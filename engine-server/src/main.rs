@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use engine_core::engine::{PendingUserTask, ProcessInstance, WorkflowEngine};
+use engine_core::engine::{ExternalTaskItem, PendingUserTask, ProcessInstance, WorkflowEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -45,6 +45,57 @@ struct CompleteRequest {
     variables: Option<HashMap<String, Value>>,
 }
 
+// ---------------------------------------------------------------------------
+// External Task request/response types
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TopicRequest {
+    topic_name: String,
+    lock_duration: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchAndLockRequest {
+    worker_id: String,
+    max_tasks: usize,
+    topics: Vec<TopicRequest>,
+    /// Optional timeout for long-polling (milliseconds).
+    async_response_timeout: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompleteExternalTaskRequest {
+    worker_id: String,
+    variables: Option<HashMap<String, Value>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FailExternalTaskRequest {
+    worker_id: String,
+    retries: Option<i32>,
+    error_message: Option<String>,
+    error_details: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtendLockRequest {
+    worker_id: String,
+    new_duration: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmnErrorRequest {
+    worker_id: String,
+    error_code: String,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // initialize tracing
@@ -76,6 +127,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/complete/:id", post(complete_task))
         .route("/api/instances", get(list_instances))
         .route("/api/instances/:id", get(get_instance))
+        // External Task endpoints
+        .route("/api/external-task/fetchAndLock", post(fetch_and_lock))
+        .route("/api/external-task/:id/complete", post(complete_external_task))
+        .route("/api/external-task/:id/failure", post(fail_external_task))
+        .route("/api/external-task/:id/extendLock", post(extend_lock))
+        .route("/api/external-task/:id/bpmnError", post(bpmn_error))
         .layer(cors)
         .with_state(state);
 
@@ -166,3 +223,124 @@ async fn get_instance(
         
     Ok(Json(instance))
 }
+
+// ---------------------------------------------------------------------------
+// External Task REST handlers
+// ---------------------------------------------------------------------------
+
+/// POST /api/external-task/fetchAndLock
+///
+/// Long-polling variant: if `asyncResponseTimeout` is set, retries up to that
+/// duration (polling every 500ms).
+async fn fetch_and_lock(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<FetchAndLockRequest>,
+) -> Json<Vec<ExternalTaskItem>> {
+    let topics: Vec<String> = payload.topics.iter().map(|t| t.topic_name.clone()).collect();
+    // Use the first topic's lock duration, or default 30s
+    let lock_duration = payload.topics.first().map(|t| t.lock_duration).unwrap_or(30);
+    let timeout_ms = payload.async_response_timeout.unwrap_or(0);
+
+    // Simple long-polling: retry until tasks found or timeout
+    let start = tokio::time::Instant::now();
+    loop {
+        let mut engine = state.engine.lock().await;
+        let tasks = engine.fetch_and_lock(
+            &payload.worker_id,
+            payload.max_tasks,
+            &topics,
+            lock_duration,
+        );
+
+        if !tasks.is_empty() || timeout_ms == 0 {
+            return Json(tasks);
+        }
+
+        // Release lock before sleeping
+        drop(engine);
+
+        if start.elapsed().as_millis() as u64 >= timeout_ms {
+            return Json(vec![]);
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// POST /api/external-task/:id/complete
+async fn complete_external_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<CompleteExternalTaskRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut engine = state.engine.lock().await;
+    let task_id = Uuid::parse_str(&id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+
+    let vars = payload.variables.unwrap_or_default();
+
+    engine
+        .complete_external_task(task_id, &payload.worker_id, vars)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/external-task/:id/failure
+async fn fail_external_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<FailExternalTaskRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut engine = state.engine.lock().await;
+    let task_id = Uuid::parse_str(&id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+
+    engine
+        .fail_external_task(
+            task_id,
+            &payload.worker_id,
+            payload.retries,
+            payload.error_message,
+            payload.error_details,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/external-task/:id/extendLock
+async fn extend_lock(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<ExtendLockRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut engine = state.engine.lock().await;
+    let task_id = Uuid::parse_str(&id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+
+    engine
+        .extend_lock(task_id, &payload.worker_id, payload.new_duration)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/external-task/:id/bpmnError
+async fn bpmn_error(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<BpmnErrorRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut engine = state.engine.lock().await;
+    let task_id = Uuid::parse_str(&id)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+
+    engine
+        .handle_bpmn_error(task_id, &payload.worker_id, &payload.error_code)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+

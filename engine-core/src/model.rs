@@ -27,6 +27,8 @@ pub enum BpmnElement {
     ServiceTask(String),
     /// A user task assigned to a specific role or user.
     UserTask(String),
+    /// An external task that can be fetched and completed by remote workers.
+    ExternalTask { topic: String },
 }
 
 // ---------------------------------------------------------------------------

@@ -61,6 +61,12 @@ struct BpmnServiceTask {
     id: String,
     #[serde(rename = "@data-handler")]
     handler: Option<String>,
+    /// Maatini type attribute: "external" means external task.
+    #[serde(rename = "@maatini:type")]
+    maatini_type: Option<String>,
+    /// Topic name for external tasks.
+    #[serde(rename = "@data-topic")]
+    topic: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,10 +122,18 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         builder = builder.node(end.id, BpmnElement::EndEvent);
     }
 
-    // 3. Process Service Tasks
+    // 3. Process Service Tasks (may be external)
     for task in defs.process.service_tasks {
-        let handler = task.handler.unwrap_or_else(|| "default_handler".into());
-        builder = builder.node(task.id, BpmnElement::ServiceTask(handler));
+        let is_external = task.maatini_type.as_deref() == Some("external")
+            || task.topic.is_some();
+
+        if is_external {
+            let topic = task.topic.unwrap_or_else(|| "default".into());
+            builder = builder.node(task.id, BpmnElement::ExternalTask { topic });
+        } else {
+            let handler = task.handler.unwrap_or_else(|| "default_handler".into());
+            builder = builder.node(task.id, BpmnElement::ServiceTask(handler));
+        }
     }
 
     // 4. Process User Tasks

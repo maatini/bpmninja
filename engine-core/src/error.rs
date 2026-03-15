@@ -44,6 +44,18 @@ pub enum EngineError {
     #[error("No service handler registered for '{0}'")]
     HandlerNotFound(String),
 
+    /// The requested external task does not exist.
+    #[error("External task not found: {0}")]
+    ExternalTaskNotFound(Uuid),
+
+    /// The external task is locked by another worker.
+    #[error("External task '{task_id}' is locked by worker '{worker_id}'")]
+    ExternalTaskLocked { task_id: Uuid, worker_id: String },
+
+    /// The external task is not currently locked (cannot complete/fail).
+    #[error("External task '{0}' is not locked")]
+    ExternalTaskNotLocked(Uuid),
+
     #[error("Persistence error: {0}")]
     PersistenceError(String),
 }
