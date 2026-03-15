@@ -1,0 +1,21 @@
+[package]
+name = "mini-bpm-desktop"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5.0", features = [] }
+
+[dependencies]
+tauri = { version = "1.5.0", features = ["api-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.33", features = ["full"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+engine-core = { path = "../../engine-core" }
+persistence-nats = { path = "../../persistence-nats" }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

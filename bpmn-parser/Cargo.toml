@@ -1,0 +1,11 @@
+[package]
+name = "bpmn-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+quick-xml = { version = "0.31", features = ["serialize"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }

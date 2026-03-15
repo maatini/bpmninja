@@ -5,7 +5,8 @@
     "gcc@latest",
     "rust-analyzer@latest",
     "nats-server@latest",
-    "natscli@latest"
+    "natscli@latest",
+    "nodejs@latest"
   ],
   "shell": {
     "init_hook": [
@@ -14,19 +15,19 @@
     ],
     "scripts": {
       "build": [
-        "cargo build"
+        "cargo build --workspace"
       ],
       "lint": [
-        "cargo clippy -- -D warnings"
+        "cargo clippy --workspace -- -D warnings"
       ],
       "fmt": [
-        "cargo fmt --check"
+        "cargo fmt --all --check"
       ],
       "test": [
-        "cargo test"
+        "cargo test --workspace"
       ],
       "run": [
-        "cargo run"
+        "cargo run --workspace"
       ],
       "nats:up": [
         "docker compose up -d"
@@ -40,14 +41,17 @@
       "test:nats": [
         "devbox run nats:up",
         "sleep 2",
-        "cargo test",
+        "cargo test --workspace",
         "devbox run nats:down"
       ],
       "test:nats:ci": [
         "devbox run nats:up",
         "sleep 5",
-        "cargo test -- --ignored",
+        "cargo test --workspace -- --ignored",
         "devbox run nats:down"
+      ],
+      "ui:dev": [
+        "cd desktop-tauri && npm install && npm run tauri dev"
       ]
     }
   }

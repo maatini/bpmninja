@@ -1,0 +1,12 @@
+[package]
+name = "persistence-nats"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+async-nats = { version = "0.38", features = ["jetstream"] }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"

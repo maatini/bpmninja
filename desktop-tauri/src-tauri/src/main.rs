@@ -1,0 +1,70 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use uuid::Uuid;
+use mini_bpm::engine::{WorkflowEngine, PendingUserTask};
+use mini_bpm::model::{ProcessDefinitionBuilder, BpmnElement};
+
+struct AppState {
+    engine: Arc<Mutex<WorkflowEngine>>,
+}
+
+#[tauri::command]
+async fn deploy_simple_process(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let mut engine = state.engine.lock().await;
+
+    let def = ProcessDefinitionBuilder::new("simple")
+        .node("start", BpmnElement::StartEvent)
+        .node("task1", BpmnElement::UserTask("admin".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "task1")
+        .flow("task1", "end")
+        .build()
+        .map_err(|e| format!("{:?}", e))?;
+
+    engine.deploy_definition(def);
+    Ok("Deployed 'simple' process".into())
+}
+
+#[tauri::command]
+async fn start_instance(state: tauri::State<'_, AppState>, def_id: String) -> Result<String, String> {
+    let mut engine = state.engine.lock().await;
+    let id = engine.start_instance(&def_id).await.map_err(|e| format!("{:?}", e))?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+async fn get_pending_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<PendingUserTask>, String> {
+    let engine = state.engine.lock().await;
+    let tasks = engine.get_pending_user_tasks().to_vec();
+    Ok(tasks)
+}
+
+#[tauri::command]
+async fn complete_task(state: tauri::State<'_, AppState>, task_id: String) -> Result<(), String> {
+    let mut engine = state.engine.lock().await;
+    let tid = Uuid::parse_str(&task_id).map_err(|e| e.to_string())?;
+    engine.complete_user_task(tid, std::collections::HashMap::new()).await.map_err(|e| format!("{:?}", e))?;
+    Ok(())
+}
+
+fn main() {
+    let engine = WorkflowEngine::new();
+
+    tauri::Builder::default()
+        .manage(AppState {
+            engine: Arc::new(Mutex::new(engine)),
+        })
+        .invoke_handler(tauri::generate_handler![
+            deploy_simple_process,
+            start_instance,
+            get_pending_tasks,
+            complete_task
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

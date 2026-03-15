@@ -1,0 +1,112 @@
+:root {
+  --primary-color: #2563eb;
+  --bg-color: #f8fafc;
+  --text-color: #1e293b;
+  --border-color: #e2e8f0;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 250px;
+  background-color: white;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 20px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nav-item {
+  padding: 15px 20px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.2s;
+}
+
+.nav-item:hover, .nav-item.active {
+  background-color: #eff6ff;
+  color: var(--primary-color);
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  position: relative;
+}
+
+/* Modeler specific */
+.modeler-container {
+  flex: 1;
+  display: flex;
+  position: relative;
+}
+
+.canvas {
+  flex: 1;
+  height: 100%;
+}
+
+.properties-panel-parent {
+  width: 300px;
+  border-left: 1px solid var(--border-color);
+  background: white;
+  overflow-y: auto;
+}
+
+/* Base Styles */
+.button {
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.button:hover {
+  background-color: #1d4ed8;
+}
+
+.header-actions {
+  padding: 10px;
+  background: white;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 10px;
+}
+
+h2 { margin: 20px; }
+
+.card {
+  background: white;
+  margin: 10px 20px;
+  padding: 15px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid var(--border-color);
+}
+
+.card-title {
+  font-weight: bold;
+  margin-bottom: 10px;
+}

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -26,7 +27,7 @@ pub type ServiceHandlerFn =
 // ---------------------------------------------------------------------------
 
 /// A user task that is waiting for external completion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingUserTask {
     pub task_id: Uuid,
     pub instance_id: Uuid,
@@ -42,7 +43,7 @@ pub struct PendingUserTask {
 // ---------------------------------------------------------------------------
 
 /// The result of executing a single step in the process.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum NextAction {
     /// The token should continue to the next node.
     Continue(Token),
@@ -57,7 +58,7 @@ pub enum NextAction {
 // ---------------------------------------------------------------------------
 
 /// The state of a process instance.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstanceState {
     Running,
     WaitingOnUserTask { task_id: Uuid },
@@ -69,7 +70,7 @@ pub enum InstanceState {
 // ---------------------------------------------------------------------------
 
 /// A live process instance tracked by the engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInstance {
     #[allow(dead_code)]
     pub id: Uuid,
@@ -736,5 +737,147 @@ mod tests {
         let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
         assert_eq!(loaded_tokens.len(), 1);
         assert_eq!(loaded_tokens[0].current_node, "end");
+    }
+    #[tokio::test]
+    async fn test_nats_engine_recovery() {
+        use crate::persistence::tests::setup_nats_test;
+        
+        let p = match setup_nats_test().await {
+            Some(p) => p,
+            None => {
+                log::warn!("Skipping NATS test, not available.");
+                return;
+            }
+        };
+
+        let (mut engine, def_id) = setup_linear_engine();
+        engine = engine.with_persistence(p.clone());
+        
+        let _inst_id = engine.start_instance(&def_id).await.unwrap();
+        
+        assert_eq!(engine.pending_user_tasks.len(), 1);
+        let task_id = engine.pending_user_tasks[0].task_id;
+        
+        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(loaded_tokens.len(), 1);
+        let loaded_token = &loaded_tokens[0];
+        assert_eq!(loaded_token.current_node, "ut");
+        
+        engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
+        
+        let final_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(final_tokens.len(), 1);
+        assert_eq!(final_tokens[0].current_node, "end");
+    }
+
+    #[tokio::test]
+    async fn test_nats_concurrent_instances() {
+        use crate::persistence::tests::setup_nats_test;
+        
+        let p = match setup_nats_test().await {
+            Some(p) => p,
+            None => {
+                log::warn!("Skipping NATS test, not available.");
+                return;
+            }
+        };
+
+        let (mut engine, def_id) = setup_linear_engine();
+        engine = engine.with_persistence(p.clone());
+        
+        for _ in 0..5 {
+            engine.start_instance(&def_id).await.unwrap();
+        }
+        
+        assert_eq!(engine.pending_user_tasks.len(), 5);
+        
+        let pending_tasks: Vec<_> = engine.pending_user_tasks.iter().map(|t| t.task_id).collect();
+        for task_id in pending_tasks {
+            engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
+        }
+        
+        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(loaded_tokens.len(), 5);
+        for token in loaded_tokens {
+            assert_eq!(token.current_node, "end");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_nats_timer_start() {
+        use crate::persistence::tests::setup_nats_test;
+        
+        let p = match setup_nats_test().await {
+            Some(p) => p,
+            None => {
+                log::warn!("Skipping NATS test, not available.");
+                return;
+            }
+        };
+
+        let mut engine = WorkflowEngine::new().with_persistence(p.clone());
+        let dur = std::time::Duration::from_secs(60);
+
+        let def = crate::model::ProcessDefinitionBuilder::new("nats_timer_proc")
+            .node("ts", BpmnElement::TimerStartEvent(dur))
+            .node("ut", BpmnElement::UserTask("user".into()))
+            .node("end", BpmnElement::EndEvent)
+            .flow("ts", "ut")
+            .flow("ut", "end")
+            .build()
+            .unwrap();
+            
+        let def_id = def.id.clone();
+        engine.deploy_definition(def);
+        let inst_id = engine.trigger_timer_start(&def_id, dur).await.unwrap();
+        
+        assert_eq!(engine.pending_user_tasks.len(), 1);
+        
+        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(loaded_tokens.len(), 1);
+        assert_eq!(loaded_tokens[0].current_node, "ut");
+        
+        let task_id = engine.pending_user_tasks[0].task_id;
+        engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
+        
+        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
+    }
+
+    #[tokio::test]
+    async fn test_nats_variables_persistence() {
+        use crate::persistence::tests::setup_nats_test;
+        
+        let p = match setup_nats_test().await {
+            Some(p) => p,
+            None => {
+                log::warn!("Skipping NATS test, not available.");
+                return;
+            }
+        };
+
+        let (mut engine, def_id) = setup_linear_engine();
+        engine = engine.with_persistence(p.clone());
+        
+        let inst_id = engine.start_instance(&def_id).await.unwrap();
+        let task_id = engine.pending_user_tasks[0].task_id;
+        
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("str_var".to_string(), serde_json::Value::String("hello nats".to_string()));
+        vars.insert("num_var".to_string(), serde_json::Value::Number(serde_json::Number::from(42)));
+        vars.insert("bool_var".to_string(), serde_json::Value::Bool(false));
+        
+        engine.complete_user_task(task_id, vars).await.unwrap();
+
+        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
+        
+        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(loaded_tokens.len(), 1);
+        let token = &loaded_tokens[0];
+        
+        assert_eq!(token.current_node, "end");
+        assert!(token.variables.get("validated").unwrap().as_bool().unwrap());
+        assert_eq!(token.variables.get("str_var").unwrap().as_str().unwrap(), "hello nats");
+        assert_eq!(token.variables.get("num_var").unwrap().as_i64().unwrap(), 42);
+        assert!(!token.variables.get("bool_var").unwrap().as_bool().unwrap());
     }
 }
