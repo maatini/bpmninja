@@ -36,6 +36,18 @@
       ],
       "nats:logs": [
         "docker compose logs -f nats"
+      ],
+      "test:nats": [
+        "devbox run nats:up",
+        "sleep 2",
+        "cargo test",
+        "devbox run nats:down"
+      ],
+      "test:nats:ci": [
+        "devbox run nats:up",
+        "sleep 5",
+        "cargo test -- --ignored",
+        "devbox run nats:down"
       ]
     }
   }

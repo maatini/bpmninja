@@ -31,3 +31,4 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 
 # NATS Persistence
 async-nats = "0.38"
+futures = "0.3"

@@ -710,4 +710,31 @@ mod tests {
         assert!(log[0].contains("started"));
         assert!(log.last().unwrap().contains("completed"));
     }
+
+    #[tokio::test]
+    async fn test_engine_with_nats_persistence() {
+        use crate::persistence::tests::setup_nats_test;
+        
+        let p = match setup_nats_test().await {
+            Some(p) => p,
+            None => {
+                log::warn!("Skipping NATS test, not available.");
+                return;
+            }
+        };
+
+        let (mut engine, def_id) = setup_linear_engine();
+        engine = engine.with_persistence(p.clone());
+        
+        let inst_id = engine.start_instance(&def_id).await.unwrap();
+        let task_id = engine.pending_user_tasks[0].task_id;
+        
+        engine.complete_user_task(task_id, HashMap::new()).await.unwrap();
+
+        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
+        
+        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
+        assert_eq!(loaded_tokens.len(), 1);
+        assert_eq!(loaded_tokens[0].current_node, "end");
+    }
 }

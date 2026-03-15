@@ -89,6 +89,102 @@
       "last_modified": "2026-03-05T18:52:33Z",
       "resolved": "github:NixOS/nixpkgs/917fec990948658ef1ccd07cef2a1ef060786846?lastModified=1772736753&narHash=sha256-au%2Fm3%2BEuBLoSzWUCb64a%2FMZq6QUtOV8oC0D9tY2scPQ%3D"
     },
+    "nats-server@latest": {
+      "last_modified": "2026-03-11T04:01:32Z",
+      "resolved": "github:NixOS/nixpkgs/b6067cc0127d4db9c26c79e4de0513e58d0c40c9#nats-server",
+      "source": "devbox-search",
+      "version": "2.12.5",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/asj3q61as7d8lgplw13n98gvpslihrkf-nats-server-2.12.5",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/asj3q61as7d8lgplw13n98gvpslihrkf-nats-server-2.12.5"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/6syxh2vwksqp8g6v6vgy5dk6hbiw8yrx-nats-server-2.12.5",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/6syxh2vwksqp8g6v6vgy5dk6hbiw8yrx-nats-server-2.12.5"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/q3ni375kf2vxahy3jyj001x7w022ijg7-nats-server-2.12.5",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/q3ni375kf2vxahy3jyj001x7w022ijg7-nats-server-2.12.5"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/0i24f9aa7ik4n0pvwkkqwpxjx5s073cz-nats-server-2.12.5",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/0i24f9aa7ik4n0pvwkkqwpxjx5s073cz-nats-server-2.12.5"
+        }
+      }
+    },
+    "natscli@latest": {
+      "last_modified": "2026-02-23T15:40:43Z",
+      "resolved": "github:NixOS/nixpkgs/80d901ec0377e19ac3f7bb8c035201e2e098cc97#natscli",
+      "source": "devbox-search",
+      "version": "0.3.1",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/zhiqq53vpghp3kg2j71i63isnf9vsda2-natscli-0.3.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/zhiqq53vpghp3kg2j71i63isnf9vsda2-natscli-0.3.1"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ns6fhcn88syrna0j439j7362jx72bqyh-natscli-0.3.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/ns6fhcn88syrna0j439j7362jx72bqyh-natscli-0.3.1"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/3qbj8m1inaw1s5d97qhz72dvsq029p92-natscli-0.3.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/3qbj8m1inaw1s5d97qhz72dvsq029p92-natscli-0.3.1"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/idf3vmv5xd2ipxr1hs3ijvnz4z51m70s-natscli-0.3.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/idf3vmv5xd2ipxr1hs3ijvnz4z51m70s-natscli-0.3.1"
+        }
+      }
+    },
     "rust-analyzer@latest": {
       "last_modified": "2026-03-11T04:01:32Z",
       "resolved": "github:NixOS/nixpkgs/b6067cc0127d4db9c26c79e4de0513e58d0c40c9#rust-analyzer",
