@@ -5,7 +5,7 @@ members = [
     "persistence-nats",
     "agent-orchestrator",
     "desktop-tauri/src-tauri"
-]
+, "engine-server"]
 resolver = "2"
 
 [workspace.dependencies]
