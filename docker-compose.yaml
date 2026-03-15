@@ -1,0 +1,12 @@
+services:
+  nats:
+    image: nats:alpine
+    command: ["--js", "--sd", "/data"]
+    ports:
+      - "4222:4222" # Client Connections
+      - "8222:8222" # HTTP Monitoring
+    volumes:
+      - nats-data:/data
+
+volumes:
+  nats-data:

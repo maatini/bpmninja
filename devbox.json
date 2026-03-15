@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.14.0/.schema/devbox.schema.json",
+  "packages": [
+    "rustup@latest",
+    "gcc@latest",
+    "rust-analyzer@latest",
+    "nats-server@latest",
+    "natscli@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "rustup default stable 2>/dev/null",
+      "echo '🦀 Rust toolchain ready: '$(rustc --version)"
+    ],
+    "scripts": {
+      "build": [
+        "cargo build"
+      ],
+      "lint": [
+        "cargo clippy -- -D warnings"
+      ],
+      "fmt": [
+        "cargo fmt --check"
+      ],
+      "test": [
+        "cargo test"
+      ],
+      "run": [
+        "cargo run"
+      ],
+      "nats:up": [
+        "docker compose up -d"
+      ],
+      "nats:down": [
+        "docker compose down"
+      ],
+      "nats:logs": [
+        "docker compose logs -f nats"
+      ]
+    }
+  }
+}

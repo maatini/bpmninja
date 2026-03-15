@@ -1,0 +1,33 @@
+[package]
+name = "mini-bpm"
+version = "0.2.0"
+edition = "2021"
+description = "A minimal, strongly-typed BPMN 2.0 workflow engine in Rust"
+license = "MIT"
+
+[dependencies]
+# Domain-specific error handling without boilerplate
+thiserror = "1.0"
+
+# Unique identification of process instances and tokens
+uuid = { version = "1.7", features = ["v4", "serde"] }
+
+# Timer events and task time tracking
+chrono = { version = "0.4", features = ["serde"] }
+
+# Structured logging for engine tracing
+log = "0.4"
+env_logger = "0.11"
+
+# Async runtime for timer spawning, channels, and async service handlers
+tokio = { version = "1", features = ["full"] }
+
+# Token variables as dynamic JSON values
+serde_json = "1.0"
+
+# Serialization and XML parsing
+serde = { version = "1.0", features = ["derive"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+
+# NATS Persistence
+async-nats = "0.38"
