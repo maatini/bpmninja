@@ -1,8 +1,10 @@
 pub mod error;
 pub mod model;
+pub mod persistence;
 pub mod engine;
 
-// Re-export main structures
-pub use error::{EngineError, Result};
-pub use model::{ProcessDefinition, BpmnElement, ProcessInstance, Token, UserTaskInfo, ServiceHandler};
+pub use error::{EngineError, EngineResult};
+pub use model::{ProcessDefinition, BpmnElement, Token};
+pub use engine::{ProcessInstance, PendingUserTask, ServiceHandlerFn};
+pub use persistence::WorkflowPersistence;
 pub use engine::WorkflowEngine;

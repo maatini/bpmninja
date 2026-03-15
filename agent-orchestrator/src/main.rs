@@ -1,15 +1,9 @@
-pub mod model;
-pub mod error;
-pub mod engine;
-pub mod bpmn_parser;
-pub mod persistence;
-
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-use crate::bpmn_parser::parse_bpmn_xml;
-use crate::engine::WorkflowEngine;
-use crate::persistence::NatsPersistence;
+use bpmn_parser::parse_bpmn_xml;
+use engine_core::engine::WorkflowEngine;
+use persistence_nats::persistence::NatsPersistence;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

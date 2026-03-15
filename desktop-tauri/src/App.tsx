@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { deployDefinition, startInstance, getPendingTasks, completeTask, PendingUserTask } from './lib/tauri'
+import { deployDefinition, startInstance, getPendingTasks, completeTask, type PendingUserTask } from './lib/tauri'
 import { Modeler } from './Modeler'
 
 function App() {

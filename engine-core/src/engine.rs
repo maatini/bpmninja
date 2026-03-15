@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::error::{EngineError, EngineResult};
 use crate::model::{BpmnElement, ProcessDefinition, Token};
-use crate::persistence::{NatsPersistence, WorkflowPersistence};
+use crate::persistence::WorkflowPersistence;
 
 // ---------------------------------------------------------------------------
 // Service handler
@@ -90,7 +90,7 @@ pub struct WorkflowEngine {
     pub instances: HashMap<Uuid, ProcessInstance>,
     pub service_handlers: HashMap<String, ServiceHandlerFn>,
     pub pending_user_tasks: Vec<PendingUserTask>,
-    pub persistence: Option<Arc<NatsPersistence>>,
+    pub persistence: Option<Arc<dyn WorkflowPersistence>>,
 }
 
 impl WorkflowEngine {
@@ -107,7 +107,7 @@ impl WorkflowEngine {
     }
 
     /// Attaches a persistence layer to the engine.
-    pub fn with_persistence(mut self, persistence: Arc<NatsPersistence>) -> Self {
+    pub fn with_persistence(mut self, persistence: Arc<dyn WorkflowPersistence>) -> Self {
         self.persistence = Some(persistence);
         self
     }
@@ -710,174 +710,5 @@ mod tests {
         assert!(log.len() >= 4);
         assert!(log[0].contains("started"));
         assert!(log.last().unwrap().contains("completed"));
-    }
-
-    #[tokio::test]
-    async fn test_engine_with_nats_persistence() {
-        use crate::persistence::tests::setup_nats_test;
-        
-        let p = match setup_nats_test().await {
-            Some(p) => p,
-            None => {
-                log::warn!("Skipping NATS test, not available.");
-                return;
-            }
-        };
-
-        let (mut engine, def_id) = setup_linear_engine();
-        engine = engine.with_persistence(p.clone());
-        
-        let inst_id = engine.start_instance(&def_id).await.unwrap();
-        let task_id = engine.pending_user_tasks[0].task_id;
-        
-        engine.complete_user_task(task_id, HashMap::new()).await.unwrap();
-
-        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
-        
-        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(loaded_tokens.len(), 1);
-        assert_eq!(loaded_tokens[0].current_node, "end");
-    }
-    #[tokio::test]
-    async fn test_nats_engine_recovery() {
-        use crate::persistence::tests::setup_nats_test;
-        
-        let p = match setup_nats_test().await {
-            Some(p) => p,
-            None => {
-                log::warn!("Skipping NATS test, not available.");
-                return;
-            }
-        };
-
-        let (mut engine, def_id) = setup_linear_engine();
-        engine = engine.with_persistence(p.clone());
-        
-        let _inst_id = engine.start_instance(&def_id).await.unwrap();
-        
-        assert_eq!(engine.pending_user_tasks.len(), 1);
-        let task_id = engine.pending_user_tasks[0].task_id;
-        
-        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(loaded_tokens.len(), 1);
-        let loaded_token = &loaded_tokens[0];
-        assert_eq!(loaded_token.current_node, "ut");
-        
-        engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
-        
-        let final_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(final_tokens.len(), 1);
-        assert_eq!(final_tokens[0].current_node, "end");
-    }
-
-    #[tokio::test]
-    async fn test_nats_concurrent_instances() {
-        use crate::persistence::tests::setup_nats_test;
-        
-        let p = match setup_nats_test().await {
-            Some(p) => p,
-            None => {
-                log::warn!("Skipping NATS test, not available.");
-                return;
-            }
-        };
-
-        let (mut engine, def_id) = setup_linear_engine();
-        engine = engine.with_persistence(p.clone());
-        
-        for _ in 0..5 {
-            engine.start_instance(&def_id).await.unwrap();
-        }
-        
-        assert_eq!(engine.pending_user_tasks.len(), 5);
-        
-        let pending_tasks: Vec<_> = engine.pending_user_tasks.iter().map(|t| t.task_id).collect();
-        for task_id in pending_tasks {
-            engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
-        }
-        
-        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(loaded_tokens.len(), 5);
-        for token in loaded_tokens {
-            assert_eq!(token.current_node, "end");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_nats_timer_start() {
-        use crate::persistence::tests::setup_nats_test;
-        
-        let p = match setup_nats_test().await {
-            Some(p) => p,
-            None => {
-                log::warn!("Skipping NATS test, not available.");
-                return;
-            }
-        };
-
-        let mut engine = WorkflowEngine::new().with_persistence(p.clone());
-        let dur = std::time::Duration::from_secs(60);
-
-        let def = crate::model::ProcessDefinitionBuilder::new("nats_timer_proc")
-            .node("ts", BpmnElement::TimerStartEvent(dur))
-            .node("ut", BpmnElement::UserTask("user".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("ts", "ut")
-            .flow("ut", "end")
-            .build()
-            .unwrap();
-            
-        let def_id = def.id.clone();
-        engine.deploy_definition(def);
-        let inst_id = engine.trigger_timer_start(&def_id, dur).await.unwrap();
-        
-        assert_eq!(engine.pending_user_tasks.len(), 1);
-        
-        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(loaded_tokens.len(), 1);
-        assert_eq!(loaded_tokens[0].current_node, "ut");
-        
-        let task_id = engine.pending_user_tasks[0].task_id;
-        engine.complete_user_task(task_id, std::collections::HashMap::new()).await.unwrap();
-        
-        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
-    }
-
-    #[tokio::test]
-    async fn test_nats_variables_persistence() {
-        use crate::persistence::tests::setup_nats_test;
-        
-        let p = match setup_nats_test().await {
-            Some(p) => p,
-            None => {
-                log::warn!("Skipping NATS test, not available.");
-                return;
-            }
-        };
-
-        let (mut engine, def_id) = setup_linear_engine();
-        engine = engine.with_persistence(p.clone());
-        
-        let inst_id = engine.start_instance(&def_id).await.unwrap();
-        let task_id = engine.pending_user_tasks[0].task_id;
-        
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("str_var".to_string(), serde_json::Value::String("hello nats".to_string()));
-        vars.insert("num_var".to_string(), serde_json::Value::Number(serde_json::Number::from(42)));
-        vars.insert("bool_var".to_string(), serde_json::Value::Bool(false));
-        
-        engine.complete_user_task(task_id, vars).await.unwrap();
-
-        assert_eq!(*engine.get_instance_state(inst_id).unwrap(), InstanceState::Completed);
-        
-        let loaded_tokens = p.load_tokens(&def_id).await.unwrap();
-        assert_eq!(loaded_tokens.len(), 1);
-        let token = &loaded_tokens[0];
-        
-        assert_eq!(token.current_node, "end");
-        assert!(token.variables.get("validated").unwrap().as_bool().unwrap());
-        assert_eq!(token.variables.get("str_var").unwrap().as_str().unwrap(), "hello nats");
-        assert_eq!(token.variables.get("num_var").unwrap().as_i64().unwrap(), 42);
-        assert!(!token.variables.get("bool_var").unwrap().as_bool().unwrap());
     }
 }

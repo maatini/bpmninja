@@ -11,6 +11,16 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 [[package]]
 name = "agent-orchestrator"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bpmn-parser",
+ "engine-core",
+ "env_logger",
+ "log",
+ "persistence-nats",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "aho-corasick"
@@ -117,7 +127,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -401,6 +411,13 @@ dependencies = [
 [[package]]
 name = "bpmn-parser"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "engine-core",
+ "quick-xml 0.31.0",
+ "serde",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "brotli"
@@ -1049,6 +1066,16 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 [[package]]
 name = "engine-core"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "enumflags2"
@@ -2386,27 +2413,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mini-bpm"
-version = "0.2.0"
-dependencies = [
- "async-nats",
- "chrono",
- "env_logger",
- "futures",
- "log",
- "quick-xml 0.37.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "mini-bpm-desktop"
 version = "0.1.0"
 dependencies = [
- "mini-bpm",
+ "engine-core",
+ "persistence-nats",
  "serde",
  "serde_json",
  "tauri",
@@ -2924,7 +2935,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3005,6 +3016,18 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "persistence-nats"
 version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "engine-core",
+ "futures",
+ "log",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "petgraph"
@@ -3365,12 +3388,21 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "quick-xml"
 version = "0.37.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
 dependencies = [
  "memchr",
- "serde",
 ]
 
 [[package]]

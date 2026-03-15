@@ -3,17 +3,11 @@ use async_nats::Client;
 use futures::StreamExt;
 use std::collections::HashMap;
 
-use crate::error::{EngineError, EngineResult};
-use crate::model::Token;
+use engine_core::error::{EngineError, EngineResult};
+use engine_core::model::Token;
 
-/// A trait for persisting workflow engine state.
-#[allow(async_fn_in_trait)]
-pub trait WorkflowPersistence: Send + Sync {
-    /// Save a token's state for a given process instance.
-    async fn save_token(&self, token: &Token) -> EngineResult<()>;
-    /// Load all tokens for a given process instance.
-    async fn load_tokens(&self, process_id: &str) -> EngineResult<Vec<Token>>;
-}
+use async_trait::async_trait;
+use engine_core::persistence::WorkflowPersistence;
 
 #[derive(Clone)]
 pub struct NatsPersistence {
@@ -49,7 +43,7 @@ impl NatsPersistence {
     }
 }
 
-
+#[async_trait]
 impl WorkflowPersistence for NatsPersistence {
     async fn save_token(&self, token: &Token) -> EngineResult<()> {
         let subject = format!("{}.{}", self.stream_name, token.id);

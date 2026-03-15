@@ -5,8 +5,12 @@ edition = "2024"
 
 [dependencies]
 engine-core = { path = "../engine-core" }
-async-nats = { version = "0.38", features = ["jetstream"] }
+async-nats = "0.38"
 tokio = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
+futures = "0.3.32"
+uuid = "1.22.0"
+log = "0.4.29"
+async-trait = "0.1.89"

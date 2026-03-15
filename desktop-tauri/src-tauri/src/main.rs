@@ -6,8 +6,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use mini_bpm::engine::{WorkflowEngine, PendingUserTask};
-use mini_bpm::model::{ProcessDefinitionBuilder, BpmnElement};
+use engine_core::engine::{WorkflowEngine, PendingUserTask};
+use engine_core::model::{ProcessDefinitionBuilder, BpmnElement};
 
 struct AppState {
     engine: Arc<Mutex<WorkflowEngine>>,

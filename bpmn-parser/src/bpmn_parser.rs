@@ -3,8 +3,8 @@ use std::time::Duration;
 use quick_xml::de::from_str;
 use serde::Deserialize;
 
-use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ProcessDefinition, ProcessDefinitionBuilder};
+use engine_core::error::{EngineError, EngineResult};
+use engine_core::model::{BpmnElement, ProcessDefinition, ProcessDefinitionBuilder};
 
 #[derive(Debug, Deserialize)]
 struct BpmnDefinitions {
