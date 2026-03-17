@@ -1,5 +1,10 @@
 # mini-bpm
 
+[![GitHub stars](https://img.shields.io/github/stars/maatini/mini-bpm-engine.svg?style=flat-square)](https://github.com/maatini/mini-bpm-engine/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/maatini/mini-bpm-engine.svg?style=flat-square)](https://github.com/maatini/mini-bpm-engine/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/maatini/mini-bpm-engine.svg?style=flat-square)](https://github.com/maatini/mini-bpm-engine/issues)
+[![Rust](https://img.shields.io/badge/Rust-cargo-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
+
 ![mini-bpm-engine](readme-assets/mini-bpm-engine.jpeg)
 
 Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
@@ -12,6 +17,46 @@ Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
 * `engine-server`: Ein eigenständiger, auf Axum basierender HTTP-Server, der REST-API-Endpunkte für die Engine bereitstellt.
 * `desktop-tauri`: Eine Tauri-Desktop-Anwendung, die mit der Workflow-Engine interagiert.
 * `agent-orchestrator`: Ein Crate zur Orchestrierung von externen Agenten/Workern, die mit der Engine interagieren.
+
+## Architektur
+
+Das folgende Diagramm nutzt Mermaid, um die hochauflösende Vektor-Struktur des mini-bpm Projekts darzustellen:
+
+```mermaid
+flowchart TD
+    %% Styling
+    classDef core fill:#e2e8f0,stroke:#64748b,stroke-width:2px,color:#0f172a;
+    classDef server fill:#bae6fd,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
+    classDef persistence fill:#bbf7d0,stroke:#16a34a,stroke-width:2px,color:#14532d;
+    classDef desktop fill:#fef08a,stroke:#ca8a04,stroke-width:2px,color:#713f12;
+    classDef agent fill:#fbcfe8,stroke:#db2777,stroke-width:2px,color:#831843;
+
+    subgraph "Clients / External"
+        UI["desktop-tauri\n(Desktop App)"]:::desktop
+        Agent["agent-orchestrator\n(External Workers)"]:::agent
+    end
+
+    subgraph "Server Layer"
+        Axum["engine-server\n(Axum HTTP REST API)"]:::server
+    end
+
+    subgraph "Core Workflow Engine"
+        Engine["engine-core\n(Token & State Execution)"]:::core
+        Parser["bpmn-parser\n(XML to Rust Structs)"]:::core
+    end
+
+    subgraph "Storage"
+        Nats[(persistence-nats\nNATS JetStream)]:::persistence
+    end
+
+    %% Connections
+    UI -- "HTTP (Optionally)" --> Axum
+    UI -- "Embedded Mode" --> Engine
+    Agent -- "HTTP Fetch/Lock" --> Axum
+    Axum -- "Calls" --> Engine
+    Engine -- "Parses" --> Parser
+    Engine -- "Stores State & Events" --> Nats
+```
 
 ## Starten des Engine-Servers
 
