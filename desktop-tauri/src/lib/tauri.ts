@@ -25,8 +25,8 @@ export async function deployDefinition(xml: string, name: string): Promise<strin
   return invoke('deploy_definition', { xml, name });
 }
 
-export async function startInstance(defId: string): Promise<string> {
-  return invoke('start_instance', { defId });
+export async function startInstance(defId: string, variables?: Record<string, unknown>): Promise<string> {
+  return invoke('start_instance', { defId, variables: variables || null });
 }
 
 export async function getPendingTasks(): Promise<PendingUserTask[]> {
@@ -43,4 +43,21 @@ export async function listInstances(): Promise<ProcessInstance[]> {
 
 export async function getInstanceDetails(instanceId: string): Promise<ProcessInstance> {
   return invoke('get_instance_details', { instanceId });
+}
+
+export async function updateInstanceVariables(instanceId: string, variables: Record<string, unknown>): Promise<void> {
+  return invoke('update_instance_variables', { instanceId, variables });
+}
+
+export interface DefinitionInfo {
+  id: string;
+  node_count: number;
+}
+
+export async function listDefinitions(): Promise<DefinitionInfo[]> {
+  return invoke('list_definitions');
+}
+
+export async function getDefinitionXml(definitionId: string): Promise<string> {
+  return invoke('get_definition_xml', { definitionId });
 }

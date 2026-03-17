@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -13,10 +14,23 @@ use engine_core::engine::{WorkflowEngine, ProcessInstance, PendingUserTask};
 use engine_core::model::{ProcessDefinitionBuilder, BpmnElement};
 #[cfg(not(feature = "http-backend"))]
 use bpmn_parser::parse_bpmn_xml;
+#[cfg(not(feature = "http-backend"))]
+use persistence_nats::NatsPersistence;
+
+/// Lightweight summary of a deployed process definition.
+#[derive(serde::Serialize, Clone)]
+struct DefinitionInfo {
+    id: String,
+    node_count: usize,
+}
 
 #[cfg(not(feature = "http-backend"))]
 struct AppState {
     engine: Arc<Mutex<WorkflowEngine>>,
+    /// Stores the original BPMN XML keyed by definition ID (in-memory fallback).
+    deployed_xml: Arc<Mutex<HashMap<String, String>>>,
+    /// Optional NATS persistence for the bpmn_xml Object Store.
+    nats: Option<Arc<NatsPersistence>>,
 }
 
 #[cfg(feature = "http-backend")]
@@ -56,6 +70,16 @@ async fn deploy_definition(state: tauri::State<'_, AppState>, xml: String, _name
 
     let def = parse_bpmn_xml(&xml).map_err(|e| format!("{:?}", e))?;
     let def_id = def.id.clone();
+
+    // Persist XML: prefer NATS Object Store, fall back to in-memory.
+    if let Some(nats) = &state.nats {
+        nats.save_bpmn_xml(&def_id, &xml)
+            .await
+            .map_err(|e| format!("NATS save XML failed: {:?}", e))?;
+    }
+    // Always keep in-memory copy for fast reads.
+    state.deployed_xml.lock().await.insert(def_id.clone(), xml);
+
     engine.deploy_definition(def);
     Ok(def_id)
 }
@@ -86,19 +110,30 @@ async fn deploy_definition(state: tauri::State<'_, AppState>, xml: String, name:
 
 #[tauri::command]
 #[cfg(not(feature = "http-backend"))]
-async fn start_instance(state: tauri::State<'_, AppState>, def_id: String) -> Result<String, String> {
+async fn start_instance(state: tauri::State<'_, AppState>, def_id: String, variables: Option<HashMap<String, serde_json::Value>>) -> Result<String, String> {
     let mut engine = state.engine.lock().await;
-    let id = engine.start_instance(&def_id).await.map_err(|e| format!("{:?}", e))?;
+    let id = match variables {
+        Some(vars) if !vars.is_empty() => {
+            engine.start_instance_with_variables(&def_id, vars).await
+        }
+        _ => engine.start_instance(&def_id).await,
+    }
+    .map_err(|e| format!("{:?}", e))?;
     Ok(id.to_string())
 }
 
 #[tauri::command]
 #[cfg(feature = "http-backend")]
-async fn start_instance(state: tauri::State<'_, AppState>, def_id: String) -> Result<String, String> {
+async fn start_instance(state: tauri::State<'_, AppState>, def_id: String, variables: Option<HashMap<String, serde_json::Value>>) -> Result<String, String> {
     let url = format!("{}/api/start", state.base_url);
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "definition_id": def_id
     });
+    if let Some(vars) = variables {
+        if !vars.is_empty() {
+            payload["variables"] = serde_json::to_value(vars).unwrap_or_default();
+        }
+    }
     
     let res = state.client.post(&url)
         .json(&payload)
@@ -207,10 +242,127 @@ async fn get_instance_details(state: tauri::State<'_, AppState>, instance_id: St
     Ok(data)
 }
 
+#[tauri::command]
+#[cfg(not(feature = "http-backend"))]
+async fn update_instance_variables(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+    variables: HashMap<String, serde_json::Value>,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().await;
+    let id = Uuid::parse_str(&instance_id).map_err(|e| e.to_string())?;
+    engine.update_instance_variables(id, variables).map_err(|e| format!("{:?}", e))
+}
+
+#[tauri::command]
+#[cfg(feature = "http-backend")]
+async fn update_instance_variables(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+    variables: HashMap<String, serde_json::Value>,
+) -> Result<(), String> {
+    let url = format!("{}/api/instances/{}/variables", state.base_url, instance_id);
+    let res = state.client
+        .put(&url)
+        .json(&serde_json::json!({ "variables": variables }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        return Err(format!("Update variables failed: {}", res.status()));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Definitions listing + XML download
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+#[cfg(not(feature = "http-backend"))]
+async fn list_definitions(state: tauri::State<'_, AppState>) -> Result<Vec<DefinitionInfo>, String> {
+    let engine = state.engine.lock().await;
+    let defs: Vec<DefinitionInfo> = engine
+        .definitions
+        .iter()
+        .map(|(id, def)| DefinitionInfo {
+            id: id.clone(),
+            node_count: def.nodes.len(),
+        })
+        .collect();
+    Ok(defs)
+}
+
+#[tauri::command]
+#[cfg(feature = "http-backend")]
+async fn list_definitions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let url = format!("{}/api/definitions", state.base_url);
+    let res = state.client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("List definitions failed: {}", res.status()));
+    }
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(data)
+}
+
+#[tauri::command]
+#[cfg(not(feature = "http-backend"))]
+async fn get_definition_xml(state: tauri::State<'_, AppState>, definition_id: String) -> Result<String, String> {
+    // Try in-memory cache first (fast path).
+    {
+        let xml_store = state.deployed_xml.lock().await;
+        if let Some(xml) = xml_store.get(&definition_id) {
+            return Ok(xml.clone());
+        }
+    }
+
+    // Fall back to NATS Object Store.
+    if let Some(nats) = &state.nats {
+        return nats
+            .load_bpmn_xml(&definition_id)
+            .await
+            .map_err(|e| format!("{:?}", e));
+    }
+
+    Err(format!("No XML found for definition '{}'", definition_id))
+}
+
+#[tauri::command]
+#[cfg(feature = "http-backend")]
+async fn get_definition_xml(state: tauri::State<'_, AppState>, definition_id: String) -> Result<String, String> {
+    let url = format!("{}/api/definitions/{}/xml", state.base_url, definition_id);
+    let res = state.client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("Get definition XML failed: {}", res.status()));
+    }
+    let xml = res.text().await.map_err(|e| e.to_string())?;
+    Ok(xml)
+}
+
 fn main() {
+    // Attempt NATS connection (non-blocking, graceful fallback).
+    #[cfg(not(feature = "http-backend"))]
+    let nats_persistence: Option<Arc<NatsPersistence>> = {
+        tauri::async_runtime::block_on(async {
+            match NatsPersistence::connect("nats://localhost:4222", "WORKFLOW_EVENTS").await {
+                Ok(p) => {
+                    println!("[mini-bpm] Connected to NATS.");
+                    Some(Arc::new(p))
+                }
+                Err(e) => {
+                    eprintln!("[mini-bpm] NATS not available, using in-memory only: {}", e);
+                    None
+                }
+            }
+        })
+    };
+
     #[cfg(not(feature = "http-backend"))]
     let initial_state = AppState {
         engine: Arc::new(Mutex::new(WorkflowEngine::new())),
+        deployed_xml: Arc::new(Mutex::new(HashMap::new())),
+        nats: nats_persistence,
     };
 
     #[cfg(feature = "http-backend")]
@@ -228,7 +380,10 @@ fn main() {
             get_pending_tasks,
             complete_task,
             list_instances,
-            get_instance_details
+            get_instance_details,
+            update_instance_variables,
+            list_definitions,
+            get_definition_xml
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

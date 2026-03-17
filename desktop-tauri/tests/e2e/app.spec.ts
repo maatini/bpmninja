@@ -14,6 +14,7 @@ import { test, expect, type Page, type Dialog } from '@playwright/test';
  */
 interface MockState {
   deployedDefs: string[];
+  deployedXml: Record<string, string>;
   instances: string[];
   pendingTasks: Array<{
     task_id: string;
@@ -35,6 +36,7 @@ interface MockState {
 
 const DEFAULT_MOCK_STATE: MockState = {
   deployedDefs: [],
+  deployedXml: {},
   instances: [],
   pendingTasks: [],
   completedTasks: [],
@@ -78,6 +80,8 @@ async function injectTauriMock(
             case 'deploy_definition': {
               const defId = 'mock-def-' + Date.now();
               mockState.deployedDefs.push(defId);
+              // Store XML for download mock
+              mockState.deployedXml[defId] = (args.xml as string) || '<mock/>';
               // If the process has a UserTask, seed a pending task
               if (args.xml && args.xml.includes('userTask')) {
                 mockState.pendingTasks.push({
@@ -137,8 +141,64 @@ async function injectTauriMock(
               break;
             }
 
+            case 'list_definitions': {
+              // Return a definition info entry per deployed def
+              resolve(mockState.deployedDefs.map(id => ({ id, node_count: 3 })));
+              break;
+            }
+
+            case 'get_definition_xml': {
+              const defId = args.definitionId as string;
+              const xml = mockState.deployedXml[defId];
+              if (xml) {
+                resolve(xml);
+              } else {
+                reject('No XML for definition: ' + defId);
+              }
+              break;
+            }
+
+            case 'update_instance_variables': {
+              const instId = args.instanceId as string;
+              const newVars = args.variables as Record<string, unknown>;
+              const inst = mockState.processInstances.find((i: any) => i.id === instId);
+              if (inst) {
+                for (const [k, v] of Object.entries(newVars)) {
+                  if (v === null) {
+                    delete inst.variables[k];
+                  } else {
+                    inst.variables[k] = v;
+                  }
+                }
+                resolve(null);
+              } else {
+                reject('No such instance: ' + instId);
+              }
+              break;
+            }
+
+            // Tauri built-in dialog/save
+            case 'plugin:dialog|save': {
+              // Return a fake file path so writeTextFile can proceed
+              resolve('/tmp/mock-download.bpmn');
+              break;
+            }
+
+            // Tauri built-in fs/writeTextFile
+            case 'plugin:fs|write_file':
+            case 'plugin:fs|write_text_file': {
+              resolve(null);
+              break;
+            }
+
             default:
-              reject(`command ${cmd} not found`);
+              // Silently resolve null for Tauri-internal commands
+              // (dialog, fs, etc.) that use `tauri` as the cmd.
+              if (cmd === 'tauri' || cmd.startsWith('plugin:')) {
+                resolve(null);
+              } else {
+                reject(`command ${cmd} not found`);
+              }
           }
         } catch (e: any) {
           reject(e.message ?? String(e));
@@ -232,7 +292,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     const alerts = await collectAlerts(page, async () => {
-      await page.locator('button', { hasText: 'Start Instance' }).click();
+      // Open variables dialog
+      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+      // Confirm with default empty object
+      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
     });
 
     expect(alerts.length).toBe(1);
@@ -252,9 +315,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     });
     expect(deployAlerts[0]).toContain('Deployed definition!');
 
-    // Now start instance
+    // Now start instance via variables dialog
     const startAlerts = await collectAlerts(page, async () => {
-      await page.locator('button', { hasText: 'Start Instance' }).click();
+      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
     });
 
     expect(startAlerts.length).toBe(1);
@@ -364,9 +428,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     });
     expect(alerts[0]).toContain('Deployed definition!');
 
-    // Step 2: Start Instance
+    // Step 2: Start Instance via variables dialog
     alerts = await collectAlerts(page, async () => {
-      await page.locator('button', { hasText: 'Start Instance' }).click();
+      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
     });
     expect(alerts[0]).toContain('Started instance!');
 
@@ -464,12 +529,253 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(detail.getByText('Process started')).toBeVisible();
     await expect(detail.getByText('Executed service task')).toBeVisible();
 
-    // Variables JSON
-    await expect(detail.locator('.variables-block')).toContainText('"validated": true');
-    await expect(detail.locator('.variables-block')).toContainText('"score": 95');
+    // Variables JSON (now in editable textarea)
+    const textarea = detail.locator('.vars-textarea');
+    await expect(textarea).toBeVisible();
+    const textareaValue = await textarea.inputValue();
+    expect(textareaValue).toContain('"validated": true');
+    expect(textareaValue).toContain('"score": 95');
 
     // Close button
     await detail.locator('button', { hasText: 'Close' }).click();
     await expect(detail).not.toBeVisible();
+  });
+
+  // ---- 12. Deployed Processes – empty state --------------------------------
+
+  test('should navigate to Deployed Processes tab and show empty state', async ({ page }) => {
+    await injectTauriMock(page);
+    await page.goto('/');
+
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+    await expect(page.getByText('No deployed processes.')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('button', { hasText: 'Refresh' })).toBeVisible();
+  });
+
+  // ---- 13. Deployed Processes – pre-seeded definitions ---------------------
+
+  test('should display pre-seeded definitions with node count', async ({ page }) => {
+    await injectTauriMock(page, {
+      deployedDefs: ['order-process', 'approval-flow'],
+      deployedXml: {
+        'order-process': '<bpmn>order</bpmn>',
+        'approval-flow': '<bpmn>approval</bpmn>',
+      },
+    });
+    await page.goto('/');
+
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+
+    const cards = page.locator('.card');
+    await expect(cards).toHaveCount(2, { timeout: 5_000 });
+
+    await expect(cards.first().getByText('Definition: order-process')).toBeVisible();
+    await expect(cards.nth(1).getByText('Definition: approval-flow')).toBeVisible();
+  });
+
+  // ---- 14. Deployed Processes – download button ---------------------------
+
+  test('should click Download BPMN without error', async ({ page }) => {
+    await injectTauriMock(page, {
+      deployedDefs: ['download-test'],
+      deployedXml: { 'download-test': '<bpmn>test</bpmn>' },
+    });
+    await page.goto('/');
+
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+
+    // Click Download – should complete without crashing.
+    // In E2E (non-Tauri), the dialog mock resolves null so the
+    // writeTextFile silently succeeds or is skipped.
+    await page.locator('button', { hasText: 'Download BPMN' }).click();
+    // After click, button should return to normal state (not stuck in "Downloading...")
+    await expect(page.locator('button', { hasText: 'Download BPMN' })).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ---- 15. Deploy then view in Deployed Processes -------------------------
+
+  test('should show deployed definition after deploying from modeler', async ({ page }) => {
+    await injectTauriMock(page);
+    await page.goto('/');
+    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
+
+    // Deploy a process first
+    const deployAlerts = await collectAlerts(page, async () => {
+      await page.locator('button', { hasText: 'Deploy Process' }).click();
+    });
+    expect(deployAlerts[0]).toContain('Deployed definition!');
+
+    // Switch to Deployed Processes tab
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+
+    // Should see at least one definition card
+    const cards = page.locator('.card');
+    await expect(cards).toHaveCount(1, { timeout: 5_000 });
+  });
+
+  // ---- 16. View deployed definition in Modeler ---------------------------
+
+  test('should open deployed definition in modeler when clicking View in Modeler', async ({ page }) => {
+    const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="ViewTest_1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_View"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="ViewTest_1">
+      <bpmndi:BPMNShape id="Shape_Start" bpmnElement="StartEvent_View">
+        <dc:Bounds x="180" y="160" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+    await injectTauriMock(page, {
+      deployedDefs: ['view-test-def'],
+      deployedXml: { 'view-test-def': sampleXml },
+    });
+    await page.goto('/');
+
+    // Navigate to Deployed Processes tab
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+
+    // Click "View in Modeler" button
+    await page.locator('button', { hasText: 'View in Modeler' }).click();
+
+    // Should switch back to Modeler tab and show the bpmn-js container
+    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
+
+    // The BPMN Modeler nav-item should be active
+    const modelerNav = page.locator('.nav-item', { hasText: 'BPMN Modeler' });
+    await expect(modelerNav).toHaveClass(/active/, { timeout: 5_000 });
+  });
+
+  // ---- 17. New Diagram resets modeler ------------------------------------
+
+  test('should reset modeler to empty diagram when clicking New Diagram', async ({ page }) => {
+    const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="NewDiagramTest_1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_ND"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="NewDiagramTest_1">
+      <bpmndi:BPMNShape id="Shape_Start" bpmnElement="StartEvent_ND">
+        <dc:Bounds x="180" y="160" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+    await injectTauriMock(page, {
+      deployedDefs: ['nd-test-def'],
+      deployedXml: { 'nd-test-def': sampleXml },
+    });
+    await page.goto('/');
+
+    // Step 1: View a deployed definition in the Modeler
+    await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
+    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+    await page.locator('button', { hasText: 'View in Modeler' }).click();
+    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
+
+    // Step 2: Click "New Diagram" to reset
+    await page.locator('button', { hasText: 'New Diagram' }).click();
+
+    // Canvas should still be visible (empty diagram loaded)
+    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 5_000 });
+
+    // Step 3: Clicking "Start Instance" (via dialog) should warn because defId was cleared
+    const warnAlerts = await collectAlerts(page, async () => {
+      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    });
+    expect(warnAlerts.length).toBe(1);
+    expect(warnAlerts[0]).toContain('Please deploy a process first');
+  });
+
+  // ---- 18. Start Instance with custom variables --------------------------
+
+  test('should start an instance with custom variables', async ({ page }) => {
+    await injectTauriMock(page);
+    await page.goto('/');
+    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
+
+    // Deploy first
+    const deployAlerts = await collectAlerts(page, async () => {
+      await page.locator('button', { hasText: 'Deploy Process' }).click();
+    });
+    expect(deployAlerts[0]).toContain('Deployed definition!');
+
+    // Open variables dialog
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await expect(page.locator('.vars-dialog')).toBeVisible({ timeout: 3_000 });
+
+    // Type custom variables JSON
+    const textarea = page.locator('.vars-textarea');
+    await textarea.fill('{"orderId": "ORD-42", "amount": 99.5}');
+
+    // Click Start and expect success
+    const startAlerts = await collectAlerts(page, async () => {
+      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    });
+    expect(startAlerts.length).toBe(1);
+    expect(startAlerts[0]).toContain('Started instance! ID: mock-instance-');
+
+    // Dialog should be closed now
+    await expect(page.locator('.vars-dialog')).not.toBeVisible();
+  });
+
+  // ---- 19. Edit instance variables in detail panel -----------------------
+
+  test('should edit instance variables via Instances detail panel', async ({ page }) => {
+    await injectTauriMock(page, {
+      processInstances: [
+        {
+          id: 'inst-edit-vars-001',
+          definition_id: 'edit-vars-def',
+          state: 'Running',
+          current_node: 'Task_1',
+          audit_log: ['▶ Process started'],
+          variables: { status: 'new', priority: 1 },
+        },
+      ],
+    });
+    await page.goto('/');
+
+    // Navigate to Instances tab
+    await page.locator('.nav-item', { hasText: 'Instances' }).click();
+    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+
+    // Click the instance card to open detail view
+    await page.locator('.card').first().click();
+    const detail = page.locator('.instance-detail');
+    await expect(detail).toBeVisible({ timeout: 5_000 });
+
+    // Verify current variables in textarea
+    const textarea = detail.locator('.vars-textarea');
+    await expect(textarea).toBeVisible();
+    const initial = await textarea.inputValue();
+    expect(initial).toContain('"status": "new"');
+    expect(initial).toContain('"priority": 1');
+
+    // Edit variables: update status, delete priority (null), add a new key
+    await textarea.fill('{"status": "in-progress", "priority": null, "assignee": "alice"}');
+
+    // Click Save Variables
+    const alerts = await collectAlerts(page, async () => {
+      await detail.locator('button', { hasText: 'Save Variables' }).click();
+    });
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain('Variables saved successfully');
+
+    // After save, the textarea should show the updated variables
+    // (priority should be removed, status updated, assignee added)
+    const updated = await textarea.inputValue();
+    expect(updated).toContain('"status": "in-progress"');
+    expect(updated).toContain('"assignee": "alice"');
+    expect(updated).not.toContain('"priority"');
   });
 });

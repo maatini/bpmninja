@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { deployDefinition, startInstance, getPendingTasks, completeTask, type PendingUserTask } from './lib/tauri'
 import { Modeler } from './Modeler'
 import { Instances } from './Instances'
+import { DeployedProcesses } from './DeployedProcesses'
 
 function App() {
   const [activeTab, setActiveTab] = useState('modeler')
   const [tasks, setTasks] = useState<PendingUserTask[]>([])
   const [defId, setDefId] = useState<string>('')
+  const [viewXml, setViewXml] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeTab === 'tasks') {
@@ -33,17 +35,29 @@ function App() {
     }
   }
 
-  const handleStart = async () => {
+  const handleStart = async (variables: Record<string, unknown>) => {
     if (!defId) {
       alert("Please deploy a process first.")
       return
     }
     try {
-      const id = await startInstance(defId)
+      const id = await startInstance(defId, variables)
       alert("Started instance! ID: " + id)
     } catch (e) {
       alert("Error starting: " + e)
     }
+  }
+
+  // Called when user clicks "View in Modeler" on a deployed definition
+  const handleViewDefinition = (xml: string) => {
+    setViewXml(xml)
+    setActiveTab('modeler')
+  }
+
+  // Called when user clicks "New Diagram" in the Modeler
+  const handleNewDiagram = () => {
+    setViewXml(null)
+    setDefId('')
   }
 
   const handleComplete = async (taskId: string) => {
@@ -63,6 +77,9 @@ function App() {
         <div className={`nav-item ${activeTab === 'modeler' ? 'active' : ''}`} onClick={() => setActiveTab('modeler')}>
           BPMN Modeler
         </div>
+        <div className={`nav-item ${activeTab === 'definitions' ? 'active' : ''}`} onClick={() => setActiveTab('definitions')}>
+          Deployed Processes
+        </div>
         <div className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`} onClick={() => setActiveTab('tasks')}>
           Pending Tasks
         </div>
@@ -73,7 +90,11 @@ function App() {
       
       <div className="main-content">
         {activeTab === 'modeler' && (
-          <Modeler onDeploy={handleDeploy} onStart={handleStart} />
+          <Modeler onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} initialXml={viewXml} />
+        )}
+
+        {activeTab === 'definitions' && (
+          <DeployedProcesses onView={handleViewDefinition} />
         )}
 
         {activeTab === 'tasks' && (
@@ -105,3 +126,4 @@ function App() {
 }
 
 export default App
+

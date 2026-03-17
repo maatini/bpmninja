@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listInstances, getInstanceDetails, getPendingTasks, type ProcessInstance, type PendingUserTask } from './lib/tauri';
+import { listInstances, getInstanceDetails, getPendingTasks, updateInstanceVariables, type ProcessInstance, type PendingUserTask } from './lib/tauri';
 
 // Helper to render the instance state as a readable string
 function stateLabel(state: ProcessInstance['state']): string {
@@ -23,6 +23,7 @@ export function Instances() {
   const [selected, setSelected] = useState<ProcessInstance | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingUserTask[]>([]);
+  const [editVarsJson, setEditVarsJson] = useState('{}');
 
   const fetchInstances = useCallback(async () => {
     setLoading(true);
@@ -46,6 +47,11 @@ export function Instances() {
     try {
       const details = await getInstanceDetails(inst.id);
       setSelected(details);
+      setEditVarsJson(
+        Object.keys(details.variables).length > 0
+          ? JSON.stringify(details.variables, null, 2)
+          : '{}'
+      );
       // If waiting on user task, fetch pending tasks to show info
       if (typeof details.state === 'object' && 'WaitingOnUserTask' in details.state) {
         const tasks = await getPendingTasks();
@@ -55,9 +61,37 @@ export function Instances() {
       }
     } catch (e) {
       setSelected(inst);
+      setEditVarsJson(
+        Object.keys(inst.variables).length > 0
+          ? JSON.stringify(inst.variables, null, 2)
+          : '{}'
+      );
       setPendingTasks([]);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleSaveVariables = async () => {
+    if (!selected) return;
+    try {
+      const parsed = JSON.parse(editVarsJson);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        alert('Variables must be a JSON object.');
+        return;
+      }
+      await updateInstanceVariables(selected.id, parsed);
+      alert('Variables saved successfully.');
+      // Refresh the detail view
+      const updated = await getInstanceDetails(selected.id);
+      setSelected(updated);
+      setEditVarsJson(
+        Object.keys(updated.variables).length > 0
+          ? JSON.stringify(updated.variables, null, 2)
+          : '{}'
+      );
+    } catch (e) {
+      alert('Error saving variables: ' + e);
     }
   };
 
@@ -140,14 +174,22 @@ export function Instances() {
                 </ul>
               </div>
 
-              {/* Variables */}
+              {/* Editable variables */}
               <div>
                 <strong>Variables:</strong>
-                <pre className="variables-block">
-                  {Object.keys(selected.variables).length > 0
-                    ? JSON.stringify(selected.variables, null, 2)
-                    : '(none)'}
-                </pre>
+                <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 0' }}>
+                  Edit JSON below. Set a key to <code>null</code> to delete it.
+                </p>
+                <textarea
+                  className="vars-textarea"
+                  value={editVarsJson}
+                  onChange={(e) => setEditVarsJson(e.target.value)}
+                  rows={6}
+                  spellCheck={false}
+                />
+                <div style={{ marginTop: 6 }}>
+                  <button className="button save-vars-btn" onClick={handleSaveVariables}>Save Variables</button>
+                </div>
               </div>
             </>
           )}

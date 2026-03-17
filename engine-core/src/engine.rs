@@ -215,6 +215,60 @@ impl WorkflowEngine {
         Ok(instance_id)
     }
 
+    /// Starts a new process instance with pre-populated variables.
+    ///
+    /// Like `start_instance`, but the token carries initial variables from the
+    /// caller. The instance's `variables` field is also seeded.
+    pub async fn start_instance_with_variables(
+        &mut self,
+        definition_id: &str,
+        variables: HashMap<String, Value>,
+    ) -> EngineResult<Uuid> {
+        let def = self
+            .definitions
+            .get(definition_id)
+            .ok_or_else(|| EngineError::NoSuchDefinition(definition_id.to_string()))?;
+
+        let (start_id, start_element) = def
+            .start_event()
+            .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
+
+        if matches!(start_element, BpmnElement::TimerStartEvent(_)) {
+            return Err(EngineError::InvalidDefinition(
+                "Use trigger_timer_start() for timer start events".into(),
+            ));
+        }
+
+        let instance_id = Uuid::new_v4();
+        let instance = ProcessInstance {
+            id: instance_id,
+            definition_id: definition_id.to_string(),
+            state: InstanceState::Running,
+            current_node: start_id.to_string(),
+            audit_log: vec![format!(
+                "▶ Process started at node '{start_id}' with {} variable(s)",
+                variables.len()
+            )],
+            variables: variables.clone(),
+        };
+
+        log::info!(
+            "Started instance {instance_id} of '{definition_id}' at node '{start_id}' with {} vars",
+            variables.len()
+        );
+
+        self.instances.insert(instance_id, instance);
+        let token = Token::with_variables(start_id, variables);
+        if let Some(p) = &self.persistence {
+            if let Err(e) = p.save_token(&token).await {
+                log::error!("Failed to save initial token: {}", e);
+            }
+        }
+        self.run_instance(instance_id, token).await?;
+
+        Ok(instance_id)
+    }
+
     /// Simulates an external timer trigger that starts a timer-start-event process.
     ///
     /// Validates the duration against the definition, then spawns the instance.
@@ -601,6 +655,53 @@ impl WorkflowEngine {
             .get(&instance_id)
             .cloned()
             .ok_or(EngineError::NoSuchInstance(instance_id))
+    }
+
+    /// Updates variables on a running process instance.
+    ///
+    /// - Keys with non-null values are created or overwritten.
+    /// - Keys with `Value::Null` are removed from the instance variables.
+    pub fn update_instance_variables(
+        &mut self,
+        instance_id: Uuid,
+        variables: HashMap<String, Value>,
+    ) -> EngineResult<()> {
+        let instance = self
+            .instances
+            .get_mut(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+
+        let mut added: usize = 0;
+        let mut modified: usize = 0;
+        let mut deleted: usize = 0;
+
+        for (key, value) in variables {
+            if value.is_null() {
+                // Delete
+                if instance.variables.remove(&key).is_some() {
+                    deleted += 1;
+                }
+            } else if instance.variables.contains_key(&key) {
+                // Update existing
+                instance.variables.insert(key, value);
+                modified += 1;
+            } else {
+                // Create new
+                instance.variables.insert(key, value);
+                added += 1;
+            }
+        }
+
+        instance.audit_log.push(format!(
+            "Variables updated: +{added} ~{modified} -{deleted}"
+        ));
+
+        log::info!(
+            "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
+            instance_id
+        );
+
+        Ok(())
     }
 
     // ----- external task operations -----------------------------------------

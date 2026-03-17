@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 engine-core = { path = "../engine-core" }
-quick-xml = { version = "0.31", features = ["serialize"] }
+quick-xml = { version = "0.37", features = ["serialize", "overlapped-lists"] }
 serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

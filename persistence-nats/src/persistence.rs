@@ -1,4 +1,5 @@
 use async_nats::jetstream::{self, context::Context, stream::Config as StreamConfig};
+use async_nats::jetstream::object_store::Config as ObjectStoreConfig;
 use async_nats::Client;
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -34,11 +35,61 @@ impl NatsPersistence {
                 ..Default::default()
             })
             .await;
+
+        // Ensure the bpmn_xml Object Store bucket exists (per NATS rules).
+        let _ = js
+            .create_object_store(ObjectStoreConfig {
+                bucket: "bpmn_xml".to_string(),
+                description: Some("Original BPMN 2.0 XML artifacts".to_string()),
+                ..Default::default()
+            })
+            .await;
             
         Ok(Self {
             client,
             js,
             stream_name: stream_name.to_string(),
+        })
+    }
+
+    /// Stores the original BPMN XML in the `bpmn_xml` Object Store bucket.
+    pub async fn save_bpmn_xml(&self, definition_id: &str, xml: &str) -> EngineResult<()> {
+        let store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
+        })?;
+
+        store
+            .put(definition_id, &mut xml.as_bytes())
+            .await
+            .map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to store BPMN XML: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    /// Loads the original BPMN XML from the `bpmn_xml` Object Store bucket.
+    pub async fn load_bpmn_xml(&self, definition_id: &str) -> EngineResult<String> {
+        use tokio::io::AsyncReadExt;
+
+        let store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
+        })?;
+
+        let mut result = store.get(definition_id).await.map_err(|e| {
+            EngineError::PersistenceError(format!(
+                "Failed to load BPMN XML for '{}': {}",
+                definition_id, e
+            ))
+        })?;
+
+        let mut data = Vec::new();
+        result.read_to_end(&mut data).await.map_err(|e| {
+            EngineError::PersistenceError(format!("Error reading XML data: {}", e))
+        })?;
+
+        String::from_utf8(data).map_err(|e| {
+            EngineError::PersistenceError(format!("BPMN XML is not valid UTF-8: {}", e))
         })
     }
 }
