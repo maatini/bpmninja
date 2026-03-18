@@ -1,2 +1,61 @@
-/target
-tmp
+# ========================
+# Node.js / Frontend
+# ========================
+node_modules/
+**/node_modules/
+
+# Build- und Dist-Ordner (je nach Framework)
+dist/
+build/
+.release/
+.next/
+.nuxt/
+.svelte-kit/
+out/
+
+# Lockfiles (optional – meist committen, aber hier ignorieren wenn du willst)
+# pnpm-lock.yaml
+# yarn.lock
+# package-lock.json
+
+# ========================
+# Logs & Debug
+# ========================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.local
+.env.*.local
+
+# ========================
+# Editoren & OS
+# ========================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# ========================
+# Rust + Tauri (wichtig!)
+# ========================
+target/
+**/target/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/bundle/
+src-tauri/WixTools/
+
+# Rust backup files
+**/*.rs.bk
+
+# Cargo cache (optional)
+.cargo/
