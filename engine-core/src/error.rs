@@ -44,6 +44,10 @@ pub enum EngineError {
     #[error("No service handler registered for '{0}'")]
     HandlerNotFound(String),
 
+    /// No condition matched at a gateway node (and no default flow exists).
+    #[error("No matching condition at gateway '{0}'")]
+    NoMatchingCondition(String),
+
     /// The requested external task does not exist.
     #[error("External task not found: {0}")]
     ExternalTaskNotFound(Uuid),

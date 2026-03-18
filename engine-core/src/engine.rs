@@ -75,6 +75,8 @@ pub struct ExternalTaskItem {
 pub enum NextAction {
     /// The token should continue to the next node.
     Continue(Token),
+    /// Multiple tokens should continue (inclusive gateway fork).
+    ContinueMultiple(Vec<Token>),
     /// The engine must pause — a user task is pending.
     WaitForUser(PendingUserTask),
     /// The engine must pause — an external task is pending.
@@ -111,6 +113,113 @@ pub struct ProcessInstance {
     pub audit_log: Vec<String>,
     /// Current process variables (synced from the executing token).
     pub variables: HashMap<String, Value>,
+}
+
+// ---------------------------------------------------------------------------
+// Condition evaluation (gateway support)
+// ---------------------------------------------------------------------------
+
+/// Evaluates a simple condition expression against token variables.
+///
+/// Supported forms:
+/// - `"variable == value"` / `"variable != value"`
+/// - `"variable > value"` / `"variable < value"` / `"variable >= value"` / `"variable <= value"`
+/// - `"variable"` (truthy check: non-null, non-false, non-zero, non-empty-string)
+///
+/// Returns `false` if the variable is missing or the expression is malformed.
+fn evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return false;
+    }
+
+    // Try comparison operators (longest first to avoid prefix conflicts)
+    for op in ["==", "!=", ">=", "<=", ">", "<"] {
+        if let Some(idx) = expr.find(op) {
+            let var_name = expr[..idx].trim();
+            let rhs_str = expr[idx + op.len()..].trim();
+
+            let lhs = match variables.get(var_name) {
+                Some(v) => v,
+                None => return false,
+            };
+
+            // Parse RHS as a JSON value for comparison
+            let rhs = parse_rhs(rhs_str);
+
+            return match op {
+                "==" => values_eq(lhs, &rhs),
+                "!=" => !values_eq(lhs, &rhs),
+                ">" => values_cmp(lhs, &rhs) == Some(std::cmp::Ordering::Greater),
+                "<" => values_cmp(lhs, &rhs) == Some(std::cmp::Ordering::Less),
+                ">=" => values_cmp(lhs, &rhs).is_some_and(|o| o != std::cmp::Ordering::Less),
+                "<=" => values_cmp(lhs, &rhs).is_some_and(|o| o != std::cmp::Ordering::Greater),
+                _ => false,
+            };
+        }
+    }
+
+    // Fallback: truthy check on a single variable name
+    match variables.get(expr) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Null) | None => false,
+        // Arrays and objects are truthy
+        Some(_) => true,
+    }
+}
+
+/// Parses a right-hand-side string into a `serde_json::Value`.
+fn parse_rhs(s: &str) -> Value {
+    // Strip surrounding quotes (single or double) for string comparison
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        return Value::String(s[1..s.len() - 1].to_string());
+    }
+    // Boolean literals
+    if s == "true" {
+        return Value::Bool(true);
+    }
+    if s == "false" {
+        return Value::Bool(false);
+    }
+    // Null
+    if s == "null" {
+        return Value::Null;
+    }
+    // Try number
+    if let Ok(n) = s.parse::<i64>() {
+        return Value::Number(n.into());
+    }
+    if let Ok(n) = s.parse::<f64>() {
+        if let Some(n) = serde_json::Number::from_f64(n) {
+            return Value::Number(n);
+        }
+    }
+    // Fallback: treat as plain string
+    Value::String(s.to_string())
+}
+
+/// Equality comparison for JSON values.
+fn values_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            a.as_f64().zip(b.as_f64()).is_some_and(|(x, y)| (x - y).abs() < f64::EPSILON)
+        }
+        _ => a == b,
+    }
+}
+
+/// Ordering comparison for JSON values (numbers only).
+fn values_cmp(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            let fa = a.as_f64()?;
+            let fb = b.as_f64()?;
+            fa.partial_cmp(&fb)
+        }
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +494,26 @@ impl WorkflowEngine {
                         }
                     }
                 }
+                NextAction::ContinueMultiple(forked_tokens) => {
+                    // Run each forked branch sequentially.
+                    // All branches share the same instance and must
+                    // complete independently (each reaching an EndEvent).
+                    for fork_token in forked_tokens {
+                        if let Some(p) = &self.persistence {
+                            if let Err(e) = p.save_token(&fork_token).await {
+                                log::error!("Failed to save forked token: {}", e);
+                            }
+                        }
+                        // Temporarily set instance back to Running for each branch
+                        if let Some(inst) = self.instances.get_mut(&instance_id) {
+                            inst.state = InstanceState::Running;
+                        }
+                        // Recursively run each forked branch in a Box::pin to
+                        // satisfy the borrow checker for recursive async
+                        Box::pin(self.run_instance(instance_id, fork_token)).await?;
+                    }
+                    return Ok(());
+                }
                 NextAction::WaitForUser(pending) => {
                     let task_id = pending.task_id;
                     if let Some(inst) = self.instances.get_mut(&instance_id) {
@@ -543,6 +672,95 @@ impl WorkflowEngine {
 
                 Ok(NextAction::WaitForExternalTask(ext_task))
             }
+
+            // ----- Exclusive Gateway (XOR) -----
+            BpmnElement::ExclusiveGateway { default } => {
+                let outgoing = def_clone.next_nodes(&current_id);
+                let mut chosen_target: Option<String> = None;
+
+                // Evaluate conditions in order; first match wins
+                for sf in outgoing {
+                    if let Some(ref cond) = sf.condition {
+                        if evaluate_condition(cond, &token.variables) {
+                            chosen_target = Some(sf.target.clone());
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback to default flow if no condition matched
+                if chosen_target.is_none() {
+                    if let Some(default_target) = default {
+                        chosen_target = Some(default_target.clone());
+                    }
+                }
+
+                let target = chosen_target.ok_or_else(|| {
+                    EngineError::NoMatchingCondition(current_id.clone())
+                })?;
+
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.audit_log.push(format!(
+                    "◆ Exclusive gateway '{current_id}' → took path to '{target}'"
+                ));
+                log::info!(
+                    "Instance {instance_id}: exclusive gateway '{current_id}' → '{target}'"
+                );
+
+                token.current_node = target.clone();
+                inst.current_node = target;
+                Ok(NextAction::Continue(token.clone()))
+            }
+
+            // ----- Inclusive Gateway (OR) -----
+            BpmnElement::InclusiveGateway => {
+                let outgoing = def_clone.next_nodes(&current_id);
+                let mut matched_targets: Vec<String> = Vec::new();
+
+                // Evaluate all conditions; every match is taken
+                for sf in outgoing {
+                    if let Some(ref cond) = sf.condition {
+                        if evaluate_condition(cond, &token.variables) {
+                            matched_targets.push(sf.target.clone());
+                        }
+                    } else {
+                        // Unconditional flows are always taken
+                        matched_targets.push(sf.target.clone());
+                    }
+                }
+
+                if matched_targets.is_empty() {
+                    return Err(EngineError::NoMatchingCondition(current_id.clone()));
+                }
+
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.audit_log.push(format!(
+                    "◇ Inclusive gateway '{current_id}' → forked to {} path(s): [{}]",
+                    matched_targets.len(),
+                    matched_targets.join(", ")
+                ));
+                log::info!(
+                    "Instance {instance_id}: inclusive gateway '{current_id}' → {} path(s)",
+                    matched_targets.len()
+                );
+
+                // Fork tokens — each gets a copy of the current variables
+                let forked: Vec<Token> = matched_targets
+                    .into_iter()
+                    .map(|target| {
+                        let mut t = Token::with_variables(&target, token.variables.clone());
+                        t.current_node = target;
+                        t
+                    })
+                    .collect();
+
+                if forked.len() == 1 {
+                    // Only one match → no need for multi-token handling
+                    Ok(NextAction::Continue(forked.into_iter().next().unwrap()))
+                } else {
+                    Ok(NextAction::ContinueMultiple(forked))
+                }
+            }
         }
     }
 
@@ -681,14 +899,19 @@ impl WorkflowEngine {
                 if instance.variables.remove(&key).is_some() {
                     deleted += 1;
                 }
-            } else if instance.variables.contains_key(&key) {
-                // Update existing
-                instance.variables.insert(key, value);
-                modified += 1;
             } else {
-                // Create new
-                instance.variables.insert(key, value);
-                added += 1;
+                match instance.variables.entry(key) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        // Update existing
+                        e.insert(value);
+                        modified += 1;
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        // Create new
+                        e.insert(value);
+                        added += 1;
+                    }
+                }
             }
         }
 
@@ -1188,5 +1411,279 @@ mod tests {
         assert!(log.len() >= 4);
         assert!(log[0].contains("started"));
         assert!(log.last().unwrap().contains("completed"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Condition evaluator tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn condition_eq_number() {
+        let mut vars = HashMap::new();
+        vars.insert("amount".into(), Value::Number(100.into()));
+        assert!(evaluate_condition("amount == 100", &vars));
+        assert!(!evaluate_condition("amount == 200", &vars));
+    }
+
+    #[test]
+    fn condition_neq_string() {
+        let mut vars = HashMap::new();
+        vars.insert("status".into(), Value::String("approved".into()));
+        assert!(evaluate_condition("status == 'approved'", &vars));
+        assert!(evaluate_condition("status != 'rejected'", &vars));
+        assert!(!evaluate_condition("status == 'rejected'", &vars));
+    }
+
+    #[test]
+    fn condition_gt_lt() {
+        let mut vars = HashMap::new();
+        vars.insert("score".into(), Value::Number(75.into()));
+        assert!(evaluate_condition("score > 50", &vars));
+        assert!(evaluate_condition("score >= 75", &vars));
+        assert!(evaluate_condition("score < 100", &vars));
+        assert!(evaluate_condition("score <= 75", &vars));
+        assert!(!evaluate_condition("score > 75", &vars));
+    }
+
+    #[test]
+    fn condition_truthy_check() {
+        let mut vars = HashMap::new();
+        vars.insert("flag".into(), Value::Bool(true));
+        vars.insert("zero".into(), Value::Number(0.into()));
+        vars.insert("empty".into(), Value::String(String::new()));
+
+        assert!(evaluate_condition("flag", &vars));
+        assert!(!evaluate_condition("zero", &vars));
+        assert!(!evaluate_condition("empty", &vars));
+        assert!(!evaluate_condition("missing_var", &vars));
+    }
+
+    #[test]
+    fn condition_missing_variable() {
+        let vars = HashMap::new();
+        assert!(!evaluate_condition("x == 5", &vars));
+    }
+
+    // -----------------------------------------------------------------------
+    // ExclusiveGateway (XOR) tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exclusive_gateway_takes_matching_path() {
+        let mut engine = WorkflowEngine::new();
+        engine.register_service_handler(
+            "noop",
+            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
+        );
+
+        // Start → XOR Gateway → (amount > 100 → high) / (default → low) → End
+        let def = ProcessDefinitionBuilder::new("xor_test")
+            .node("start", BpmnElement::StartEvent)
+            .node(
+                "gw",
+                BpmnElement::ExclusiveGateway {
+                    default: Some("low".into()),
+                },
+            )
+            .node("high", BpmnElement::ServiceTask("noop".into()))
+            .node("low", BpmnElement::ServiceTask("noop".into()))
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "high", "amount > 100")
+            .flow("gw", "low") // unconditional (default candidate)
+            .flow("high", "end")
+            .flow("low", "end")
+            .build()
+            .unwrap();
+
+        engine.deploy_definition(def);
+
+        // amount = 500 → should take the "high" path
+        let mut vars = HashMap::new();
+        vars.insert("amount".into(), Value::Number(500.into()));
+        let inst_id = engine
+            .start_instance_with_variables("xor_test", vars)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *engine.get_instance_state(inst_id).unwrap(),
+            InstanceState::Completed
+        );
+        let log = engine.get_audit_log(inst_id).unwrap();
+        let gw_entry = log.iter().find(|l| l.contains("Exclusive gateway")).unwrap();
+        assert!(gw_entry.contains("high"), "Expected high path: {gw_entry}");
+    }
+
+    #[tokio::test]
+    async fn exclusive_gateway_uses_default_when_no_match() {
+        let mut engine = WorkflowEngine::new();
+        engine.register_service_handler(
+            "noop",
+            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
+        );
+
+        let def = ProcessDefinitionBuilder::new("xor_default")
+            .node("start", BpmnElement::StartEvent)
+            .node(
+                "gw",
+                BpmnElement::ExclusiveGateway {
+                    default: Some("low".into()),
+                },
+            )
+            .node("high", BpmnElement::ServiceTask("noop".into()))
+            .node("low", BpmnElement::ServiceTask("noop".into()))
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "high", "amount > 100")
+            .flow("gw", "low")
+            .flow("high", "end")
+            .flow("low", "end")
+            .build()
+            .unwrap();
+
+        engine.deploy_definition(def);
+
+        // amount = 50 → no condition matches → should use default "low"
+        let mut vars = HashMap::new();
+        vars.insert("amount".into(), Value::Number(50.into()));
+        let inst_id = engine
+            .start_instance_with_variables("xor_default", vars)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *engine.get_instance_state(inst_id).unwrap(),
+            InstanceState::Completed
+        );
+        let log = engine.get_audit_log(inst_id).unwrap();
+        let gw_entry = log.iter().find(|l| l.contains("Exclusive gateway")).unwrap();
+        assert!(gw_entry.contains("low"), "Expected low (default) path: {gw_entry}");
+    }
+
+    #[tokio::test]
+    async fn exclusive_gateway_error_when_no_match_no_default() {
+        let mut engine = WorkflowEngine::new();
+
+        let def = ProcessDefinitionBuilder::new("xor_fail")
+            .node("start", BpmnElement::StartEvent)
+            .node(
+                "gw",
+                BpmnElement::ExclusiveGateway { default: None },
+            )
+            .node("a", BpmnElement::EndEvent)
+            .node("b", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "a", "x == 1")
+            .conditional_flow("gw", "b", "x == 2")
+            .build()
+            .unwrap();
+
+        engine.deploy_definition(def);
+
+        // No variables at all → no condition matches → error
+        let result = engine.start_instance("xor_fail").await;
+        assert!(
+            matches!(result, Err(EngineError::NoMatchingCondition(_))),
+            "Expected NoMatchingCondition, got: {result:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // InclusiveGateway (OR) tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn inclusive_gateway_forks_multiple_paths() {
+        let mut engine = WorkflowEngine::new();
+        engine.register_service_handler(
+            "track_a",
+            Arc::new(|vars: &mut HashMap<String, Value>| {
+                vars.insert("path_a".into(), Value::Bool(true));
+                Ok(())
+            }),
+        );
+        engine.register_service_handler(
+            "track_b",
+            Arc::new(|vars: &mut HashMap<String, Value>| {
+                vars.insert("path_b".into(), Value::Bool(true));
+                Ok(())
+            }),
+        );
+
+        // Start → Inclusive GW → (a > 0 → svc_a → end) / (b > 0 → svc_b → end)
+        let def = ProcessDefinitionBuilder::new("or_test")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::InclusiveGateway)
+            .node("svc_a", BpmnElement::ServiceTask("track_a".into()))
+            .node("svc_b", BpmnElement::ServiceTask("track_b".into()))
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "svc_a", "a > 0")
+            .conditional_flow("gw", "svc_b", "b > 0")
+            .flow("svc_a", "end")
+            .flow("svc_b", "end")
+            .build()
+            .unwrap();
+
+        engine.deploy_definition(def);
+
+        // Both conditions true → both paths should fire
+        let mut vars = HashMap::new();
+        vars.insert("a".into(), Value::Number(10.into()));
+        vars.insert("b".into(), Value::Number(20.into()));
+        let inst_id = engine
+            .start_instance_with_variables("or_test", vars)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *engine.get_instance_state(inst_id).unwrap(),
+            InstanceState::Completed
+        );
+        let log = engine.get_audit_log(inst_id).unwrap();
+        let gw_entry = log.iter().find(|l| l.contains("Inclusive gateway")).unwrap();
+        assert!(
+            gw_entry.contains("2 path(s)"),
+            "Expected 2 forked paths: {gw_entry}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inclusive_gateway_single_match_no_fork() {
+        let mut engine = WorkflowEngine::new();
+        engine.register_service_handler(
+            "noop",
+            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
+        );
+
+        let def = ProcessDefinitionBuilder::new("or_single")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::InclusiveGateway)
+            .node("a", BpmnElement::ServiceTask("noop".into()))
+            .node("b", BpmnElement::ServiceTask("noop".into()))
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "a", "x == 1")
+            .conditional_flow("gw", "b", "x == 2")
+            .flow("a", "end")
+            .flow("b", "end")
+            .build()
+            .unwrap();
+
+        engine.deploy_definition(def);
+
+        // Only x == 1 → single match → Continue (not ContinueMultiple)
+        let mut vars = HashMap::new();
+        vars.insert("x".into(), Value::Number(1.into()));
+        let inst_id = engine
+            .start_instance_with_variables("or_single", vars)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *engine.get_instance_state(inst_id).unwrap(),
+            InstanceState::Completed
+        );
     }
 }

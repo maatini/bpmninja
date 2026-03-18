@@ -29,6 +29,47 @@ pub enum BpmnElement {
     UserTask(String),
     /// An external task that can be fetched and completed by remote workers.
     ExternalTask { topic: String },
+    /// An exclusive gateway (XOR) — exactly one outgoing path is taken based
+    /// on condition evaluation. An optional `default` flow is followed when
+    /// no condition matches.
+    ExclusiveGateway { default: Option<String> },
+    /// An inclusive gateway (OR) — all outgoing paths whose condition
+    /// evaluates to `true` are taken (token forking).
+    InclusiveGateway,
+}
+
+// ---------------------------------------------------------------------------
+// Sequence flow (edge with optional condition)
+// ---------------------------------------------------------------------------
+
+/// A directed edge between two BPMN flow-nodes.
+///
+/// Carries an optional condition expression that gates whether the flow is
+/// taken (relevant for exclusive and inclusive gateways).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SequenceFlow {
+    /// Target node ID this flow points to.
+    pub target: String,
+    /// Optional condition expression, e.g. `"amount > 100"`.
+    pub condition: Option<String>,
+}
+
+impl SequenceFlow {
+    /// Creates a simple (unconditional) sequence flow.
+    pub fn simple(target: impl Into<String>) -> Self {
+        Self {
+            target: target.into(),
+            condition: None,
+        }
+    }
+
+    /// Creates a conditional sequence flow.
+    pub fn conditional(target: impl Into<String>, condition: impl Into<String>) -> Self {
+        Self {
+            target: target.into(),
+            condition: Some(condition.into()),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,13 +115,13 @@ impl Token {
 /// An immutable, structurally validated BPMN process definition.
 ///
 /// - `nodes`: maps each node ID → its `BpmnElement` type.
-/// - `flows`: maps each source node ID → target node ID (single outgoing
-///   flow per node for this minimal engine).
+/// - `flows`: maps each source node ID → a list of outgoing `SequenceFlow`s.
+///   Linear nodes have exactly one entry; gateways have two or more.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessDefinition {
     pub id: String,
     pub nodes: HashMap<String, BpmnElement>,
-    pub flows: HashMap<String, String>,
+    pub flows: HashMap<String, Vec<SequenceFlow>>,
 }
 
 impl ProcessDefinition {
@@ -90,11 +131,12 @@ impl ProcessDefinition {
     /// - Exactly one start event (StartEvent or TimerStartEvent) must exist.
     /// - At least one end event must exist.
     /// - All flow targets must reference existing node IDs.
-    /// - Every non-end node must have an outgoing flow.
+    /// - Every non-end node must have at least one outgoing flow.
+    /// - Gateways must have at least 2 outgoing flows.
     pub fn new(
         id: impl Into<String>,
         nodes: HashMap<String, BpmnElement>,
-        flows: HashMap<String, String>,
+        flows: HashMap<String, Vec<SequenceFlow>>,
     ) -> EngineResult<Self> {
         let id = id.into();
 
@@ -127,12 +169,14 @@ impl ProcessDefinition {
         }
 
         // --- all flow targets reference existing nodes ---
-        for (from, to) in &flows {
+        for (from, targets) in &flows {
             if !nodes.contains_key(from) {
                 return Err(EngineError::NoSuchNode(from.clone()));
             }
-            if !nodes.contains_key(to) {
-                return Err(EngineError::NoSuchNode(to.clone()));
+            for sf in targets {
+                if !nodes.contains_key(&sf.target) {
+                    return Err(EngineError::NoSuchNode(sf.target.clone()));
+                }
             }
         }
 
@@ -141,10 +185,26 @@ impl ProcessDefinition {
             if matches!(element, BpmnElement::EndEvent) {
                 continue;
             }
-            if !flows.contains_key(node_id) {
+            let outgoing = flows.get(node_id).map_or(0, |v| v.len());
+            if outgoing == 0 {
                 return Err(EngineError::InvalidDefinition(format!(
                     "Node '{node_id}' has no outgoing sequence flow"
                 )));
+            }
+        }
+
+        // --- gateways must have at least 2 outgoing flows ---
+        for (node_id, element) in &nodes {
+            if matches!(
+                element,
+                BpmnElement::ExclusiveGateway { .. } | BpmnElement::InclusiveGateway
+            ) {
+                let outgoing = flows.get(node_id).map_or(0, |v| v.len());
+                if outgoing < 2 {
+                    return Err(EngineError::InvalidDefinition(format!(
+                        "Gateway '{node_id}' must have at least 2 outgoing flows, has {outgoing}"
+                    )));
+                }
             }
         }
 
@@ -167,9 +227,23 @@ impl ProcessDefinition {
         self.nodes.get(id)
     }
 
-    /// Returns the target node ID for the outgoing flow from `from_id`.
+    /// Returns all outgoing sequence flows from the given node.
+    pub fn next_nodes(&self, from_id: &str) -> &[SequenceFlow] {
+        self.flows.get(from_id).map_or(&[], |v| v.as_slice())
+    }
+
+    /// Backward-compatible helper: returns the single outgoing target for
+    /// linear (non-gateway) nodes.
+    ///
+    /// Returns `None` if the node has no outgoing flows or if it has
+    /// multiple outgoing flows (use `next_nodes` for gateways).
     pub fn next_node(&self, from_id: &str) -> Option<&str> {
-        self.flows.get(from_id).map(|s| s.as_str())
+        let flows = self.next_nodes(from_id);
+        if flows.len() == 1 {
+            Some(flows[0].target.as_str())
+        } else {
+            None
+        }
     }
 }
 
@@ -181,7 +255,7 @@ impl ProcessDefinition {
 pub struct ProcessDefinitionBuilder {
     id: String,
     nodes: HashMap<String, BpmnElement>,
-    flows: HashMap<String, String>,
+    flows: HashMap<String, Vec<SequenceFlow>>,
 }
 
 impl ProcessDefinitionBuilder {
@@ -199,9 +273,26 @@ impl ProcessDefinitionBuilder {
         self
     }
 
-    /// Adds a sequence flow (edge) between two nodes.
+    /// Adds an unconditional sequence flow (edge) between two nodes.
     pub fn flow(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
-        self.flows.insert(from.into(), to.into());
+        self.flows
+            .entry(from.into())
+            .or_default()
+            .push(SequenceFlow::simple(to));
+        self
+    }
+
+    /// Adds a conditional sequence flow between two nodes.
+    pub fn conditional_flow(
+        mut self,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        condition: impl Into<String>,
+    ) -> Self {
+        self.flows
+            .entry(from.into())
+            .or_default()
+            .push(SequenceFlow::conditional(to, condition));
         self
     }
 
@@ -307,5 +398,89 @@ mod tests {
             .flow("ts", "end")
             .build();
         assert!(def.is_ok());
+    }
+
+    // --- Gateway-specific tests ---
+
+    #[test]
+    fn exclusive_gateway_definition() {
+        let def = ProcessDefinitionBuilder::new("xor")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::ExclusiveGateway { default: Some("end2".into()) })
+            .node("end1", BpmnElement::EndEvent)
+            .node("end2", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "end1", "approved == true")
+            .flow("gw", "end2")
+            .build();
+        assert!(def.is_ok());
+    }
+
+    #[test]
+    fn inclusive_gateway_definition() {
+        let def = ProcessDefinitionBuilder::new("or")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::InclusiveGateway)
+            .node("end1", BpmnElement::EndEvent)
+            .node("end2", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "end1", "notify_email == true")
+            .conditional_flow("gw", "end2", "notify_sms == true")
+            .build();
+        assert!(def.is_ok());
+    }
+
+    #[test]
+    fn gateway_rejects_single_outgoing() {
+        let def = ProcessDefinitionBuilder::new("bad")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::ExclusiveGateway { default: None })
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .flow("gw", "end")
+            .build();
+        assert!(matches!(
+            def,
+            Err(EngineError::InvalidDefinition(msg)) if msg.contains("at least 2")
+        ));
+    }
+
+    #[test]
+    fn conditional_flow_builder() {
+        let def = ProcessDefinitionBuilder::new("cond")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::ExclusiveGateway { default: None })
+            .node("a", BpmnElement::EndEvent)
+            .node("b", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "a", "x == 1")
+            .conditional_flow("gw", "b", "x == 2")
+            .build()
+            .unwrap();
+
+        let flows = def.next_nodes("gw");
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[0].condition, Some("x == 1".into()));
+        assert_eq!(flows[1].condition, Some("x == 2".into()));
+    }
+
+    #[test]
+    fn next_nodes_returns_multiple() {
+        let def = ProcessDefinitionBuilder::new("multi")
+            .node("start", BpmnElement::StartEvent)
+            .node("gw", BpmnElement::InclusiveGateway)
+            .node("a", BpmnElement::EndEvent)
+            .node("b", BpmnElement::EndEvent)
+            .node("c", BpmnElement::EndEvent)
+            .flow("start", "gw")
+            .conditional_flow("gw", "a", "x > 0")
+            .conditional_flow("gw", "b", "y > 0")
+            .conditional_flow("gw", "c", "z > 0")
+            .build()
+            .unwrap();
+
+        assert_eq!(def.next_nodes("gw").len(), 3);
+        // next_node returns None for multi-out nodes
+        assert_eq!(def.next_node("gw"), None);
     }
 }
