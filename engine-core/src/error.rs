@@ -62,6 +62,10 @@ pub enum EngineError {
 
     #[error("Persistence error: {0}")]
     PersistenceError(String),
+
+    /// A script execution failed.
+    #[error("Script error: {0}")]
+    ScriptError(String),
 }
 
 /// Convenience alias used throughout the engine.

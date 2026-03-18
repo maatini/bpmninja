@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
 };
 use engine_core::engine::{ExternalTaskItem, PendingUserTask, ProcessInstance, WorkflowEngine};
+use engine_core::error::EngineError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,6 +15,81 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// Centralized error type – maps EngineError to proper HTTP status codes
+// ---------------------------------------------------------------------------
+
+/// Unified error type for all REST handlers.
+enum AppError {
+    /// Wraps an `EngineError` with automatic status-code mapping.
+    Engine(EngineError),
+    /// Client sent a malformed request (invalid UUID, bad XML, etc.).
+    BadRequest(String),
+}
+
+impl From<EngineError> for AppError {
+    fn from(e: EngineError) -> Self {
+        Self::Engine(e)
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match self {
+            // Client errors (400)
+            Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(EngineError::InvalidDefinition(msg)) => {
+                (StatusCode::BAD_REQUEST, msg)
+            }
+            Self::Engine(EngineError::NoMatchingCondition(msg)) => {
+                (StatusCode::BAD_REQUEST, format!("No matching condition at gateway '{msg}'"))
+            }
+            // Not-found errors (404)
+            Self::Engine(EngineError::NoSuchDefinition(id)) => {
+                (StatusCode::NOT_FOUND, format!("Definition not found: {id}"))
+            }
+            Self::Engine(EngineError::NoSuchInstance(id)) => {
+                (StatusCode::NOT_FOUND, format!("Instance not found: {id}"))
+            }
+            Self::Engine(EngineError::NoSuchNode(id)) => {
+                (StatusCode::NOT_FOUND, format!("Node not found: {id}"))
+            }
+            Self::Engine(EngineError::ExternalTaskNotFound(id)) => {
+                (StatusCode::NOT_FOUND, format!("External task not found: {id}"))
+            }
+            // Conflict errors (409)
+            Self::Engine(EngineError::TaskNotPending { task_id, actual_state }) => {
+                (StatusCode::CONFLICT, format!("Task '{task_id}' is not pending (state: {actual_state})"))
+            }
+            Self::Engine(EngineError::ExternalTaskLocked { task_id, worker_id }) => {
+                (StatusCode::CONFLICT, format!("Task '{task_id}' locked by worker '{worker_id}'"))
+            }
+            Self::Engine(EngineError::ExternalTaskNotLocked(id)) => {
+                (StatusCode::CONFLICT, format!("External task '{id}' is not locked"))
+            }
+            Self::Engine(EngineError::AlreadyCompleted) => {
+                (StatusCode::CONFLICT, "Process instance already completed".to_string())
+            }
+            // Everything else → 500
+            Self::Engine(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"))
+            }
+        };
+
+        let body = serde_json::json!({ "error": message });
+        (status, Json(body)).into_response()
+    }
+}
+
+/// Parse a UUID from a path segment, returning `AppError::BadRequest` on failure.
+fn parse_uuid(raw: &str) -> Result<Uuid, AppError> {
+    Uuid::parse_str(raw).map_err(|_| AppError::BadRequest("Invalid UUID format".to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// State & request/response types
+// ---------------------------------------------------------------------------
 
 struct AppState {
     engine: Arc<Mutex<WorkflowEngine>>,
@@ -132,26 +208,29 @@ pub fn build_app() -> Router {
         .with_state(state)
 }
 
+// ---------------------------------------------------------------------------
+// REST handlers
+// ---------------------------------------------------------------------------
 
 async fn deploy_definition(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DeployRequest>,
-) -> Result<Json<DeployResponse>, (StatusCode, String)> {
+) -> Result<Json<DeployResponse>, AppError> {
     let mut engine = state.engine.lock().await;
-    
+
     let def = bpmn_parser::parse_bpmn_xml(&payload.xml)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid BPMN XML: {:?}", e)))?;
-        
+        .map_err(|e| AppError::BadRequest(format!("Invalid BPMN XML: {e:?}")))?;
+
     let def_id = def.id.clone();
     engine.deploy_definition(def);
-    
+
     Ok(Json(DeployResponse { definition_id: def_id }))
 }
 
 async fn start_instance(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<StartRequest>,
-) -> Result<Json<StartResponse>, (StatusCode, String)> {
+) -> Result<Json<StartResponse>, AppError> {
     let mut engine = state.engine.lock().await;
     let id = match payload.variables {
         Some(vars) if !vars.is_empty() => {
@@ -160,9 +239,8 @@ async fn start_instance(
                 .await
         }
         _ => engine.start_instance(&payload.definition_id).await,
-    }
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
-        
+    }?;
+
     Ok(Json(StartResponse { instance_id: id.to_string() }))
 }
 
@@ -178,18 +256,13 @@ async fn complete_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<CompleteRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let task_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
-        
+    let task_id = parse_uuid(&id)?;
     let vars = payload.variables.unwrap_or_default();
-    
-    engine
-        .complete_user_task(task_id, vars)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
-        
+
+    engine.complete_user_task(task_id, vars).await?;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -204,15 +277,12 @@ async fn list_instances(
 async fn get_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<ProcessInstance>, (StatusCode, String)> {
+) -> Result<Json<ProcessInstance>, AppError> {
     let engine = state.engine.lock().await;
-    let instance_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid instance ID format".to_string()))?;
-        
-    let instance = engine
-        .get_instance_details(instance_id)
-        .map_err(|e| (StatusCode::NOT_FOUND, format!("{:?}", e)))?;
-        
+    let instance_id = parse_uuid(&id)?;
+
+    let instance = engine.get_instance_details(instance_id)?;
+
     Ok(Json(instance))
 }
 
@@ -225,14 +295,11 @@ async fn update_instance_variables(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateVariablesRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let instance_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid instance ID format".to_string()))?;
+    let instance_id = parse_uuid(&id)?;
 
-    engine
-        .update_instance_variables(instance_id, payload.variables)
-        .map_err(|e| (StatusCode::NOT_FOUND, format!("{:?}", e)))?;
+    engine.update_instance_variables(instance_id, payload.variables)?;
 
     Ok((StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))))
 }
@@ -285,17 +352,14 @@ async fn complete_external_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<CompleteExternalTaskRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let task_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
-
+    let task_id = parse_uuid(&id)?;
     let vars = payload.variables.unwrap_or_default();
 
     engine
         .complete_external_task(task_id, &payload.worker_id, vars)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -305,20 +369,17 @@ async fn fail_external_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<FailExternalTaskRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let task_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+    let task_id = parse_uuid(&id)?;
 
-    engine
-        .fail_external_task(
-            task_id,
-            &payload.worker_id,
-            payload.retries,
-            payload.error_message,
-            payload.error_details,
-        )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+    engine.fail_external_task(
+        task_id,
+        &payload.worker_id,
+        payload.retries,
+        payload.error_message,
+        payload.error_details,
+    )?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -328,14 +389,11 @@ async fn extend_lock(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<ExtendLockRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let task_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+    let task_id = parse_uuid(&id)?;
 
-    engine
-        .extend_lock(task_id, &payload.worker_id, payload.new_duration)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+    engine.extend_lock(task_id, &payload.worker_id, payload.new_duration)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -345,14 +403,11 @@ async fn bpmn_error(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<BpmnErrorRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, AppError> {
     let mut engine = state.engine.lock().await;
-    let task_id = Uuid::parse_str(&id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid task ID format".to_string()))?;
+    let task_id = parse_uuid(&id)?;
 
-    engine
-        .handle_bpmn_error(task_id, &payload.worker_id, &payload.error_code)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", e)))?;
+    engine.handle_bpmn_error(task_id, &payload.worker_id, &payload.error_code)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

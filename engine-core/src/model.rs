@@ -8,6 +8,22 @@ use uuid::Uuid;
 use crate::error::{EngineError, EngineResult};
 
 // ---------------------------------------------------------------------------
+// Execution Listeners (Scripts)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ListenerEvent {
+    Start,
+    End,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionListener {
+    pub event: ListenerEvent,
+    pub script: String,
+}
+
+// ---------------------------------------------------------------------------
 // BPMN element types
 // ---------------------------------------------------------------------------
 
@@ -122,6 +138,8 @@ pub struct ProcessDefinition {
     pub id: String,
     pub nodes: HashMap<String, BpmnElement>,
     pub flows: HashMap<String, Vec<SequenceFlow>>,
+    #[serde(default)]
+    pub listeners: HashMap<String, Vec<ExecutionListener>>,
 }
 
 impl ProcessDefinition {
@@ -137,6 +155,7 @@ impl ProcessDefinition {
         id: impl Into<String>,
         nodes: HashMap<String, BpmnElement>,
         flows: HashMap<String, Vec<SequenceFlow>>,
+        listeners: HashMap<String, Vec<ExecutionListener>>,
     ) -> EngineResult<Self> {
         let id = id.into();
 
@@ -208,7 +227,7 @@ impl ProcessDefinition {
             }
         }
 
-        Ok(Self { id, nodes, flows })
+        Ok(Self { id, nodes, flows, listeners })
     }
 
     /// Returns the (id, element) of the start event.
@@ -256,6 +275,7 @@ pub struct ProcessDefinitionBuilder {
     id: String,
     nodes: HashMap<String, BpmnElement>,
     flows: HashMap<String, Vec<SequenceFlow>>,
+    listeners: HashMap<String, Vec<ExecutionListener>>,
 }
 
 impl ProcessDefinitionBuilder {
@@ -264,6 +284,7 @@ impl ProcessDefinitionBuilder {
             id: id.into(),
             nodes: HashMap::new(),
             flows: HashMap::new(),
+            listeners: HashMap::new(),
         }
     }
 
@@ -296,9 +317,21 @@ impl ProcessDefinitionBuilder {
         self
     }
 
+    /// Adds an execution listener to a specific node.
+    pub fn listener(mut self, node_id: impl Into<String>, event: ListenerEvent, script: impl Into<String>) -> Self {
+        self.listeners
+            .entry(node_id.into())
+            .or_default()
+            .push(ExecutionListener {
+                event,
+                script: script.into(),
+            });
+        self
+    }
+
     /// Builds and validates the definition.
     pub fn build(self) -> EngineResult<ProcessDefinition> {
-        ProcessDefinition::new(self.id, self.nodes, self.flows)
+        ProcessDefinition::new(self.id, self.nodes, self.flows, self.listeners)
     }
 }
 

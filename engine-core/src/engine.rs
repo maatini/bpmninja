@@ -10,8 +10,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ProcessDefinition, Token};
+use crate::model::{BpmnElement, ProcessDefinition, Token, ListenerEvent};
 use crate::persistence::WorkflowPersistence;
+use rhai::Dynamic;
 
 // ---------------------------------------------------------------------------
 // Service handler
@@ -36,7 +37,6 @@ pub struct PendingUserTask {
     pub node_id: String,
     pub assignee: String,
     pub token: Token,
-    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
 }
 
@@ -105,7 +105,6 @@ pub enum InstanceState {
 /// A live process instance tracked by the engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInstance {
-    #[allow(dead_code)]
     pub id: Uuid,
     pub definition_id: String,
     pub state: InstanceState,
@@ -222,18 +221,65 @@ fn values_cmp(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
     }
 }
 
+/// Resolves the next target node by evaluating conditions on outgoing flows.
+///
+/// Returns the target of the first matching flow (or the first unconditional
+/// flow). Used by StartEvent, ServiceTask, and task-completion handlers.
+fn resolve_next_target(
+    def: &ProcessDefinition,
+    from: &str,
+    variables: &HashMap<String, Value>,
+) -> EngineResult<String> {
+    def.next_nodes(from)
+        .iter()
+        .find(|f| {
+            f.condition
+                .as_ref()
+                .map(|c| evaluate_condition(c, variables))
+                .unwrap_or(true)
+        })
+        .map(|f| f.target.clone())
+        .ok_or_else(|| {
+            EngineError::InvalidDefinition(format!(
+                "No matching outgoing flow from '{from}'"
+            ))
+        })
+}
+
+/// Verifies that the given worker holds the lock on an external task.
+///
+/// Returns `Ok(())` if `locked_worker` matches `worker_id`.
+/// Returns an error if the task is locked by a different worker or not locked at all.
+fn verify_lock_ownership(
+    task_id: Uuid,
+    locked_worker: &Option<String>,
+    worker_id: &str,
+) -> EngineResult<()> {
+    match locked_worker {
+        Some(locked_by) if locked_by != worker_id => {
+            Err(EngineError::ExternalTaskLocked {
+                task_id,
+                worker_id: locked_by.clone(),
+            })
+        }
+        None => Err(EngineError::ExternalTaskNotLocked(task_id)),
+        _ => Ok(()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Workflow engine
 // ---------------------------------------------------------------------------
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
-    pub definitions: HashMap<String, ProcessDefinition>,
+    pub definitions: HashMap<String, Arc<ProcessDefinition>>,
     pub instances: HashMap<Uuid, ProcessInstance>,
     pub service_handlers: HashMap<String, ServiceHandlerFn>,
     pub pending_user_tasks: Vec<PendingUserTask>,
     pub pending_external_tasks: Vec<ExternalTaskItem>,
     pub persistence: Option<Arc<dyn WorkflowPersistence>>,
+    pub script_engine: rhai::Engine,
 }
 
 impl WorkflowEngine {
@@ -247,6 +293,7 @@ impl WorkflowEngine {
             pending_user_tasks: Vec::new(),
             pending_external_tasks: Vec::new(),
             persistence: None,
+            script_engine: rhai::Engine::new(),
         }
     }
 
@@ -261,7 +308,7 @@ impl WorkflowEngine {
     /// Deploys a process definition so instances can be started from it.
     pub fn deploy_definition(&mut self, definition: ProcessDefinition) {
         log::info!("Deployed definition '{}'", definition.id);
-        self.definitions.insert(definition.id.clone(), definition);
+        self.definitions.insert(definition.id.clone(), Arc::new(definition));
     }
 
     // ----- handler registration --------------------------------------------
@@ -282,46 +329,9 @@ impl WorkflowEngine {
     /// Starts a new process instance from a deployed definition.
     ///
     /// The definition must have a plain `StartEvent`.
+    /// Delegates to `start_instance_with_variables` with an empty variable map.
     pub async fn start_instance(&mut self, definition_id: &str) -> EngineResult<Uuid> {
-        let def = self
-            .definitions
-            .get(definition_id)
-            .ok_or_else(|| EngineError::NoSuchDefinition(definition_id.to_string()))?;
-
-        let (start_id, start_element) = def
-            .start_event()
-            .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
-
-        if matches!(start_element, BpmnElement::TimerStartEvent(_)) {
-            return Err(EngineError::InvalidDefinition(
-                "Use trigger_timer_start() for timer start events".into(),
-            ));
-        }
-
-        let instance_id = Uuid::new_v4();
-        let instance = ProcessInstance {
-            id: instance_id,
-            definition_id: definition_id.to_string(),
-            state: InstanceState::Running,
-            current_node: start_id.to_string(),
-            audit_log: vec![format!("▶ Process started at node '{start_id}'")],
-            variables: HashMap::new(),
-        };
-
-        log::info!(
-            "Started instance {instance_id} of '{definition_id}' at node '{start_id}'"
-        );
-
-        self.instances.insert(instance_id, instance);
-        let token = Token::new(start_id);
-        if let Some(p) = &self.persistence {
-            if let Err(e) = p.save_token(&token).await {
-                log::error!("Failed to save initial token: {}", e);
-            }
-        }
-        self.run_instance(instance_id, token).await?;
-
-        Ok(instance_id)
+        self.start_instance_with_variables(definition_id, HashMap::new()).await
     }
 
     /// Starts a new process instance with pre-populated variables.
@@ -540,21 +550,88 @@ impl WorkflowEngine {
         }
     }
 
+    /// Executes all scripts of a given `ListenerEvent` on the specified node.
+    fn run_node_scripts(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def: &ProcessDefinition,
+        node_id: &str,
+        event: ListenerEvent,
+        audit_log: &mut Vec<String>,
+    ) -> EngineResult<()> {
+        if let Some(listeners) = def.listeners.get(node_id) {
+            for l in listeners {
+                if l.event == event {
+                    let mut scope = rhai::Scope::new();
+                    for (k, v) in &token.variables {
+                        scope.push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(Dynamic::UNIT));
+                    }
+
+                    self.script_engine
+                        .eval_with_scope::<()>(&mut scope, &l.script)
+                        .map_err(|e| EngineError::ScriptError(e.to_string()))?;
+
+                    for (k, _, v) in scope.iter_raw() {
+                        if let Ok(json_val) = rhai::serde::from_dynamic(v) {
+                            token.variables.insert(k.to_string(), json_val);
+                        }
+                    }
+
+                    let event_name = match event {
+                        ListenerEvent::Start => "start",
+                        ListenerEvent::End => "end",
+                    };
+                    log::info!("Instance {instance_id}: executed {event_name} script on node '{node_id}'");
+                    audit_log.push(format!("📜 Executed {event_name} script on '{node_id}'"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Helper to run End scripts and commit variables to the instance state.
+    fn run_end_scripts(
+        &mut self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def: &ProcessDefinition,
+        node_id: &str,
+    ) -> EngineResult<()> {
+        let mut end_audits = Vec::new();
+        self.run_node_scripts(
+            instance_id,
+            token,
+            def,
+            node_id,
+            ListenerEvent::End,
+            &mut end_audits,
+        )?;
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.audit_log.append(&mut end_audits);
+            inst.variables = token.variables.clone();
+        }
+        Ok(())
+    }
+
     /// Executes a single step for the given token position.
     async fn execute_step(
         &mut self,
         instance_id: Uuid,
         token: &mut Token,
     ) -> EngineResult<NextAction> {
-        let instance = self
-            .instances
-            .get(&instance_id)
-            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let def_id = {
+            let instance = self
+                .instances
+                .get(&instance_id)
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            instance.definition_id.clone()
+        };
 
         let def = self
             .definitions
-            .get(&instance.definition_id)
-            .ok_or_else(|| EngineError::NoSuchDefinition(instance.definition_id.clone()))?;
+            .get(&def_id)
+            .ok_or_else(|| EngineError::NoSuchDefinition(def_id.clone()))?;
 
         let current_id = token.current_node.clone();
         let element = def
@@ -562,33 +639,41 @@ impl WorkflowEngine {
             .ok_or_else(|| EngineError::NoSuchNode(current_id.clone()))?
             .clone();
 
-        // We need to re-borrow mutably for audit log updates
-        let def_clone = def.clone();
+        // Cheap Arc clone to release the immutable borrow on self.definitions
+        let def_clone = Arc::clone(def);
+
+        let mut start_audits = Vec::new();
+        self.run_node_scripts(
+            instance_id,
+            token,
+            &def_clone,
+            &current_id,
+            ListenerEvent::Start,
+            &mut start_audits,
+        )?;
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.audit_log.append(&mut start_audits);
+            inst.variables = token.variables.clone();
+        }
 
         match &element {
             BpmnElement::StartEvent | BpmnElement::TimerStartEvent(_) => {
                 log::debug!("Passing through start event '{current_id}'");
-                let next = def_clone
-                    .next_nodes(&current_id)
-                    .iter()
-                    .find(|f| {
-                        f.condition
-                            .as_ref()
-                            .map(|c| evaluate_condition(c, &token.variables))
-                            .unwrap_or(true)
-                    })
-                    .map(|f| f.target.clone())
-                    .ok_or_else(|| {
-                        EngineError::InvalidDefinition(format!(
-                            "No matching outgoing flow from '{current_id}'"
-                        ))
-                    })?;
-                token.current_node = next;
+                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                token.current_node = next.clone();
+                // Keep instance in sync so the UI highlights the correct node
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = next;
                 Ok(NextAction::Continue(token.clone()))
             }
 
             BpmnElement::EndEvent => {
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = current_id.clone();
                 inst.audit_log
                     .push(format!("⏹ Process completed at end event '{current_id}'"));
                 log::info!("Instance {instance_id}: reached end event '{current_id}'");
@@ -605,7 +690,8 @@ impl WorkflowEngine {
                 // Execute the handler
                 handler(&mut token.variables)?;
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.audit_log.push(format!(
                     "⚙ Executed service task '{current_id}' (handler: {handler_name})"
                 ));
@@ -613,21 +699,10 @@ impl WorkflowEngine {
                     "Instance {instance_id}: executed service task '{current_id}' → '{handler_name}'"
                 );
 
-                let next = def_clone
-                    .next_nodes(&current_id)
-                    .iter()
-                    .find(|f| {
-                        f.condition
-                            .as_ref()
-                            .map(|c| evaluate_condition(c, &token.variables))
-                            .unwrap_or(true)
-                    })
-                    .map(|f| f.target.clone())
-                    .ok_or_else(|| {
-                        EngineError::InvalidDefinition(format!(
-                            "No matching outgoing flow from '{current_id}'"
-                        ))
-                    })?;
+                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = next.clone();
                 inst.variables = token.variables.clone();
                 token.current_node = next;
@@ -644,7 +719,9 @@ impl WorkflowEngine {
                     created_at: Utc::now(),
                 };
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = current_id.clone();
                 inst.audit_log.push(format!(
                     "👤 User task '{current_id}' assigned to '{assignee}' — waiting (task_id: {})",
                     pending.task_id
@@ -658,11 +735,10 @@ impl WorkflowEngine {
             }
 
             BpmnElement::ExternalTask { topic } => {
-                let def_id = instance.definition_id.clone();
                 let ext_task = ExternalTaskItem {
                     id: Uuid::new_v4(),
                     instance_id,
-                    definition_id: def_id,
+                    definition_id: def_id.clone(),
                     node_id: current_id.clone(),
                     topic: topic.clone(),
                     token: token.clone(),
@@ -674,7 +750,9 @@ impl WorkflowEngine {
                     error_details: None,
                 };
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = current_id.clone();
                 inst.audit_log.push(format!(
                     "🔗 External task '{current_id}' created for topic '{topic}' — waiting (task_id: {})",
                     ext_task.id
@@ -713,6 +791,8 @@ impl WorkflowEngine {
                     EngineError::NoMatchingCondition(current_id.clone())
                 })?;
 
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+
                 let inst = self.instances.get_mut(&instance_id).unwrap();
                 inst.audit_log.push(format!(
                     "◆ Exclusive gateway '{current_id}' → took path to '{target}'"
@@ -747,7 +827,11 @@ impl WorkflowEngine {
                     return Err(EngineError::NoMatchingCondition(current_id.clone()));
                 }
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = current_id.clone();
                 inst.audit_log.push(format!(
                     "◇ Inclusive gateway '{current_id}' → forked to {} path(s): [{}]",
                     matched_targets.len(),
@@ -761,11 +845,7 @@ impl WorkflowEngine {
                 // Fork tokens — each gets a copy of the current variables
                 let forked: Vec<Token> = matched_targets
                     .into_iter()
-                    .map(|target| {
-                        let mut t = Token::with_variables(&target, token.variables.clone());
-                        t.current_node = target;
-                        t
-                    })
+                    .map(|target| Token::with_variables(&target, token.variables.clone()))
                     .collect();
 
                 if forked.len() == 1 {
@@ -820,31 +900,24 @@ impl WorkflowEngine {
             .push(format!("✅ User task '{}' completed", pending.node_id));
         inst.state = InstanceState::Running;
         inst.variables = token.variables.clone();
+        let def_id = inst.definition_id.clone();
 
         // Advance token to the next node
         let def = self
             .definitions
-            .get(&inst.definition_id)
-            .ok_or_else(|| EngineError::NoSuchDefinition(inst.definition_id.clone()))?;
+            .get(&def_id)
+            .ok_or(EngineError::NoSuchDefinition(def_id))?;
+        let def = Arc::clone(def);
 
-        let next = def
-            .next_nodes(&pending.node_id)
-            .iter()
-            .find(|f| {
-                f.condition
-                    .as_ref()
-                    .map(|c| evaluate_condition(c, &token.variables))
-                    .unwrap_or(true)
-            })
-            .map(|f| f.target.clone())
-            .ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "No matching outgoing flow from '{}'",
-                    pending.node_id
-                ))
-            })?;
+        self.run_end_scripts(instance_id, &mut token, &def, &pending.node_id)?;
 
-        token.current_node = next;
+        let next = resolve_next_target(&def, &pending.node_id, &token.variables)?;
+
+        token.current_node = next.clone();
+        // Update instance current_node so UI highlights correctly
+        let inst = self.instances.get_mut(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        inst.current_node = next;
         if let Some(p) = &self.persistence {
             if let Err(e) = p.save_token(&token).await {
                 log::error!("Failed to save token after user task: {}", e);
@@ -1018,18 +1091,7 @@ impl WorkflowEngine {
         let task = &self.pending_external_tasks[idx];
 
         // Verify lock ownership
-        match &task.worker_id {
-            Some(locked_by) if locked_by != worker_id => {
-                return Err(EngineError::ExternalTaskLocked {
-                    task_id,
-                    worker_id: locked_by.clone(),
-                });
-            }
-            None => {
-                return Err(EngineError::ExternalTaskNotLocked(task_id));
-            }
-            _ => {}
-        }
+        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
         let task = self.pending_external_tasks.remove(idx);
         let instance_id = task.instance_id;
@@ -1055,31 +1117,24 @@ impl WorkflowEngine {
         ));
         inst.state = InstanceState::Running;
         inst.variables = token.variables.clone();
+        let def_id = inst.definition_id.clone();
 
         // Advance token to the next node
         let def = self
             .definitions
-            .get(&inst.definition_id)
-            .ok_or_else(|| EngineError::NoSuchDefinition(inst.definition_id.clone()))?;
+            .get(&def_id)
+            .ok_or(EngineError::NoSuchDefinition(def_id))?;
+        let def = Arc::clone(def);
 
-        let next = def
-            .next_nodes(&task.node_id)
-            .iter()
-            .find(|f| {
-                f.condition
-                    .as_ref()
-                    .map(|c| evaluate_condition(c, &token.variables))
-                    .unwrap_or(true)
-            })
-            .map(|f| f.target.clone())
-            .ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "No matching outgoing flow from '{}'",
-                    task.node_id
-                ))
-            })?;
+        self.run_end_scripts(instance_id, &mut token, &def, &task.node_id)?;
 
-        token.current_node = next;
+        let next = resolve_next_target(&def, &task.node_id, &token.variables)?;
+
+        token.current_node = next.clone();
+        // Update instance current_node so UI highlights correctly
+        let inst = self.instances.get_mut(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        inst.current_node = next;
         if let Some(p) = &self.persistence {
             if let Err(e) = p.save_token(&token).await {
                 log::error!("Failed to save token after external task: {}", e);
@@ -1107,18 +1162,7 @@ impl WorkflowEngine {
             .ok_or(EngineError::ExternalTaskNotFound(task_id))?;
 
         // Verify lock ownership
-        match &task.worker_id {
-            Some(locked_by) if locked_by != worker_id => {
-                return Err(EngineError::ExternalTaskLocked {
-                    task_id,
-                    worker_id: locked_by.clone(),
-                });
-            }
-            None => {
-                return Err(EngineError::ExternalTaskNotLocked(task_id));
-            }
-            _ => {}
-        }
+        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
         // Update retries
         let new_retries = retries.unwrap_or(task.retries - 1);
@@ -1166,18 +1210,7 @@ impl WorkflowEngine {
             .find(|t| t.id == task_id)
             .ok_or(EngineError::ExternalTaskNotFound(task_id))?;
 
-        match &task.worker_id {
-            Some(locked_by) if locked_by != worker_id => {
-                return Err(EngineError::ExternalTaskLocked {
-                    task_id,
-                    worker_id: locked_by.clone(),
-                });
-            }
-            None => {
-                return Err(EngineError::ExternalTaskNotLocked(task_id));
-            }
-            _ => {}
-        }
+        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
         task.lock_expiration =
             Some(Utc::now() + TimeDelta::seconds(additional_duration));
@@ -1207,18 +1240,7 @@ impl WorkflowEngine {
 
         let task = &self.pending_external_tasks[idx];
 
-        match &task.worker_id {
-            Some(locked_by) if locked_by != worker_id => {
-                return Err(EngineError::ExternalTaskLocked {
-                    task_id,
-                    worker_id: locked_by.clone(),
-                });
-            }
-            None => {
-                return Err(EngineError::ExternalTaskNotLocked(task_id));
-            }
-            _ => {}
-        }
+        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
         let task = self.pending_external_tasks.remove(idx);
         let instance_id = task.instance_id;
@@ -1249,506 +1271,6 @@ impl Default for WorkflowEngine {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::ProcessDefinitionBuilder;
+#[path = "tests.rs"]
+mod tests;
 
-    fn setup_linear_engine() -> (WorkflowEngine, String) {
-        let mut engine = WorkflowEngine::new();
-
-        // Register a simple service handler
-        engine.register_service_handler(
-            "validate",
-            Arc::new(|vars: &mut HashMap<String, Value>| {
-                vars.insert("validated".into(), Value::Bool(true));
-                Ok(())
-            }),
-        );
-
-        let def = ProcessDefinitionBuilder::new("linear")
-            .node("start", BpmnElement::StartEvent)
-            .node("svc", BpmnElement::ServiceTask("validate".into()))
-            .node("ut", BpmnElement::UserTask("alice".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "svc")
-            .flow("svc", "ut")
-            .flow("ut", "end")
-            .build()
-            .unwrap();
-
-        let def_id = def.id.clone();
-        engine.deploy_definition(def);
-        (engine, def_id)
-    }
-
-    #[tokio::test]
-    async fn conditional_routing_on_service_task() {
-        let mut engine = WorkflowEngine::new();
-        engine.register_service_handler(
-            "noop",
-            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
-        );
-
-        let def = ProcessDefinitionBuilder::new("cond_svc")
-            .node("start", BpmnElement::StartEvent)
-            .node("svc", BpmnElement::ServiceTask("noop".into()))
-            .node("end_a", BpmnElement::EndEvent)
-            .node("end_b", BpmnElement::EndEvent)
-            .flow("start", "svc")
-            .conditional_flow("svc", "end_a", "x == 1")
-            .conditional_flow("svc", "end_b", "x == 2")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        let mut vars = HashMap::new();
-        vars.insert("x".into(), Value::Number(2.into()));
-        let inst_id = engine
-            .start_instance_with_variables("cond_svc", vars)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-        let log = engine.get_audit_log(inst_id).unwrap();
-        let end_entry = log.iter().find(|l| l.contains("Process completed")).unwrap();
-        assert!(end_entry.contains("end_b"), "Expected end_b path: {end_entry}");
-    }
-
-    #[tokio::test]
-    async fn start_instance_pauses_at_user_task() {
-        let (mut engine, def_id) = setup_linear_engine();
-        let inst_id = engine.start_instance(&def_id).await.unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::WaitingOnUserTask {
-                task_id: engine.pending_user_tasks[0].task_id
-            }
-        );
-        assert_eq!(engine.pending_user_tasks.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn complete_user_task_reaches_end() {
-        let (mut engine, def_id) = setup_linear_engine();
-        let inst_id = engine.start_instance(&def_id).await.unwrap();
-
-        let task_id = engine.pending_user_tasks[0].task_id;
-        engine
-            .complete_user_task(task_id, HashMap::new())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-        assert!(engine.pending_user_tasks.is_empty());
-    }
-
-    #[tokio::test]
-    async fn completing_wrong_task_gives_error() {
-        let (mut engine, def_id) = setup_linear_engine();
-        engine.start_instance(&def_id).await.unwrap();
-
-        let wrong_id = Uuid::new_v4();
-        let result = engine
-            .complete_user_task(wrong_id, HashMap::new())
-            .await;
-        assert!(matches!(result, Err(EngineError::TaskNotPending { .. })));
-    }
-
-    #[tokio::test]
-    async fn service_handler_modifies_variables() {
-        let (mut engine, def_id) = setup_linear_engine();
-        engine.start_instance(&def_id).await.unwrap();
-
-        // The token should have 'validated: true' from the service handler
-        let pending = &engine.pending_user_tasks[0];
-        assert_eq!(
-            pending.token.variables.get("validated"),
-            Some(&Value::Bool(true))
-        );
-    }
-
-    #[tokio::test]
-    async fn timer_start_succeeds() {
-        let mut engine = WorkflowEngine::new();
-        let dur = Duration::from_secs(60);
-
-        let def = ProcessDefinitionBuilder::new("timer_proc")
-            .node("ts", BpmnElement::TimerStartEvent(dur))
-            .node("end", BpmnElement::EndEvent)
-            .flow("ts", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-        let inst_id = engine.trigger_timer_start("timer_proc", dur).await.unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-    }
-
-    #[tokio::test]
-    async fn timer_mismatch_gives_error() {
-        let mut engine = WorkflowEngine::new();
-
-        let def = ProcessDefinitionBuilder::new("timer_proc")
-            .node("ts", BpmnElement::TimerStartEvent(Duration::from_secs(60)))
-            .node("end", BpmnElement::EndEvent)
-            .flow("ts", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-        let result = engine
-            .trigger_timer_start("timer_proc", Duration::from_secs(30))
-            .await;
-        assert!(matches!(result, Err(EngineError::TimerMismatch { .. })));
-    }
-
-    #[tokio::test]
-    async fn plain_start_rejects_timer_def() {
-        let mut engine = WorkflowEngine::new();
-
-        let def = ProcessDefinitionBuilder::new("timer_proc")
-            .node("ts", BpmnElement::TimerStartEvent(Duration::from_secs(5)))
-            .node("end", BpmnElement::EndEvent)
-            .flow("ts", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-        let result = engine.start_instance("timer_proc").await;
-        assert!(matches!(
-            result,
-            Err(EngineError::InvalidDefinition(msg)) if msg.contains("timer")
-        ));
-    }
-
-    #[tokio::test]
-    async fn unknown_definition_gives_error() {
-        let mut engine = WorkflowEngine::new();
-        let result = engine.start_instance("nonexistent").await;
-        assert!(matches!(
-            result,
-            Err(EngineError::NoSuchDefinition(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn missing_handler_gives_error() {
-        let mut engine = WorkflowEngine::new();
-
-        let def = ProcessDefinitionBuilder::new("p1")
-            .node("start", BpmnElement::StartEvent)
-            .node("svc", BpmnElement::ServiceTask("unknown_handler".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "svc")
-            .flow("svc", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-        let result = engine.start_instance("p1").await;
-        assert!(matches!(result, Err(EngineError::HandlerNotFound(_))));
-    }
-
-    #[tokio::test]
-    async fn audit_log_captures_all_steps() {
-        let (mut engine, def_id) = setup_linear_engine();
-        let inst_id = engine.start_instance(&def_id).await.unwrap();
-
-        let task_id = engine.pending_user_tasks[0].task_id;
-        engine
-            .complete_user_task(task_id, HashMap::new())
-            .await
-            .unwrap();
-
-        let log = engine.get_audit_log(inst_id).unwrap();
-        assert!(log.len() >= 4);
-        assert!(log[0].contains("started"));
-        assert!(log.last().unwrap().contains("completed"));
-    }
-
-    // -----------------------------------------------------------------------
-    // Condition evaluator tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn condition_eq_number() {
-        let mut vars = HashMap::new();
-        vars.insert("amount".into(), Value::Number(100.into()));
-        assert!(evaluate_condition("amount == 100", &vars));
-        assert!(!evaluate_condition("amount == 200", &vars));
-    }
-
-    #[test]
-    fn condition_neq_string() {
-        let mut vars = HashMap::new();
-        vars.insert("status".into(), Value::String("approved".into()));
-        assert!(evaluate_condition("status == 'approved'", &vars));
-        assert!(evaluate_condition("status != 'rejected'", &vars));
-        assert!(!evaluate_condition("status == 'rejected'", &vars));
-    }
-
-    #[test]
-    fn condition_gt_lt() {
-        let mut vars = HashMap::new();
-        vars.insert("score".into(), Value::Number(75.into()));
-        assert!(evaluate_condition("score > 50", &vars));
-        assert!(evaluate_condition("score >= 75", &vars));
-        assert!(evaluate_condition("score < 100", &vars));
-        assert!(evaluate_condition("score <= 75", &vars));
-        assert!(!evaluate_condition("score > 75", &vars));
-    }
-
-    #[test]
-    fn condition_truthy_check() {
-        let mut vars = HashMap::new();
-        vars.insert("flag".into(), Value::Bool(true));
-        vars.insert("zero".into(), Value::Number(0.into()));
-        vars.insert("empty".into(), Value::String(String::new()));
-
-        assert!(evaluate_condition("flag", &vars));
-        assert!(!evaluate_condition("zero", &vars));
-        assert!(!evaluate_condition("empty", &vars));
-        assert!(!evaluate_condition("missing_var", &vars));
-    }
-
-    #[test]
-    fn condition_missing_variable() {
-        let vars = HashMap::new();
-        assert!(!evaluate_condition("x == 5", &vars));
-    }
-
-    // -----------------------------------------------------------------------
-    // ExclusiveGateway (XOR) tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn exclusive_gateway_takes_matching_path() {
-        let mut engine = WorkflowEngine::new();
-        engine.register_service_handler(
-            "noop",
-            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
-        );
-
-        // Start → XOR Gateway → (amount > 100 → high) / (default → low) → End
-        let def = ProcessDefinitionBuilder::new("xor_test")
-            .node("start", BpmnElement::StartEvent)
-            .node(
-                "gw",
-                BpmnElement::ExclusiveGateway {
-                    default: Some("low".into()),
-                },
-            )
-            .node("high", BpmnElement::ServiceTask("noop".into()))
-            .node("low", BpmnElement::ServiceTask("noop".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "gw")
-            .conditional_flow("gw", "high", "amount > 100")
-            .flow("gw", "low") // unconditional (default candidate)
-            .flow("high", "end")
-            .flow("low", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        // amount = 500 → should take the "high" path
-        let mut vars = HashMap::new();
-        vars.insert("amount".into(), Value::Number(500.into()));
-        let inst_id = engine
-            .start_instance_with_variables("xor_test", vars)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-        let log = engine.get_audit_log(inst_id).unwrap();
-        let gw_entry = log.iter().find(|l| l.contains("Exclusive gateway")).unwrap();
-        assert!(gw_entry.contains("high"), "Expected high path: {gw_entry}");
-    }
-
-    #[tokio::test]
-    async fn exclusive_gateway_uses_default_when_no_match() {
-        let mut engine = WorkflowEngine::new();
-        engine.register_service_handler(
-            "noop",
-            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
-        );
-
-        let def = ProcessDefinitionBuilder::new("xor_default")
-            .node("start", BpmnElement::StartEvent)
-            .node(
-                "gw",
-                BpmnElement::ExclusiveGateway {
-                    default: Some("low".into()),
-                },
-            )
-            .node("high", BpmnElement::ServiceTask("noop".into()))
-            .node("low", BpmnElement::ServiceTask("noop".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "gw")
-            .conditional_flow("gw", "high", "amount > 100")
-            .flow("gw", "low")
-            .flow("high", "end")
-            .flow("low", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        // amount = 50 → no condition matches → should use default "low"
-        let mut vars = HashMap::new();
-        vars.insert("amount".into(), Value::Number(50.into()));
-        let inst_id = engine
-            .start_instance_with_variables("xor_default", vars)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-        let log = engine.get_audit_log(inst_id).unwrap();
-        let gw_entry = log.iter().find(|l| l.contains("Exclusive gateway")).unwrap();
-        assert!(gw_entry.contains("low"), "Expected low (default) path: {gw_entry}");
-    }
-
-    #[tokio::test]
-    async fn exclusive_gateway_error_when_no_match_no_default() {
-        let mut engine = WorkflowEngine::new();
-
-        let def = ProcessDefinitionBuilder::new("xor_fail")
-            .node("start", BpmnElement::StartEvent)
-            .node(
-                "gw",
-                BpmnElement::ExclusiveGateway { default: None },
-            )
-            .node("a", BpmnElement::EndEvent)
-            .node("b", BpmnElement::EndEvent)
-            .flow("start", "gw")
-            .conditional_flow("gw", "a", "x == 1")
-            .conditional_flow("gw", "b", "x == 2")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        // No variables at all → no condition matches → error
-        let result = engine.start_instance("xor_fail").await;
-        assert!(
-            matches!(result, Err(EngineError::NoMatchingCondition(_))),
-            "Expected NoMatchingCondition, got: {result:?}"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // InclusiveGateway (OR) tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn inclusive_gateway_forks_multiple_paths() {
-        let mut engine = WorkflowEngine::new();
-        engine.register_service_handler(
-            "track_a",
-            Arc::new(|vars: &mut HashMap<String, Value>| {
-                vars.insert("path_a".into(), Value::Bool(true));
-                Ok(())
-            }),
-        );
-        engine.register_service_handler(
-            "track_b",
-            Arc::new(|vars: &mut HashMap<String, Value>| {
-                vars.insert("path_b".into(), Value::Bool(true));
-                Ok(())
-            }),
-        );
-
-        // Start → Inclusive GW → (a > 0 → svc_a → end) / (b > 0 → svc_b → end)
-        let def = ProcessDefinitionBuilder::new("or_test")
-            .node("start", BpmnElement::StartEvent)
-            .node("gw", BpmnElement::InclusiveGateway)
-            .node("svc_a", BpmnElement::ServiceTask("track_a".into()))
-            .node("svc_b", BpmnElement::ServiceTask("track_b".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "gw")
-            .conditional_flow("gw", "svc_a", "a > 0")
-            .conditional_flow("gw", "svc_b", "b > 0")
-            .flow("svc_a", "end")
-            .flow("svc_b", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        // Both conditions true → both paths should fire
-        let mut vars = HashMap::new();
-        vars.insert("a".into(), Value::Number(10.into()));
-        vars.insert("b".into(), Value::Number(20.into()));
-        let inst_id = engine
-            .start_instance_with_variables("or_test", vars)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-        let log = engine.get_audit_log(inst_id).unwrap();
-        let gw_entry = log.iter().find(|l| l.contains("Inclusive gateway")).unwrap();
-        assert!(
-            gw_entry.contains("2 path(s)"),
-            "Expected 2 forked paths: {gw_entry}"
-        );
-    }
-
-    #[tokio::test]
-    async fn inclusive_gateway_single_match_no_fork() {
-        let mut engine = WorkflowEngine::new();
-        engine.register_service_handler(
-            "noop",
-            Arc::new(|_vars: &mut HashMap<String, Value>| Ok(())),
-        );
-
-        let def = ProcessDefinitionBuilder::new("or_single")
-            .node("start", BpmnElement::StartEvent)
-            .node("gw", BpmnElement::InclusiveGateway)
-            .node("a", BpmnElement::ServiceTask("noop".into()))
-            .node("b", BpmnElement::ServiceTask("noop".into()))
-            .node("end", BpmnElement::EndEvent)
-            .flow("start", "gw")
-            .conditional_flow("gw", "a", "x == 1")
-            .conditional_flow("gw", "b", "x == 2")
-            .flow("a", "end")
-            .flow("b", "end")
-            .build()
-            .unwrap();
-
-        engine.deploy_definition(def);
-
-        // Only x == 1 → single match → Continue (not ContinueMultiple)
-        let mut vars = HashMap::new();
-        vars.insert("x".into(), Value::Number(1.into()));
-        let inst_id = engine
-            .start_instance_with_variables("or_single", vars)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *engine.get_instance_state(inst_id).unwrap(),
-            InstanceState::Completed
-        );
-    }
-}

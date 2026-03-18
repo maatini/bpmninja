@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use quick_xml::de::from_str;
@@ -54,13 +55,13 @@ struct BpmnProcess {
     #[serde(rename = "callActivity", default)]
     call_activities: Vec<BpmnGenericTask>,
 
-    /// Gateways — treated as pass-through nodes for now.
+    /// Gateways — mapped to proper BpmnElement variants.
     #[serde(rename = "exclusiveGateway", default)]
-    exclusive_gateways: Vec<BpmnGenericTask>,
+    exclusive_gateways: Vec<BpmnExclusiveGateway>,
     #[serde(rename = "parallelGateway", default)]
-    parallel_gateways: Vec<BpmnGenericTask>,
+    parallel_gateways: Vec<BpmnGateway>,
     #[serde(rename = "inclusiveGateway", default)]
-    inclusive_gateways: Vec<BpmnGenericTask>,
+    inclusive_gateways: Vec<BpmnGateway>,
 
     /// Intermediate events — treated as pass-through nodes.
     #[serde(rename = "intermediateThrowEvent", default)]
@@ -139,6 +140,23 @@ struct BpmnGenericTask {
     name: Option<String>,
 }
 
+/// Exclusive gateway with optional `default` attribute referencing a sequence flow ID.
+#[derive(Debug, Deserialize)]
+struct BpmnExclusiveGateway {
+    #[serde(rename = "@id")]
+    id: String,
+    /// Per BPMN spec: the ID of the default outgoing sequence flow.
+    #[serde(rename = "@default", default)]
+    default: Option<String>,
+}
+
+/// Generic gateway struct for inclusive and parallel gateways.
+#[derive(Debug, Deserialize)]
+struct BpmnGateway {
+    #[serde(rename = "@id")]
+    id: String,
+}
+
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
 ///
 /// Note: Since `quick-xml` expects exact structure, the parsed XML must match
@@ -210,13 +228,32 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         builder = builder.node(task.id, BpmnElement::ServiceTask(handler));
     }
 
-    // 6. Gateways — treated as pass-through ServiceTask nodes for now.
-    let all_gateways = defs.process.exclusive_gateways.into_iter()
-        .chain(defs.process.parallel_gateways)
-        .chain(defs.process.inclusive_gateways);
+    // 6. Build a flow lookup (flow-ID → target-ref) for resolving the
+    //    `default` attribute on exclusive gateways.
+    let flow_lookup: HashMap<String, String> = defs
+        .process
+        .sequence_flows
+        .iter()
+        .map(|f| (f._id.clone(), f.target_ref.clone()))
+        .collect();
 
-    for gw in all_gateways {
-        builder = builder.node(gw.id, BpmnElement::ServiceTask("gateway_passthrough".into()));
+    // 6a. Exclusive gateways — resolve `default` flow ID → target node ID
+    for gw in defs.process.exclusive_gateways {
+        let default_target = gw.default.and_then(|flow_id| flow_lookup.get(&flow_id).cloned());
+        builder = builder.node(
+            gw.id,
+            BpmnElement::ExclusiveGateway { default: default_target },
+        );
+    }
+
+    // 6b. Inclusive gateways
+    for gw in defs.process.inclusive_gateways {
+        builder = builder.node(gw.id, BpmnElement::InclusiveGateway);
+    }
+
+    // 6c. Parallel gateways — map to InclusiveGateway (temporary)
+    for gw in defs.process.parallel_gateways {
+        builder = builder.node(gw.id, BpmnElement::InclusiveGateway);
     }
 
     // 7. Intermediate events — treated as pass-through nodes.
@@ -303,6 +340,13 @@ mod tests {
         "#;
 
         let def = parse_bpmn_xml(xml).unwrap();
+
+        // Gateway must be parsed as ExclusiveGateway, NOT ServiceTask
+        match def.nodes.get("gw1").unwrap() {
+            BpmnElement::ExclusiveGateway { default } => assert_eq!(*default, None),
+            other => panic!("Expected ExclusiveGateway, got {:?}", other),
+        }
+
         let flows = def.next_nodes("gw1");
         assert_eq!(flows.len(), 2);
         
@@ -311,6 +355,49 @@ mod tests {
         
         let flow2 = flows.iter().find(|f| f.target == "end2").unwrap();
         assert_eq!(flow2.condition, None);
+    }
+
+    #[test]
+    fn parse_exclusive_gateway_with_default() {
+        let xml = r#"
+            <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="proc1">
+                    <startEvent id="start1" />
+                    <exclusiveGateway id="gw1" default="f3" />
+                    <userTask id="ut1" data-assignee="alice" />
+                    <userTask id="ut2" data-assignee="bob" />
+                    <endEvent id="end1" />
+                    
+                    <sequenceFlow id="f1" sourceRef="start1" targetRef="gw1" />
+                    <sequenceFlow id="f2" sourceRef="gw1" targetRef="ut1">
+                        <conditionExpression xsi:type="tFormalExpression">x &gt; 0</conditionExpression>
+                    </sequenceFlow>
+                    <sequenceFlow id="f3" sourceRef="gw1" targetRef="ut2" />
+                    <sequenceFlow id="f4" sourceRef="ut1" targetRef="end1" />
+                    <sequenceFlow id="f5" sourceRef="ut2" targetRef="end1" />
+                </process>
+            </definitions>
+        "#;
+
+        let def = parse_bpmn_xml(xml).unwrap();
+
+        // Default attribute must resolve flow "f3" → target "ut2"
+        match def.nodes.get("gw1").unwrap() {
+            BpmnElement::ExclusiveGateway { default } => {
+                assert_eq!(default.as_deref(), Some("ut2"));
+            }
+            other => panic!("Expected ExclusiveGateway, got {:?}", other),
+        }
+
+        // User tasks must be parsed correctly
+        match def.nodes.get("ut1").unwrap() {
+            BpmnElement::UserTask(a) => assert_eq!(a, "alice"),
+            other => panic!("Expected UserTask, got {:?}", other),
+        }
+        match def.nodes.get("ut2").unwrap() {
+            BpmnElement::UserTask(a) => assert_eq!(a, "bob"),
+            other => panic!("Expected UserTask, got {:?}", other),
+        }
     }
 
     #[test]
