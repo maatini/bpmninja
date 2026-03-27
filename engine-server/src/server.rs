@@ -200,6 +200,7 @@ pub fn build_app() -> Router {
         .route("/api/definitions/:id", delete(delete_definition))
         .route("/api/instances/:id/variables", put(update_instance_variables))
         // Service Task endpoints
+        .route("/api/service-tasks", get(get_service_tasks))
         .route("/api/service-task/fetchAndLock", post(fetch_and_lock_service_tasks))
         .route("/api/service-task/:id/complete", post(complete_service_task))
         .route("/api/service-task/:id/failure", post(fail_service_task))
@@ -250,6 +251,14 @@ async fn get_tasks(
 ) -> Json<Vec<PendingUserTask>> {
     let engine = state.engine.lock().await;
     let tasks = engine.get_pending_user_tasks().to_vec();
+    Json(tasks)
+}
+
+async fn get_service_tasks(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<PendingServiceTask>> {
+    let engine = state.engine.lock().await;
+    let tasks = engine.get_external_tasks().to_vec();
     Json(tasks)
 }
 

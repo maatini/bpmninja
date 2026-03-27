@@ -16,7 +16,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 
 #[cfg(not(feature = "http-backend"))]
-use engine_core::engine::{WorkflowEngine, ProcessInstance, PendingUserTask, InstanceState};
+use engine_core::engine::{WorkflowEngine, ProcessInstance, PendingUserTask, PendingServiceTask, InstanceState};
 #[cfg(not(feature = "http-backend"))]
 use engine_core::model::{ProcessDefinitionBuilder, BpmnElement};
 #[cfg(not(feature = "http-backend"))]
@@ -248,6 +248,70 @@ async fn complete_task(state: tauri::State<'_, AppState>, task_id: String) -> Re
         
     if !res.status().is_success() {
         return Err(format!("Complete task failed with status: {}", res.status()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(not(feature = "http-backend"))]
+async fn get_pending_service_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<PendingServiceTask>, String> {
+    let engine = state.engine.lock().await;
+    Ok(engine.get_external_tasks().to_vec())
+}
+
+#[tauri::command]
+#[cfg(feature = "http-backend")]
+async fn get_pending_service_tasks(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let url = format!("{}/api/service-tasks", state.base_url);
+    let res = state.client.get(&url).send().await.map_err(|e| e.to_string())?;
+    
+    if !res.status().is_success() {
+        return Err(format!("Get pending service tasks failed: {}", res.status()));
+    }
+    
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(data)
+}
+
+#[tauri::command]
+#[cfg(not(feature = "http-backend"))]
+async fn complete_service_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    worker_id: String,
+    variables: Option<HashMap<String, serde_json::Value>>,
+) -> Result<(), String> {
+    let mut engine = state.engine.lock().await;
+    let tid = Uuid::parse_str(&task_id).map_err(|e| e.to_string())?;
+    engine
+        .complete_service_task(tid, &worker_id, variables.unwrap_or_default())
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(feature = "http-backend")]
+async fn complete_service_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    worker_id: String,
+    variables: Option<HashMap<String, serde_json::Value>>,
+) -> Result<(), String> {
+    let url = format!("{}/api/service-task/{}/complete", state.base_url, task_id);
+    let payload = serde_json::json!({
+        "workerId": worker_id,
+        "variables": variables.unwrap_or_default()
+    });
+    
+    let res = state.client.post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+        
+    if !res.status().is_success() {
+        return Err(format!("Complete service task failed with status: {}", res.status()));
     }
     Ok(())
 }
@@ -736,6 +800,8 @@ fn main() {
             start_instance,
             get_pending_tasks,
             complete_task,
+            get_pending_service_tasks,
+            complete_service_task,
             list_instances,
             get_instance_details,
             update_instance_variables,

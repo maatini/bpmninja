@@ -17,11 +17,13 @@ import '@bpmn-io/properties-panel/assets/properties-panel.css';
 
 import { CustomPropertiesProvider } from './ConditionPropertiesProvider';
 import { ScriptPropertiesProvider } from './ScriptPropertiesProvider';
+import { TopicPropertiesProvider } from './TopicPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
-  scriptPropertiesProvider: ['type', ScriptPropertiesProvider]
+  scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
+  topicPropertiesProvider: ['type', TopicPropertiesProvider]
 };
 
 

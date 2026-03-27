@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { deployDefinition, startInstance, getPendingTasks, completeTask, getBackendInfo, type PendingUserTask, type BackendInfo } from './lib/tauri'
+import { deployDefinition, startInstance, getPendingTasks, completeTask, getPendingServiceTasks, completeServiceTask, getBackendInfo, type PendingUserTask, type PendingServiceTask, type BackendInfo } from './lib/tauri'
 import { Modeler } from './Modeler'
 import { Instances } from './Instances'
 import { DeployedProcesses } from './DeployedProcesses'
@@ -11,6 +11,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('definitions')
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [tasks, setTasks] = useState<PendingUserTask[]>([])
+  const [serviceTasks, setServiceTasks] = useState<PendingServiceTask[]>([])
   const [defId, setDefId] = useState<string>('')
   const [viewXml, setViewXml] = useState<string | null>(null)
   const [backendInfo, setBackendInfo] = useState<BackendInfo | null>(null)
@@ -27,8 +28,12 @@ function App() {
 
   const fetchTasks = async () => {
     try {
-      const pending = await getPendingTasks()
+      const [pending, pendingServices] = await Promise.all([
+        getPendingTasks(),
+        getPendingServiceTasks()
+      ])
       setTasks(pending)
+      setServiceTasks(pendingServices)
     } catch (e) {
       console.error("Failed to fetch tasks", e)
     }
@@ -85,6 +90,16 @@ function App() {
     }
   }
 
+  const handleCompleteServiceTask = async (taskId: string) => {
+    try {
+      await completeServiceTask(taskId, "tauri-ui")
+      fetchTasks()
+      alert("Service Task completed!")
+    } catch (e) {
+      alert("Error completing service task: " + e)
+    }
+  }
+
   return (
     <div className="app-container">
       <div className="sidebar">
@@ -134,17 +149,47 @@ function App() {
             <div className="header-actions">
               <button className="button" onClick={fetchTasks}>Refresh</button>
             </div>
-            {tasks.length === 0 && <div style={{marginLeft: 20}}>No pending tasks.</div>}
-            {tasks.map(task => (
-              <div key={task.task_id} className="card">
-                <div className="card-title">Task: {task.node_id}</div>
-                <div>Assignee: {task.assignee}</div>
-                <div>Instance: {task.instance_id}</div>
-                <div style={{marginTop: 10}}>
-                  <button className="button" onClick={() => handleComplete(task.task_id)}>Complete Task</button>
+            
+            <h3 style={{ marginTop: 24, marginBottom: 16 }}>User Tasks</h3>
+            {tasks.length === 0 && <div style={{marginLeft: 20}}>No pending user tasks.</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
+              {tasks.map(task => (
+                <div key={task.task_id} className="card">
+                  <div className="card-title">Task: {task.node_id}</div>
+                  <div>Assignee: {task.assignee}</div>
+                  <div>Instance: {task.instance_id}</div>
+                  <div style={{marginTop: 10}}>
+                    <button className="button" onClick={() => handleComplete(task.task_id)}>Complete Task</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <h3 style={{ marginTop: 32, marginBottom: 16 }}>Service Tasks (External)</h3>
+            {serviceTasks.length === 0 && <div style={{marginLeft: 20}}>No pending service tasks.</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
+              {serviceTasks.map(task => (
+                <div key={task.id} className="card" style={{ borderLeft: '4px solid #8b5cf6' }}>
+                  <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Task: {task.node_id}</span>
+                    <span style={{ fontSize: '0.8rem', padding: '2px 8px', background: '#eedeff', color: '#6d28d9', borderRadius: '12px', fontWeight: 600 }}>
+                      Topic: {task.topic}
+                    </span>
+                  </div>
+                  <div>Worker: {task.worker_id || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unlocked</span>}</div>
+                  <div>Instance: {task.instance_id}</div>
+                  <div>Retries left: {task.retries}</div>
+                  {task.error_message && (
+                    <div style={{ color: '#ef4444', fontSize: '0.9rem', marginTop: 4 }}>Error: {task.error_message}</div>
+                  )}
+                  <div style={{marginTop: 10}}>
+                    <button className="button" style={{ background: '#8b5cf6' }} onClick={() => handleCompleteServiceTask(task.id)}>
+                      Complete as 'tauri-ui'
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

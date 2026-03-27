@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listInstances, getInstanceDetails, getPendingTasks, updateInstanceVariables, getDefinitionXml, deleteInstance, type ProcessInstance, type PendingUserTask } from './lib/tauri';
+import { listInstances, getInstanceDetails, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, getDefinitionXml, deleteInstance, type ProcessInstance, type PendingUserTask, type PendingServiceTask } from './lib/tauri';
 import { InstanceViewer } from './InstanceViewer';
 import { RefreshCw, Activity, CheckCircle, Clock, Trash } from 'lucide-react';
 
@@ -8,6 +8,7 @@ function stateLabel(state: ProcessInstance['state']): string {
   if (state === 'Running') return 'Running';
   if (state === 'Completed') return 'Completed';
   if (typeof state === 'object' && 'WaitingOnUserTask' in state) return 'Waiting on User Task';
+  if (typeof state === 'object' && 'WaitingOnServiceTask' in state) return 'Waiting on Service Task';
   return String(state);
 }
 
@@ -15,6 +16,7 @@ function stateLabel(state: ProcessInstance['state']): string {
 function stateBadgeClass(state: ProcessInstance['state']): string {
   if (state === 'Running') return 'state-badge state-running';
   if (state === 'Completed') return 'state-badge state-completed';
+  if (typeof state === 'object' && 'WaitingOnServiceTask' in state) return 'state-badge state-waiting state-service-task';
   return 'state-badge state-waiting';
 }
 
@@ -26,6 +28,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
   const [selected, setSelected] = useState<ProcessInstance | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingUserTask[]>([]);
+  const [pendingServiceTasks, setPendingServiceTasks] = useState<PendingServiceTask[]>([]);
   const [variables, setVariables] = useState<VariableRow[]>([]);
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
 
@@ -92,16 +95,28 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
 
       setVariables(parseVariables(details.variables));
       // If waiting on user task, fetch pending tasks to show info
-      if (typeof details.state === 'object' && 'WaitingOnUserTask' in details.state) {
-        const tasks = await getPendingTasks();
-        setPendingTasks(tasks.filter(t => t.instance_id === details.id));
+      if (typeof details.state === 'object') {
+        if ('WaitingOnUserTask' in details.state) {
+          const tasks = await getPendingTasks();
+          setPendingTasks(tasks.filter(t => t.instance_id === details.id));
+          setPendingServiceTasks([]);
+        } else if ('WaitingOnServiceTask' in details.state) {
+          const sTasks = await getPendingServiceTasks();
+          setPendingServiceTasks(sTasks.filter(t => t.instance_id === details.id));
+          setPendingTasks([]);
+        } else {
+          setPendingTasks([]);
+          setPendingServiceTasks([]);
+        }
       } else {
         setPendingTasks([]);
+        setPendingServiceTasks([]);
       }
     } catch (e) {
       setSelected(inst);
       setVariables(parseVariables(inst.variables));
       setPendingTasks([]);
+      setPendingServiceTasks([]);
     } finally {
       setDetailLoading(false);
     }
@@ -193,6 +208,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
   const handleClose = () => {
     setSelected(null);
     setPendingTasks([]);
+    setPendingServiceTasks([]);
     setDefinitionXml(null);
     setShowNodeDetails(false);
   };
@@ -321,6 +337,22 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
                   {pendingTasks.map(task => (
                     <div key={task.task_id} style={{ marginLeft: 12, marginTop: 4 }}>
                       Node: {task.node_id} · Assignee: {task.assignee}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Pending service task info */}
+              {pendingServiceTasks.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Pending Service Task:</strong>
+                  {pendingServiceTasks.map(task => (
+                    <div key={task.id} style={{ marginLeft: 12, marginTop: 4 }}>
+                      Node: {task.node_id} · Topic: <span style={{ fontWeight: 600 }}>{task.topic}</span>
+                      <br/>
+                      <span style={{ fontSize: '0.85em', color: '#64748b' }}>
+                        Worker: {task.worker_id || 'Unlocked'} · Retries: {task.retries}
+                      </span>
                     </div>
                   ))}
                 </div>

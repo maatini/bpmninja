@@ -12,7 +12,7 @@ export interface ProcessInstance {
   id: string;
   definition_key: string;
   business_key: string;
-  state: 'Running' | 'Completed' | { WaitingOnUserTask: { task_id: string } };
+  state: 'Running' | 'Completed' | { WaitingOnUserTask: { task_id: string } } | { WaitingOnServiceTask: { task_id: string } };
   current_node: string;
   audit_log: string[];
   variables: Record<string, unknown>;
@@ -36,6 +36,28 @@ export async function getPendingTasks(): Promise<PendingUserTask[]> {
 
 export async function completeTask(taskId: string): Promise<void> {
   return invoke('complete_task', { taskId });
+}
+
+export interface PendingServiceTask {
+  id: string;
+  instance_id: string;
+  definition_key: string;
+  node_id: string;
+  topic: string;
+  worker_id: string | null;
+  lock_expiration: string | null;
+  retries: number;
+  error_message: string | null;
+  error_details: string | null;
+  created_at: string;
+}
+
+export async function getPendingServiceTasks(): Promise<PendingServiceTask[]> {
+  return invoke('get_pending_service_tasks');
+}
+
+export async function completeServiceTask(taskId: string, workerId: string, variables?: Record<string, unknown>): Promise<void> {
+  return invoke('complete_service_task', { taskId, workerId, variables: variables || null });
 }
 
 export async function listInstances(): Promise<ProcessInstance[]> {
