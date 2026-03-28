@@ -74,16 +74,26 @@ flowchart TD
     Engine -- "Stores State & Events" --> Nats
 ```
 
+## Devbox-Umgebung
+
+Dieses Projekt nutzt [Devbox](https://www.jetify.com/devbox), um eine isolierte und reproduzierbare Entwicklungsumgebung bereitzustellen.
+Diese Umgebung bringt alle notwendigen Abhängigkeiten wie Rust, Node.js und den NATS-Server mit.
+
+Wichtige Devbox-Skripte (ausführbar mit `devbox run <script>`):
+* `build`, `test`, `lint`, `fmt` - Cargo Standardkommandos in der Entwicklungsumgebung
+* `ui:dev` - Startet das Tauri-Frontend (Desktop Applikation) im Entwicklungsmodus
+* `engine:docker` - Startet die gesamte Server-Infrastruktur (NATS & Engine-Server) per Docker Compose
+
 ## Starten des Engine-Servers
 
-Um den HTTP-REST-API-Server zu starten: 
+Für die lokale Entwicklung empfehlen wir die bereitgestellten Devbox-Befehle:
 
 ```bash
-# NATS starten (falls Persistenz genutzt werden soll)
-docker-compose up -d nats
+# NATS lokal starten
+devbox run nats:up
 
 # Engine-Server ausführen
-cargo run -p engine-server
+devbox run engine:run
 ```
 
 Der Server lauscht standardmäßig auf `http://localhost:8081`.
