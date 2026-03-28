@@ -12,7 +12,6 @@ function App() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [tasks, setTasks] = useState<PendingUserTask[]>([])
   const [serviceTasks, setServiceTasks] = useState<PendingServiceTask[]>([])
-  const [defId, setDefId] = useState<string>('')
   const [viewXml, setViewXml] = useState<string | null>(null)
   const [backendInfo, setBackendInfo] = useState<BackendInfo | null>(null)
 
@@ -42,23 +41,25 @@ function App() {
   const handleDeploy = async (xml: string) => {
     try {
       const id = await deployDefinition(xml, 'modeler-process')
-      setDefId(id)
       alert("Deployed definition! ID: " + id)
     } catch (e) {
       alert("Error deploying: " + e)
     }
   }
 
-  const handleStart = async (variables: Record<string, unknown>) => {
-    if (!defId) {
-      alert("Please deploy a process first.")
-      return
-    }
+  const handleStart = async (xml: string, variables: Record<string, unknown>) => {
     try {
-      const id = await startInstance(defId, variables)
-      alert("Started instance! ID: " + id)
+      // Auto-deploy the current modeler state
+      const newDefId = await deployDefinition(xml, 'modeler-process')
+
+      // Start instance with the freshly deployed definition
+      const id = await startInstance(newDefId, variables)
+
+      // Navigate to the new instance
+      setSelectedInstanceId(id)
+      setActiveTab('instances')
     } catch (e) {
-      alert("Error starting: " + e)
+      alert("Error deploying/starting: " + e)
     }
   }
 
@@ -71,13 +72,11 @@ function App() {
   // Called when user clicks "New Diagram" in the Modeler
   const handleNewDiagram = () => {
     setViewXml(null)
-    setDefId('')
   }
 
   // Called when the user opens a local BPMN file via "Open File".
   const handleOpenFile = () => {
     setViewXml(null)
-    setDefId('')
   }
 
   const handleComplete = async (taskId: string) => {

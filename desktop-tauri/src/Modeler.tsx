@@ -18,6 +18,7 @@ import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import { CustomPropertiesProvider } from './ConditionPropertiesProvider';
 import { ScriptPropertiesProvider } from './ScriptPropertiesProvider';
 import { TopicPropertiesProvider } from './TopicPropertiesProvider';
+import { VariableEditor, type VariableRow, serializeVariables } from './VariableEditor';
 
 const customProviderModule = {
   __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider'],
@@ -29,7 +30,7 @@ const customProviderModule = {
 
 interface ModelerProps {
   onDeploy: (xml: string) => Promise<void>;
-  onStart: (variables: Record<string, unknown>) => void;
+  onStart: (xml: string, variables: Record<string, unknown>) => Promise<void>;
   onNewDiagram: () => void;
   onOpenFile: () => void;
   initialXml?: string | null;
@@ -69,7 +70,8 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
   const lastImportedXmlRef = useRef<string | null>(null);
   const [showVarsDialog, setShowVarsDialog] = useState(false);
   const [businessKey, setBusinessKey] = useState('');
-  const [varsJson, setVarsJson] = useState('{}');
+  const [startVariables, setStartVariables] = useState<VariableRow[]>([]);
+  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
     if (containerRef.current && propertiesRef.current) {
@@ -169,27 +171,30 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
   };
 
   const handleStartClick = () => {
-    setVarsJson('{}');
+    setStartVariables([]);
     setBusinessKey('');
     setShowVarsDialog(true);
   };
 
-  const handleStartConfirm = () => {
+  const handleStartConfirm = async () => {
+    if (!modelerRef.current) return;
+
+    const serialized = serializeVariables(startVariables);
+    if (serialized === null) return;
+
+    if (businessKey.trim() !== '') {
+      serialized.business_key = businessKey.trim();
+    }
+
+    setIsStarting(true);
     try {
-      const parsed = JSON.parse(varsJson);
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        alert('Variables must be a JSON object (e.g. {"key": "value"}).');
-        return;
-      }
-      
-      if (businessKey.trim() !== '') {
-        parsed.business_key = businessKey.trim();
-      }
-      
+      const { xml } = await modelerRef.current.saveXML({ format: true });
       setShowVarsDialog(false);
-      onStart(parsed);
-    } catch {
-      alert('Invalid JSON. Please enter a valid JSON object.');
+      await onStart(xml, serialized);
+    } catch (e) {
+      alert('Failed to start process: ' + e);
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -225,17 +230,15 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
             <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem', color: '#475569', fontWeight: 500 }}>
               Process Variables
             </label>
-            <p style={{fontSize: '0.85rem', color: '#888', margin: '0 0 8px'}}>Optional JSON object, e.g. {'{"orderId": "123"}'}</p>
-            <textarea
-              className="vars-textarea"
-              value={varsJson}
-              onChange={(e) => setVarsJson(e.target.value)}
-              rows={6}
-              spellCheck={false}
+            <VariableEditor
+              variables={startVariables}
+              onChange={setStartVariables}
             />
             <div className="vars-dialog-actions">
               <button className="button" onClick={() => setShowVarsDialog(false)} style={{backgroundColor: '#6b7280'}}>Cancel</button>
-              <button className="button" onClick={handleStartConfirm} style={{backgroundColor: '#10b981'}}>Start</button>
+              <button className="button" onClick={handleStartConfirm} style={{backgroundColor: '#10b981'}} disabled={isStarting}>
+                {isStarting ? 'Deploying & Starting…' : 'Start'}
+              </button>
             </div>
           </div>
         </div>

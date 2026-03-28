@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { listInstances, getInstanceDetails, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, getDefinitionXml, deleteInstance, type ProcessInstance, type PendingUserTask, type PendingServiceTask } from './lib/tauri';
 import { InstanceViewer } from './InstanceViewer';
 import { RefreshCw, Activity, CheckCircle, Clock, Trash } from 'lucide-react';
+import { VariableEditor, type VariableRow, parseVariables, serializeVariables } from './VariableEditor';
 
 // Helper to render the instance state as a readable string
 function stateLabel(state: ProcessInstance['state']): string {
@@ -32,32 +33,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
   const [variables, setVariables] = useState<VariableRow[]>([]);
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
 
-  // Type definition for variable rows
-  type VarType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Null';
-  interface VariableRow {
-    name: string;
-    type: VarType;
-    value: any;
-    isNew?: boolean;
-  }
-
-  const parseVariables = (vars: Record<string, unknown>): VariableRow[] => {
-    return Object.entries(vars)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, val]) => {
-      let type: VarType = 'String';
-      if (val === null) type = 'Null';
-      else if (typeof val === 'boolean') type = 'Boolean';
-      else if (typeof val === 'number') type = 'Number';
-      else if (typeof val === 'object') type = 'Object';
-      
-      return { 
-        name, 
-        type, 
-        value: type === 'Object' ? JSON.stringify(val, null, 2) : val 
-      };
-    });
-  };
+  // Variables state is typed using VariableRow from VariableEditor
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
   const [showNodeDetails, setShowNodeDetails] = useState(false);
 
@@ -122,80 +98,14 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
     }
   }, []);
 
-  const handleVariableChange = (index: number, field: keyof VariableRow, newValue: any) => {
-    const updated = [...variables];
-    const row = updated[index];
-    
-    if (field === 'type') {
-      row.type = newValue as VarType;
-      if (row.type === 'String') row.value = '';
-      else if (row.type === 'Number') row.value = 0;
-      else if (row.type === 'Boolean') row.value = false;
-      else if (row.type === 'Null') row.value = null;
-      else if (row.type === 'Object') row.value = '{}';
-    } else {
-      (row[field] as any) = newValue;
-    }
-    setVariables(updated);
-  };
-
-  const handleAddVariable = () => {
-    setVariables([...variables, { name: '', type: 'String', value: '', isNew: true }]);
-  };
-
-  const handleRemoveVariable = (index: number) => {
-    const updated = [...variables];
-    const removed = updated.splice(index, 1)[0];
-    
-    // Track removed keys that existed on the backend to instruct deletion
-    if (!removed.isNew && removed.name.trim()) {
-      const newDeleted = new Set(deletedKeys);
-      newDeleted.add(removed.name);
-      setDeletedKeys(newDeleted);
-    }
-    
-    setVariables(updated);
-  };
-
   const handleSaveVariables = async () => {
     if (!selected) return;
-    try {
-      const varsToSave: Record<string, unknown> = {};
-      
-      // Include explicitly deleted keys as null
-      for (const key of deletedKeys) {
-        varsToSave[key] = null;
-      }
-      
-      for (const v of variables) {
-        if (!v.name.trim()) continue; // skip unnamed variables
-        
-        if (v.type === 'Object') {
-          try {
-            varsToSave[v.name] = JSON.parse(v.value as string);
-          } catch (e) {
-            alert(`Invalid JSON for variable '${v.name}'`);
-            return;
-          }
-        } else if (v.type === 'Number') {
-          const num = Number(v.value);
-          if (isNaN(num)) {
-            alert(`Invalid number for variable '${v.name}'`);
-            return;
-          }
-          varsToSave[v.name] = num;
-        } else if (v.type === 'Boolean') {
-          varsToSave[v.name] = Boolean(v.value);
-        } else if (v.type === 'Null') {
-          varsToSave[v.name] = null;
-        } else {
-          varsToSave[v.name] = v.value;
-        }
-      }
+    const varsToSave = serializeVariables(variables, deletedKeys);
+    if (varsToSave === null) return;
 
+    try {
       await updateInstanceVariables(selected.id, varsToSave);
       alert('Variables saved successfully.');
-      // Refresh the detail view
       const updated = await getInstanceDetails(selected.id);
       setSelected(updated);
       setVariables(parseVariables(updated.variables));
@@ -371,109 +281,14 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
               {/* Editable variables */}
               <div style={{ marginTop: 16 }}>
                 <strong>Variables:</strong>
-                
-                <table className="variables-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '25%' }}>Name</th>
-                      <th style={{ width: '20%' }}>Type</th>
-                      <th>Value</th>
-                      <th style={{ width: '40px', textAlign: 'center' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {variables.map((v, idx) => (
-                      <tr key={idx}>
-                        <td>
-                          <input 
-                            type="text" 
-                            className="var-input" 
-                            value={v.name} 
-                            onChange={(e) => handleVariableChange(idx, 'name', e.target.value)}
-                            placeholder="Variable name"
-                            readOnly={!v.isNew} 
-                            style={{ backgroundColor: !v.isNew ? '#f8fafc' : '#ffffff' }}
-                          />
-                        </td>
-                        <td>
-                          <select 
-                            className="var-select" 
-                            value={v.type} 
-                            onChange={(e) => handleVariableChange(idx, 'type', e.target.value)}
-                          >
-                            <option value="String">String</option>
-                            <option value="Number">Number</option>
-                            <option value="Boolean">Boolean</option>
-                            <option value="Object">Object</option>
-                            <option value="Null">Null</option>
-                          </select>
-                        </td>
-                        <td>
-                          {v.type === 'String' && (
-                            <input 
-                              type="text" 
-                              className="var-input" 
-                              value={v.value as string} 
-                              onChange={(e) => handleVariableChange(idx, 'value', e.target.value)} 
-                              placeholder="String value"
-                            />
-                          )}
-                          {v.type === 'Number' && (
-                            <input 
-                              type="number" 
-                              className="var-input" 
-                              value={v.value as number} 
-                              onChange={(e) => handleVariableChange(idx, 'value', parseFloat(e.target.value))} 
-                              placeholder="Number value"
-                            />
-                          )}
-                          {v.type === 'Boolean' && (
-                            <input 
-                              type="checkbox" 
-                              className="var-checkbox"
-                              checked={v.value as boolean} 
-                              onChange={(e) => handleVariableChange(idx, 'value', e.target.checked)} 
-                            />
-                          )}
-                          {v.type === 'Object' && (
-                            <textarea 
-                              className="vars-textarea" 
-                              value={v.value as string} 
-                              onChange={(e) => handleVariableChange(idx, 'value', e.target.value)} 
-                              rows={2}
-                              spellCheck={false}
-                              style={{ width: '100%', resize: 'vertical' }}
-                            />
-                          )}
-                          {v.type === 'Null' && (
-                            <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '0.85rem' }}>null</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <button 
-                            className="button" 
-                            style={{ background: 'transparent', color: '#ef4444', border: 'none', padding: '4px', cursor: 'pointer' }}
-                            onClick={() => handleRemoveVariable(idx)} 
-                            title="Delete Variable"
-                          >
-                            <Trash size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {variables.length === 0 && (
-                      <tr>
-                        <td colSpan={4} style={{ textAlign: 'center', color: '#64748b', padding: '16px' }}>
-                          No variables configured.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between' }}>
-                  <button className="button" onClick={handleAddVariable} style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }}>
-                    + Add Variable
-                  </button>
+                <VariableEditor
+                  variables={variables}
+                  onChange={setVariables}
+                  readOnlyNames={true}
+                  deletedKeys={deletedKeys}
+                  onDeletedKeysChange={setDeletedKeys}
+                />
+                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                   <button className="button save-vars-btn" onClick={handleSaveVariables}>
                     Save Variables
                   </button>

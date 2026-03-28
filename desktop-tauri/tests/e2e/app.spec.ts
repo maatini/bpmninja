@@ -376,47 +376,22 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     expect(alerts[0]).toContain('Deployed definition! ID: mock-def-');
   });
 
-  // ---- 3. Start Instance without Deploy --------------------------------
 
-  test('should show warning when starting without deploying first', async ({ page }) => {
+
+  // ---- 4. Start Instance ----------------------------------
+
+  test('should auto-deploy and start instance, then navigate to Instances', async ({ page }) => {
     await injectTauriMock(page);
     await page.goto('/');
     await page.locator('.nav-item', { hasText: 'BPMN Modeler' }).click();
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
-    const alerts = await collectAlerts(page, async () => {
-      // Open variables dialog
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      // Confirm with default empty object
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
+    // Start instance via variables dialog (auto-deploys)
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toBe('Please deploy a process first.');
-  });
-
-  // ---- 4. Start Instance after Deploy ----------------------------------
-
-  test('should start an instance after deploying and show success alert', async ({ page }) => {
-    await injectTauriMock(page);
-    await page.goto('/');
-    await page.locator('.nav-item', { hasText: 'BPMN Modeler' }).click();
-    await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
-
-    // Deploy first
-    const deployAlerts = await collectAlerts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
-    });
-    expect(deployAlerts[0]).toContain('Deployed definition!');
-
-    // Now start instance via variables dialog
-    const startAlerts = await collectAlerts(page, async () => {
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-
-    expect(startAlerts.length).toBe(1);
-    expect(startAlerts[0]).toContain('Started instance! ID: mock-instance-');
+    // Verification: We should be redirected to the instances tab
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
   });
 
   // ---- 5. View Pending Tasks -------------------------------------------
@@ -523,12 +498,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     });
     expect(alerts[0]).toContain('Deployed definition!');
 
-    // Step 2: Start Instance via variables dialog
-    alerts = await collectAlerts(page, async () => {
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-    expect(alerts[0]).toContain('Started instance!');
+    // Step 2: Start Instance via variables dialog (auto deploy + start)
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    
+    // Will navigate to instances tab automatically.
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 5_000 });
 
     // Step 3: Navigate to Pending Tasks
     await page.locator('.nav-item', { hasText: 'Pending Tasks' }).click();
@@ -837,13 +812,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     // Canvas should still be visible (empty diagram loaded)
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 5_000 });
 
-    // Step 3: Clicking "Start Instance" (via dialog) should warn because defId was cleared
-    const warnAlerts = await collectAlerts(page, async () => {
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-    expect(warnAlerts.length).toBe(1);
-    expect(warnAlerts[0]).toContain('Please deploy a process first');
+    // Step 3: Auto-deploy & start works without existing defId
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+
+    // Verify nav to instances
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 5_000 });
   });
 
   // ---- 18. Delete Instance -----------------------------------------------
@@ -935,19 +909,24 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
     await expect(page.locator('.vars-dialog')).toBeVisible({ timeout: 3_000 });
 
-    // Type custom variables JSON
-    const textarea = page.locator('.vars-textarea');
-    await textarea.fill('{"orderId": "ORD-42", "amount": 99.5}');
+    // Add variable 'orderId'
+    await page.locator('.vars-dialog button', { hasText: '+ Add Variable' }).click();
+    const newRow1 = page.locator('.vars-dialog tbody tr').last();
+    await newRow1.locator('input').first().fill('orderId');
+    await newRow1.locator('input').nth(1).fill('ORD-42');
 
-    // Click Start and expect success
-    const startAlerts = await collectAlerts(page, async () => {
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-    expect(startAlerts.length).toBe(1);
-    expect(startAlerts[0]).toContain('Started instance! ID: mock-instance-');
+    // Add variable 'amount'
+    await page.locator('.vars-dialog button', { hasText: '+ Add Variable' }).click();
+    const newRow2 = page.locator('.vars-dialog tbody tr').last();
+    await newRow2.locator('input').first().fill('amount');
+    await newRow2.locator('select').selectOption('Number');
+    await newRow2.locator('input[type="number"]').fill('99.5');
 
-    // Dialog should be closed now
-    await expect(page.locator('.vars-dialog')).not.toBeVisible();
+    // Click Start
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+
+    // Should navigate to instances tab
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
   });
 
   // ---- 19. Edit instance variables in detail panel -----------------------
@@ -1072,15 +1051,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     });
     expect(alerts[0]).toContain('Deployed definition!');
 
-    // 3. Klicke "Start Instance" (ohne initiale Variablen)
-    alerts = await collectAlerts(page, async () => {
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-    expect(alerts[0]).toContain('Started instance!');
+    // 3. Klicke "Start Instance" (ohne initiale Variablen, navigiert auto zu Instances)
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
 
-    // 4. Validierung: Navigiere zum Tab "Instances", klicke auf die neue Instanz
-    await page.locator('.nav-item', { hasText: 'Instances' }).click();
+    // 4. Validierung: Klicke auf die neue Instanz
     await expect(page.locator('.card').first()).toBeVisible({ timeout: 5_000 });
     await page.locator('.card').first().click();
 
@@ -1146,12 +1122,11 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     // Canvas should still be visible after loading
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
-    // defId was reset, so "Start Instance" should warn about missing deploy
-    const alerts = await collectAlerts(page, async () => {
-      await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-      await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
-    });
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toBe('Please deploy a process first.');
+    // "Start Instance" directly deploys loaded file
+    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    
+    // Should navigate to instances view
+    await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
   });
 });
