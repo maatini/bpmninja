@@ -775,3 +775,87 @@ async fn test_delete_definition_cascade() {
     assert_eq!(engine.definitions.len(), 0);
     assert_eq!(engine.instances.len(), 0);
 }
+
+// -----------------------------------------------------------------------
+// ParallelGateway (AND) & Multi-Token tests
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn parallel_gateway_forks_and_joins() {
+    let mut engine = WorkflowEngine::new();
+
+    // Start -> Split -> (A, B) -> Join -> End
+    let def = ProcessDefinitionBuilder::new("and_test")
+        .node("start", BpmnElement::StartEvent)
+        .node("split", BpmnElement::ParallelGateway)
+        .node("task_a", BpmnElement::ServiceTask { topic: "task_a".into() })
+        .node("task_b", BpmnElement::ServiceTask { topic: "task_b".into() })
+        .node("join", BpmnElement::ParallelGateway)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "split")
+        .flow("split", "task_a")
+        .flow("split", "task_b")
+        .flow("task_a", "join")
+        .flow("task_b", "join")
+        .flow("join", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+
+    let inst_id = engine
+        .start_instance(def_key)
+        .await
+        .unwrap();
+
+    // Should be paused in parallel execution waiting for both service tasks
+    let state = engine.get_instance_state(inst_id).unwrap().clone();
+    println!("State after start: {:?}", state);
+    for entry in engine.get_audit_log(inst_id).unwrap() {
+        println!("Log: {}", entry);
+    }
+    assert!(matches!(state, InstanceState::ParallelExecution { active_token_count: 2 }), "State should be parallel execution: {:?}", state);
+
+    assert_eq!(engine.pending_service_tasks.len(), 2);
+
+    // Complete task A
+    let task_a = engine.pending_service_tasks.iter().find(|t| t.topic == "task_a").unwrap().id;
+    // Need to fetch and lock it first
+    let _ = engine.fetch_and_lock_service_tasks("worker", 10, &["task_a".into()], 1000).await;
+    
+    let mut vars_a = std::collections::HashMap::new();
+    vars_a.insert("var_a".into(), serde_json::Value::Bool(true));
+    engine.complete_service_task(task_a, "worker", vars_a).await.unwrap();
+
+    // After A completes, it should be waiting at the join. Still in parallel state.
+    let state = engine.get_instance_state(inst_id).unwrap().clone();
+    println!("State after A completes: {:?}", state);
+    for entry in engine.get_audit_log(inst_id).unwrap() {
+        println!("Log: {}", entry);
+    }
+    assert!(matches!(state, InstanceState::ParallelExecution { active_token_count: 2 }));
+    
+    // Check join barrier
+    let inst = engine.instances.get(&inst_id).unwrap();
+    let barrier = inst.join_barriers.get("join").unwrap();
+    assert_eq!(barrier.expected_count, 2);
+    assert_eq!(barrier.arrived_tokens.len(), 1);
+
+    // Complete task B
+    let task_b = engine.pending_service_tasks.iter().find(|t| t.topic == "task_b").unwrap().id;
+    let _ = engine.fetch_and_lock_service_tasks("worker", 10, &["task_b".into()], 1000).await;
+    let mut vars_b = std::collections::HashMap::new();
+    vars_b.insert("var_b".into(), serde_json::Value::Bool(true));
+    engine.complete_service_task(task_b, "worker", vars_b).await.unwrap();
+
+    // Now it should be complete!
+    assert_eq!(
+        *engine.get_instance_state(inst_id).unwrap(),
+        InstanceState::Completed
+    );
+
+    // Variables from both branches should be merged
+    let details = engine.get_instance_details(inst_id).unwrap();
+    assert_eq!(details.variables.get("var_a"), Some(&serde_json::Value::Bool(true)));
+    assert_eq!(details.variables.get("var_b"), Some(&serde_json::Value::Bool(true)));
+}

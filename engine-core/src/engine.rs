@@ -72,6 +72,8 @@ pub enum NextAction {
     WaitForUser(PendingUserTask),
     /// The engine must pause — an external task is pending.
     WaitForServiceTask(PendingServiceTask),
+    /// Token arrived at a join gateway but must wait for sibling tokens.
+    WaitForJoin { gateway_id: String, token: Token },
     /// The process reached an end event.
     Complete,
 }
@@ -86,12 +88,37 @@ pub enum InstanceState {
     Running,
     WaitingOnUserTask { task_id: Uuid },
     WaitingOnServiceTask { task_id: Uuid },
+    /// Multiple tokens are active; some may be waiting, some running.
+    ParallelExecution { active_token_count: usize },
     Completed,
 }
 
 // ---------------------------------------------------------------------------
 // Process instance
 // ---------------------------------------------------------------------------
+
+/// A token actively traveling through the process graph.
+/// Part of the Token-Registry on ProcessInstance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveToken {
+    pub token: Token,
+    /// ID of the fork gateway that spawned this token (None for the root token).
+    pub fork_id: Option<String>,
+    /// Index within the fork (0, 1, 2, ...) for deterministic ordering.
+    pub branch_index: usize,
+    /// Whether this token has completed (reached EndEvent or joined).
+    pub completed: bool,
+}
+
+/// Synchronization barrier at a converging gateway.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinBarrier {
+    pub gateway_node_id: String,
+    /// Number of tokens that must arrive before the join fires.
+    pub expected_count: usize,
+    /// Tokens that have arrived so far.
+    pub arrived_tokens: Vec<Token>,
+}
 
 /// A live process instance tracked by the engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +131,12 @@ pub struct ProcessInstance {
     pub audit_log: Vec<String>,
     /// Current process variables (synced from the executing token).
     pub variables: HashMap<String, Value>,
+    /// All currently active tokens (Token-Registry).
+    #[serde(default)]
+    pub active_tokens: Vec<ActiveToken>,
+    /// Join barriers waiting for tokens at converging gateways.
+    #[serde(default)]
+    pub join_barriers: HashMap<String, JoinBarrier>,
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +455,8 @@ impl WorkflowEngine {
                 variables.len()
             )],
             variables: variables.clone(),
+            active_tokens: Vec::new(),
+            join_barriers: std::collections::HashMap::new(),
         };
 
         log::info!(
@@ -500,6 +535,8 @@ impl WorkflowEngine {
                 provided_duration.as_secs()
             )],
             variables: HashMap::new(),
+            active_tokens: Vec::new(),
+            join_barriers: std::collections::HashMap::new(),
         };
 
         log::info!(
@@ -572,15 +609,16 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         loop {
             let old_state = self.instances.get(&instance_id).cloned();
+            let current_gateway_id = token.current_node.clone();
             let action = self.execute_step(instance_id, &mut token).await?;
             
-            // Get event type based on what action just took place
             let (event_type, description) = match &action {
                 NextAction::Continue(_) => (crate::history::HistoryEventType::TokenAdvanced, "Token advanced".to_string()),
-                NextAction::ContinueMultiple(_) => (crate::history::HistoryEventType::GatewayTaken, "Token forked at gateway".to_string()),
+                NextAction::ContinueMultiple(_) => (crate::history::HistoryEventType::TokenForked, "Token forked at gateway".to_string()),
+                NextAction::WaitForJoin { .. } => (crate::history::HistoryEventType::TokenAdvanced, "Token arrived at join".to_string()),
                 NextAction::WaitForUser(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for user task".to_string()),
                 NextAction::WaitForServiceTask(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for service task".to_string()),
-                NextAction::Complete => (crate::history::HistoryEventType::InstanceCompleted, "Process completed".to_string()),
+                NextAction::Complete => (crate::history::HistoryEventType::BranchCompleted, "Execution path completed".to_string()),
             };
             
             self.record_history_event(
@@ -602,29 +640,49 @@ impl WorkflowEngine {
                     }
                 }
                 NextAction::ContinueMultiple(forked_tokens) => {
-                    // Run each forked branch sequentially.
-                    // All branches share the same instance and must
-                    // complete independently (each reaching an EndEvent).
-                    for fork_token in forked_tokens {
+                    let branch_count = forked_tokens.len();
+                    
+                    self.register_join_barrier_if_needed(instance_id, &current_gateway_id, branch_count)?;
+
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        inst.state = InstanceState::ParallelExecution { active_token_count: inst.active_tokens.len() + branch_count };
+                        inst.current_node = current_gateway_id.clone();
+                    }
+                    self.persist_instance(instance_id).await;
+
+                    for (idx, fork_token) in forked_tokens.into_iter().enumerate() {
                         if let Some(p) = &self.persistence {
                             if let Err(e) = p.save_token(&fork_token).await {
                                 log::error!("Failed to save forked token: {}", e);
                             }
                         }
-                        // Temporarily set instance back to Running for each branch
-                        if let Some(inst) = self.instances.get_mut(&instance_id) {
-                            inst.state = InstanceState::Running;
-                        }
-                        // Recursively run each forked branch in a Box::pin to
-                        // satisfy the borrow checker for recursive async
+                        self.register_active_token(instance_id, &current_gateway_id, idx, &fork_token)?;
                         Box::pin(self.run_instance(instance_id, fork_token)).await?;
                     }
                     return Ok(());
                 }
+                NextAction::WaitForJoin { gateway_id, token: arrived_token } => {
+                    let merged = self.arrive_at_join(instance_id, &gateway_id, arrived_token).await?;
+                    match merged {
+                        None => {
+                            self.persist_instance(instance_id).await;
+                            return Ok(());
+                        }
+                        Some(merged_token) => {
+                            token = merged_token;
+                            if let Some(inst) = self.instances.get_mut(&instance_id) {
+                                inst.state = InstanceState::Running;
+                                inst.current_node = gateway_id.clone();
+                            }
+                        }
+                    }
+                }
                 NextAction::WaitForUser(pending) => {
                     let task_id = pending.task_id;
                     if let Some(inst) = self.instances.get_mut(&instance_id) {
-                        inst.state = InstanceState::WaitingOnUserTask { task_id };
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnUserTask { task_id };
+                        }
                     }
                     self.pending_user_tasks.push(pending);
                     self.persist_instance(instance_id).await;
@@ -634,7 +692,9 @@ impl WorkflowEngine {
                 NextAction::WaitForServiceTask(svc_task) => {
                     let task_id = svc_task.id;
                     if let Some(inst) = self.instances.get_mut(&instance_id) {
-                        inst.state = InstanceState::WaitingOnServiceTask { task_id };
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnServiceTask { task_id };
+                        }
                     }
                     self.persist_instance(instance_id).await;
                     self.pending_service_tasks.push(svc_task);
@@ -642,14 +702,157 @@ impl WorkflowEngine {
                     return Ok(());
                 }
                 NextAction::Complete => {
-                    if let Some(inst) = self.instances.get_mut(&instance_id) {
-                        inst.state = InstanceState::Completed;
+                    self.complete_branch_token(instance_id, token.id)?;
+                    if self.all_tokens_completed(instance_id)? {
+                        if let Some(inst) = self.instances.get_mut(&instance_id) {
+                            inst.state = InstanceState::Completed;
+                            inst.audit_log.push("⏹ All tokens completed. Process fully completed.".to_string());
+                        }
+                        
+                        self.record_history_event(
+                            instance_id,
+                            crate::history::HistoryEventType::InstanceCompleted,
+                            "Process fully completed",
+                            crate::history::ActorType::Engine,
+                            None,
+                            None
+                        ).await;
+                        self.persist_instance(instance_id).await;
                     }
-                    self.persist_instance(instance_id).await;
                     return Ok(());
                 }
             }
         }
+    }
+
+    // ----- Helper: Token-Registry & Parallel Execution ---------------------
+
+    fn register_join_barrier_if_needed(
+        &mut self,
+        instance_id: Uuid,
+        split_gateway_id: &str,
+        branch_count: usize,
+    ) -> EngineResult<()> {
+        let def_key = self.instances.get(&instance_id).unwrap().definition_key;
+        let def = self.definitions.get(&def_key).unwrap().clone();
+        
+        if let Some(join_id) = self.find_downstream_join(&def, split_gateway_id) {
+            let inst = self.instances.get_mut(&instance_id).unwrap();
+            inst.join_barriers.insert(join_id.clone(), JoinBarrier {
+                gateway_node_id: join_id.clone(),
+                expected_count: branch_count,
+                arrived_tokens: Vec::new(),
+            });
+            log::debug!("Registered JoinBarrier for join '{join_id}' (expected: {branch_count})");
+        }
+        Ok(())
+    }
+
+    fn find_downstream_join(&self, def: &ProcessDefinition, start_node: &str) -> Option<String> {
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        for flow in def.next_nodes(start_node) {
+            queue.push_back(flow.target.clone());
+        }
+        
+        while let Some(node) = queue.pop_front() {
+            if visited.contains(&node) { continue; }
+            visited.insert(node.clone());
+            
+            if def.is_join_gateway(&node) {
+                return Some(node);
+            }
+            
+            for flow in def.next_nodes(&node) {
+                queue.push_back(flow.target.clone());
+            }
+        }
+        None
+    }
+
+    fn register_active_token(&mut self, instance_id: Uuid, fork_id: &str, branch_index: usize, token: &Token) -> EngineResult<()> {
+        let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        inst.active_tokens.push(ActiveToken {
+            token: token.clone(),
+            fork_id: Some(fork_id.to_string()),
+            branch_index,
+            completed: false,
+        });
+        Ok(())
+    }
+
+    async fn arrive_at_join(
+        &mut self,
+        instance_id: Uuid,
+        gateway_id: &str,
+        token: Token,
+    ) -> EngineResult<Option<Token>> {
+        let def_key = self.instances.get(&instance_id).unwrap().definition_key;
+        let def = self.definitions.get(&def_key).unwrap().clone();
+        
+        let expected = def.incoming_flow_count(gateway_id);
+        let inst = self.instances.get_mut(&instance_id).unwrap();
+        
+        let barrier = inst.join_barriers.entry(gateway_id.to_string()).or_insert_with(|| JoinBarrier {
+            gateway_node_id: gateway_id.to_string(),
+            expected_count: expected,
+            arrived_tokens: Vec::new(),
+        });
+        
+        barrier.arrived_tokens.push(token.clone());
+        let current_arrived = barrier.arrived_tokens.len();
+        
+        inst.audit_log.push(format!("➔ Token arrived at join '{}' ({}/{})", gateway_id, current_arrived, barrier.expected_count));
+        
+        if current_arrived >= barrier.expected_count {
+            let all_tokens = barrier.arrived_tokens.clone();
+            inst.join_barriers.remove(gateway_id);
+            
+            for t in &all_tokens {
+                if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == t.id) {
+                    active.completed = true;
+                }
+            }
+            
+            let mut merged_vars = HashMap::new();
+            for t in &all_tokens {
+                merged_vars.extend(t.variables.clone());
+            }
+            
+            let mut merged_token = Token::with_variables(gateway_id, merged_vars);
+            merged_token.is_merged = true;
+            inst.audit_log.push(format!("🔗 Join '{}' completed. Tokens merged.", gateway_id));
+            
+            self.record_history_event(
+                instance_id,
+                crate::history::HistoryEventType::TokenJoined,
+                &format!("Joined {} tokens at '{}'", current_arrived, gateway_id),
+                crate::history::ActorType::Engine,
+                None,
+                None
+            ).await;
+            
+            Ok(Some(merged_token))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn complete_branch_token(&mut self, instance_id: Uuid, token_id: Uuid) -> EngineResult<()> {
+        let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == token_id) {
+            active.completed = true;
+        }
+        Ok(())
+    }
+
+    fn all_tokens_completed(&self, instance_id: Uuid) -> EngineResult<bool> {
+        let inst = self.instances.get(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        if inst.active_tokens.is_empty() {
+            // Linear flow
+            return Ok(true);
+        }
+        Ok(inst.active_tokens.iter().all(|t| t.completed))
     }
 
     /// Helper: runs End scripts, commits variables to instance state.
@@ -797,6 +1000,47 @@ impl WorkflowEngine {
                 Ok(NextAction::WaitForServiceTask(svc_task))
             }
 
+            // ----- Parallel Gateway (AND) -----
+            BpmnElement::ParallelGateway => {
+                let outgoing = def_clone.next_nodes(&current_id);
+                let incoming_count = def_clone.incoming_flow_count(&current_id);
+
+                if incoming_count >= 2 && !token.is_merged {
+                    // --- JOIN LOGIC ---
+                    return Ok(NextAction::WaitForJoin {
+                        gateway_id: current_id.clone(),
+                        token: token.clone(),
+                    });
+                }
+                token.is_merged = false;
+
+                // --- SPLIT LOGIC ---
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+
+                let inst = self.instances.get_mut(&instance_id)
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!(
+                    "■ Parallel gateway '{current_id}' → forked to {} path(s)",
+                    outgoing.len()
+                ));
+                log::info!(
+                    "Instance {instance_id}: parallel gateway '{current_id}' → {} path(s)",
+                    outgoing.len()
+                );
+
+                let forked: Vec<Token> = outgoing
+                    .iter()
+                    .map(|sf| Token::with_variables(&sf.target, token.variables.clone()))
+                    .collect();
+
+                if forked.len() == 1 {
+                    Ok(NextAction::Continue(forked.into_iter().next().unwrap()))
+                } else {
+                    Ok(NextAction::ContinueMultiple(forked))
+                }
+            }
+
             // ----- Exclusive Gateway (XOR) -----
             BpmnElement::ExclusiveGateway { default } => {
                 let outgoing = def_clone.next_nodes(&current_id);
@@ -842,6 +1086,18 @@ impl WorkflowEngine {
             // ----- Inclusive Gateway (OR) -----
             BpmnElement::InclusiveGateway => {
                 let outgoing = def_clone.next_nodes(&current_id);
+                let incoming_count = def_clone.incoming_flow_count(&current_id);
+
+                if incoming_count >= 2 && !token.is_merged {
+                    // --- JOIN LOGIC ---
+                    return Ok(NextAction::WaitForJoin {
+                        gateway_id: current_id.clone(),
+                        token: token.clone(),
+                    });
+                }
+                token.is_merged = false;
+
+                // --- SPLIT LOGIC ---
                 let mut matched_targets: Vec<String> = Vec::new();
 
                 // Evaluate all conditions; every match is taken
@@ -940,8 +1196,11 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         inst.audit_log
             .push(format!("✅ User task '{}' completed", pending.node_id));
-        inst.state = InstanceState::Running;
-        inst.variables = token.variables.clone();
+        
+        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+            inst.state = InstanceState::Running;
+        }
+        inst.current_node = pending.node_id.clone();
         let def_key = inst.definition_key;
 
         // Advance token to the next node

@@ -24,6 +24,9 @@ pub enum HistoryEventType {
     GatewayTaken,      // XOR / OR fork
     ListenerExecuted,  // Scripts
     TokenAdvanced,     // generic token move
+    TokenForked,       // Gateway split created N tokens
+    TokenJoined,       // Gateway join merged N tokens into one
+    BranchCompleted,   // One branch of a parallel execution reached EndEvent
     Error,             // something failed
 }
 
@@ -39,6 +42,9 @@ impl HistoryEventType {
             Self::GatewayTaken => "Gateway path was taken".into(),
             Self::ListenerExecuted => "Execution listener finished".into(),
             Self::TokenAdvanced => "Token advanced to the next node".into(),
+            Self::TokenForked => "Token forked into multiple branches".into(),
+            Self::TokenJoined => "Multiple tokens joined into one".into(),
+            Self::BranchCompleted => "Branch execution completed".into(),
             Self::Error => "An execution error occurred".into(),
         }
     }
@@ -227,6 +233,8 @@ mod tests {
             current_node: "start".into(),
             audit_log: vec![],
             variables: HashMap::new(),
+            active_tokens: vec![],
+            join_barriers: HashMap::new(),
         };
         old.variables.insert("a".into(), json!(1));
         old.variables.insert("b".into(), json!(2));

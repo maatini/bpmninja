@@ -136,7 +136,9 @@ impl WorkflowEngine {
             "✅ Service task '{}' completed by worker '{}'",
             task.node_id, worker_id
         ));
-        inst.state = InstanceState::Running;
+        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+            inst.state = InstanceState::Running;
+        }
         inst.variables = token.variables.clone();
         let def_key = inst.definition_key;
 

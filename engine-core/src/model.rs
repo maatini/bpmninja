@@ -50,6 +50,9 @@ pub enum BpmnElement {
     /// An inclusive gateway (OR) — all outgoing paths whose condition
     /// evaluates to `true` are taken (token forking).
     InclusiveGateway,
+    /// A parallel gateway (AND) — all outgoing paths are taken unconditionally;
+    /// as a join, waits for ALL incoming tokens.
+    ParallelGateway,
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,8 @@ pub struct Token {
     pub id: Uuid,
     pub current_node: String,
     pub variables: HashMap<String, Value>,
+    #[serde(skip, default)]
+    pub is_merged: bool,
 }
 
 impl Token {
@@ -108,6 +113,7 @@ impl Token {
             id: Uuid::new_v4(),
             current_node: start_node.to_string(),
             variables: HashMap::new(),
+            is_merged: false,
         }
     }
 
@@ -118,6 +124,7 @@ impl Token {
             id: Uuid::new_v4(),
             current_node: start_node.to_string(),
             variables,
+            is_merged: false,
         }
     }
 }
@@ -216,16 +223,17 @@ impl ProcessDefinition {
             }
         }
 
-        // --- gateways must have at least 2 outgoing flows ---
+        // --- gateways must have at least 2 incoming or outgoing flows ---
         for (node_id, element) in &nodes {
             if matches!(
                 element,
-                BpmnElement::ExclusiveGateway { .. } | BpmnElement::InclusiveGateway
+                BpmnElement::ExclusiveGateway { .. } | BpmnElement::InclusiveGateway | BpmnElement::ParallelGateway
             ) {
                 let outgoing = flows.get(node_id).map_or(0, |v| v.len());
-                if outgoing < 2 {
+                let incoming = flows.values().flat_map(|f| f.iter()).filter(|sf| &sf.target == node_id).count();
+                if outgoing < 2 && incoming < 2 {
                     return Err(EngineError::InvalidDefinition(format!(
-                        "Gateway '{node_id}' must have at least 2 outgoing flows, has {outgoing}"
+                        "Gateway '{node_id}' must have at least 2 incoming or 2 outgoing flows"
                     )));
                 }
             }
@@ -267,6 +275,20 @@ impl ProcessDefinition {
         } else {
             None
         }
+    }
+
+    /// Returns the number of incoming sequence flows to the given node.
+    pub fn incoming_flow_count(&self, node_id: &str) -> usize {
+        self.flows
+            .values()
+            .flat_map(|flows| flows.iter())
+            .filter(|sf| sf.target == node_id)
+            .count()
+    }
+
+    /// Returns true if this node is a converging gateway (join).
+    pub fn is_join_gateway(&self, node_id: &str) -> bool {
+        self.incoming_flow_count(node_id) >= 2
     }
 }
 
