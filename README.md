@@ -63,7 +63,9 @@ Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
 
 ## Architektur
 
-Das folgende Diagramm nutzt Mermaid, um die hochauflösende Vektor-Struktur des mini-bpm Projekts darzustellen:
+> Ausführliche Architektur-Dokumentation mit 8 Mermaid-Diagrammen: **[docs/architecture.md](docs/architecture.md)**
+
+Das folgende Diagramm zeigt die Gesamtstruktur des mini-bpm Projekts:
 
 ```mermaid
 flowchart TD
@@ -133,31 +135,34 @@ Folgende Tools müssen auf deinem System installiert sein:
 
 ### Workspace Test Summary
 
-| Crate | Unit Tests | Integration Tests | Gesamt |
+| Crate | Unit Tests | E2E / Integration Tests | Gesamt |
 |---|---|---|---|
-| **engine-core** | 58 | — | 58 |
+| **engine-core** | 63 | — | 63 |
 | **bpmn-parser** | 12 | — | 12 |
 | **persistence-nats** | 2 | — | 2 |
 | **engine-server** | — | 6 | 6 |
-| **Gesamt** | **72** | **6** | **78** ✅ |
+| **Gesamt** | **77** | **6** | **83** ✅ |
 
-### Code Coverage (cargo-llvm-cov)
+#### engine-core Test-Breakdown
 
-| Crate / Modul | Lines | Covered | Line Coverage |
-|---|---|---|---|
-| **engine-core** `model.rs` | 335 | 322 | **96.1%** ✅ |
-| **engine-core** `engine.rs` | 1 840 | — | — ² |
-| **engine-core** `condition.rs` | 112 | 60 | **81.0%** |
-| **engine-core** `script_runner.rs` | 86 | 54 | **94.7%** ✅ |
-| **engine-core** `service_task.rs` | 389 | 225 | **93.3%** ✅ |
-| **engine-core** `history.rs` | 302 | 173 | **92.5%** ✅ |
-| **engine-core** `tests.rs` | 1 209 | — | **~99%** ✅ |
-| **bpmn-parser** | 909 | 306 | **91.6%** ✅ |
-| **persistence-nats** | 668 | 45 | **8.8%** ¹ |
-| **engine-server** | 705 | 12 | **2.7%** ¹ |
+| Modul | Tests | Abdeckung |
+|---|---|---|
+| `engine::tests` | 44 | State Machine, Gateways, User/Service Tasks, Boundary Events, Call Activities, Variables, Timers, Messages |
+| `model::tests` | 15 | ProcessDefinition Builder, Token, SequenceFlow, Validation, FileReference |
+| `history::tests` | 4 | History Diff-Berechnung, File-Upload-Erkennung, Human-Readable Text |
 
-¹ *Benötigen laufende NATS-Instanz bzw. HTTP-Server für vollständige Integration Tests.*
-² *engine.rs wurde in Phase 1 signifikant erweitert — ein neuer Coverage-Lauf steht aus.*
+### Code-Statistiken
+
+| Crate | Dateien | LOC (ohne Tests) |
+|---|---|---|
+| **engine-core** | 10 | 4.365 |
+| **engine-core** (tests) | 1 | 1.457 |
+| **bpmn-parser** | 2 | 912 |
+| **persistence-nats** | 2 | 721 |
+| **engine-server** | 3 + 4 E2E | 919 + 520 |
+| **Rust Workspace** | **22** | **~8.900** |
+| desktop-tauri (TypeScript) | ~17 | ~8.500 |
+| **Projekt Gesamt** | **~39** | **~17.400** |
 
 ### Mutation Testing (cargo-mutants, engine-core)
 
@@ -176,12 +181,13 @@ Folgende Tools müssen auf deinem System installiert sein:
 
 | Metrik | Wert |
 |---|---|
+| Test-Dateien | 4 (`e2e_deploy`, `e2e_variables`, `e2e_files`, `e2e_history`) |
 | Tests | 6 |
 | Passed | 6 |
 | **Pass Rate** | **100%** ✅ |
 
 > [!NOTE]
-> Die Rust `engine-server` E2E-Tests validieren Deployments, Variablen-Updates, Datei-Handling und Event-Historie über den echten Axum REST-API Stack inkl. In-Memory Persistence Mock (`tests/e2e_deploy.rs`, `e2e_variables.rs`, `e2e_history.rs`, `e2e_files.rs`).
+> Die Rust `engine-server` E2E-Tests validieren Deployments, Variablen-Updates, Datei-Handling und Event-Historie über den echten Axum REST-API Stack inkl. In-Memory Persistence Mock.
 
 ### E2E Tests (Playwright, desktop-tauri)
 
