@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Multipart},
     http::{Method, StatusCode},
     response::IntoResponse,
     routing::{get, post, put, delete},
@@ -236,6 +236,11 @@ pub fn build_app_with_engine(
         .route("/api/definitions/:id/xml", get(get_definition_xml))
         .route("/api/definitions/:id", delete(delete_definition))
         .route("/api/instances/:id/variables", put(update_instance_variables))
+        .route("/api/instances/:id/files/:var_name",
+            post(upload_instance_file)
+            .get(get_instance_file)
+            .delete(delete_instance_file)
+        )
         .route("/api/instances/:id/history", get(get_instance_history))
         .route("/api/instances/:id/history/:event_id", get(get_instance_history_entry))
         .route("/api/info", get(get_backend_info))
@@ -702,4 +707,94 @@ async fn get_monitoring_data(
         pending_service_tasks: stats.pending_service_tasks,
         storage_info,
     })
+}
+
+async fn upload_instance_file(
+    State(state): State<Arc<AppState>>,
+    Path((id, var_name)): Path<(String, String)>,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, AppError> {
+    let mut engine = state.engine.write().await;
+    let instance_id = parse_uuid(&id)?;
+    if engine.get_instance_details(instance_id).is_err() {
+        return Err(AppError::BadRequest("Instance not found".into()));
+    }
+    
+    if let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(e.to_string()))? {
+        let filename = field.file_name().unwrap_or("unknown").to_string();
+        let content_type = field.content_type().unwrap_or("application/octet-stream").to_string();
+        let data = field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
+        
+        let file_ref = engine_core::model::FileReference::new(
+            instance_id,
+            &var_name,
+            &filename,
+            &content_type,
+            data.len() as u64,
+        );
+
+        if let Some(persistence) = &state.persistence {
+            persistence.save_file(&file_ref.object_key, &data).await?;
+        }
+        
+        let mut vars = HashMap::new();
+        vars.insert(var_name, file_ref.to_variable_value());
+        engine.update_instance_variables(instance_id, vars).await?;
+        
+        Ok(StatusCode::CREATED)
+    } else {
+        Err(AppError::BadRequest("No file field provided".into()))
+    }
+}
+
+async fn get_instance_file(
+    State(state): State<Arc<AppState>>,
+    Path((id, var_name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let engine = state.engine.read().await;
+    let instance_id = parse_uuid(&id)?;
+    let instance = engine.get_instance_details(instance_id)?;
+    
+    let file_ref = instance.get_file_reference(&var_name)
+        .ok_or_else(|| AppError::BadRequest("Variable is not a file".into()))?;
+
+    if let Some(persistence) = &state.persistence {
+        let data = persistence.load_file(&file_ref.object_key).await?;
+        
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            file_ref.mime_type.parse().unwrap_or(axum::http::HeaderValue::from_static("application/octet-stream"))
+        );
+        headers.insert(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", file_ref.filename).parse().unwrap_or(axum::http::HeaderValue::from_static("attachment"))
+        );
+        
+        Ok((headers, data))
+    } else {
+        Err(AppError::BadRequest("No persistence configured".into()))
+    }
+}
+
+async fn delete_instance_file(
+    State(state): State<Arc<AppState>>,
+    Path((id, var_name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut engine = state.engine.write().await;
+    let instance_id = parse_uuid(&id)?;
+    let instance = engine.get_instance_details(instance_id)?;
+    
+    let file_ref = instance.get_file_reference(&var_name)
+        .ok_or_else(|| AppError::BadRequest("Variable is not a file".into()))?;
+
+    if let Some(persistence) = &state.persistence {
+        persistence.delete_file(&file_ref.object_key).await?;
+    }
+    
+    let mut vars = HashMap::new();
+    vars.insert(var_name, Value::Null);
+    engine.update_instance_variables(instance_id, vars).await?;
+    
+    Ok(StatusCode::NO_CONTENT)
 }

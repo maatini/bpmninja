@@ -63,6 +63,15 @@ impl NatsPersistence {
             })
             .await;
 
+        // Ensure the instance_files Object Store bucket exists.
+        let _ = js
+            .create_object_store(ObjectStoreConfig {
+                bucket: "instance_files".to_string(),
+                description: Some("Binary file attachments for process instance variables".to_string()),
+                ..Default::default()
+            })
+            .await;
+
         // Ensure the instances KV bucket exists (per NATS rules).
         let _ = js
             .create_key_value(async_nats::jetstream::kv::Config {
@@ -433,6 +442,46 @@ impl WorkflowPersistence for NatsPersistence {
 
     async fn list_message_catches(&self) -> EngineResult<Vec<engine_core::engine::PendingMessageCatch>> {
         self.list_kv_entries("messages", "message catch").await
+    }
+
+    async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()> {
+        const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
+        if data.len() > MAX_FILE_SIZE {
+            return Err(EngineError::InvalidDefinition(
+                format!("File exceeds maximum size of 50 MB ({} bytes)", data.len())
+            ));
+        }
+        let store = self.js.get_object_store("instance_files").await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to get instance_files Object Store: {}", e))
+        })?;
+        let mut data_mut = data;
+        store.put(object_key, &mut data_mut).await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to save file: {}", e))
+        })?;
+        Ok(())
+    }
+
+    async fn load_file(&self, object_key: &str) -> EngineResult<Vec<u8>> {
+        use tokio::io::AsyncReadExt;
+        let store = self.js.get_object_store("instance_files").await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to get instance_files Object Store: {}", e))
+        })?;
+        let mut result = store.get(object_key).await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to load file '{}': {}", object_key, e))
+        })?;
+        let mut data = Vec::new();
+        result.read_to_end(&mut data).await.map_err(|e| {
+            EngineError::PersistenceError(format!("Error reading file data: {}", e))
+        })?;
+        Ok(data)
+    }
+
+    async fn delete_file(&self, object_key: &str) -> EngineResult<()> {
+        let store = self.js.get_object_store("instance_files").await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to get instance_files Object Store: {}", e))
+        })?;
+        let _ = store.delete(object_key).await;
+        Ok(())
     }
 
     async fn save_bpmn_xml(&self, definition_id: &str, xml: &str) -> EngineResult<()> {

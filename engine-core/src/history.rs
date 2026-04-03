@@ -153,6 +153,21 @@ impl HistoryEntry {
     }
 }
 
+fn format_file_human_text(_key: &str, value: &serde_json::Value) -> Option<String> {
+    if value.get("type").and_then(|t| t.as_str()) == Some("file") {
+        let filename = value.get("filename").and_then(|f| f.as_str()).unwrap_or("unknown");
+        let size = value.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+        let size_human = if size > 1_048_576 {
+            format!("{:.1} MB", size as f64 / 1_048_576.0)
+        } else {
+            format!("{:.1} KB", size as f64 / 1024.0)
+        };
+        Some(format!("File '{}' uploaded ({}).", filename, size_human))
+    } else {
+        None
+    }
+}
+
 /// Calculates the difference between two process instance states.
 pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDiff {
     let mut diff = HistoryDiff {
@@ -190,7 +205,11 @@ pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDi
         if let Some(v_new) = new.variables.get(k) {
             if v_old != v_new {
                 var_diff.changed.insert(k.clone(), (v_old.clone(), v_new.clone()));
-                human_texts.push(format!("Variable '{}' changed from {} to {}.", k, v_old, v_new));
+                if let Some(file_text) = format_file_human_text(k, v_new) {
+                    human_texts.push(file_text);
+                } else {
+                    human_texts.push(format!("Variable '{}' changed from {} to {}.", k, v_old, v_new));
+                }
             }
         } else {
             var_diff.removed.push(k.clone());
@@ -202,7 +221,11 @@ pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDi
     for (k, v_new) in &new.variables {
         if !old.variables.contains_key(k) {
             var_diff.added.insert(k.clone(), v_new.clone());
-            human_texts.push(format!("Variable '{}' was added ({}).", k, v_new));
+            if let Some(file_text) = format_file_human_text(k, v_new) {
+                human_texts.push(file_text);
+            } else {
+                human_texts.push(format!("Variable '{}' was added ({}).", k, v_new));
+            }
         }
     }
 
@@ -258,6 +281,50 @@ mod tests {
         assert_eq!(var_diff.changed.get("a").unwrap(), &(json!(1), json!(100)));
         assert_eq!(var_diff.removed[0], "b");
         assert_eq!(var_diff.added.get("c").unwrap(), &json!(3));
+    }
+
+    #[test]
+    fn test_calculate_diff_file_upload_human_text() {
+        let old = ProcessInstance {
+            id: Uuid::new_v4(),
+            definition_key: Uuid::new_v4(),
+            business_key: "BK-1".into(),
+            state: InstanceState::Running,
+            current_node: "start".into(),
+            audit_log: vec![],
+            variables: HashMap::new(),
+            active_tokens: vec![],
+            join_barriers: HashMap::new(),
+        };
+        
+        let mut new = old.clone();
+        new.variables.insert("report".into(), json!({
+            "type": "file",
+            "object_key": "file:test",
+            "filename": "report.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 1258291, // ~1.2 MB
+            "uploaded_at": "2026-04-03T12:00:00Z"
+        }));
+
+        let diff = calculate_diff(&old, &new);
+        let human = diff.human_readable.unwrap();
+        assert_eq!(human, "File 'report.pdf' uploaded (1.2 MB).");
+        
+        // test KB format
+        let mut new2 = old.clone();
+        new2.variables.insert("config".into(), json!({
+            "type": "file",
+            "object_key": "file:test",
+            "filename": "config.json",
+            "mime_type": "application/json",
+            "size_bytes": 1024, // 1.0 KB
+            "uploaded_at": "2026-04-03T12:00:00Z"
+        }));
+        
+        let diff2 = calculate_diff(&old, &new2);
+        let human2 = diff2.human_readable.unwrap();
+        assert_eq!(human2, "File 'config.json' uploaded (1.0 KB).");
     }
 
     #[test]

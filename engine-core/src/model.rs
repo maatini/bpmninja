@@ -149,6 +149,57 @@ impl Token {
 }
 
 // ---------------------------------------------------------------------------
+// File Reference
+// ---------------------------------------------------------------------------
+
+/// A typed wrapper for file-variable references stored in ProcessInstance.variables.
+/// The JSON stored in variables has `"type": "file"` as discriminator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FileReference {
+    pub object_key: String,    // "file:instance-{uuid}-{varname}-{filename}"
+    pub filename: String,      // "report.pdf"
+    pub mime_type: String,     // "application/pdf"
+    pub size_bytes: u64,       // 1245678
+    pub uploaded_at: String,   // ISO 8601 timestamp
+}
+
+impl FileReference {
+    /// Creates a new FileReference and generates the object_key.
+    pub fn new(instance_id: Uuid, var_name: &str, filename: &str, mime_type: &str, size_bytes: u64) -> Self {
+        let object_key = format!("file:{instance_id}-{var_name}-{filename}");
+        Self {
+            object_key,
+            filename: filename.to_string(),
+            mime_type: mime_type.to_string(),
+            size_bytes,
+            uploaded_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Converts this reference to a serde_json::Value for storage in variables.
+    pub fn to_variable_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "file",
+            "object_key": self.object_key,
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "size_bytes": self.size_bytes,
+            "uploaded_at": self.uploaded_at
+        })
+    }
+
+    /// Tries to parse a serde_json::Value as a FileReference.
+    /// Returns None if the value doesn't have `"type": "file"`.
+    pub fn from_variable_value(value: &serde_json::Value) -> Option<Self> {
+        if value.get("type").and_then(|t| t.as_str()) == Some("file") {
+            serde_json::from_value(value.clone()).ok()
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Process definition (validated at construction time)
 // ---------------------------------------------------------------------------
 
@@ -593,5 +644,34 @@ mod tests {
         assert_eq!(def.next_nodes("gw").len(), 3);
         // next_node returns None for multi-out nodes
         assert_eq!(def.next_node("gw"), None);
+    }
+
+    #[test]
+    fn test_file_reference_roundtrip() {
+        let instance_id = Uuid::new_v4();
+        let file_ref = FileReference::new(instance_id, "contract", "contract.pdf", "application/pdf", 1024 * 500);
+        
+        let value = file_ref.to_variable_value();
+        
+        assert_eq!(value.get("type").unwrap().as_str().unwrap(), "file");
+        assert_eq!(value.get("filename").unwrap().as_str().unwrap(), "contract.pdf");
+        
+        let restored = FileReference::from_variable_value(&value).unwrap();
+        assert_eq!(file_ref, restored);
+    }
+
+    #[test]
+    fn test_get_file_reference_returns_none_for_non_file() {
+        let not_a_file = serde_json::json!({
+            "type": "string",
+            "value": "hello"
+        });
+        
+        let result = FileReference::from_variable_value(&not_a_file);
+        assert!(result.is_none());
+        
+        // Also just a string
+        let just_a_str = serde_json::json!("file");
+        assert!(FileReference::from_variable_value(&just_a_str).is_none());
     }
 }

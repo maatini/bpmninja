@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::condition::evaluate_condition;
 use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
+use crate::model::{BpmnElement, ListenerEvent, ProcessDefinition, Token, FileReference};
 use crate::persistence::WorkflowPersistence;
 use crate::script_runner;
 
@@ -165,6 +165,22 @@ pub struct ProcessInstance {
     /// Join barriers waiting for tokens at converging gateways.
     #[serde(default)]
     pub join_barriers: HashMap<String, JoinBarrier>,
+}
+
+impl ProcessInstance {
+    /// Returns a typed FileReference if the variable exists and has type "file".
+    pub fn get_file_reference(&self, var_name: &str) -> Option<FileReference> {
+        self.variables.get(var_name)
+            .and_then(FileReference::from_variable_value)
+    }
+
+    /// Returns all variable names that contain file references.
+    pub fn file_variable_names(&self) -> Vec<String> {
+        self.variables.iter()
+            .filter(|(_, v)| FileReference::from_variable_value(v).is_some())
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,11 +1676,17 @@ impl WorkflowEngine {
 
     /// Deletes a process instance and cleans up associated pending tasks.
     pub async fn delete_instance(&mut self, instance_id: Uuid) -> EngineResult<()> {
-        if self.instances.remove(&instance_id).is_none() {
-            return Err(EngineError::NoSuchInstance(instance_id));
-        }
+        let removed_inst = self.instances.remove(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
 
         if let Some(ref persistence) = self.persistence {
+            // Delete associated files
+            for value in removed_inst.variables.values() {
+                if let Some(file_ref) = FileReference::from_variable_value(value) {
+                    let _ = persistence.delete_file(&file_ref.object_key).await;
+                }
+            }
+
             // Delete associated user tasks from persistence
             for task in self.pending_user_tasks.iter().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_user_task(task.task_id).await;

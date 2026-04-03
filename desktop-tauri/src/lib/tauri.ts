@@ -179,3 +179,34 @@ export async function getMonitoringData(): Promise<MonitoringData> {
 export async function readBpmnFile(path: string): Promise<string> {
   return invoke('read_bpmn_file', { path });
 }
+
+// ---------------------------------------------------------------------------
+// File Attachments
+// ---------------------------------------------------------------------------
+
+export interface FileReference {
+  type: 'file';
+  object_key: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  uploaded_at: string;
+}
+
+export async function uploadInstanceFile(
+  instanceId: string, varName: string, filePath: string
+): Promise<FileReference> {
+  return invoke('upload_instance_file', { instanceId, varName, filePath });
+}
+
+export async function downloadInstanceFile(
+  instanceId: string, varName: string, savePath: string
+): Promise<void> {
+  return invoke('download_instance_file', { instanceId, varName, savePath });
+}
+
+export async function deleteInstanceFile(
+  instanceId: string, varName: string
+): Promise<void> {
+  return invoke('delete_instance_file', { instanceId, varName });
+}

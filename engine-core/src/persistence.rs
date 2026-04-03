@@ -84,6 +84,13 @@ pub trait WorkflowPersistence: Send + Sync {
     /// Load all persisted pending message catches.
     async fn list_message_catches(&self) -> EngineResult<Vec<crate::engine::PendingMessageCatch>>;
 
+    /// Store a file in the instance_files Object Store.
+    async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()>;
+    /// Load a file from the instance_files Object Store.
+    async fn load_file(&self, object_key: &str) -> EngineResult<Vec<u8>>;
+    /// Delete a file from the instance_files Object Store.
+    async fn delete_file(&self, object_key: &str) -> EngineResult<()>;
+
     /// Store original BPMN 2.0 XML for a definition.
     async fn save_bpmn_xml(&self, definition_key: &str, xml: &str) -> EngineResult<()>;
     /// Load original BPMN 2.0 XML for a definition.

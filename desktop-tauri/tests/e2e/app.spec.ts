@@ -65,9 +65,9 @@ async function injectTauriMock(
     // Mutable state for the mock backend
     const mockState = serializedState;
 
-    // The Tauri v1 API calls this function for every invoke()
     (window as any).__TAURI_IPC__ = (message: any) => {
       const { cmd, callback, error, ...args } = message;
+      console.log('TAURI IPC mock:', cmd, JSON.stringify(args));
 
       // Helper to resolve the invoke promise
       const resolve = (result: any) => {
@@ -300,6 +300,35 @@ async function injectTauriMock(
               break;
             }
 
+            case 'upload_instance_file': {
+              const instId = args.instanceId as string;
+              const varName = args.varName as string;
+              const inst = mockState.processInstances.find((i: any) => i.id === instId);
+              if (inst) {
+                inst.variables[varName] = {
+                  type: 'file',
+                  filename: 'mock-upload.txt',
+                  size_bytes: 1024,
+                  mime_type: 'text/plain',
+                  object_key: 'mock-key',
+                };
+                resolve({ status: 'success' });
+              } else {
+                reject('Instance not found');
+              }
+              break;
+            }
+
+            case 'download_instance_file': {
+              resolve(null);
+              break;
+            }
+
+            case 'delete_instance_file': {
+               resolve(null);
+               break;
+            }
+
             // Tauri built-in dialog/save
             case 'plugin:dialog|save': {
               // Return a fake file path so writeTextFile can proceed
@@ -310,7 +339,11 @@ async function injectTauriMock(
             // Tauri built-in dialog/open
             case 'plugin:dialog|open': {
               // Return a fake file path for the open-file mock
-              resolve(mockState.openFileXml ? '/tmp/mock-open.bpmn' : null);
+              if (mockState.openFileXml) {
+                resolve('/tmp/mock-open.bpmn');
+              } else {
+                resolve('/tmp/mock-upload.txt');
+              }
               break;
             }
 
@@ -332,9 +365,23 @@ async function injectTauriMock(
             }
 
             default:
-              // Silently resolve null for Tauri-internal commands
-              // (dialog, fs, etc.) that use `tauri` as the cmd.
-              if (cmd === 'tauri' || cmd.startsWith('plugin:')) {
+              if (cmd === 'tauri') {
+                if (args.__tauriModule === 'Dialog') {
+                  if (args.message?.cmd === 'openDialog') {
+                    if (mockState.openFileXml) {
+                      resolve('/tmp/mock-open.bpmn');
+                    } else {
+                      resolve('/tmp/mock-upload.txt');
+                    }
+                    return;
+                  }
+                  if (args.message?.cmd === 'saveDialog') {
+                    resolve('/tmp/mock-download.bpmn');
+                    return;
+                  }
+                }
+                resolve(null);
+              } else if (cmd.startsWith('plugin:')) {
                 resolve(null);
               } else {
                 reject(`command ${cmd} not found`);
@@ -1279,5 +1326,57 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(timeline.getByText('Instance Started')).toBeVisible();
     await expect(timeline.getByText('Token Advanced')).not.toBeVisible();
     await expect(timeline.getByText('Variables Changed')).not.toBeVisible();
+  });
+
+  // ---- 26. File Attachments -----------------------------------------------
+
+  test('should allow attaching a file and display the details', async ({ page }) => {
+    await injectTauriMock(page, {
+      processInstances: [
+        {
+          id: 'inst-file-1',
+          definition_key: 'file-key',
+          business_key: 'bk-file-1',
+          state: 'Running',
+          current_node: 'Task_1',
+          audit_log: [],
+          variables: {}
+        }
+      ]
+    });
+    
+    await page.goto('/');
+    page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
+    
+    await page.locator('.nav-item', { hasText: 'Instances' }).click();
+    await expect(page.locator('.card').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.card').first().click();
+    
+    // Wait for detail pane
+    const detail = page.locator('.instance-detail');
+    await expect(detail).toBeVisible({ timeout: 5_000 });
+    
+    let dialogHandled = false;
+    page.on('dialog', dialog => {
+      dialogHandled = true;
+      console.log('Dialog type:', dialog.type(), 'Message:', dialog.message());
+      if (dialog.type() === 'prompt') {
+        dialog.accept('my_file_var');
+      } else {
+        dialog.accept();
+      }
+    });
+
+    await page.locator('button', { hasText: 'Attach File' }).click();
+    
+    // Wait for the UI to update
+    await expect(detail.locator('input.var-input').first()).toHaveValue('my_file_var', { timeout: 5000 });
+    await expect(detail.getByText('mock-upload.txt')).toBeVisible();
+    await expect(detail.getByText('(1.0 KB)')).toBeVisible();
+    
+    // Click "Download"
+    await page.locator('button', { hasText: 'Download' }).click();
+    // It should not throw any error (download_instance_file mock resolves instantly)
+    
   });
 });

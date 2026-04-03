@@ -296,6 +296,8 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
                       readOnlyNames={true}
                       deletedKeys={deletedKeys}
                       onDeletedKeysChange={setDeletedKeys}
+                      instanceId={selected.id}
+                      onVariablesRefreshRequest={() => handleSelect(selected)}
                     />
                     <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                       <button className="button save-vars-btn" onClick={handleSaveVariables}>

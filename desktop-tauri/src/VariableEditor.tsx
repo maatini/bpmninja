@@ -1,7 +1,17 @@
-import { Trash } from 'lucide-react';
+import { Trash, Paperclip, Download } from 'lucide-react';
+import { open, save } from '@tauri-apps/api/dialog';
+import { uploadInstanceFile, downloadInstanceFile, type FileReference } from './lib/tauri';
 
 // Shared type definitions for the variable editor
-export type VarType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Null';
+export type VarType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Null' | 'File';
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return bytes + ' B';
+  const kb = bytes / 1024;
+  if (kb < 1024) return kb.toFixed(1) + ' KB';
+  const mb = kb / 1024;
+  return mb.toFixed(1) + ' MB';
+}
 
 export interface VariableRow {
   name: string;
@@ -21,6 +31,7 @@ export function parseVariables(vars: Record<string, unknown>): VariableRow[] {
       if (val === null) type = 'Null';
       else if (typeof val === 'boolean') type = 'Boolean';
       else if (typeof val === 'number') type = 'Number';
+      else if (typeof val === 'object' && val !== null && (val as any).type === 'file') type = 'File';
       else if (typeof val === 'object') type = 'Object';
 
       return {
@@ -69,6 +80,8 @@ export function serializeVariables(
       result[v.name] = Boolean(v.value);
     } else if (v.type === 'Null') {
       result[v.name] = null;
+    } else if (v.type === 'File') {
+      result[v.name] = v.value;
     } else {
       result[v.name] = v.value;
     }
@@ -85,6 +98,8 @@ interface VariableEditorProps {
   /** Track deleted keys for backend synchronisation (optional). */
   deletedKeys?: Set<string>;
   onDeletedKeysChange?: (keys: Set<string>) => void;
+  instanceId?: string;
+  onVariablesRefreshRequest?: () => void;
 }
 
 /**
@@ -97,6 +112,8 @@ export function VariableEditor({
   readOnlyNames = false,
   deletedKeys,
   onDeletedKeysChange,
+  instanceId,
+  onVariablesRefreshRequest,
 }: VariableEditorProps) {
   const handleChange = (index: number, field: keyof VariableRow, newValue: unknown) => {
     const updated = [...variables];
@@ -119,6 +136,43 @@ export function VariableEditor({
 
   const handleAdd = () => {
     onChange([...variables, { name: '', type: 'String', value: '', isNew: true }]);
+  };
+
+  const handleUploadFile = async () => {
+    if (!instanceId) return;
+    try {
+      const filePaths = await open({
+        multiple: false,
+        title: 'Select File to Upload'
+      });
+      if (!filePaths || Array.isArray(filePaths)) return;
+
+      const varName = prompt('Enter a variable name for this file:');
+      if (!varName || !varName.trim()) return;
+
+      await uploadInstanceFile(instanceId, varName.trim(), filePaths as string);
+      
+      if (onVariablesRefreshRequest) {
+        onVariablesRefreshRequest();
+      }
+    } catch (e) {
+      alert(`Upload failed: ${e}`);
+    }
+  };
+
+  const handleDownloadFile = async (varName: string, filename: string) => {
+    if (!instanceId) return;
+    try {
+      const savePath = await save({
+        defaultPath: filename,
+        title: 'Save File'
+      });
+      if (!savePath) return;
+
+      await downloadInstanceFile(instanceId, varName, savePath);
+    } catch (e) {
+      alert(`Download failed: ${e}`);
+    }
   };
 
   const handleRemove = (index: number) => {
@@ -168,11 +222,13 @@ export function VariableEditor({
                   className="var-select"
                   value={v.type}
                   onChange={(e) => handleChange(idx, 'type', e.target.value)}
+                  disabled={v.type === 'File'}
                 >
                   <option value="String">String</option>
                   <option value="Number">Number</option>
                   <option value="Boolean">Boolean</option>
                   <option value="Object">Object</option>
+                  <option value="File">File</option>
                   <option value="Null">Null</option>
                 </select>
               </td>
@@ -219,6 +275,23 @@ export function VariableEditor({
                 {v.type === 'Null' && (
                   <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '0.85rem' }}>null</span>
                 )}
+                {v.type === 'File' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Paperclip size={14} />
+                    <span style={{ fontWeight: 500 }}>{(v.value as FileReference)?.filename}</span>
+                    <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                      ({formatFileSize((v.value as FileReference)?.size_bytes || 0)})
+                    </span>
+                    {instanceId && (
+                      <button 
+                        onClick={() => handleDownloadFile(v.name, (v.value as FileReference).filename)}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Download size={14} /> Download
+                      </button>
+                    )}
+                  </div>
+                )}
               </td>
               <td style={{ textAlign: 'center' }}>
                 <button
@@ -241,7 +314,7 @@ export function VariableEditor({
           )}
         </tbody>
       </table>
-      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-start' }}>
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-start', gap: '8px' }}>
         <button
           className="button"
           onClick={handleAdd}
@@ -249,6 +322,15 @@ export function VariableEditor({
         >
           + Add Variable
         </button>
+        {instanceId && (
+          <button
+            className="button"
+            onClick={handleUploadFile}
+            style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Paperclip size={16} /> Attach File
+          </button>
+        )}
       </div>
     </>
   );
