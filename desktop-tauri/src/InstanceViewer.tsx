@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Focus } from 'lucide-react';
 
 // @ts-ignore
 import NavigatedViewer from 'bpmn-js/lib/NavigatedViewer';
@@ -69,6 +70,12 @@ export function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewe
     };
   }, [xml, activeNodeId, onNodeClick]);
 
+  const handleCenter = () => {
+    if (viewerRef.current) {
+      viewerRef.current.get('canvas').zoom('fit-viewport', 'auto');
+    }
+  };
+
   return (
     <>
       <style>
@@ -80,10 +87,19 @@ export function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewe
           }
         `}
       </style>
-      <div 
-        ref={containerRef} 
-        style={{ width: '100%', height: '300px', border: '1px solid #e2e8f0', borderRadius: '4px', backgroundColor: '#fafafa', marginBottom: '16px' }}
-      />
+      <div style={{ position: 'relative', marginBottom: '16px' }}>
+        <div 
+          ref={containerRef} 
+          style={{ width: '100%', height: '300px', border: '1px solid #e2e8f0', borderRadius: '4px', backgroundColor: '#fafafa' }}
+        />
+        <button 
+          onClick={handleCenter}
+          style={{ position: 'absolute', bottom: '48px', right: '16px', zIndex: 99, padding: '6px 8px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          title="Center Workflow"
+        >
+          <Focus size={18} color="#475569" />
+        </button>
+      </div>
     </>
   );
 }

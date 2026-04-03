@@ -158,6 +158,9 @@ export function VariableEditor({
                   placeholder="Variable name"
                   readOnly={readOnlyNames && !v.isNew}
                   style={{ backgroundColor: readOnlyNames && !v.isNew ? '#f8fafc' : '#ffffff' }}
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  spellCheck={false}
                 />
               </td>
               <td>
@@ -181,6 +184,9 @@ export function VariableEditor({
                     value={v.value as string}
                     onChange={(e) => handleChange(idx, 'value', e.target.value)}
                     placeholder="String value"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    spellCheck={false}
                   />
                 )}
                 {v.type === 'Number' && (

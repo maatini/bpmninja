@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { getInstanceHistory, type HistoryEntry, type HistoryQuery } from './lib/tauri';
 import { 
   Play, CheckCircle, Activity, Settings, 
-  XCircle, Filter, Camera, ArrowRightCircle
+  XCircle, Filter, Camera, ArrowRightCircle, X
 } from 'lucide-react';
 
 interface HistoryTimelineProps {
   instanceId: string;
+  refreshTrigger?: number;
 }
 
-export function HistoryTimeline({ instanceId }: HistoryTimelineProps) {
+export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimelineProps) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,6 +18,9 @@ export function HistoryTimeline({ instanceId }: HistoryTimelineProps) {
   // Filters
   const [eventTypes, setEventTypes] = useState<string>('');
   const [actorTypes, setActorTypes] = useState<string>('');
+
+  // Dialog State
+  const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -38,7 +42,7 @@ export function HistoryTimeline({ instanceId }: HistoryTimelineProps) {
   useEffect(() => {
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId, eventTypes, actorTypes]);
+  }, [instanceId, eventTypes, actorTypes, refreshTrigger]);
 
   const getEventIcon = (type: string) => {
     switch (type) {
@@ -103,70 +107,104 @@ export function HistoryTimeline({ instanceId }: HistoryTimelineProps) {
         <div style={{ fontSize: '0.9rem', color: '#64748b' }}>No history entries found for the current filters.</div>
       )}
 
-      {/* Timeline List */}
-      <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', paddingLeft: '8px' }}>
-        {/* Subtle vertical line behind items */}
-        <div style={{ position: 'absolute', left: '22px', top: '24px', bottom: '24px', width: '2px', backgroundColor: '#e2e8f0', zIndex: 0 }}></div>
-        
-        {entries.map((entry) => (
-          <div key={entry.id} style={{ display: 'flex', gap: '16px', marginBottom: '20px', position: 'relative', zIndex: 1 }}>
-            
-            {/* Left Icon */}
-            <div style={{ 
-              width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#fff', 
-              border: '2px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 
-            }}>
-              {getEventIcon(entry.event_type)}
-            </div>
-
-            {/* Content Body */}
-            <div style={{ flex: 1, backgroundColor: '#fff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              
-              {/* Header Row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <strong style={{ fontSize: '0.95rem', color: '#1e293b' }}>
-                    {(entry.event_type || 'Unknown Event').replace(/([A-Z])/g, ' $1').trim()}
-                  </strong>
-                  {entry.node_id && (
-                    <span style={{ fontSize: '0.75rem', padding: '2px 6px', backgroundColor: '#f1f5f9', color: '#475569', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
-                      Node: {entry.node_id}
-                    </span>
-                  )}
-                  {/* Snapshot Badge */}
-                  {entry.is_snapshot && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', padding: '2px 6px', backgroundColor: '#eff6ff', color: '#1d4ed8', borderRadius: '4px', border: '1px solid #bfdbfe' }} title="Full process state snapshot attached">
-                      <Camera size={12} /> Snapshot
-                    </span>
-                  )}
-                </div>
-
-                <div style={{ fontSize: '0.8rem', color: '#64748b' }} title={new Date(entry.timestamp).toLocaleString()}>
-                  {new Date(entry.timestamp).toLocaleTimeString()}
-                </div>
-              </div>
-
-              {/* Description & Human Diff */}
-              <div style={{ fontSize: '0.9rem', color: '#475569', marginBottom: '8px' }}>
-                {entry.description}
-                {entry.diff?.human_readable && (
-                  <div style={{ marginTop: '4px', padding: '6px 10px', backgroundColor: '#fcfcfc', borderLeft: '3px solid #cbd5e1', fontSize: '0.85rem' }}>
-                    {entry.diff.human_readable}
+      {/* Compact List View */}
+      <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <thead style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+            <tr>
+              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: '#475569', width: '40px' }}></th>
+              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>Action</th>
+              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>Who</th>
+              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry) => (
+              <tr 
+                key={entry.id} 
+                onClick={() => setSelectedEntry(entry)}
+                style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer', backgroundColor: '#fff', transition: 'background 0.2s' }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
+              >
+                <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                  {getEventIcon(entry.event_type)}
+                </td>
+                <td style={{ padding: '10px 16px', fontSize: '0.85rem', color: '#1e293b', fontWeight: 500 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Snapshot details">
+                    {(entry.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
+                    {entry.is_snapshot && <Camera size={12} color="#64748b" />}
                   </div>
-                )}
-              </div>
-
-              {/* Actor Badge */}
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                 <span className={getActorColor(entry.actor_type)} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', border: '1px solid', textTransform: 'capitalize' }}>
-                   {(entry.actor_type || 'Unknown').toLowerCase()}{entry.actor_id ? ` (${entry.actor_id})` : ''}
-                 </span>
-              </div>
-
-            </div>
-          </div>
-        ))}
+                </td>
+                <td style={{ padding: '10px 16px' }}>
+                  <span className={getActorColor(entry.actor_type)} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', border: '1px solid', textTransform: 'capitalize' }}>
+                    {(entry.actor_type || 'Unknown').toLowerCase()}{entry.actor_id ? ` (${entry.actor_id})` : ''}
+                  </span>
+                </td>
+                <td style={{ padding: '10px 16px', fontSize: '0.85rem', color: '#64748b' }}>
+                  {new Date(entry.timestamp).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {/* Detail Dialog */}
+      {selectedEntry && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ backgroundColor: '#fff', borderRadius: '8px', padding: '24px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', position: 'relative' }}>
+            <button 
+              onClick={() => setSelectedEntry(null)} 
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
+            >
+              <X size={20} />
+            </button>
+            
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: 0, color: '#1e293b', fontSize: '1.25rem' }}>
+              {getEventIcon(selectedEntry.event_type)}
+              {(selectedEntry.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
+            </h2>
+
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+              <span className={getActorColor(selectedEntry.actor_type)} style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '12px', border: '1px solid', textTransform: 'capitalize' }}>
+                {selectedEntry.actor_type || 'Unknown'}{selectedEntry.actor_id ? ` (${selectedEntry.actor_id})` : ''}
+              </span>
+              <span style={{ fontSize: '0.85rem', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+                {new Date(selectedEntry.timestamp).toLocaleString()}
+              </span>
+              {selectedEntry.node_id && (
+                <span style={{ fontSize: '0.75rem', padding: '4px 10px', backgroundColor: '#f1f5f9', color: '#475569', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
+                  Node: {selectedEntry.node_id}
+                </span>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.95rem', color: '#334155' }}>
+              {selectedEntry.description}
+            </div>
+
+            {selectedEntry.diff?.human_readable && (
+              <div style={{ marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '0.9rem', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>Changes</h3>
+                <div style={{ padding: '10px 14px', backgroundColor: '#fcfcfc', borderLeft: '3px solid #cbd5e1', fontSize: '0.9rem', color: '#475569', whiteSpace: 'pre-wrap' }}>
+                  {selectedEntry.diff.human_readable}
+                </div>
+              </div>
+            )}
+
+            {selectedEntry.diff?.changes && Object.keys(selectedEntry.diff.changes).length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '0.9rem', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>Raw Data Changes</h3>
+                <pre style={{ backgroundColor: '#1e293b', color: '#e2e8f0', padding: '12px', borderRadius: '6px', fontSize: '0.85rem', overflowX: 'auto' }}>
+                  {JSON.stringify(selectedEntry.diff.changes, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

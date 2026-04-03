@@ -1091,7 +1091,7 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         let old_state = self.instances.get(&instance_id).cloned();
 
-        {
+        let updated_vars = {
             let instance = self
                 .instances
                 .get_mut(&instance_id)
@@ -1131,6 +1131,25 @@ impl WorkflowEngine {
                 "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
                 instance_id
             );
+            
+            instance.variables.clone()
+        };
+
+        // Sync token variables in pending tasks so they don't overwrite changes on completion
+        let mut user_task_ids = Vec::new();
+        for task in &mut self.pending_user_tasks {
+            if task.instance_id == instance_id {
+                task.token.variables = updated_vars.clone();
+                user_task_ids.push(task.task_id);
+            }
+        }
+
+        let mut service_task_ids = Vec::new();
+        for task in &mut self.pending_service_tasks {
+            if task.instance_id == instance_id {
+                task.token.variables = updated_vars.clone();
+                service_task_ids.push(task.id);
+            }
         }
 
         self.record_history_event(
@@ -1143,6 +1162,13 @@ impl WorkflowEngine {
         ).await;
 
         self.persist_instance(instance_id).await;
+
+        for tid in user_task_ids {
+            self.persist_user_task(tid).await;
+        }
+        for sid in service_task_ids {
+            self.persist_service_task(sid).await;
+        }
 
         Ok(())
     }

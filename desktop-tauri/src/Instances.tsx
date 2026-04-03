@@ -34,6 +34,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
   const [pendingServiceTasks, setPendingServiceTasks] = useState<PendingServiceTask[]>([]);
   const [variables, setVariables] = useState<VariableRow[]>([]);
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
 
   // Variables state is typed using VariableRow from VariableEditor
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
     try {
       const list = await listInstances();
       setInstances(list);
+      setHistoryRefreshTrigger(prev => prev + 1);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -60,6 +62,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
     setDetailLoading(true);
     setDefinitionXml(null);
     setShowNodeDetails(false);
+    setHistoryRefreshTrigger(prev => prev + 1);
     try {
       const details = await getInstanceDetails(inst.id);
       setSelected(details);
@@ -112,6 +115,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
       setSelected(updated);
       setVariables(parseVariables(updated.variables));
       setDeletedKeys(new Set());
+      setHistoryRefreshTrigger(prev => prev + 1);
     } catch (e) {
       alert('Error saving variables: ' + e);
     }
@@ -276,7 +280,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
                   {/* Execution History Timeline */}
                   <div style={{ marginBottom: 16 }}>
                     <strong>Execution History:</strong>
-                    <HistoryTimeline instanceId={selected.id} />
+                    <HistoryTimeline instanceId={selected.id} refreshTrigger={historyRefreshTrigger} />
                   </div>
 
                   {/* Editable variables */}

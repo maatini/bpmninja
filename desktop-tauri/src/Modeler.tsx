@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/api/dialog';
 import { readBpmnFile } from './lib/tauri';
-import { FilePlus, FolderOpen, UploadCloud, Play } from 'lucide-react';
+import { FilePlus, FolderOpen, UploadCloud, Play, Focus } from 'lucide-react';
 
 // Make sure to ignore TS types for modules that might not have types
 // @ts-ignore
@@ -106,6 +106,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
       
       modeler.on('import.done', async ({ error }: any) => {
         if (!error) {
+          modeler.get('canvas').zoom('fit-viewport', 'auto');
           try {
             const { xml } = await modeler.saveXML({ format: true });
             if (xml) localStorage.setItem('minibpm_last_workflow', xml);
@@ -170,6 +171,12 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
     }
   };
 
+  const handleCenter = () => {
+    if (modelerRef.current) {
+      modelerRef.current.get('canvas').zoom('fit-viewport', 'auto');
+    }
+  };
+
   const handleStartClick = () => {
     setStartVariables([]);
     setBusinessKey('');
@@ -206,8 +213,15 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
         <button className="button" onClick={handleDeploy} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><UploadCloud size={16} /> Deploy Process</button>
         <button className="button" onClick={handleStartClick} style={{ backgroundColor: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}><Play size={16} /> Start Instance</button>
       </div>
-      <div className="modeler-container">
+      <div className="modeler-container" style={{ position: 'relative' }}>
         <div className="canvas" ref={containerRef} />
+        <button 
+          onClick={handleCenter}
+          style={{ position: 'absolute', bottom: '48px', right: '316px', zIndex: 99, padding: '6px 8px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          title="Center Workflow"
+        >
+          <Focus size={18} color="#475569" />
+        </button>
         <div className="properties-panel-parent" ref={propertiesRef} />
       </div>
 
