@@ -5,6 +5,8 @@
 
 use super::*;
 use crate::model::ProcessDefinitionBuilder;
+use crate::condition::evaluate_condition;
+use crate::model::ListenerEvent;
 
 
 async fn complete_all_service_tasks(engine: &mut WorkflowEngine, worker: &str, vars: HashMap<String, Value>) {
@@ -972,6 +974,7 @@ async fn restore_instance_loads_from_persistence() {
         id: Uuid::new_v4(),
         definition_key: def_key,
         business_key: "BK1".into(),
+        parent_instance_id: None,
         state: InstanceState::Completed,
         current_node: "end".into(),
         audit_log: vec![],
@@ -1206,4 +1209,67 @@ async fn boundary_error_event_catches_error() {
     let inst = engine.get_instance_details(inst_id).unwrap();
     assert_eq!(inst.state, InstanceState::Completed);
     assert_eq!(inst.current_node, "end2");
+}
+
+#[tokio::test]
+async fn call_activity_lifecycle() {
+    let mut engine = WorkflowEngine::new();
+    
+    // Deploy Child
+    let child_def = ProcessDefinitionBuilder::new("child_proc")
+        .node("start", BpmnElement::StartEvent)
+        .node("child_task", BpmnElement::UserTask("child_assignee".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "child_task")
+        .flow("child_task", "end")
+        .build()
+        .unwrap();
+    let _child_key = engine.deploy_definition(child_def).await;
+    
+    // Deploy Parent
+    let parent_def = ProcessDefinitionBuilder::new("parent_proc")
+        .node("start", BpmnElement::StartEvent)
+        .node("call", BpmnElement::CallActivity { called_element: "child_proc".into() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "call")
+        .flow("call", "end")
+        .build()
+        .unwrap();
+    let parent_key = engine.deploy_definition(parent_def).await;
+    
+    // Start Parent
+    let parent_id = engine.start_instance(parent_key).await.unwrap();
+    
+    // Parent should be blocked on Call Activity
+    let parent_inst = engine.get_instance_details(parent_id).unwrap();
+    if let InstanceState::WaitingOnCallActivity { sub_instance_id, .. } = parent_inst.state {
+        // Child instance should exist
+        let child_inst = engine.get_instance_details(sub_instance_id).unwrap();
+        assert_eq!(child_inst.parent_instance_id, Some(parent_id));
+        assert!(matches!(child_inst.state, InstanceState::WaitingOnUserTask { .. }));
+        assert!(matches!(child_inst.state, InstanceState::WaitingOnUserTask { .. }));
+        
+        // Complete the child's user task
+        let tasks = engine.get_pending_user_tasks();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].instance_id, sub_instance_id);
+        
+        let child_task_id = tasks[0].task_id;
+        
+        // Add a variable to child to ensure parent gets it
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("from_child".into(), serde_json::json!("hello parent"));
+        engine.complete_user_task(child_task_id, vars).await.unwrap();
+        
+        // Child should be completed
+        let child_inst = engine.get_instance_details(sub_instance_id).unwrap();
+        assert_eq!(child_inst.state, InstanceState::Completed);
+        
+        // Parent should now be automatically resumed and completed
+        let parent_inst = engine.get_instance_details(parent_id).unwrap();
+        assert_eq!(parent_inst.state, InstanceState::Completed);
+        assert_eq!(parent_inst.variables.get("from_child").unwrap().as_str().unwrap(), "hello parent");
+    } else {
+        panic!("Parent not waiting on call activity: {:?}", parent_inst.state);
+    }
 }

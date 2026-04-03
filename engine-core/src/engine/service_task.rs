@@ -166,7 +166,7 @@ impl WorkflowEngine {
             )?;
         }
 
-        let next = super::resolve_next_target(&def, &task.node_id, &token.variables)?;
+        let next = crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;
 
         token.current_node = next.clone();
         // Update instance current_node so UI highlights correctly
@@ -190,7 +190,7 @@ impl WorkflowEngine {
             old_state.as_ref()
         ).await;
 
-        self.run_instance(instance_id, token).await
+        self.run_instance_batch(instance_id, token).await
     }
 
     /// Reports a failure for an service task.
@@ -354,7 +354,7 @@ impl WorkflowEngine {
             let mut token = task.token;
             let def = self.definitions.get(&def_key)
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
-            let next = super::resolve_next_target(def, &boundary_id, &token.variables)?;
+            let next = crate::engine::executor::resolve_next_target(def, &boundary_id, &token.variables)?;
             
             token.current_node = next.clone();
             {
@@ -365,7 +365,7 @@ impl WorkflowEngine {
             
             self.remove_persisted_service_task(task_id).await;
             self.persist_instance(instance_id).await;
-            Box::pin(self.run_instance(instance_id, token)).await?;
+            self.run_instance_batch(instance_id, token).await?;
             return Ok(());
         }
 

@@ -1,0 +1,597 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use chrono::Utc;
+use uuid::Uuid;
+
+use crate::condition::evaluate_condition;
+use crate::error::{EngineError, EngineResult};
+use crate::model::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
+use crate::engine::{WorkflowEngine, types::*};
+use crate::engine::boundary::setup_boundary_events;
+use crate::engine::gateway::{execute_parallel_gateway, execute_exclusive_gateway, execute_inclusive_gateway};
+use crate::script_runner;
+
+// Helper function resolving next target
+pub(crate) fn resolve_next_target(
+    def: &ProcessDefinition,
+    from: &str,
+    variables: &std::collections::HashMap<String, serde_json::Value>,
+) -> EngineResult<String> {
+    def.next_nodes(from)
+        .iter()
+        .find(|f| {
+            f.condition
+                .as_ref()
+                .map(|c| evaluate_condition(c, variables))
+                .unwrap_or(true)
+        })
+        .map(|f| f.target.clone())
+        .ok_or_else(|| EngineError::InvalidDefinition(format!("No matching outgoing flow from '{from}'")))
+}
+
+impl WorkflowEngine {
+    /// Non-recursive batched execution loop.
+    pub(crate) async fn run_instance_batch(
+        &mut self,
+        instance_id: Uuid,
+        initial_token: Token,
+    ) -> EngineResult<()> {
+        let mut queue = VecDeque::new();
+        queue.push_back(initial_token);
+
+        // Keep track of any tokens that need to be saved
+        let mut tokens_to_save = Vec::new();
+
+        while let Some(mut token) = queue.pop_front() {
+            let old_state = self.instances.get(&instance_id).cloned();
+            let current_gateway_id = token.current_node.clone();
+            
+            let action = self.execute_step(instance_id, &mut token).await?;
+            
+            let (event_type, description) = match &action {
+                NextAction::Continue(_) => (crate::history::HistoryEventType::TokenAdvanced, "Token advanced".to_string()),
+                NextAction::ContinueMultiple(_) => (crate::history::HistoryEventType::TokenForked, "Token forked at gateway".to_string()),
+                NextAction::WaitForJoin { .. } => (crate::history::HistoryEventType::TokenAdvanced, "Token arrived at join".to_string()),
+                NextAction::WaitForUser(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for user task".to_string()),
+                NextAction::WaitForServiceTask(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for service task".to_string()),
+                NextAction::WaitForTimer(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for timer".to_string()),
+                NextAction::WaitForMessage(_) => (crate::history::HistoryEventType::TokenAdvanced, "Waiting for message".to_string()),
+                NextAction::WaitForCallActivity { .. } => (crate::history::HistoryEventType::CallActivityStarted, "Spawned call activity".to_string()),
+                NextAction::Complete => (crate::history::HistoryEventType::BranchCompleted, "Execution path completed".to_string()),
+            };
+            
+            self.record_history_event(
+                instance_id,
+                event_type,
+                &description,
+                crate::history::ActorType::Engine,
+                None,
+                old_state.as_ref()
+            ).await;
+
+            match action {
+                NextAction::Continue(next_token) => {
+                    tokens_to_save.push(next_token.clone());
+                    queue.push_back(next_token);
+                }
+                NextAction::ContinueMultiple(forked_tokens) => {
+                    let branch_count = forked_tokens.len();
+                    
+                    self.register_join_barrier_if_needed(instance_id, &current_gateway_id, branch_count)?;
+
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        inst.state = InstanceState::ParallelExecution { active_token_count: inst.active_tokens.len() + branch_count };
+                        inst.current_node = current_gateway_id.clone();
+                    }
+
+                    for (idx, fork_token) in forked_tokens.into_iter().enumerate() {
+                        tokens_to_save.push(fork_token.clone());
+                        self.register_active_token(instance_id, &current_gateway_id, idx, &fork_token)?;
+                        queue.push_back(fork_token);
+                    }
+                }
+                NextAction::WaitForJoin { gateway_id, token: arrived_token } => {
+                    let merged = self.arrive_at_join(instance_id, &gateway_id, arrived_token).await?;
+                    if let Some(merged_token) = merged {
+                        if let Some(inst) = self.instances.get_mut(&instance_id) {
+                            inst.state = InstanceState::Running;
+                            inst.current_node = gateway_id.clone();
+                        }
+                        queue.push_back(merged_token);
+                    }
+                }
+                NextAction::WaitForUser(pending) => {
+                    let task_id = pending.task_id;
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnUserTask { task_id };
+                        }
+                    }
+                    self.pending_user_tasks.push(pending);
+                    self.persist_user_task(task_id).await;
+                }
+                NextAction::WaitForServiceTask(svc_task) => {
+                    let task_id = svc_task.id;
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnServiceTask { task_id };
+                        }
+                    }
+                    self.pending_service_tasks.push(svc_task);
+                    self.persist_service_task(task_id).await;
+                }
+                NextAction::WaitForTimer(pending) => {
+                    let timer_id = pending.id;
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnTimer { timer_id };
+                        }
+                    }
+                    self.pending_timers.push(pending);
+                    self.persist_timer(timer_id).await;
+                }
+                NextAction::WaitForMessage(pending) => {
+                    let message_id = pending.id;
+                    if let Some(inst) = self.instances.get_mut(&instance_id) {
+                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                            inst.state = InstanceState::WaitingOnMessage { message_id };
+                        }
+                    }
+                    self.pending_message_catches.push(pending);
+                    self.persist_message_catch(message_id).await;
+                }
+                NextAction::WaitForCallActivity { called_element, token: call_token } => {
+                    // Start the child subprocess
+                    let mut child_def_key = None;
+                    for (k, v) in &self.definitions {
+                        if v.id == called_element {
+                            child_def_key = Some(*k);
+                            break;
+                        }
+                    }
+                    
+                    if let Some(child_key) = child_def_key {
+                        // Put the parent sub process in waiting state
+                        
+                        // We must first update the state so that the child can find our state if it finishes synchronously.
+                        let sub_instance_id = Uuid::new_v4(); // placeholder, assigned by spawn and replaced
+                        
+                        if let Some(inst) = self.instances.get_mut(&instance_id) {
+                            if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                                inst.state = InstanceState::WaitingOnCallActivity { sub_instance_id, token: call_token.clone() };
+                            }
+                        }
+                        
+                        log::info!("Instance {instance_id}: Triggering Call Activity '{}'", called_element);
+                        
+                        // Now we need to start the child instance asynchronously or recursively.
+                        // Actually, we can just call an internal start mechanism that accepts parent_id.
+                        // We will add spawn_call_activity helper on WorkflowEngine.
+                        match self.spawn_call_activity(child_key, instance_id, call_token.current_node.clone(), call_token.variables.clone()).await {
+                            Ok(spawned_id) => {
+                                // Update the actual spawned ID
+                                if let Some(inst) = self.instances.get_mut(&instance_id) {
+                                    if let InstanceState::WaitingOnCallActivity { sub_instance_id: ref mut sub, .. } = inst.state {
+                                        *sub = spawned_id;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to start call activity '{}': {}", called_element, e);
+                                // Optional: we could throw a BPMN error or mark as crashed
+                            }
+                        }
+                    } else {
+                        log::error!("Call Activity target '{}' not found deployed.", called_element);
+                    }
+                }
+                NextAction::Complete => {
+                    self.complete_branch_token(instance_id, token.id)?;
+                    if self.all_tokens_completed(instance_id)? {
+                        if let Some(inst) = self.instances.get_mut(&instance_id) {
+                            inst.state = InstanceState::Completed;
+                            inst.audit_log.push("⏹ All tokens completed. Process fully completed.".to_string());
+                        }
+                        self.record_history_event(
+                            instance_id,
+                            crate::history::HistoryEventType::InstanceCompleted,
+                            "Process fully completed",
+                            crate::history::ActorType::Engine,
+                            None,
+                            None
+                        ).await;
+                        
+                        // Check if we need to resume a parent instance (Call Activity)
+                        // Note: we can't do this while borrowing `self.instances`, so we do this here.
+                        // Actually wait we need to avoid borrowing conflicts! 
+                        // It's safe to just call the method here.
+                    }
+                }
+            }
+        } // end while
+
+        // Flush persistence for the entire batch
+        self.persist_instance(instance_id).await;
+        if let Some(p) = &self.persistence {
+            for t in tokens_to_save {
+                if let Err(e) = p.save_token(&t).await {
+                    log::error!("Failed to save token: {}", e);
+                }
+            }
+        }
+        
+        // After batch finishes for this instance, if it completed, check parent
+        let mut completed = false;
+        if let Some(inst) = self.instances.get(&instance_id) {
+            completed = matches!(inst.state, InstanceState::Completed);
+        }
+        if completed {
+            self.resume_parent_if_needed(instance_id).await?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn execute_step(
+        &mut self,
+        instance_id: Uuid,
+        token: &mut Token,
+    ) -> EngineResult<NextAction> {
+        let def_key = {
+            let instance = self
+                .instances
+                .get(&instance_id)
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            instance.definition_key
+        };
+
+        let def = self
+            .definitions
+            .get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?;
+
+        let current_id = token.current_node.clone();
+        let element = def
+            .get_node(&current_id)
+            .ok_or_else(|| EngineError::NoSuchNode(current_id.clone()))?
+            .clone();
+
+        let def_clone = Arc::clone(def);
+
+        let mut start_audits = Vec::new();
+        script_runner::run_node_scripts(
+            &self.script_engine,
+            instance_id,
+            token,
+            &def_clone,
+            &current_id,
+            ListenerEvent::Start,
+            &mut start_audits,
+        )?;
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.audit_log.append(&mut start_audits);
+            inst.variables = token.variables.clone();
+        }
+
+        match &element {
+            BpmnElement::StartEvent | BpmnElement::TimerStartEvent(_) | BpmnElement::MessageStartEvent { .. } => {
+                log::debug!("Passing through start event '{current_id}'");
+                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                token.current_node = next.clone();
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = next;
+                Ok(NextAction::Continue(token.clone()))
+            }
+
+            BpmnElement::EndEvent => {
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("⏹ Process completed at end event '{current_id}'"));
+                log::info!("Instance {instance_id}: reached end event '{current_id}'");
+                Ok(NextAction::Complete)
+            }
+
+            BpmnElement::UserTask(assignee) => {
+                let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
+                for t in pending_timers {
+                    self.pending_timers.push(t);
+                }
+
+                let pending = PendingUserTask {
+                    task_id: Uuid::new_v4(),
+                    instance_id,
+                    node_id: current_id.clone(),
+                    assignee: assignee.clone(),
+                    token: token.clone(),
+                    created_at: Utc::now(),
+                };
+
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("👤 User task '{current_id}' assigned to '{assignee}' — waiting (task_id: {})", pending.task_id));
+                log::info!("Instance {instance_id}: user task '{current_id}' pending for '{assignee}'");
+
+                Ok(NextAction::WaitForUser(pending))
+            }
+
+            BpmnElement::ServiceTask { topic } => {
+                let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
+                for t in pending_timers {
+                    self.pending_timers.push(t);
+                }
+
+                let svc_task = PendingServiceTask {
+                    id: Uuid::new_v4(),
+                    instance_id,
+                    definition_key: def_key,
+                    node_id: current_id.clone(),
+                    topic: topic.clone(),
+                    token: token.clone(),
+                    created_at: Utc::now(),
+                    worker_id: None,
+                    lock_expiration: None,
+                    retries: 3,
+                    error_message: None,
+                    error_details: None,
+                };
+
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("🔗 Service task '{current_id}' created for topic '{topic}' (task_id: {})", svc_task.id));
+                log::info!("Instance {instance_id}: service task '{current_id}' pending for topic '{topic}'");
+
+                Ok(NextAction::WaitForServiceTask(svc_task))
+            }
+
+            BpmnElement::ParallelGateway => {
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let action = execute_parallel_gateway(&def_clone, &current_id, token)?;
+                if let NextAction::ContinueMultiple(ref f) = action {
+                    let inst = self.instances.get_mut(&instance_id).unwrap();
+                    inst.current_node = current_id.clone();
+                    inst.audit_log.push(format!("■ Parallel gateway '{current_id}' → forked to {} path(s)", f.len()));
+                }
+                Ok(action)
+            }
+
+            BpmnElement::ExclusiveGateway { default } => {
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let action = execute_exclusive_gateway(&def_clone, &current_id, token, default)?;
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.audit_log.push(format!("◆ Exclusive gateway '{current_id}' → took path to '{}'", token.current_node));
+                inst.current_node = token.current_node.clone();
+                Ok(action)
+            }
+
+            BpmnElement::InclusiveGateway => {
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let action = execute_inclusive_gateway(&def_clone, &current_id, token)?;
+                if let NextAction::ContinueMultiple(ref f) = action {
+                    let inst = self.instances.get_mut(&instance_id).unwrap();
+                    inst.current_node = current_id.clone();
+                    inst.audit_log.push(format!("◇ Inclusive gateway '{current_id}' → forked to {} path(s)", f.len()));
+                }
+                Ok(action)
+            }
+            
+            BpmnElement::TimerCatchEvent(dur) => {
+                let pending = PendingTimer {
+                    id: Uuid::new_v4(),
+                    instance_id,
+                    node_id: current_id.clone(),
+                    expires_at: Utc::now() + chrono::Duration::from_std(*dur).unwrap_or(chrono::Duration::seconds(0)),
+                    token: token.clone(),
+                };
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("⏱ Timer catch event '{current_id}' — waiting"));
+                Ok(NextAction::WaitForTimer(pending))
+            }
+
+            BpmnElement::MessageCatchEvent { message_name } => {
+                let pending = PendingMessageCatch {
+                    id: Uuid::new_v4(),
+                    instance_id,
+                    node_id: current_id.clone(),
+                    message_name: message_name.clone(),
+                    token: token.clone(),
+                };
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("✉️ Message catch event '{current_id}' waiting for '{message_name}'"));
+                Ok(NextAction::WaitForMessage(pending))
+            }
+            
+            BpmnElement::CallActivity { called_element } => {
+                let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
+                for t in pending_timers {
+                    self.pending_timers.push(t);
+                }
+                
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("🔗 Call Activity '{current_id}' invoking process '{called_element}'"));
+                log::info!("Instance {instance_id}: call activity '{current_id}' invoking '{called_element}'");
+                
+                Ok(NextAction::WaitForCallActivity { called_element: called_element.clone(), token: token.clone() })
+            }
+            
+            BpmnElement::ErrorEndEvent { error_code } => {
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = current_id.clone();
+                inst.audit_log.push(format!("💥 Process completed at error end '{current_id}' with code '{error_code}'"));
+                Ok(NextAction::Complete)
+            }
+            
+            BpmnElement::BoundaryTimerEvent { .. } | BpmnElement::BoundaryErrorEvent { .. } => {
+                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
+                token.current_node = next.clone();
+                let inst = self.instances.get_mut(&instance_id).unwrap();
+                inst.current_node = next;
+                Ok(NextAction::Continue(token.clone()))
+            }
+        }
+    }
+
+    // ----- Helper: Token-Registry & Parallel Execution ---------------------
+
+    pub(crate) fn register_join_barrier_if_needed(
+        &mut self,
+        instance_id: Uuid,
+        split_gateway_id: &str,
+        branch_count: usize,
+    ) -> EngineResult<()> {
+        let def_key = self.instances.get(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?.definition_key;
+        let def = self.definitions.get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
+        
+        if let Some(join_id) = self.find_downstream_join(&def, split_gateway_id) {
+            let inst = self.instances.get_mut(&instance_id)
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            inst.join_barriers.insert(join_id.clone(), JoinBarrier {
+                gateway_node_id: join_id.clone(),
+                expected_count: branch_count,
+                arrived_tokens: Vec::new(),
+            });
+            log::debug!("Registered JoinBarrier for join '{join_id}' (expected: {branch_count})");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn find_downstream_join(&self, def: &ProcessDefinition, start_node: &str) -> Option<String> {
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        for flow in def.next_nodes(start_node) {
+            queue.push_back(flow.target.clone());
+        }
+        
+        while let Some(node) = queue.pop_front() {
+            if visited.contains(&node) { continue; }
+            visited.insert(node.clone());
+            
+            if def.is_join_gateway(&node) {
+                return Some(node);
+            }
+            
+            for flow in def.next_nodes(&node) {
+                queue.push_back(flow.target.clone());
+            }
+        }
+        None
+    }
+
+    pub(crate) fn register_active_token(&mut self, instance_id: Uuid, fork_id: &str, branch_index: usize, token: &Token) -> EngineResult<()> {
+        let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        inst.active_tokens.push(ActiveToken {
+            token: token.clone(),
+            fork_id: Some(fork_id.to_string()),
+            branch_index,
+            completed: false,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn arrive_at_join(
+        &mut self,
+        instance_id: Uuid,
+        gateway_id: &str,
+        token: Token,
+    ) -> EngineResult<Option<Token>> {
+        let def_key = self.instances.get(&instance_id)
+             .ok_or(EngineError::NoSuchInstance(instance_id))?.definition_key;
+        let def = self.definitions.get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
+        
+        let expected = def.incoming_flow_count(gateway_id);
+        let inst = self.instances.get_mut(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        
+        let barrier = inst.join_barriers.entry(gateway_id.to_string()).or_insert_with(|| JoinBarrier {
+            gateway_node_id: gateway_id.to_string(),
+            expected_count: expected,
+            arrived_tokens: Vec::new(),
+        });
+        
+        barrier.arrived_tokens.push(token.clone());
+        let current_arrived = barrier.arrived_tokens.len();
+        
+        inst.audit_log.push(format!("➔ Token arrived at join '{}' ({}/{})", gateway_id, current_arrived, barrier.expected_count));
+        
+        if current_arrived >= barrier.expected_count {
+            let all_tokens = barrier.arrived_tokens.clone();
+            inst.join_barriers.remove(gateway_id);
+            
+            for t in &all_tokens {
+                if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == t.id) {
+                    active.completed = true;
+                }
+            }
+            
+            let mut merged_vars = std::collections::HashMap::new();
+            for t in &all_tokens {
+                merged_vars.extend(t.variables.clone());
+            }
+            
+            let mut merged_token = Token::with_variables(gateway_id, merged_vars);
+            merged_token.is_merged = true;
+            inst.audit_log.push(format!("🔗 Join '{}' completed. Tokens merged.", gateway_id));
+            
+            self.record_history_event(
+                instance_id,
+                crate::history::HistoryEventType::TokenJoined,
+                &format!("Joined {} tokens at '{}'", current_arrived, gateway_id),
+                crate::history::ActorType::Engine,
+                None,
+                None
+            ).await;
+            
+            Ok(Some(merged_token))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(crate) fn complete_branch_token(&mut self, instance_id: Uuid, token_id: Uuid) -> EngineResult<()> {
+        let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == token_id) {
+            active.completed = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn all_tokens_completed(&self, instance_id: Uuid) -> EngineResult<bool> {
+        let inst = self.instances.get(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
+        if inst.active_tokens.is_empty() {
+            // Linear flow
+            return Ok(true);
+        }
+        Ok(inst.active_tokens.iter().all(|t| t.completed))
+    }
+
+    /// Helper: runs End scripts, commits variables to instance state.
+    pub(crate) fn run_end_scripts(
+        &mut self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def: &ProcessDefinition,
+        node_id: &str,
+    ) -> EngineResult<()> {
+        let inst = self.instances.get_mut(&instance_id)
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        crate::script_runner::run_end_scripts(
+            &self.script_engine,
+            instance_id,
+            token,
+            def,
+            node_id,
+            &mut inst.audit_log,
+            &mut inst.variables,
+        )
+    }
+}

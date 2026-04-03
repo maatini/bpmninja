@@ -1,0 +1,1 @@
+~/bin/better_pack.py -v --exclude desktop-tauri/src-tauri/icons readme-assets desktop-tauri/tests engine-server/tests Cargo.lock desktop-tauri/playwright-report/index.html desktop-tauri/src/assets api-spec desktop-tauri/public

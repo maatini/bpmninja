@@ -72,6 +72,8 @@ pub enum BpmnElement {
     },
     /// An end event that throws a specific BPMN error.
     ErrorEndEvent { error_code: String },
+    /// A Call Activity that invokes another process definition.
+    CallActivity { called_element: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +117,7 @@ impl SequenceFlow {
 /// A token traveling through the process graph.
 ///
 /// Carries a unique ID, its current position, and a bag of process variables.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Token {
     #[allow(dead_code)]
     pub id: Uuid,

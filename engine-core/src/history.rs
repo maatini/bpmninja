@@ -28,6 +28,8 @@ pub enum HistoryEventType {
     TokenJoined,       // Gateway join merged N tokens into one
     BranchCompleted,   // One branch of a parallel execution reached EndEvent
     Error,             // something failed
+    CallActivityStarted,
+    CallActivityCompleted,
 }
 
 impl HistoryEventType {
@@ -46,6 +48,8 @@ impl HistoryEventType {
             Self::TokenJoined => "Multiple tokens joined into one".into(),
             Self::BranchCompleted => "Branch execution completed".into(),
             Self::Error => "An execution error occurred".into(),
+            Self::CallActivityStarted => "Call activity started".into(),
+            Self::CallActivityCompleted => "Call activity completed".into(),
         }
     }
 }
@@ -252,6 +256,7 @@ mod tests {
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
+            parent_instance_id: None,
             state: InstanceState::Running,
             current_node: "start".into(),
             audit_log: vec![],
@@ -289,6 +294,7 @@ mod tests {
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
+            parent_instance_id: None,
             state: InstanceState::Running,
             current_node: "start".into(),
             audit_log: vec![],
@@ -349,6 +355,7 @@ mod tests {
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
+            parent_instance_id: None,
             state: InstanceState::Running,
             current_node: "start".into(),
             audit_log: vec![],

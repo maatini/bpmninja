@@ -31,7 +31,7 @@ async fn test_file_upload_download_delete() {
     "#;
 
     let deploy_resp = client
-        .post(&format!("{}/api/deploy", base_url))
+        .post(format!("{}/api/deploy", base_url))
         .json(&json!({
             "name": "test-files",
             "xml": xml
@@ -45,7 +45,7 @@ async fn test_file_upload_download_delete() {
 
     // 2. Start an instance
     let start_resp = client
-        .post(&format!("{}/api/start", base_url))
+        .post(format!("{}/api/start", base_url))
         .json(&json!({
             "definition_key": def_key
         }))
@@ -66,7 +66,7 @@ async fn test_file_upload_download_delete() {
     let form = multipart::Form::new().part("file", part);
 
     let upload_resp = client
-        .post(&format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
+        .post(format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
         .multipart(form)
         .send()
         .await
@@ -76,7 +76,7 @@ async fn test_file_upload_download_delete() {
 
     // 4. Verify the variable exists as a FileReference
     let inst_resp = client
-        .get(&format!("{}/api/instances/{}", base_url, instance_id))
+        .get(format!("{}/api/instances/{}", base_url, instance_id))
         .send()
         .await
         .unwrap();
@@ -96,7 +96,7 @@ async fn test_file_upload_download_delete() {
        If we had a MockPersistence, it could return 200...
     */
     let download_resp = client
-        .get(&format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
+        .get(format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
         .send()
         .await
         .unwrap();
@@ -107,7 +107,7 @@ async fn test_file_upload_download_delete() {
 
     // 6. Delete the file
     let delete_resp = client
-        .delete(&format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
+        .delete(format!("{}/api/instances/{}/files/greeting_file", base_url, instance_id))
         .send()
         .await
         .unwrap();
@@ -116,7 +116,7 @@ async fn test_file_upload_download_delete() {
 
     // 7. Verify the variable is deleted
     let inst_resp_after = client
-        .get(&format!("{}/api/instances/{}", base_url, instance_id))
+        .get(format!("{}/api/instances/{}", base_url, instance_id))
         .send()
         .await
         .unwrap();
