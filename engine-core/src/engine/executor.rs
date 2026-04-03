@@ -78,7 +78,7 @@ impl WorkflowEngine {
                 NextAction::ContinueMultiple(forked_tokens) => {
                     let branch_count = forked_tokens.len();
                     
-                    self.register_join_barrier_if_needed(instance_id, &current_gateway_id, branch_count)?;
+                    self.register_join_barrier_if_needed(instance_id, &current_gateway_id, branch_count).await?;
 
                     if let Some(inst) = self.instances.get_mut(&instance_id) {
                         inst.state = InstanceState::ParallelExecution { active_token_count: inst.active_tokens.len() + branch_count };
@@ -144,7 +144,8 @@ impl WorkflowEngine {
                 NextAction::WaitForCallActivity { called_element, token: call_token } => {
                     // Start the child subprocess
                     let mut child_def_key = None;
-                    for (k, v) in &self.definitions {
+                    let all_defs = self.definitions.all().await;
+                    for (k, v) in &all_defs {
                         if v.id == called_element {
                             child_def_key = Some(*k);
                             break;
@@ -249,6 +250,7 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
+            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
         let current_id = token.current_node.clone();
@@ -257,7 +259,7 @@ impl WorkflowEngine {
             .ok_or_else(|| EngineError::NoSuchNode(current_id.clone()))?
             .clone();
 
-        let def_clone = Arc::clone(def);
+        let def_clone = Arc::clone(&def);
 
         let mut start_audits = Vec::new();
         script_runner::run_node_scripts(
@@ -271,7 +273,10 @@ impl WorkflowEngine {
         )?;
         if let Some(inst) = self.instances.get_mut(&instance_id) {
             inst.audit_log.append(&mut start_audits);
-            inst.variables = token.variables.clone();
+            // Only sync variables if a script listener potentially modified them
+            if def_clone.listeners.contains_key(&current_id) {
+                inst.variables = token.variables.clone();
+            }
         }
 
         match &element {
@@ -440,7 +445,7 @@ impl WorkflowEngine {
 
     // ----- Helper: Token-Registry & Parallel Execution ---------------------
 
-    pub(crate) fn register_join_barrier_if_needed(
+    pub(crate) async fn register_join_barrier_if_needed(
         &mut self,
         instance_id: Uuid,
         split_gateway_id: &str,
@@ -448,7 +453,7 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         let def_key = self.instances.get(&instance_id)
             .ok_or(EngineError::NoSuchInstance(instance_id))?.definition_key;
-        let def = self.definitions.get(&def_key)
+        let def = self.definitions.get(&def_key).await
             .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
         
         if let Some(join_id) = self.find_downstream_join(&def, split_gateway_id) {
@@ -505,7 +510,7 @@ impl WorkflowEngine {
     ) -> EngineResult<Option<Token>> {
         let def_key = self.instances.get(&instance_id)
              .ok_or(EngineError::NoSuchInstance(instance_id))?.definition_key;
-        let def = self.definitions.get(&def_key)
+        let def = self.definitions.get(&def_key).await
             .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
         
         let expected = def.incoming_flow_count(gateway_id);

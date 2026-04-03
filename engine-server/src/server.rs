@@ -298,6 +298,7 @@ async fn list_definitions(
     let engine = state.engine.read().await;
     let defs: Vec<DefinitionInfo> = engine
         .list_definitions()
+        .await
         .into_iter()
         .map(|(key, bpmn_id, node_count)| DefinitionInfo {
             key: key.to_string(),
@@ -502,29 +503,32 @@ async fn fetch_and_lock_service_tasks(
     let lock_duration = payload.topics.first().map(|t| t.lock_duration).unwrap_or(30);
     let timeout_ms = payload.async_response_timeout.unwrap_or(0);
 
+    let poll_interval = tokio::time::Duration::from_millis(500);
+    let max_timeout = tokio::time::Duration::from_millis(timeout_ms.min(30_000)); // Cap at 30s
+
     // Simple long-polling: retry until tasks found or timeout
     let start = tokio::time::Instant::now();
     loop {
-        let mut engine = state.engine.write().await;
-        let tasks = engine.fetch_and_lock_service_tasks(
-            &payload.worker_id,
-            payload.max_tasks,
-            &topics,
-            lock_duration,
-        ).await;
+        // Acquire lock, do work, release lock — all in one scope
+        let tasks = {
+            let mut engine = state.engine.write().await;
+            engine.fetch_and_lock_service_tasks(
+                &payload.worker_id,
+                payload.max_tasks,
+                &topics,
+                lock_duration,
+            ).await
+        }; // ← Lock is released here BEFORE the sleep
 
         if !tasks.is_empty() || timeout_ms == 0 {
             return Json(tasks);
         }
 
-        // Release lock before sleeping
-        drop(engine);
-
-        if start.elapsed().as_millis() as u64 >= timeout_ms {
+        if start.elapsed() >= max_timeout {
             return Json(vec![]);
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(poll_interval).await;
     }
 }
 
@@ -690,7 +694,7 @@ async fn get_monitoring_data(
 ) -> Json<MonitoringData> {
     let engine = state.engine.read().await;
 
-    let stats = engine.get_stats();
+    let stats = engine.get_stats().await;
 
     let storage_info = if let Some(ref persistence) = state.persistence {
         persistence.get_storage_info().await.unwrap_or(None)

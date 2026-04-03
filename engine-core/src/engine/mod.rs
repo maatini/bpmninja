@@ -9,6 +9,7 @@ use crate::error::{EngineError, EngineResult};
 use crate::model::{BpmnElement, ProcessDefinition, Token, FileReference};
 use crate::persistence::WorkflowPersistence;
 pub mod types;
+pub(crate) mod registry;
 pub(crate) mod executor;
 pub(crate) mod gateway;
 pub(crate) mod boundary;
@@ -18,7 +19,7 @@ pub use types::*;
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
-    pub(crate) definitions: HashMap<Uuid, Arc<ProcessDefinition>>,
+    pub(crate) definitions: registry::DefinitionRegistry,
     pub(crate) instances: HashMap<Uuid, ProcessInstance>,
     pub(crate) pending_user_tasks: Vec<PendingUserTask>,
     pub(crate) pending_service_tasks: Vec<PendingServiceTask>,
@@ -33,7 +34,7 @@ impl WorkflowEngine {
     pub fn new() -> Self {
         log::info!("WorkflowEngine initialized");
         Self {
-            definitions: HashMap::new(),
+            definitions: registry::DefinitionRegistry::new(),
             instances: HashMap::new(),
             pending_user_tasks: Vec::new(),
             pending_service_tasks: Vec::new(),
@@ -80,9 +81,9 @@ impl WorkflowEngine {
     }
 
     /// Returns summary statistics for monitoring dashboards.
-    pub fn get_stats(&self) -> EngineStats {
+    pub async fn get_stats(&self) -> EngineStats {
         EngineStats {
-            definitions_count: self.definitions.len(),
+            definitions_count: self.definitions.len().await,
             instances_total: self.instances.len(),
             instances_running: self.instances.values()
                 .filter(|i| matches!(i.state, InstanceState::Running))
@@ -102,11 +103,8 @@ impl WorkflowEngine {
     }
 
     /// Returns a list of all deployed definitions (key, BPMN-ID, node count).
-    pub fn list_definitions(&self) -> Vec<(Uuid, String, usize)> {
-        self.definitions
-            .iter()
-            .map(|(key, def)| (*key, def.id.clone(), def.nodes.len()))
-            .collect()
+    pub async fn list_definitions(&self) -> Vec<(Uuid, String, usize)> {
+        self.definitions.list().await
     }
 
     // ----- History Recording -----------------------------------------------
@@ -141,7 +139,7 @@ impl WorkflowEngine {
                 entry = entry.with_diff(diff);
             }
             if let Some(curr) = new_state.or(old_state) {
-                if let Some(def) = self.definitions.get(&curr.definition_key) {
+                if let Some(def) = self.definitions.get(&curr.definition_key).await {
                     entry.definition_version = Some(def.version);
                 }
             }
@@ -175,8 +173,8 @@ impl WorkflowEngine {
 
     /// Persists a process definition to the KV store.
     async fn persist_definition(&self, key: Uuid) {
-        if let (Some(p), Some(def)) = (&self.persistence, self.definitions.get(&key)) {
-            if let Err(e) = p.save_definition(def).await {
+        if let (Some(p), Some(def)) = (&self.persistence, self.definitions.get(&key).await) {
+            if let Err(e) = p.save_definition(&def).await {
                 log::error!("Failed to persist definition {}: {}", key, e);
             }
         }
@@ -271,10 +269,7 @@ impl WorkflowEngine {
     /// Returns the new definition key (UUID).
     pub async fn deploy_definition(&mut self, definition: ProcessDefinition) -> Uuid {
         // Find highest version of existing definitions with matching ID
-        let highest_version = self.definitions.values()
-            .filter(|d| d.id == definition.id)
-            .map(|d| d.version)
-            .max();
+        let highest_version = self.definitions.highest_version(&definition.id).await;
             
         let key = definition.key; // Always use a unique key
         let version = highest_version.map(|v| v + 1).unwrap_or(definition.version);
@@ -283,7 +278,7 @@ impl WorkflowEngine {
         def.key = key;
         def.version = version;
         log::info!("Deployed definition '{}' (v{}, key: {})", def.id, def.version, key);
-        self.definitions.insert(key, Arc::new(def));
+        self.definitions.insert(key, Arc::new(def)).await;
         self.persist_definition(key).await;
         key
     }
@@ -321,6 +316,7 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&definition_key)
+            .await
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let (start_id, start_element) = def
@@ -461,7 +457,7 @@ impl WorkflowEngine {
         ).await;
 
         if let Some(mut token) = token_to_resume {
-            let def = self.definitions.get(&def_key)
+            let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
                 
             self.run_end_scripts(parent_id, &mut token, &def, &called_node_id)?;
@@ -491,6 +487,7 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&definition_key)
+            .await
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let (start_id, start_element) = def
@@ -568,12 +565,12 @@ impl WorkflowEngine {
     /// reference is not carried into the task — instead the caller should
     /// poll or use channels in a production setup. For the demo, we return
     /// the duration and let the main code handle it.
-    pub fn schedule_timer_start(
+    pub async fn schedule_timer_start(
         &self,
         definition_key: Uuid,
         duration: Duration,
     ) -> EngineResult<()> {
-        if !self.definitions.contains_key(&definition_key) {
+        if !self.definitions.contains_key(&definition_key).await {
             return Err(EngineError::NoSuchDefinition(definition_key));
         }
 
@@ -645,9 +642,9 @@ impl WorkflowEngine {
                 old_state.as_ref()
             ).await;
             
-            let def = self.definitions.get(&def_key)
+            let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
-            let next = crate::engine::executor::resolve_next_target(def, &catch.node_id, &token.variables)?;
+            let next = crate::engine::executor::resolve_next_target(&def, &catch.node_id, &token.variables)?;
             token.current_node = next.clone();
             
             {
@@ -661,7 +658,8 @@ impl WorkflowEngine {
         }
         
         let mut defs_to_start = Vec::new();
-        for (def_key, def) in &self.definitions {
+        let all_defs = self.definitions.all().await;
+        for (def_key, def) in &all_defs {
             if let Some((_, BpmnElement::MessageStartEvent { message_name: ref_msg })) = def.start_event() {
                 if ref_msg == &message_name {
                     defs_to_start.push(*def_key);
@@ -718,9 +716,9 @@ impl WorkflowEngine {
             ).await;
             
             let mut token = timer.token;
-            let def = self.definitions.get(&def_key)
+            let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
-            let next = crate::engine::executor::resolve_next_target(def, &timer.node_id, &token.variables)?;
+            let next = crate::engine::executor::resolve_next_target(&def, &timer.node_id, &token.variables)?;
             token.current_node = next.clone();
             
             {
@@ -766,7 +764,7 @@ impl WorkflowEngine {
         }
 
         self.remove_persisted_user_task(task_id).await;
-        self.cancel_boundary_timers(instance_id, &pending.node_id);
+        self.cancel_boundary_timers(instance_id, &pending.node_id).await;
 
         let old_state = self.instances.get(&instance_id).cloned();
 
@@ -792,8 +790,9 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
+            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
-        let def = Arc::clone(def);
+        let def = Arc::clone(&def);
 
         self.run_end_scripts(instance_id, &mut token, &def, &pending.node_id)?;
 
@@ -865,14 +864,14 @@ impl WorkflowEngine {
     }
 
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
-    pub(crate) fn cancel_boundary_timers(&mut self, instance_id: Uuid, task_node_id: &str) {
+    pub(crate) async fn cancel_boundary_timers(&mut self, instance_id: Uuid, task_node_id: &str) {
         let def_key = if let Some(inst) = self.instances.get(&instance_id) {
             inst.definition_key
         } else {
             return;
         };
         
-        let bound_timers: Vec<String> = if let Some(def) = self.definitions.get(&def_key) {
+        let bound_timers: Vec<String> = if let Some(def) = self.definitions.get(&def_key).await {
             def.nodes.iter()
                 .filter_map(|(id, node)| {
                     if let BpmnElement::BoundaryTimerEvent { attached_to, .. } = node {
@@ -944,7 +943,7 @@ impl WorkflowEngine {
     /// Deletes a process definition. 
     /// If cascade is true, deletes all associated process instances first.
     pub async fn delete_definition(&mut self, definition_key: Uuid, cascade: bool) -> EngineResult<()> {
-        if !self.definitions.contains_key(&definition_key) {
+        if !self.definitions.contains_key(&definition_key).await {
             return Err(EngineError::NoSuchDefinition(definition_key));
         }
 
@@ -964,7 +963,7 @@ impl WorkflowEngine {
             }
         }
 
-        self.definitions.remove(&definition_key);
+        self.definitions.remove(&definition_key).await;
 
         if let Some(ref persistence) = self.persistence {
             persistence.delete_definition(&definition_key.to_string()).await?;
@@ -1029,10 +1028,11 @@ impl WorkflowEngine {
         };
 
         // Sync token variables in pending tasks so they don't overwrite changes on completion
+        let shared_vars = std::sync::Arc::new(updated_vars);
         let mut user_task_ids = Vec::new();
         for task in &mut self.pending_user_tasks {
             if task.instance_id == instance_id {
-                task.token.variables = updated_vars.clone();
+                task.token.variables = (*shared_vars).clone();
                 user_task_ids.push(task.task_id);
             }
         }
@@ -1040,7 +1040,7 @@ impl WorkflowEngine {
         let mut service_task_ids = Vec::new();
         for task in &mut self.pending_service_tasks {
             if task.instance_id == instance_id {
-                task.token.variables = updated_vars.clone();
+                task.token.variables = (*shared_vars).clone();
                 service_task_ids.push(task.id);
             }
         }

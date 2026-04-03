@@ -123,7 +123,7 @@ impl WorkflowEngine {
             token.variables.insert(k, v);
         }
         
-        self.cancel_boundary_timers(instance_id, &task.node_id);
+        self.cancel_boundary_timers(instance_id, &task.node_id).await;
 
         log::info!(
             "Instance {}: completed service task '{}' (task_id: {task_id})",
@@ -148,8 +148,9 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
+            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
-        let def = Arc::clone(def);
+        let def = Arc::clone(&def);
 
         // Run end scripts
         {
@@ -321,10 +322,10 @@ impl WorkflowEngine {
             inst.definition_key
         };
         
-        self.cancel_boundary_timers(instance_id, &task.node_id);
+        self.cancel_boundary_timers(instance_id, &task.node_id).await;
         
         let mut target_boundary = None;
-        if let Some(def) = self.definitions.get(&def_key) {
+        if let Some(def) = self.definitions.get(&def_key).await {
             for (node_id, node) in &def.nodes {
                 if let crate::model::BpmnElement::BoundaryErrorEvent { attached_to, error_code: bound_err } = node {
                     if attached_to == &task.node_id && (bound_err.is_none() || bound_err.as_deref() == Some(error_code)) {
@@ -352,9 +353,9 @@ impl WorkflowEngine {
             ).await;
             
             let mut token = task.token;
-            let def = self.definitions.get(&def_key)
+            let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
-            let next = crate::engine::executor::resolve_next_target(def, &boundary_id, &token.variables)?;
+            let next = crate::engine::executor::resolve_next_target(&def, &boundary_id, &token.variables)?;
             
             token.current_node = next.clone();
             {

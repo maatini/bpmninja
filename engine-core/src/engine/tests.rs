@@ -774,7 +774,8 @@ async fn test_delete_definition_cascade() {
 
     engine.delete_definition(key, true).await.unwrap();
     
-    assert_eq!(engine.definitions.len(), 0);
+    let stats = engine.get_stats().await;
+    assert_eq!(stats.definitions_count, 0);
     assert_eq!(engine.instances.len(), 0);
 }
 
@@ -1007,7 +1008,7 @@ async fn mutation_delete_instance_and_variables() {
     let def_key = engine.deploy_definition(def).await;
     
     // Check list definitions formatting
-    let defs = engine.list_definitions();
+    let defs = engine.list_definitions().await;
     assert_eq!(defs.len(), 1);
     assert_eq!(defs[0].1, "del");
     
@@ -1414,7 +1415,7 @@ async fn test_definition_versioning_and_migration() {
         .unwrap();
 
     let key_v1 = engine.deploy_definition(def_v1).await;
-    let def_v1_deployed = engine.definitions.get(&key_v1).unwrap();
+    let def_v1_deployed = engine.definitions.get(&key_v1).await.unwrap();
     assert_eq!(def_v1_deployed.version, 1);
 
     // Start instance on V1
@@ -1431,7 +1432,7 @@ async fn test_definition_versioning_and_migration() {
         .unwrap();
 
     let key_v2 = engine.deploy_definition(def_v2).await;
-    let def_v2_deployed = engine.definitions.get(&key_v2).unwrap();
+    let def_v2_deployed = engine.definitions.get(&key_v2).await.unwrap();
     
     // Key should be different, version should be bumped
     assert_ne!(key_v1, key_v2);
