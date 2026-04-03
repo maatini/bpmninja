@@ -22,32 +22,32 @@ Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
 
 ### Basis-Elemente
 
-| Piktogramm | Element | Beschreibung |
+| BPMN | Element | Beschreibung |
 |:---:|---|---|
-| ◯ | **StartEvent** | Einfacher Startpunkt — Prozess wird sofort gestartet. |
-| ⏱️ ◯ | **TimerStartEvent** | Timer-gesteuerter Start nach einer konfigurierbaren ISO 8601 Dauer (`PT30S`, `PT5M`). |
-| ✉️ ◯ | **MessageStartEvent** | Prozess wird durch eine eingehende Nachricht (via `messageName`) gestartet. |
-| ⭕ | **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
-| ⚡ ⭕ | **ErrorEndEvent** | Terminiert den Prozess mit einem BPMN-Fehlercode (`errorCode`). |
-| 👤 ▭ | **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
-| ⚙️ ▭ | **ServiceTask** | Tasks, die von externen Workern (z.B. agent-orchestrator) per fetch-and-lock abgearbeitet werden. |
+| ○ | **StartEvent** | Einfacher Startpunkt — Prozess wird sofort gestartet. |
+| ○⏱ | **TimerStartEvent** | Timer-gesteuerter Start nach einer konfigurierbaren ISO 8601 Dauer (`PT30S`, `PT5M`). |
+| ○✉ | **MessageStartEvent** | Prozess wird durch eine eingehende Nachricht (via `messageName`) gestartet. |
+| ●  | **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
+| ●⚡ | **ErrorEndEvent** | Terminiert den Prozess mit einem BPMN-Fehlercode (`errorCode`). |
+| ▭👤 | **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
+| ▭⚙ | **ServiceTask** | Tasks, die von externen Workern (z.B. agent-orchestrator) per fetch-and-lock abgearbeitet werden. |
 
 ### Gateways
 
-| Piktogramm | Element | Beschreibung |
+| BPMN | Element | Beschreibung |
 |:---:|---|---|
-| ✖️ ♢ | **ExclusiveGateway (XOR)** | Genau ein ausgehender Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
-| ➕ ♢ | **ParallelGateway (AND)** | Alle ausgehenden Pfade werden bedingungslos verfolgt (Token-Fork). Als Join wartet es auf **alle** eingehenden Tokens (JoinBarrier) und mergt deren Variablen. |
-| ◯ ♢ | **InclusiveGateway (OR)** | Alle Pfade, deren Bedingung `true` ergibt, werden parallel verfolgt (Token-Forking). Als Join wartet es auf alle erwarteten Tokens. |
+| ◇✕ | **ExclusiveGateway (XOR)** | Genau ein ausgehender Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
+| ◇＋ | **ParallelGateway (AND)** | Alle ausgehenden Pfade werden bedingungslos verfolgt (Token-Fork). Als Join wartet es auf **alle** eingehenden Tokens (JoinBarrier) und mergt deren Variablen. |
+| ◇○ | **InclusiveGateway (OR)** | Alle Pfade, deren Bedingung `true` ergibt, werden parallel verfolgt (Token-Forking). Als Join wartet es auf alle erwarteten Tokens. |
 
 ### Events (Phase 1)
 
-| Piktogramm | Element | Beschreibung |
+| BPMN | Element | Beschreibung |
 |:---:|---|---|
-| ⏱️ ⌾ | **TimerCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis ein Timer abläuft. Auflösung via `POST /api/timers/process`. |
-| ✉️ ⌾ | **MessageCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis eine Nachricht mit passendem `messageName` korreliert wird. |
-| ⏱️ ◧ | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event. Unterbricht den Task (interrupting) wenn der Timer abläuft. Timer wird bei Task-Abschluss automatisch storniert. |
-| ⚡ ◧ | **BoundaryErrorEvent** | An einen ServiceTask angeheftetes Error-Event. Fängt BPMN-Fehler (`errorCode`) ab und leitet den Token auf einen alternativen Pfad um. |
+| ◎⏱ | **TimerCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis ein Timer abläuft. Auflösung via `POST /api/timers/process`. |
+| ◎✉ | **MessageCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis eine Nachricht mit passendem `messageName` korreliert wird. |
+| ◎⏱⊕ | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event (interrupting). Unterbricht den Task wenn der Timer abläuft. Timer wird bei Task-Abschluss automatisch storniert. |
+| ◎⚡⊕ | **BoundaryErrorEvent** | An einen ServiceTask angeheftetes Error-Event. Fängt BPMN-Fehler (`errorCode`) ab und leitet den Token auf einen alternativen Pfad um. |
 
 ### Zusätzliche Konzepte
 
