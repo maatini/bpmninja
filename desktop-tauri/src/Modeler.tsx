@@ -77,7 +77,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
     if (containerRef.current && propertiesRef.current) {
       if (modelerRef.current) return;
       
-      const modeler = new BpmnModeler({
+      const modeler: any = new BpmnModeler({
         container: containerRef.current,
         propertiesPanel: { parent: propertiesRef.current },
         additionalModules: [
@@ -101,7 +101,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
         try {
           const { xml } = await modeler.saveXML({ format: true });
           if (xml) localStorage.setItem('minibpm_last_workflow', xml);
-        } catch (e) { }
+        } catch { }
       });
       
       modeler.on('import.done', async ({ error }: any) => {
@@ -110,7 +110,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
           try {
             const { xml } = await modeler.saveXML({ format: true });
             if (xml) localStorage.setItem('minibpm_last_workflow', xml);
-          } catch (e) { }
+          } catch { }
         }
       });
 
@@ -138,7 +138,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
       await modelerRef.current.importXML(generateEmptyBpmn());
       lastImportedXmlRef.current = null;
       onNewDiagram();
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to create new diagram", e);
     }
   };
@@ -156,7 +156,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
         lastImportedXmlRef.current = xml;
       }
       onOpenFile();
-    } catch (e) {
+    } catch (e: any) {
       alert('Failed to open BPMN file: ' + e);
     }
   };
@@ -166,7 +166,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
     try {
       const { xml } = await modelerRef.current.saveXML({ format: true });
       await onDeploy(xml);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to save XML", e);
     }
   };
@@ -198,7 +198,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
       const { xml } = await modelerRef.current.saveXML({ format: true });
       setShowVarsDialog(false);
       await onStart(xml, serialized);
-    } catch (e) {
+    } catch (e: any) {
       alert('Failed to start process: ' + e);
     } finally {
       setIsStarting(false);

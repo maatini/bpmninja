@@ -16,5 +16,5 @@ trigger: always_on
 | Parser Agent | `bpmn-parser/` | BPMN 2.0 XML → `ProcessDefinition` |
 | Persistence Agent | `persistence-nats/` | NATS-backed `WorkflowPersistence` implementation |
 | Server Agent | `engine-server/` | Axum REST API (deploy, start, tasks, instances) |
-| UI Agent | `desktop-tauri/` | Tauri desktop app (React + shadcn/ui + bpmn-js) |
+| UI Agent | `desktop-tauri/` | Tauri desktop app (React + Vanilla CSS + bpmn-js) |
 | Orchestrator Agent | `agent-orchestrator/` | External worker orchestration |

@@ -14,15 +14,16 @@ Refer to the `.agent/manifest.json` for routing rules:
 - **Orchestrator Agent**: Works in `agent-orchestrator/` to tie everything together.
 
 ### Workflows (use these!)
-- `/verify` - Full test, build, and lint check
+- `/verify` - Full Rust test, build, and lint check
+- `/verify-ui` - TypeScript build check for desktop-tauri
 - `/build` - Build workspace
 - `/test` - Run all tests
 - `/lint` - Run clippy correctly
 - `/dev-tauri` - Start the frontend dev server
 
 ### Model Guidelines
-- The architecture and conventions are designed to work seamlessly with both Claude Opus 4.6 and Gemini 3.1 Pro.
-- Agents MUST: Read `.agent/rules/` before work, use the `/verify` workflow after changes.
+- The architecture and conventions are designed to work seamlessly with both Claude Opus 4.6 and Gemini 3.1 Pro via Google Antigravity.
+- Agents MUST: Read `.agent/rules/` before work, use the `/verify` workflow after Rust changes, `/verify-ui` after frontend changes.
 
 ### General Rules
 - Read `.agent/rules/PROJECT_CONTEXT.md` and `.agent/rules/AGENT_CONVENTIONS.md` before starting work.

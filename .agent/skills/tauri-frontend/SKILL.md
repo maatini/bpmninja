@@ -1,16 +1,16 @@
 ---
 name: tauri-frontend
-description: Skill for the Tauri desktop application — React + shadcn/ui frontend with bpmn-js modeler and dual-mode backend (embedded/HTTP).
-version: 1.0
-triggers: ["tauri", "desktop", "ui", "frontend", "react", "shadcn"]
+description: Skill for the Tauri desktop application — React + Vanilla CSS frontend with bpmn-js modeler and dual-mode backend (embedded/HTTP).
+version: 2.0
+triggers: ["tauri", "desktop", "ui", "frontend", "react", "bpmn-js"]
 author: Maatini
-tags: [tauri, react, typescript, shadcn, bpmn-js]
+tags: [tauri, react, typescript, vanilla-css, bpmn-js]
 ---
 
 # TAURI FRONTEND SKILL
 
 ## Crate: `desktop-tauri`
-Tauri v1 desktop application with React + shadcn/ui + bpmn-js.
+Tauri v1 desktop application with React + Vanilla CSS + bpmn-js.
 
 ## Dual Backend Modes
 - **Embedded (default):** `WorkflowEngine` runs inside Tauri backend (`main.rs`)
@@ -21,9 +21,17 @@ Tauri v1 desktop application with React + shadcn/ui + bpmn-js.
 desktop-tauri/
 ├── src-tauri/src/main.rs    # Tauri backend (all commands, state management)
 ├── src/                      # React frontend
-│   ├── App.tsx               # Main app with routing
-│   ├── components/           # shadcn/ui components
-│   └── pages/                # Definitions, Instances, Tasks, Monitoring
+│   ├── App.tsx               # Main app with sidebar navigation
+│   ├── Modeler.tsx           # BPMN Modeler (bpmn-js) with deploy/start
+│   ├── Instances.tsx         # Instance list + detail + variable editor
+│   ├── InstanceViewer.tsx    # Read-only BPMN viewer with node highlighting
+│   ├── HistoryTimeline.tsx   # Compact tabular history with detail dialog
+│   ├── VariableEditor.tsx    # Reusable typed variable editor table
+│   ├── DeployedProcesses.tsx # Definition management
+│   ├── Monitoring.tsx        # Engine metrics dashboard
+│   ├── Settings.tsx          # Backend switching
+│   ├── lib/tauri.ts          # All Tauri command wrappers (typed API)
+│   └── index.css             # All styles (Vanilla CSS, no Tailwind!)
 ├── tests/e2e/                # Playwright E2E tests
 └── package.json
 ```
@@ -47,12 +55,26 @@ desktop-tauri/
 | `switch_backend(type, url)` | Switch between in-memory/NATS |
 | `get_monitoring_data()` | Engine + NATS metrics |
 | `read_bpmn_file(path)` | Read BPMN file from disk |
+| `get_instance_history(id, query)` | Query instance history |
+| `get_pending_service_tasks()` | List pending service tasks |
+| `complete_service_task(id, worker, vars)` | Complete a service task |
 
 ## State Management
 - `AppState` with `Arc<Mutex<WorkflowEngine>>` for embedded mode
 - BPMN XML cached in-memory + NATS Object Store
 - NATS auto-connect on startup (graceful fallback to in-memory)
 - Full state restore from NATS on startup
+
+## Styling (IMPORTANT)
+- **Vanilla CSS only** — all styles in `src/index.css`
+- NO Tailwind, NO shadcn/ui, NO CSS-in-JS
+- CSS custom properties for theming (`:root` variables)
+- Lucide React icons for all iconography
+
+## TypeScript Strict Mode
+- `useUnknownInCatchVariables: true` — never use bare `catch (e)`
+- Use `catch { }` for ignored errors or `catch (e: any)` when error is used
+- External libs without types (bpmn-js) must use `@ts-ignore` + `any` typing
 
 ## Rules
 - Do NOT implement business logic in TypeScript — keep it in Rust
