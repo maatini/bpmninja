@@ -259,4 +259,44 @@ mod tests {
         assert_eq!(var_diff.removed[0], "b");
         assert_eq!(var_diff.added.get("c").unwrap(), &json!(3));
     }
+
+    #[test]
+    fn test_human_description() {
+        assert_eq!(HistoryEventType::InstanceStarted.human_description(), "Process instance started");
+        assert_eq!(HistoryEventType::InstanceCompleted.human_description(), "Process instance completed");
+        assert_eq!(HistoryEventType::InstanceDeleted.human_description(), "Process instance was deleted");
+        assert_eq!(HistoryEventType::TaskCompleted.human_description(), "Task was completed");
+        assert_eq!(HistoryEventType::VariableUpdated.human_description(), "Variable was updated");
+        assert_eq!(HistoryEventType::GatewayTaken.human_description(), "Gateway path was taken");
+        assert_eq!(HistoryEventType::ListenerExecuted.human_description(), "Execution listener finished");
+        assert_eq!(HistoryEventType::TokenAdvanced.human_description(), "Token advanced to the next node");
+        assert_eq!(HistoryEventType::TokenForked.human_description(), "Token forked into multiple branches");
+        assert_eq!(HistoryEventType::TokenJoined.human_description(), "Multiple tokens joined into one");
+        assert_eq!(HistoryEventType::BranchCompleted.human_description(), "Branch execution completed");
+        assert_eq!(HistoryEventType::Error.human_description(), "An execution error occurred");
+    }
+
+    #[test]
+    fn test_calculate_diff_empty() {
+        let old = ProcessInstance {
+            id: Uuid::new_v4(),
+            definition_key: Uuid::new_v4(),
+            business_key: "BK-1".into(),
+            state: InstanceState::Running,
+            current_node: "start".into(),
+            audit_log: vec![],
+            variables: HashMap::new(),
+            active_tokens: vec![],
+            join_barriers: HashMap::new(),
+        };
+        
+        let new = old.clone();
+        let diff = calculate_diff(&old, &new);
+
+        assert!(diff.is_empty());
+        assert!(diff.variables.is_none());
+        assert!(diff.status.is_none());
+        assert!(diff.current_node.is_none());
+        assert!(diff.human_readable.is_none());
+    }
 }

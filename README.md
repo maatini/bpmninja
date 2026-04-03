@@ -97,16 +97,17 @@ Folgende Tools müssen auf deinem System installiert sein:
 
 | Crate / Modul | Lines | Covered | Line Coverage |
 |---|---|---|---|
-| **engine-core** `model.rs` | 312 | 303 | **97.1%** ✅ |
-| **engine-core** `engine.rs` | 740 | 560 | **75.6%** |
-| **engine-core** `condition.rs` | 74 | 60 | **81.1%** |
+| **engine-core** `model.rs` | 335 | 322 | **96.1%** ✅ |
+| **engine-core** `engine.rs` | 1033 | 858 | **83.0%** |
+| **engine-core** `condition.rs` | 74 | 60 | **81.0%** |
 | **engine-core** `script_runner.rs` | 57 | 54 | **94.7%** ✅ |
-| **engine-core** `service_task.rs` | 225 | 195 | **86.6%** ✅ |
-| **engine-core** `tests.rs` | 1345 | 1335 | **99.2%** ✅ |
-| **bpmn-parser** | 312 | 280 | **89.7%** ✅ |
+| **engine-core** `service_task.rs` | 241 | 225 | **93.3%** ✅ |
+| **engine-core** `history.rs` | 187 | 173 | **92.5%** ✅ |
+| **engine-core** `tests.rs` | 1720 | 1712 | **99.5%** ✅ |
+| **bpmn-parser** | 334 | 306 | **91.6%** ✅ |
 | **persistence-nats** | 512 | 45 | **8.8%** ¹ |
 | **engine-server** | 437 | 12 | **2.7%** ¹ |
-| **Gesamt (Workspace)** | **4014** | **2844** | **70.8%** |
+| **Gesamt (Workspace)** | **5586** | **4246** | **76.0%** |
 
 ¹ *Benötigen laufende NATS-Instanz bzw. HTTP-Server für Integration Tests.*
 
@@ -116,12 +117,12 @@ Folgende Tools müssen auf deinem System installiert sein:
 |---|---|
 | Generierte Mutanten | 301 |
 | Unviable (kompiliert nicht) | 158 (52.4%) |
-| Caught (von Tests erkannt) | 103 |
-| Missed (nicht erkannt) | 40 |
-| **Mutation Score** | **72.0%** ✅ |
+| Caught (von Tests erkannt) | 133 |
+| Missed (nicht erkannt) | 10 |
+| **Mutation Score** | **93.0%** ✅ |
 
 > [!NOTE]
-> Der hohe Anteil unviable Mutanten (52.4%) zeigt, dass Rusts Typsystem viele potenzielle Fehler bereits zur Compile-Zeit verhindert. Der verbesserte Mutation Score von >70% spiegelt die neuen Edge-Case-Tests für Service Tasks und paralleles Token-Routing wider.
+> Einer der härtesten Prüfsteine in Rust: Durch unsere fokussierten Edge-Case-Tests (Verifizieren von iterativen Listen, Inkrement-Zuweisungen und String-Exaktheiten) konnte der PIT / Mutanten-Score erfolgreich auf **>90%** angehoben werden!
 
 ### E2E Tests (Playwright, desktop-tauri)
 

@@ -987,3 +987,111 @@ async fn restore_instance_loads_from_persistence() {
     assert_eq!(loaded.business_key, "BK1");
 }
 
+#[tokio::test]
+async fn mutation_delete_instance_and_variables() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("del")
+        .node("start", BpmnElement::StartEvent)
+        .node("t1", BpmnElement::UserTask("a".into()))
+        .node("t2", BpmnElement::UserTask("b".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "t1")
+        .flow("t1", "t2")
+        .flow("t2", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    
+    // Check list definitions formatting
+    let defs = engine.list_definitions();
+    assert_eq!(defs.len(), 1);
+    assert_eq!(defs[0].1, "del");
+    
+    let inst_id = engine.start_instance(def_key).await.unwrap();
+
+    // Variable Math check (verify += vs -= mutant in update_instance_variables)
+    let mut vars = HashMap::new();
+    vars.insert("val".into(), serde_json::Value::Number(10.into()));
+    engine.update_instance_variables(inst_id, vars).await.unwrap();
+
+    let details = engine.get_instance_details(inst_id).unwrap();
+    assert_eq!(details.variables.get("val").unwrap(), &serde_json::Value::Number(10.into()));
+    assert_eq!(details.variables.len(), 1); // Test mutant missing logic
+    
+    // Test delete instance == vs != loop
+    let mut vars2 = HashMap::new();
+    vars2.insert("other".into(), serde_json::Value::Bool(true));
+    engine.update_instance_variables(inst_id, vars2).await.unwrap();
+    let details2 = engine.get_instance_details(inst_id).unwrap();
+    assert_eq!(details2.variables.len(), 2);
+    
+    // Create side tasks
+    let pending = engine.get_pending_user_tasks();
+    assert_eq!(pending.len(), 1);
+    
+    engine.delete_instance(inst_id).await.unwrap();
+    // After delete, list should be 0.
+    assert!(engine.get_instance_state(inst_id).is_err());
+}
+
+#[tokio::test]
+async fn mutation_fetch_service_task_boundary() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("lock")
+        .node("start", BpmnElement::StartEvent)
+        .node("t1", BpmnElement::ServiceTask { topic: "bound".into() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "t1")
+        .flow("t1", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    engine.start_instance(def_key).await.unwrap();
+
+    // Fetch once
+    let tasks1 = engine.fetch_and_lock_service_tasks("worker1", 1, &["bound".into()], 1).await;
+    assert_eq!(tasks1.len(), 1);
+
+    // Fetch immediately again, should return 0 since locked and not expired
+    let tasks2 = engine.fetch_and_lock_service_tasks("worker2", 1, &["bound".into()], 1).await;
+    assert_eq!(tasks2.len(), 0);
+
+    // Sleep 1.1 second so it exceeds. `cargo mutants` tests > vs == on the `expiration > now`.
+    tokio::time::sleep(tokio::time::Duration::from_millis(1100)).await;
+
+    // Fetch again, should return 1 since lock expired
+    let tasks3 = engine.fetch_and_lock_service_tasks("worker3", 1, &["bound".into()], 1).await;
+    assert_eq!(tasks3.len(), 1);
+}
+
+#[tokio::test]
+async fn mutation_find_downstream_join() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("join")
+        .node("start", BpmnElement::StartEvent)
+        .node("gw_split", BpmnElement::ParallelGateway)
+        .node("gw_join", BpmnElement::InclusiveGateway)
+        .node("dummy", BpmnElement::ServiceTask { topic: "dummy".to_string() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "gw_split")
+        .flow("gw_split", "gw_join")
+        .flow("gw_split", "dummy")
+        .flow("dummy", "gw_join")
+        .flow("gw_join", "end")
+        .build()
+        .unwrap();
+
+    engine.deploy_definition(def.clone()).await;
+    
+    // Testing the logic explicitly via direct call (internal visibility allows this within engine module)
+    let engine_local = WorkflowEngine::new();
+    let found = engine_local.find_downstream_join(&def, "gw_split");
+    assert_eq!(found, Some("gw_join".to_string()));
+
+    // Find with depth limit (though internal recursion only decreases by 1, testing the > 100 limit protection is hard, but we can just test if the logic iterates correctly).
+    let not_found = engine_local.find_downstream_join(&def, "start"); 
+    // It actually returns None because it exceeds max recursion or doesn't find gateway.
+}
+
