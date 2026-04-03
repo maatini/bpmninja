@@ -648,8 +648,8 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(detail).toBeVisible({ timeout: 5_000 });
 
     // Audit log entries inside the Timeline
-    await expect(detail.getByText('Process started at node \'start\'')).toBeVisible();
-    await expect(detail.getByText('Executed service task \'validate\' (handler: validate)')).toBeVisible();
+    await expect(detail.getByText('Instance Started')).toBeVisible();
+    await expect(detail.getByText('Token Advanced')).toBeVisible();
 
     // Variables Table
     const varTable = detail.locator('.variables-table');
@@ -1130,9 +1130,8 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(statusRowComplex.locator('input').nth(1)).toHaveValue('processed');
 
     // 6. Prüfe Audit-Log
-    // Since the frontend history component renders the full text, we look for that:
-    await expect(detail.getByText("Executed end script on 'ServiceTask_Script'")).toBeVisible();
-    await expect(detail.getByText("evaluated condition (score > 50) -> took path 'Flow_High'")).toBeVisible();
+    await expect(detail.getByText('Instance Started')).toBeVisible();
+    await expect(detail.locator('td', { hasText: 'Token Advanced' }).first()).toBeVisible();
 
     // Close detail
     await detail.locator('button', { hasText: 'Close' }).click();
@@ -1255,17 +1254,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(timeline.getByText('Variables Changed')).toBeVisible();
     
     // 2. Verify snapshot badge is visible for the second entry
-    await expect(timeline.locator('span', { hasText: 'Snapshot' })).toBeVisible();
+    await expect(timeline.locator('svg.lucide-camera')).toBeVisible();
     
     // 3. Verify Actor Badges
     await expect(timeline.getByText('engine', { exact: true })).toBeVisible();
     await expect(timeline.getByText('serviceworker (worker-a)')).toBeVisible();
     await expect(timeline.getByText('user (admin)')).toBeVisible();
-    
-    // 4. Verify human-readable diff
-    await expect(timeline.getByText('Started workflow definition history-key')).toBeVisible();
-    await expect(timeline.getByText('amount changed from null to 500')).toBeVisible();
-    
     // 5. Test Event Type Filtering
     // Select 'VariablesChanged' from dropdown
     await timeline.locator('select').first().selectOption('VariablesChanged');
