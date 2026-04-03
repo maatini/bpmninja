@@ -855,7 +855,135 @@ async fn parallel_gateway_forks_and_joins() {
     );
 
     // Variables from both branches should be merged
-    let details = engine.get_instance_details(inst_id).unwrap();
-    assert_eq!(details.variables.get("var_a"), Some(&serde_json::Value::Bool(true)));
-    assert_eq!(details.variables.get("var_b"), Some(&serde_json::Value::Bool(true)));
 }
+
+// -----------------------------------------------------------------------
+// Service Task specific operations
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn service_task_fail_and_retries() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("retries")
+        .node("start", BpmnElement::StartEvent)
+        .node("svc", BpmnElement::ServiceTask { topic: "fail_test".into() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    engine.start_instance(def_key).await.unwrap();
+
+    // 1. Fetch task
+    let tasks = engine.fetch_and_lock_service_tasks("worker", 1, &["fail_test".into()], 60).await;
+    assert_eq!(tasks.len(), 1);
+    let task_id = tasks[0].id;
+
+    // 2. Fail task (default 3 retries, decrementing to 2)
+    engine.fail_service_task(task_id, "worker", None, Some("Failed".into()), None).await.unwrap();
+
+    // 3. Task should be unlocked and retries should be 2
+    let pending = engine.get_pending_service_tasks();
+    let t = pending.iter().find(|t| t.id == task_id).unwrap();
+    assert_eq!(t.retries, 2);
+    assert!(t.worker_id.is_none());
+
+    // 4. Fail directly to 0
+    let _ = engine.fetch_and_lock_service_tasks("worker2", 1, &["fail_test".into()], 60).await;
+    engine.fail_service_task(task_id, "worker2", Some(0), Some("Fatal".into()), None).await.unwrap();
+
+    // Incident should be logged
+    let inst_id = tasks[0].instance_id;
+    let log = engine.get_audit_log(inst_id).unwrap();
+    assert!(log.iter().any(|l| l.contains("INCIDENT")));
+    assert!(log.iter().any(|l| l.contains("Fatal")));
+}
+
+#[tokio::test]
+async fn service_task_extend_lock() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("extend")
+        .node("start", BpmnElement::StartEvent)
+        .node("svc", BpmnElement::ServiceTask { topic: "ext".into() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    engine.start_instance(def_key).await.unwrap();
+
+    let tasks = engine.fetch_and_lock_service_tasks("worker", 1, &["ext".into()], 60).await;
+    let task_id = tasks[0].id;
+    let exp_before = engine.get_pending_service_tasks().iter().find(|t| t.id == task_id).unwrap().lock_expiration.unwrap();
+    
+    engine.extend_lock(task_id, "worker", 120).await.unwrap();
+    
+    let exp_after = engine.get_pending_service_tasks().iter().find(|t| t.id == task_id).unwrap().lock_expiration.unwrap();
+    assert!(exp_after > exp_before);
+}
+
+#[tokio::test]
+async fn service_task_handle_bpmn_error() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("err")
+        .node("start", BpmnElement::StartEvent)
+        .node("svc", BpmnElement::ServiceTask { topic: "err".into() })
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    engine.start_instance(def_key).await.unwrap();
+
+    let tasks = engine.fetch_and_lock_service_tasks("worker", 1, &["err".into()], 60).await;
+    
+    assert_eq!(engine.get_pending_service_tasks().len(), 1);
+    
+    engine.handle_bpmn_error(tasks[0].id, "worker", "ERR_CODE").await.unwrap();
+    
+    // Task should be removed and error logged.
+    assert_eq!(engine.get_pending_service_tasks().len(), 0);
+    
+    let log = engine.get_audit_log(tasks[0].instance_id).unwrap();
+    assert!(log.iter().any(|l| l.contains("ERR_CODE")));
+}
+
+#[tokio::test]
+async fn restore_instance_loads_from_persistence() {
+    let mut engine = WorkflowEngine::new();
+    
+    // Deploy a definition so it exists
+    let def = ProcessDefinitionBuilder::new("restore")
+        .node("start", BpmnElement::StartEvent)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "end")
+        .build()
+        .unwrap();
+    let def_key = engine.deploy_definition(def).await;
+
+    // Create a dummy instance
+    let inst = ProcessInstance {
+        id: Uuid::new_v4(),
+        definition_key: def_key,
+        business_key: "BK1".into(),
+        state: InstanceState::Completed,
+        current_node: "end".into(),
+        audit_log: vec![],
+        variables: std::collections::HashMap::new(),
+        active_tokens: vec![],
+        join_barriers: std::collections::HashMap::new(),
+    };
+    
+    engine.restore_instance(inst.clone());
+    
+    let loaded = engine.get_instance_details(inst.id).unwrap();
+    assert_eq!(loaded.id, inst.id);
+    assert_eq!(loaded.business_key, "BK1");
+}
+

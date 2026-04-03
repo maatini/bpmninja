@@ -63,7 +63,7 @@ src-tauri/WixTools/
 # ========================
 # Test & Coverage Reports
 # ========================
-mutants.out/
+mutants.out*/
 tarpaulin-report/
 cobertura.xml
 *.profraw

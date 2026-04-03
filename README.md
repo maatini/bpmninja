@@ -98,15 +98,15 @@ Folgende Tools müssen auf deinem System installiert sein:
 | Crate / Modul | Lines | Covered | Line Coverage |
 |---|---|---|---|
 | **engine-core** `model.rs` | 312 | 303 | **97.1%** ✅ |
-| **engine-core** `engine.rs` | 709 | 512 | **72.2%** |
+| **engine-core** `engine.rs` | 740 | 560 | **75.6%** |
 | **engine-core** `condition.rs` | 74 | 60 | **81.1%** |
 | **engine-core** `script_runner.rs` | 57 | 54 | **94.7%** ✅ |
-| **engine-core** `service_task.rs` | 221 | 104 | **47.1%** |
-| **engine-core** `tests.rs` | 1179 | 1171 | **99.3%** ✅ |
+| **engine-core** `service_task.rs` | 225 | 195 | **86.6%** ✅ |
+| **engine-core** `tests.rs` | 1345 | 1335 | **99.2%** ✅ |
 | **bpmn-parser** | 312 | 280 | **89.7%** ✅ |
 | **persistence-nats** | 512 | 45 | **8.8%** ¹ |
 | **engine-server** | 437 | 12 | **2.7%** ¹ |
-| **Gesamt (Workspace)** | **3893** | **2629** | **67.5%** |
+| **Gesamt (Workspace)** | **4014** | **2844** | **70.8%** |
 
 ¹ *Benötigen laufende NATS-Instanz bzw. HTTP-Server für Integration Tests.*
 
@@ -114,14 +114,14 @@ Folgende Tools müssen auf deinem System installiert sein:
 
 | Metrik | Wert |
 |---|---|
-| Generierte Mutanten | 213 |
-| Unviable (kompiliert nicht) | 121 (56.8%) |
-| Caught (von Tests erkannt) | 46 |
-| Missed (nicht erkannt) | 46 |
-| **Mutation Score** | **50.0%** |
+| Generierte Mutanten | 301 |
+| Unviable (kompiliert nicht) | 158 (52.4%) |
+| Caught (von Tests erkannt) | 103 |
+| Missed (nicht erkannt) | 40 |
+| **Mutation Score** | **72.0%** ✅ |
 
 > [!NOTE]
-> Der hohe Anteil unviable Mutanten (56.8%) zeigt, dass Rusts Typsystem viele potenzielle Fehler bereits zur Compile-Zeit verhindert. Der Mutation Score bezieht sich auf die 92 Mutanten, die kompilierbar waren.
+> Der hohe Anteil unviable Mutanten (52.4%) zeigt, dass Rusts Typsystem viele potenzielle Fehler bereits zur Compile-Zeit verhindert. Der verbesserte Mutation Score von >70% spiegelt die neuen Edge-Case-Tests für Service Tasks und paralleles Token-Routing wider.
 
 ### E2E Tests (Playwright, desktop-tauri)
 
