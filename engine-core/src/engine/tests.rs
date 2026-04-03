@@ -1398,3 +1398,53 @@ async fn in_memory_large_file_variables() {
         assert_eq!(downloaded.len(), 10 * 1024 * 1024);
     }
 }
+
+#[tokio::test]
+async fn test_definition_versioning_and_migration() {
+    let mut engine = WorkflowEngine::with_in_memory_persistence();
+
+    // V1 Definition
+    let def_v1 = ProcessDefinitionBuilder::new("my_process")
+        .node("start", BpmnElement::StartEvent)
+        .node("task", BpmnElement::UserTask("worker".into()))
+        .node("end1", BpmnElement::EndEvent)
+        .flow("start", "task")
+        .flow("task", "end1")
+        .build()
+        .unwrap();
+
+    let key_v1 = engine.deploy_definition(def_v1).await;
+    let def_v1_deployed = engine.definitions.get(&key_v1).unwrap();
+    assert_eq!(def_v1_deployed.version, 1);
+
+    // Start instance on V1
+    let inst_v1 = engine.start_instance(key_v1).await.unwrap();
+
+    // V2 Definition (Same ID, changed structure)
+    let def_v2 = ProcessDefinitionBuilder::new("my_process")
+        .node("start", BpmnElement::StartEvent)
+        .node("task2", BpmnElement::UserTask("worker2".into())) // Changed ID
+        .node("end2", BpmnElement::EndEvent)
+        .flow("start", "task2")
+        .flow("task2", "end2")
+        .build()
+        .unwrap();
+
+    let key_v2 = engine.deploy_definition(def_v2).await;
+    let def_v2_deployed = engine.definitions.get(&key_v2).unwrap();
+    
+    // Key should be different, version should be bumped
+    assert_ne!(key_v1, key_v2);
+    assert_eq!(def_v2_deployed.version, 2);
+
+    // Instance v1 should still be on 'task' safely.
+    let inst_v1_data = engine.get_instance_details(inst_v1).unwrap();
+    assert_eq!(inst_v1_data.current_node, "task");
+    assert_eq!(inst_v1_data.definition_key, key_v1);
+
+    // Start instance on V2
+    let inst_v2 = engine.start_instance(key_v2).await.unwrap();
+    let inst_v2_data = engine.get_instance_details(inst_v2).unwrap();
+    assert_eq!(inst_v2_data.current_node, "task2");
+    assert_eq!(inst_v2_data.definition_key, key_v2);
+}

@@ -172,6 +172,18 @@ fn format_file_human_text(_key: &str, value: &serde_json::Value) -> Option<Strin
     }
 }
 
+fn truncate_value_for_diff(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::String(s) if s.len() > 1024 => {
+            serde_json::Value::String(format!("{}... <truncated {} chars>", &s[..1024], s.len() - 1024))
+        }
+        serde_json::Value::Array(a) if a.len() > 128 => {
+            serde_json::Value::String(format!("<Large Array: {} elements>", a.len()))
+        }
+        _ => v.clone(),
+    }
+}
+
 /// Calculates the difference between two process instance states.
 pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDiff {
     let mut diff = HistoryDiff {
@@ -208,11 +220,12 @@ pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDi
     for (k, v_old) in &old.variables {
         if let Some(v_new) = new.variables.get(k) {
             if v_old != v_new {
-                var_diff.changed.insert(k.clone(), (v_old.clone(), v_new.clone()));
+                var_diff.changed.insert(k.clone(), (truncate_value_for_diff(v_old), truncate_value_for_diff(v_new)));
                 if let Some(file_text) = format_file_human_text(k, v_new) {
                     human_texts.push(file_text);
                 } else {
-                    human_texts.push(format!("Variable '{}' changed from {} to {}.", k, v_old, v_new));
+                    let text = format!("Variable '{}' changed from {} to {}.", k, truncate_value_for_diff(v_old), truncate_value_for_diff(v_new));
+                    human_texts.push(text.chars().take(500).collect::<String>());
                 }
             }
         } else {
@@ -224,11 +237,12 @@ pub fn calculate_diff(old: &ProcessInstance, new: &ProcessInstance) -> HistoryDi
     // Check for added
     for (k, v_new) in &new.variables {
         if !old.variables.contains_key(k) {
-            var_diff.added.insert(k.clone(), v_new.clone());
+            var_diff.added.insert(k.clone(), truncate_value_for_diff(v_new));
             if let Some(file_text) = format_file_human_text(k, v_new) {
                 human_texts.push(file_text);
             } else {
-                human_texts.push(format!("Variable '{}' was added ({}).", k, v_new));
+                let text = format!("Variable '{}' was added ({}).", k, truncate_value_for_diff(v_new));
+                human_texts.push(text.chars().take(500).collect::<String>());
             }
         }
     }

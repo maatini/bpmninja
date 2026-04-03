@@ -4,8 +4,8 @@ members = [
     "bpmn-parser",
     "persistence-nats",
     "agent-orchestrator",
-    "desktop-tauri/src-tauri"
-, "engine-server"]
+    "engine-server"
+]
 resolver = "2"
 
 [workspace.dependencies]

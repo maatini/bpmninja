@@ -280,14 +280,14 @@ impl WorkflowEngine {
                 let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
                 token.current_node = next.clone();
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = next;
                 Ok(NextAction::Continue(token.clone()))
             }
 
             BpmnElement::EndEvent => {
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("⏹ Process completed at end event '{current_id}'"));
                 log::info!("Instance {instance_id}: reached end event '{current_id}'");
@@ -309,7 +309,7 @@ impl WorkflowEngine {
                     created_at: Utc::now(),
                 };
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("👤 User task '{current_id}' assigned to '{assignee}' — waiting (task_id: {})", pending.task_id));
                 log::info!("Instance {instance_id}: user task '{current_id}' pending for '{assignee}'");
@@ -338,7 +338,7 @@ impl WorkflowEngine {
                     error_details: None,
                 };
 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("🔗 Service task '{current_id}' created for topic '{topic}' (task_id: {})", svc_task.id));
                 log::info!("Instance {instance_id}: service task '{current_id}' pending for topic '{topic}'");
@@ -350,7 +350,7 @@ impl WorkflowEngine {
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
                 let action = execute_parallel_gateway(&def_clone, &current_id, token)?;
                 if let NextAction::ContinueMultiple(ref f) = action {
-                    let inst = self.instances.get_mut(&instance_id).unwrap();
+                    let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                     inst.current_node = current_id.clone();
                     inst.audit_log.push(format!("■ Parallel gateway '{current_id}' → forked to {} path(s)", f.len()));
                 }
@@ -360,7 +360,7 @@ impl WorkflowEngine {
             BpmnElement::ExclusiveGateway { default } => {
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
                 let action = execute_exclusive_gateway(&def_clone, &current_id, token, default)?;
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.audit_log.push(format!("◆ Exclusive gateway '{current_id}' → took path to '{}'", token.current_node));
                 inst.current_node = token.current_node.clone();
                 Ok(action)
@@ -370,7 +370,7 @@ impl WorkflowEngine {
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
                 let action = execute_inclusive_gateway(&def_clone, &current_id, token)?;
                 if let NextAction::ContinueMultiple(ref f) = action {
-                    let inst = self.instances.get_mut(&instance_id).unwrap();
+                    let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                     inst.current_node = current_id.clone();
                     inst.audit_log.push(format!("◇ Inclusive gateway '{current_id}' → forked to {} path(s)", f.len()));
                 }
@@ -385,7 +385,7 @@ impl WorkflowEngine {
                     expires_at: Utc::now() + chrono::Duration::from_std(*dur).unwrap_or(chrono::Duration::seconds(0)),
                     token: token.clone(),
                 };
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("⏱ Timer catch event '{current_id}' — waiting"));
                 Ok(NextAction::WaitForTimer(pending))
@@ -399,7 +399,7 @@ impl WorkflowEngine {
                     message_name: message_name.clone(),
                     token: token.clone(),
                 };
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("✉️ Message catch event '{current_id}' waiting for '{message_name}'"));
                 Ok(NextAction::WaitForMessage(pending))
@@ -411,7 +411,7 @@ impl WorkflowEngine {
                     self.pending_timers.push(t);
                 }
                 
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("🔗 Call Activity '{current_id}' invoking process '{called_element}'"));
                 log::info!("Instance {instance_id}: call activity '{current_id}' invoking '{called_element}'");
@@ -421,7 +421,7 @@ impl WorkflowEngine {
             
             BpmnElement::ErrorEndEvent { error_code } => {
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = current_id.clone();
                 inst.audit_log.push(format!("💥 Process completed at error end '{current_id}' with code '{error_code}'"));
                 Ok(NextAction::Complete)
@@ -431,7 +431,7 @@ impl WorkflowEngine {
                 let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)?;
                 token.current_node = next.clone();
-                let inst = self.instances.get_mut(&instance_id).unwrap();
+                let inst = self.instances.get_mut(&instance_id).ok_or(EngineError::NoSuchInstance(instance_id))?;
                 inst.current_node = next;
                 Ok(NextAction::Continue(token.clone()))
             }

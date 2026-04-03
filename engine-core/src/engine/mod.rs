@@ -265,15 +265,19 @@ impl WorkflowEngine {
     // ----- deployment ------------------------------------------------------
 
     /// Deploys a process definition so instances can be started from it.
-    ///
-    /// Upsert semantics: if a definition with the same BPMN process ID already
-    /// exists, its key is preserved and data is overwritten.
-    /// Returns the definition key (UUID).
+    /// Deployment semantics: if a definition with the same BPMN process ID already
+    /// exists, the new definition receives a fresh UUID key and an incremented version.
+    /// Existing running instances continue on their original definition untouched.
+    /// Returns the new definition key (UUID).
     pub async fn deploy_definition(&mut self, definition: ProcessDefinition) -> Uuid {
-        // Upsert: reuse key if same BPMN process ID already deployed
-        let existing = self.definitions.values().find(|d| d.id == definition.id);
-        let key = existing.map(|d| d.key).unwrap_or(definition.key);
-        let version = existing.map(|d| d.version + 1).unwrap_or(definition.version);
+        // Find highest version of existing definitions with matching ID
+        let highest_version = self.definitions.values()
+            .filter(|d| d.id == definition.id)
+            .map(|d| d.version)
+            .max();
+            
+        let key = definition.key; // Always use a unique key
+        let version = highest_version.map(|v| v + 1).unwrap_or(definition.version);
 
         let mut def = definition;
         def.key = key;
