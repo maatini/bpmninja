@@ -117,8 +117,13 @@ impl WorkflowEngine {
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await { Some(lk.read().await.clone()) } else { None };
 
-        // Merge variables into the token
-        let mut token = task.token;
+        // Retrieve token from central store and merge variables
+        let mut token = {
+            let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+            inst.tokens.remove(&task.token_id)
+                .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", task.token_id)))?
+        };
         for (k, v) in variables {
             token.variables.insert(k, v);
         }
@@ -358,7 +363,13 @@ impl WorkflowEngine {
                 old_state.as_ref()
             ).await;
             
-            let mut token = task.token;
+            // Retrieve token from central store
+            let mut token = {
+                let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.tokens.remove(&task.token_id)
+                    .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", task.token_id)))?
+            };
             let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
             let next = crate::engine::executor::resolve_next_target(&def, &boundary_id, &token.variables)?;

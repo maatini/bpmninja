@@ -18,7 +18,8 @@ pub struct PendingUserTask {
     pub instance_id: Uuid,
     pub node_id: String,
     pub assignee: String,
-    pub token: Token,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
     pub created_at: DateTime<Utc>,
 }
 
@@ -34,7 +35,11 @@ pub struct PendingServiceTask {
     pub definition_key: Uuid,
     pub node_id: String,
     pub topic: String,
-    pub token: Token,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
+    /// Snapshot of variables at task creation (for worker fetch-and-lock API).
+    /// This is a read-only copy; the authoritative variables live in instance.tokens.
+    pub variables_snapshot: HashMap<String, Value>,
     pub created_at: DateTime<Utc>,
     /// The worker that currently holds the lock (None = unlocked).
     pub worker_id: Option<String>,
@@ -58,7 +63,8 @@ pub struct PendingTimer {
     pub instance_id: Uuid,
     pub node_id: String,
     pub expires_at: DateTime<Utc>,
-    pub token: Token,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +73,8 @@ pub struct PendingMessageCatch {
     pub instance_id: Uuid,
     pub node_id: String,
     pub message_name: String,
-    pub token: Token,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +162,10 @@ pub struct ProcessInstance {
     pub audit_log: Vec<String>,
     /// Current process variables (synced from the executing token).
     pub variables: HashMap<String, Value>,
+    /// Central token store — the single source of truth for all active tokens.
+    /// PendingTasks reference tokens by UUID instead of owning copies.
+    #[serde(default)]
+    pub tokens: HashMap<Uuid, Token>,
     /// All currently active tokens (Token-Registry).
     #[serde(default)]
     pub active_tokens: Vec<ActiveToken>,

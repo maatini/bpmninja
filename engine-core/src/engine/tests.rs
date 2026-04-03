@@ -128,16 +128,19 @@ async fn completing_wrong_task_gives_error() {
 #[tokio::test]
 async fn service_handler_modifies_variables() {
     let (mut engine, def_key) = setup_linear_engine().await;
-    engine.start_instance(def_key).await.unwrap();
+    let inst_id = engine.start_instance(def_key).await.unwrap();
 
     let mut vars = HashMap::new();
     vars.insert("validated".into(), Value::Bool(true));
     complete_all_service_tasks(&mut engine, "worker_1", vars).await;
 
-    // The token should have 'validated: true' from the service handler
+    // The token stored centrally should have 'validated: true' from the service handler
     let pending = &engine.pending_user_tasks[0];
+    let inst_arc = engine.instances.get(&inst_id).await.unwrap();
+    let inst = inst_arc.read().await;
+    let token = inst.tokens.get(&pending.token_id).unwrap();
     assert_eq!(
-        pending.token.variables.get("validated"),
+        token.variables.get("validated"),
         Some(&Value::Bool(true))
     );
 }
@@ -982,6 +985,7 @@ async fn restore_instance_loads_from_persistence() {
         current_node: "end".into(),
         audit_log: vec![],
         variables: std::collections::HashMap::new(),
+        tokens: std::collections::HashMap::new(),
         active_tokens: vec![],
         join_barriers: std::collections::HashMap::new(),
     };

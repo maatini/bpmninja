@@ -321,13 +321,14 @@ impl WorkflowEngine {
                     instance_id,
                     node_id: current_id.clone(),
                     assignee: assignee.clone(),
-                    token: token.clone(),
+                    token_id: token.id,
                     created_at: Utc::now(),
                 };
 
                 let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let mut inst = inst_arc.write().await;
+                let mut inst = inst_arc.write().await;
                 inst.current_node = current_id.clone();
+                inst.tokens.insert(token.id, token.clone());
                 inst.audit_log.push(format!("👤 User task '{current_id}' assigned to '{assignee}' — waiting (task_id: {})", pending.task_id));
                 log::info!("Instance {instance_id}: user task '{current_id}' pending for '{assignee}'");
 
@@ -346,7 +347,8 @@ impl WorkflowEngine {
                     definition_key: def_key,
                     node_id: current_id.clone(),
                     topic: topic.clone(),
-                    token: token.clone(),
+                    token_id: token.id,
+                    variables_snapshot: token.variables.clone(),
                     created_at: Utc::now(),
                     worker_id: None,
                     lock_expiration: None,
@@ -356,8 +358,9 @@ impl WorkflowEngine {
                 };
 
                 let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let mut inst = inst_arc.write().await;
+                let mut inst = inst_arc.write().await;
                 inst.current_node = current_id.clone();
+                inst.tokens.insert(token.id, token.clone());
                 inst.audit_log.push(format!("🔗 Service task '{current_id}' created for topic '{topic}' (task_id: {})", svc_task.id));
                 log::info!("Instance {instance_id}: service task '{current_id}' pending for topic '{topic}'");
 
@@ -404,11 +407,12 @@ impl WorkflowEngine {
                     instance_id,
                     node_id: current_id.clone(),
                     expires_at: Utc::now() + chrono::Duration::from_std(*dur).unwrap_or(chrono::Duration::seconds(0)),
-                    token: token.clone(),
+                    token_id: token.id,
                 };
                 let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let mut inst = inst_arc.write().await;
+                let mut inst = inst_arc.write().await;
                 inst.current_node = current_id.clone();
+                inst.tokens.insert(token.id, token.clone());
                 inst.audit_log.push(format!("⏱ Timer catch event '{current_id}' — waiting"));
                 Ok(NextAction::WaitForTimer(pending))
             }
@@ -419,11 +423,12 @@ impl WorkflowEngine {
                     instance_id,
                     node_id: current_id.clone(),
                     message_name: message_name.clone(),
-                    token: token.clone(),
+                    token_id: token.id,
                 };
                 let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let mut inst = inst_arc.write().await;
+                let mut inst = inst_arc.write().await;
                 inst.current_node = current_id.clone();
+                inst.tokens.insert(token.id, token.clone());
                 inst.audit_log.push(format!("✉️ Message catch event '{current_id}' waiting for '{message_name}'"));
                 Ok(NextAction::WaitForMessage(pending))
             }

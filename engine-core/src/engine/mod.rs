@@ -353,6 +353,7 @@ impl WorkflowEngine {
                 variables.len()
             )],
             variables: variables.clone(),
+            tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
         };
@@ -528,6 +529,7 @@ impl WorkflowEngine {
                 provided_duration.as_secs()
             )],
             variables: HashMap::new(),
+            tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
         };
@@ -625,7 +627,13 @@ impl WorkflowEngine {
                 .ok_or_else(|| EngineError::InvalidDefinition(format!("Message catch {catch_id} disappeared")))?;
             let catch = self.pending_message_catches.remove(idx);
             
-            let mut token = catch.token;
+            // Retrieve token from central store
+            let mut token = {
+                let inst_arc = self.instances.get(&catch.instance_id).await.ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.tokens.remove(&catch.token_id)
+                    .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", catch.token_id)))?
+            };
             token.variables.extend(variables.clone());
             
             let old_state = if let Some(lk) = self.instances.get(&catch.instance_id).await { Some(lk.read().await.clone()) } else { None };
@@ -720,7 +728,13 @@ impl WorkflowEngine {
                 old_state.as_ref()
             ).await;
             
-            let mut token = timer.token;
+            // Retrieve token from central store
+            let mut token = {
+                let inst_arc = self.instances.get(&timer.instance_id).await.ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.tokens.remove(&timer.token_id)
+                    .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", timer.token_id)))?
+            };
             let def = self.definitions.get(&def_key).await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
             let next = crate::engine::executor::resolve_next_target(&def, &timer.node_id, &token.variables)?;
@@ -762,8 +776,13 @@ impl WorkflowEngine {
         let pending = self.pending_user_tasks.remove(idx);
         let instance_id = pending.instance_id;
 
-        // Merge additional variables into the token
-        let mut token = pending.token;
+        // Retrieve token from central store and merge additional variables
+        let mut token = {
+            let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+            inst.tokens.remove(&pending.token_id)
+                .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", pending.token_id)))?
+        };
         for (k, v) in additional_vars {
             token.variables.insert(k, v);
         }
@@ -1043,21 +1062,19 @@ impl WorkflowEngine {
             instance.variables.clone()
         };
 
-        // Sync token variables in pending tasks so they don't overwrite changes on completion
-        let shared_vars = std::sync::Arc::new(updated_vars);
-        let mut user_task_ids = Vec::new();
-        for task in &mut self.pending_user_tasks {
-            if task.instance_id == instance_id {
-                task.token.variables = (*shared_vars).clone();
-                user_task_ids.push(task.task_id);
-            }
-        }
-
-        let mut service_task_ids = Vec::new();
-        for task in &mut self.pending_service_tasks {
-            if task.instance_id == instance_id {
-                task.token.variables = (*shared_vars).clone();
-                service_task_ids.push(task.id);
+        // With centralized tokens, we also update instance.tokens so that
+        // when a pending task is completed, it picks up the latest variables.
+        {
+            let instance_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut instance = instance_arc.write().await;
+            for token in instance.tokens.values_mut() {
+                for (key, value) in &updated_vars {
+                    if value.is_null() {
+                        token.variables.remove(key);
+                    } else {
+                        token.variables.insert(key.clone(), value.clone());
+                    }
+                }
             }
         }
 
@@ -1071,13 +1088,6 @@ impl WorkflowEngine {
         ).await;
 
         self.persist_instance(instance_id).await;
-
-        for tid in user_task_ids {
-            self.persist_user_task(tid).await;
-        }
-        for sid in service_task_ids {
-            self.persist_service_task(sid).await;
-        }
 
         Ok(())
     }

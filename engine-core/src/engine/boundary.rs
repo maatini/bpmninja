@@ -31,7 +31,7 @@ pub(crate) fn setup_boundary_events(
             expires_at: Utc::now()
                 + chrono::Duration::from_std(duration)
                     .unwrap_or(chrono::Duration::seconds(0)),
-            token: token.clone(),
+            token_id: token.id,
         };
         pending_timers.push(pending);
     }

@@ -275,6 +275,7 @@ mod tests {
             current_node: "start".into(),
             audit_log: vec![],
             variables: HashMap::new(),
+            tokens: HashMap::new(),
             active_tokens: vec![],
             join_barriers: HashMap::new(),
         };
@@ -313,6 +314,7 @@ mod tests {
             current_node: "start".into(),
             audit_log: vec![],
             variables: HashMap::new(),
+            tokens: HashMap::new(),
             active_tokens: vec![],
             join_barriers: HashMap::new(),
         };
@@ -374,6 +376,7 @@ mod tests {
             current_node: "start".into(),
             audit_log: vec![],
             variables: HashMap::new(),
+            tokens: HashMap::new(),
             active_tokens: vec![],
             join_barriers: HashMap::new(),
         };
