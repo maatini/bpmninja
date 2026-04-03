@@ -1,5 +1,6 @@
 ---
-trigger: always_on
+trigger: file_match
+file_patterns: ["persistence-nats/**"]
 ---
 
 # NATS Message Broker Rules (mini-bpm Project)

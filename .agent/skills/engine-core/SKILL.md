@@ -1,44 +1,41 @@
 ---
 name: engine-core
 description: Skill for the engine-core crate — token-based BPMN execution, gateway routing, condition evaluation, and Rhai script execution.
-version: 1.0
-triggers: ["engine", "token", "gateway", "condition", "script", "execute_step"]
-author: Maatini
+version: 2.0
+triggers: ["engine", "token", "gateway", "condition", "script", "execute_step", "bpmn", "workflow engine"]
+author: Antigravity
 tags: [rust, bpmn, state-machine, execution]
 ---
 
 # ENGINE CORE SKILL
 
 ## Crate: `engine-core`
-Pure state machine — no network code, no NATS, no HTTP.
+Pure state machine — no network code, no NATS, no HTTP. Built with Tokio.
 
 ## Module Structure
 | File | Purpose |
 |---|---|
-| `model.rs` | `BpmnElement`, `Token`, `ProcessDefinition`, `ProcessDefinitionBuilder`, `SequenceFlow`, `ExecutionListener` |
-| `engine.rs` | `WorkflowEngine`, `ProcessInstance`, `InstanceState`, `NextAction`, `PendingUserTask`, `PendingServiceTask` |
-| `service_task.rs` | External task ops (fetch-and-lock, complete, fail, extend lock, BPMN error) |
+| `model.rs` | `BpmnElement`, `Token`, `ProcessDefinition`, `SequenceFlow`, `ExecutionListener` |
+| `engine.rs` | `WorkflowEngine`, `ProcessInstance`, `InstanceState`, `NextAction` |
+| `engine/service_task.rs` | External task ops (fetch-and-lock, complete, fail, BPMN error) |
 | `condition.rs` | `evaluate_condition()` — condition evaluator for gateway routing |
-| `script_runner.rs` | Rhai execution listeners (start/end scripts that mutate token variables) |
-| `persistence.rs` | `WorkflowPersistence` trait definition (async interface) |
+| `script_runner.rs` | Rhai execution listeners (start/end scripts) |
+| `persistence.rs` | `WorkflowPersistence` trait definition |
+| `history.rs` | `HistoryEntry`, `HistoryEventType`, `calculate_diff()` |
 | `error.rs` | `EngineError` enum, `EngineResult<T>` alias |
-| `tests.rs` | Comprehensive integration tests |
-| `lib.rs` | Public re-exports |
+| `engine/tests.rs`| Comprehensive integration tests |
+| `lib.rs` | Public re-exports (including `EngineStats`) |
 
-## Execution Flow
-1. `deploy_definition()` — validates and stores `ProcessDefinition`
-2. `start_instance()` / `start_instance_with_variables()` — creates `ProcessInstance`, starts token loop
-3. `run_instance()` — loops `execute_step()` until wait-state or end:
-   - `NextAction::Continue(token)` → advance token
-   - `NextAction::ContinueMultiple(tokens)` → fork (InclusiveGateway)
-   - `NextAction::WaitForUser(task)` → pause, store pending task
-   - `NextAction::WaitForServiceTask(task)` → pause, store external task
-   - `NextAction::Complete` → mark instance completed
-4. `complete_user_task()` / `complete_service_task()` — resume execution
+## Supported BPMN Elements
+- **StartEvent** / **TimerStartEvent(Duration)**
+- **EndEvent**
+- **ServiceTask** (Camunda-style fetch-and-lock)
+- **UserTask**
+- **ExclusiveGateway** (XOR split)
+- **InclusiveGateway** (OR split)
 
 ## Key Design Decisions
-- `Arc<ProcessDefinition>` for shared definitions (cheap clone)
-- `WorkflowEngine` holds all state as `HashMap`s (not Arc<Mutex>)
-- Persistence is optional: `Option<Arc<dyn WorkflowPersistence>>`
-- Scripts run via `rhai::Engine` embedded in `WorkflowEngine`
-- Condition evaluator is a pure function, no state
+- `Arc<ProcessDefinition>` for shared definitions
+- Token-based execution (`execute_step()` -> `NextAction`)
+- Script listeners embedded via `rhai::Engine`
+- `thiserror` for `EngineError` (no unwraps in lib code!)

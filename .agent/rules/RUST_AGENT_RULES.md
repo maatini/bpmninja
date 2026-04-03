@@ -1,8 +1,17 @@
 ---
-trigger: always_on
+trigger: file_match
+file_patterns: ["**/*.rs", "**/Cargo.toml"]
 ---
 
 # RUST_AGENT_RULES.md - Rust Skills & Best Practices for AI Agents
+
+**Core Rules (MUST follow always):**
+- Think step-by-step before writing code.
+- Always prioritize compile-time safety and idiomatic Rust.
+- Use proper error handling with thiserror + anyhow.
+- Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` after every major change.
+- Write comprehensive unit + integration tests.
+- Keep the architecture clean and modular.
 
 ## Must-Follow Rust Rules
 - Use Rust 2024 edition.

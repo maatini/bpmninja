@@ -1,5 +1,6 @@
 ---
-trigger: always_on
+trigger: file_match
+file_patterns: ["engine-core/**"]
 ---
 
 # BPMN_WORKFLOW_ENGINE.md - Project Specification
@@ -32,6 +33,7 @@ trigger: always_on
 - `execute_step()` — dispatches on `BpmnElement`, returns `NextAction`
 - `NextAction` enum: `Continue(Token)`, `ContinueMultiple(Vec<Token>)`, `WaitForUser`, `WaitForServiceTask`, `Complete`
 - `ProcessInstance { id, definition_key, business_key, state, current_node, audit_log, variables }`
+- `EngineStats` — monitoring statistics
 - `InstanceState` enum: `Running`, `WaitingOnUserTask`, `WaitingOnServiceTask`, `Completed`
 
 ### 3. External Tasks (`service_task.rs`)
@@ -50,10 +52,20 @@ trigger: always_on
 - `run_node_scripts()` — executes start/end scripts, mutates token variables
 
 ### 6. Persistence (`persistence.rs`)
-- `WorkflowPersistence` trait — async interface for save/load/delete of instances, definitions, user tasks, service tasks
+- `WorkflowPersistence` trait — async interface for save/load/delete of instances, definitions, user tasks, service tasks, XML, storage info, and history:
+  - `append_history_entry()`, `query_history()`, `HistoryQuery`
+  - `save_bpmn_xml()`, `load_bpmn_xml()`, `list_bpmn_xml_ids()`
+  - `get_storage_info()`, `StorageInfo`
 - Optional via `engine.with_persistence(Arc<dyn WorkflowPersistence>)`
 
 ### 7. Error Handling (`error.rs`)
 - `EngineError` enum with variants: `InvalidDefinition`, `NoSuchNode`, `NoSuchDefinition`, `NoSuchInstance`, `TaskNotPending`, `TimerMismatch`, `NoMatchingCondition`, `ServiceTaskNotFound`, `ServiceTaskLocked`, `ServiceTaskNotLocked`, `DefinitionHasInstances`, `PersistenceError`, `ScriptError`
+
+### 8. History Module (`history.rs`)
+- `HistoryEntry` — represents a single event in instance lifecycle
+- `HistoryEventType` — enum (`InstanceStarted`, `TaskCompleted`, `VariableUpdated`, etc.)
+- `HistoryDiff`, `VariableDiff` — captures state delta
+- `ActorType` — enum (`Engine`, `User`, `ServiceWorker`, `Timer`, `Listener`)
+- `calculate_diff()` — utility to generate diff between instance states
 
 Prioritize correctness of token flow, gateway routing, and external task lifecycle.

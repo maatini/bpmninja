@@ -1,3 +1,8 @@
+---
+trigger: file_match
+file_patterns: ["desktop-tauri/**"]
+---
+
 # UI/Desktop Agent
 - **Domain:** `desktop-tauri/`
 - **Role:** Modern UI with Tailwind, shadcn/ui, and `bpmn-js`.

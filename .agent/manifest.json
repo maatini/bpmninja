@@ -5,6 +5,7 @@
     "parser": { "path": "bpmn-parser", "rules": "rules/BPMN_PARSER_AGENT.md" },
     "persistence": { "path": "persistence-nats", "rules": "rules/NATS_PERSISTENCE_AGENT.md" },
     "ui": { "path": "desktop-tauri", "rules": "rules/TAURI_REACT_UI_AGENT.md" },
-    "orchestrator": { "path": "agent-orchestrator", "rules": "rules/ORCHESTRATOR_AGENT.md" }
+    "orchestrator": { "path": "agent-orchestrator", "rules": "rules/ORCHESTRATOR_AGENT.md" },
+    "server": { "path": "engine-server", "rules": "rules/ENGINE_SERVER_AGENT.md" }
   }
 }

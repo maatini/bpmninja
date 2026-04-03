@@ -26,7 +26,12 @@ Implements the `WorkflowPersistence` trait from `engine-core` using NATS JetStre
 | **KV Store** | `instances` | Instance ID (UUID) | `ProcessInstance` (JSON) |
 | **KV Store** | `user_tasks` | Task ID (UUID) | `PendingUserTask` (JSON) |
 | **KV Store** | `service_tasks` | Task ID (UUID) | `PendingServiceTask` (JSON) |
+| **KV Store** | `history` | History ID (UUID) | `HistoryEntry` (JSON) |
 | **JetStream** | `WORKFLOW_EVENTS` | Subjects: `workflow.*` | Audit events |
+
+## Persistence Trait Extensions (History)
+- `append_history_entry(entry)`
+- `query_history(query)` uses `HistoryQuery`
 
 ## Key Implementation Pattern
 
