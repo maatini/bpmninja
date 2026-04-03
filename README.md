@@ -20,23 +20,45 @@ Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
 
 ## Unterstützte BPMN-Elemente
 
-| Element | Beschreibung |
-|---|---|
-| **StartEvent** | Einfacher Startpunkt — Prozess wird sofort gestartet. |
-| **TimerStartEvent** | Timer-gesteuerter Start nach einer konfigurierbaren Dauer. |
-| **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
-| **ServiceTask** | Tasks, die von externen Workern (z.B. agent-orchestrator) per fetch-and-lock abgearbeitet werden. |
-| **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
-| **ExclusiveGateway (XOR)** | Genau ein ausgehender Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
-| **ParallelGateway (AND)** | Alle ausgehenden Pfade werden bedingungslos verfolgt (Token-Fork). Als Join wartet es auf **alle** eingehenden Tokens (JoinBarrier) und mergt deren Variablen. |
-| **InclusiveGateway (OR)** | Alle Pfade, deren Bedingung `true` ergibt, werden parallel verfolgt (Token-Forking). Als Join wartet es auf alle erwarteten Tokens. |
+### Basis-Elemente
+
+| Piktogramm | Element | Beschreibung |
+|:---:|---|---|
+| ◯ | **StartEvent** | Einfacher Startpunkt — Prozess wird sofort gestartet. |
+| ⏱️ ◯ | **TimerStartEvent** | Timer-gesteuerter Start nach einer konfigurierbaren ISO 8601 Dauer (`PT30S`, `PT5M`). |
+| ✉️ ◯ | **MessageStartEvent** | Prozess wird durch eine eingehende Nachricht (via `messageName`) gestartet. |
+| ⭕ | **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
+| ⚡ ⭕ | **ErrorEndEvent** | Terminiert den Prozess mit einem BPMN-Fehlercode (`errorCode`). |
+| 👤 ▭ | **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
+| ⚙️ ▭ | **ServiceTask** | Tasks, die von externen Workern (z.B. agent-orchestrator) per fetch-and-lock abgearbeitet werden. |
+
+### Gateways
+
+| Piktogramm | Element | Beschreibung |
+|:---:|---|---|
+| ✖️ ♢ | **ExclusiveGateway (XOR)** | Genau ein ausgehender Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
+| ➕ ♢ | **ParallelGateway (AND)** | Alle ausgehenden Pfade werden bedingungslos verfolgt (Token-Fork). Als Join wartet es auf **alle** eingehenden Tokens (JoinBarrier) und mergt deren Variablen. |
+| ◯ ♢ | **InclusiveGateway (OR)** | Alle Pfade, deren Bedingung `true` ergibt, werden parallel verfolgt (Token-Forking). Als Join wartet es auf alle erwarteten Tokens. |
+
+### Events (Phase 1)
+
+| Piktogramm | Element | Beschreibung |
+|:---:|---|---|
+| ⏱️ ⌾ | **TimerCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis ein Timer abläuft. Auflösung via `POST /api/timers/process`. |
+| ✉️ ⌾ | **MessageCatchEvent** | Intermediate Catch Event — pausiert den Prozess bis eine Nachricht mit passendem `messageName` korreliert wird. |
+| ⏱️ ◧ | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event. Unterbricht den Task (interrupting) wenn der Timer abläuft. Timer wird bei Task-Abschluss automatisch storniert. |
+| ⚡ ◧ | **BoundaryErrorEvent** | An einen ServiceTask angeheftetes Error-Event. Fängt BPMN-Fehler (`errorCode`) ab und leitet den Token auf einen alternativen Pfad um. |
 
 ### Zusätzliche Konzepte
 
 * **Conditional Sequence Flows** — Kanten können Bedingungsausdrücke tragen (z.B. `amount > 100`, `status == 'approved'`). Der integrierte Condition-Evaluator unterstützt `==`, `!=`, `>`, `>=`, `<`, `<=` sowie Truthy-Checks.
 * **Execution Listeners** — Nodes können Start- und End-Scripts besitzen, die Prozessvariablen lesen und mutieren (z.B. `x = x * 2; if x > 10 { result = "big" }`).
 * **Dynamische Prozessvariablen** — Variablen laufender Instanzen können zur Laufzeit via REST-API aktualisiert werden. Änderungen werden in der NATS-Persistenz automatisch mit pausierten Tokens von Pending-Tasks synchronisiert.
-* **Detail-Historie** — Das Audit-Log der Engine liefert ein lückenloses Playback aller Token-Routings und State-Veränderungen, detailliert aufgeschlüsselt nach den zugehörigen Aktoren (`User`, `Engine`, `External Worker`).
+* **Message Correlation** — Eingehende Nachrichten werden über `messageName` und optional `businessKey` an wartende Instanzen oder als Startimpuls an passende Definitionen korreliert.
+* **Timer-Verarbeitung** — Pending-Timer werden via Polling (`process_timers()`) aufgelöst. Boundary-Timer werden bei Task-Abschluss automatisch storniert (`cancel_boundary_timers`).
+* **BPMN Error Handling** — Service-Tasks können via `bpmnError`-Endpunkt Fehler melden. Die Engine routet den Token an das passende `BoundaryErrorEvent` (Matching via `errorCode`).
+* **Detail-Historie** — Das Audit-Log der Engine liefert ein lückenloses Playback aller Token-Routings und State-Veränderungen, detailliert aufgeschlüsselt nach den zugehörigen Aktoren (`User`, `Engine`, `Timer`, `ServiceWorker`).
+* **Persistente Wait-States** — Timer und Message Catches werden in NATS KV-Stores persistiert und überleben damit Server-Neustarts.
 
 ## Architektur
 
@@ -50,10 +72,12 @@ flowchart TD
     classDef persistence fill:#bbf7d0,stroke:#16a34a,stroke-width:2px,color:#14532d;
     classDef desktop fill:#fef08a,stroke:#ca8a04,stroke-width:2px,color:#713f12;
     classDef agent fill:#fbcfe8,stroke:#db2777,stroke-width:2px,color:#831843;
+    classDef storage fill:#f0fdf4,stroke:#16a34a,stroke-width:1px,color:#14532d;
 
     subgraph "Clients / External"
-        UI["desktop-tauri\n(Desktop App / bpmn-js)"]:::desktop
+        UI["desktop-tauri\n(Tauri + React + bpmn-js)"]:::desktop
         Agent["agent-orchestrator\n(External Workers)"]:::agent
+        ExtMsg["External Systems\n(Messages / Timers)"]:::agent
     end
 
     subgraph "Server Layer"
@@ -61,20 +85,32 @@ flowchart TD
     end
 
     subgraph "Core Workflow Engine"
-        Engine["engine-core\n(Token & State Execution)"]:::core
-        Parser["bpmn-parser\n(XML to Rust Structs)"]:::core
+        Parser["bpmn-parser\n(BPMN 2.0 XML → ProcessDefinition)"]:::core
+        Engine["engine-core\n(State Machine / Token Execution)"]:::core
+        Trait["WorkflowPersistence\n(Trait)"]:::core
     end
 
-    subgraph "Storage"
-        Nats[(persistence-nats\nNATS JetStream)]:::persistence
+    subgraph "Storage Layer"
+        NatsImpl["persistence-nats\n(impl WorkflowPersistence)"]:::persistence
+        Nats[("NATS JetStream\nKV: instances, definitions,\ntimers, messages, tokens")]:::storage
     end
 
-    %% Connections
+    %% Client → Server
     UI -- "HTTP REST API" --> Axum
-    Agent -- "HTTP Fetch/Lock" --> Axum
-    Axum -- "Calls" --> Engine
-    Engine -- "Parses" --> Parser
-    Engine -- "Stores State & Events" --> Nats
+    Agent -- "fetchAndLock / complete\n/ bpmnError" --> Axum
+    ExtMsg -- "POST /api/message\nPOST /api/timers/process" --> Axum
+
+    %% Server → Core
+    Axum -- "parse_bpmn_xml()" --> Parser
+    Axum -- "deploy / start / complete\n/ correlate_message\n/ process_timers" --> Engine
+
+    %% Core internals
+    Engine -. "uses" .-> Trait
+
+    %% Persistence
+    Trait -. "implemented by" .-> NatsImpl
+    Axum -- "injects persistence" --> NatsImpl
+    NatsImpl -- "KV get/put/delete\nJetStream publish" --> Nats
 ```
 
 ## Voraussetzungen
@@ -94,23 +130,33 @@ Folgende Tools müssen auf deinem System installiert sein:
 
 ## Test-Metriken
 
+### Workspace Test Summary
+
+| Crate | Unit Tests | Integration Tests | Gesamt |
+|---|---|---|---|
+| **engine-core** | 55 | — | 55 |
+| **bpmn-parser** | 12 | — | 12 |
+| **persistence-nats** | 2 | — | 2 |
+| **engine-server** | — | 5 | 5 |
+| **Gesamt** | **69** | **5** | **74** ✅ |
+
 ### Code Coverage (cargo-llvm-cov)
 
 | Crate / Modul | Lines | Covered | Line Coverage |
 |---|---|---|---|
 | **engine-core** `model.rs` | 335 | 322 | **96.1%** ✅ |
-| **engine-core** `engine.rs` | 1033 | 858 | **83.0%** |
-| **engine-core** `condition.rs` | 74 | 60 | **81.0%** |
-| **engine-core** `script_runner.rs` | 57 | 54 | **94.7%** ✅ |
-| **engine-core** `service_task.rs` | 241 | 225 | **93.3%** ✅ |
-| **engine-core** `history.rs` | 187 | 173 | **92.5%** ✅ |
-| **engine-core** `tests.rs` | 1720 | 1712 | **99.5%** ✅ |
-| **bpmn-parser** | 334 | 306 | **91.6%** ✅ |
-| **persistence-nats** | 512 | 45 | **8.8%** ¹ |
-| **engine-server** | 437 | 12 | **2.7%** ¹ |
-| **Gesamt (Workspace)** | **5586** | **4246** | **76.0%** |
+| **engine-core** `engine.rs` | 1 840 | — | — ² |
+| **engine-core** `condition.rs` | 112 | 60 | **81.0%** |
+| **engine-core** `script_runner.rs` | 86 | 54 | **94.7%** ✅ |
+| **engine-core** `service_task.rs` | 389 | 225 | **93.3%** ✅ |
+| **engine-core** `history.rs` | 302 | 173 | **92.5%** ✅ |
+| **engine-core** `tests.rs` | 1 209 | — | **~99%** ✅ |
+| **bpmn-parser** | 909 | 306 | **91.6%** ✅ |
+| **persistence-nats** | 668 | 45 | **8.8%** ¹ |
+| **engine-server** | 705 | 12 | **2.7%** ¹ |
 
-¹ *Benötigen laufende NATS-Instanz bzw. HTTP-Server für Integration Tests.*
+¹ *Benötigen laufende NATS-Instanz bzw. HTTP-Server für vollständige Integration Tests.*
+² *engine.rs wurde in Phase 1 signifikant erweitert — ein neuer Coverage-Lauf steht aus.*
 
 ### Mutation Testing (cargo-mutants, engine-core)
 
@@ -134,7 +180,7 @@ Folgende Tools müssen auf deinem System installiert sein:
 | **Pass Rate** | **100%** ✅ |
 
 > [!NOTE]
-> Die Rust `engine-server` E2E-Tests validieren Deployments, Variablen-Updates und Event-Historie über den echten Axum REST-API Stack inkl. In-Memory NATS Mock (`tests/e2e_deploy.rs`, `e2e_variables.rs`, `e2e_history.rs`).
+> Die Rust `engine-server` E2E-Tests validieren Deployments, Variablen-Updates und Event-Historie über den echten Axum REST-API Stack inkl. In-Memory Persistence Mock (`tests/e2e_deploy.rs`, `e2e_variables.rs`, `e2e_history.rs`).
 
 ### E2E Tests (Playwright, desktop-tauri)
 
@@ -218,6 +264,10 @@ Der Server lauscht standardmäßig auf `http://localhost:8081`.
 * `POST /api/service-task/:id/failure` - Einen Service Task als fehlgeschlagen markieren
 * `POST /api/service-task/:id/extendLock` - Die Sperrdauer eines Tasks verlängern
 * `POST /api/service-task/:id/bpmnError` - Einen BPMN-Fehler für einen Task melden
+
+#### Messages & Timers
+* `POST /api/message` - Eine Nachricht korrelieren (löst wartende `MessageCatchEvents` auf oder startet `MessageStartEvent`-Prozesse)
+* `POST /api/timers/process` - Alle abgelaufenen Timer verarbeiten (löst wartende `TimerCatchEvents` und `BoundaryTimerEvents` auf)
 
 #### Info & Monitoring
 * `GET /api/info` - Backend-Informationen abrufen (Typ, NATS-URL, Verbindungsstatus)
