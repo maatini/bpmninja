@@ -81,6 +81,18 @@ impl WorkflowEngine {
         self.pending_service_tasks.push(task);
     }
 
+    /// Restores a pending timer from persistence (e.g. on server startup).
+    pub fn restore_timer(&mut self, timer: PendingTimer) {
+        log::info!("Restored timer {} (instance: {}, node: {})", timer.id, timer.instance_id, timer.node_id);
+        self.pending_timers.push(timer);
+    }
+
+    /// Restores a pending message catch from persistence (e.g. on server startup).
+    pub fn restore_message_catch(&mut self, catch: PendingMessageCatch) {
+        log::info!("Restored message catch {} (instance: {}, message: {})", catch.id, catch.instance_id, catch.message_name);
+        self.pending_message_catches.push(catch);
+    }
+
     /// Returns summary statistics for monitoring dashboards.
     pub async fn get_stats(&self) -> EngineStats {
         let all_insts = self.instances.all().await;
@@ -376,11 +388,7 @@ impl WorkflowEngine {
         ).await;
 
         let token = Token::with_variables(start_id, variables);
-        if let Some(p) = &self.persistence {
-            if let Err(e) = p.save_token(&token).await {
-                log::error!("Failed to save initial token: {}", e);
-            }
-        }
+
         Box::pin(self.run_instance_batch(instance_id, token)).await?;
         self.persist_instance(instance_id).await;
 
@@ -552,11 +560,7 @@ impl WorkflowEngine {
         ).await;
 
         let token = Token::new(&start_id);
-        if let Some(p) = &self.persistence {
-            if let Err(e) = p.save_token(&token).await {
-                log::error!("Failed to save initial token (timer): {}", e);
-            }
-        }
+
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 
@@ -828,11 +832,7 @@ impl WorkflowEngine {
             let mut inst = inst_arc.write().await;
             inst.current_node = next;
         }
-        if let Some(p) = &self.persistence {
-            if let Err(e) = p.save_token(&token).await {
-                log::error!("Failed to save token after user task: {}", e);
-            }
-        }
+
         
         self.record_history_event(
             instance_id,
@@ -923,7 +923,22 @@ impl WorkflowEngine {
             Vec::new()
         };
         
+        // Collect timer IDs to delete from persistence
+        let timer_ids_to_delete: std::collections::HashSet<Uuid> = self.pending_timers.iter()
+            .filter(|t| t.instance_id == instance_id && bound_timers.contains(&t.node_id))
+            .map(|t| t.id)
+            .collect();
+            
         self.pending_timers.retain(|t| !(t.instance_id == instance_id && bound_timers.contains(&t.node_id)));
+        
+        // Delete from persistence
+        if let Some(persistence) = &self.persistence {
+            for timer_id in timer_ids_to_delete {
+                if let Err(e) = persistence.delete_timer(timer_id).await {
+                    log::error!("Failed to delete cancelled boundary timer {} from persistence: {}", timer_id, e);
+                }
+            }
+        }
     }
 
     /// Deletes a process instance and cleans up associated pending tasks.

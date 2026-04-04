@@ -72,6 +72,28 @@ async fn restore_from_nats(
         }
         Err(e) => log::error!("Failed to list service tasks: {:?}", e),
     }
+
+    match nats.list_timers().await {
+        Ok(timers) => {
+            let num = timers.len();
+            for timer in timers {
+                engine.restore_timer(timer);
+            }
+            log::info!("Restored {} pending timer(s).", num);
+        }
+        Err(e) => log::error!("Failed to list timers: {:?}", e),
+    }
+
+    match nats.list_message_catches().await {
+        Ok(catches) => {
+            let num = catches.len();
+            for catch in catches {
+                engine.restore_message_catch(catch);
+            }
+            log::info!("Restored {} pending message catch(es).", num);
+        }
+        Err(e) => log::error!("Failed to list message catches: {:?}", e),
+    }
 }
 
 #[tokio::main]

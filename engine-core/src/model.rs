@@ -375,6 +375,20 @@ impl ProcessDefinition {
     pub fn is_join_gateway(&self, node_id: &str) -> bool {
         self.incoming_flow_count(node_id) >= 2
     }
+
+    /// Returns true if this node is a splitting gateway.
+    pub fn is_split_gateway(&self, node_id: &str) -> bool {
+        if let Some(element) = self.nodes.get(node_id) {
+            matches!(
+                element,
+                BpmnElement::ExclusiveGateway { .. }
+                    | BpmnElement::InclusiveGateway
+                    | BpmnElement::ParallelGateway
+            ) && self.next_nodes(node_id).len() >= 2
+        } else {
+            false
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

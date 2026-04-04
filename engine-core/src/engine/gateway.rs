@@ -21,21 +21,17 @@ pub(crate) fn execute_parallel_gateway(
     token.is_merged = false;
 
     // --- SPLIT LOGIC ---
+    if outgoing.len() == 1 {
+        token.current_node = outgoing[0].target.clone();
+        return Ok(NextAction::Continue(token.clone()));
+    }
+
     let forked: Vec<Token> = outgoing
         .iter()
         .map(|sf| Token::with_variables(&sf.target, token.variables.clone()))
         .collect();
 
-    if forked.len() == 1 {
-        Ok(NextAction::Continue(
-            forked
-                .into_iter()
-                .next()
-                .expect("BUG: forked vec verified as len()==1 but is empty"),
-        ))
-    } else {
-        Ok(NextAction::ContinueMultiple(forked))
-    }
+    Ok(NextAction::ContinueMultiple(forked))
 }
 
 pub(crate) fn execute_exclusive_gateway(
@@ -106,19 +102,16 @@ pub(crate) fn execute_inclusive_gateway(
         return Err(EngineError::NoMatchingCondition(current_id.to_string()));
     }
 
+    if matched_targets.len() == 1 {
+        token.current_node = matched_targets[0].clone();
+        return Ok(NextAction::Continue(token.clone()));
+    }
+
     // Fork tokens — each gets a copy of the current variables
     let forked: Vec<Token> = matched_targets
         .into_iter()
         .map(|target| Token::with_variables(&target, token.variables.clone()))
         .collect();
 
-    if forked.len() == 1 {
-        let single = forked
-            .into_iter()
-            .next()
-            .expect("BUG: forked vec verified as len()==1 but is empty");
-        Ok(NextAction::Continue(single))
-    } else {
-        Ok(NextAction::ContinueMultiple(forked))
-    }
+    Ok(NextAction::ContinueMultiple(forked))
 }

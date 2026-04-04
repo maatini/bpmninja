@@ -56,7 +56,7 @@ Eine einbettbare BPMN 2.0 Workflow-Engine in Rust.
 * **Dynamische Prozessvariablen** — Variablen laufender Instanzen können zur Laufzeit via REST-API aktualisiert werden. Änderungen werden in der NATS-Persistenz automatisch mit pausierten Tokens von Pending-Tasks synchronisiert.
 * **Datei-Variablen** — Integrierte Unterstützung für Datei-Uploads und Downloads als vollwertige Prozessvariablen, sicher persistiert im NATS JetStream Object Store.
 * **Message Correlation** — Eingehende Nachrichten werden über `messageName` und optional `businessKey` an wartende Instanzen oder als Startimpuls an passende Definitionen korreliert.
-* **Timer-Verarbeitung** — Pending-Timer werden via Polling (`process_timers()`) aufgelöst. Boundary-Timer werden bei Task-Abschluss automatisch storniert (`cancel_boundary_timers`).
+* **Timer-Verarbeitung** — Pending-Timer werden via Polling (`process_timers()`) aufgelöst. Boundary-Timer werden bei Task-Abschluss automatisch storniert (`cancel_boundary_timers`). **Hinweis**: Die Engine nutzt aktuell keinen internen Background-Thread für Timer-Polling. Timers müssen von einem externen Cronjob über den Endpunkt `POST /api/timers/process` regelmäßig aufgerufen werden.
 * **BPMN Error Handling** — Service-Tasks können via `bpmnError`-Endpunkt Fehler melden. Die Engine routet den Token an das passende `BoundaryErrorEvent` (Matching via `errorCode`).
 * **Detail-Historie** — Das Audit-Log der Engine liefert ein lückenloses Playback aller Token-Routings und State-Veränderungen, detailliert aufgeschlüsselt nach den zugehörigen Aktoren (`User`, `Engine`, `Timer`, `ServiceWorker`).
 * **Persistente Wait-States** — Timer und Message Catches werden in NATS KV-Stores persistiert und überleben damit Server-Neustarts.

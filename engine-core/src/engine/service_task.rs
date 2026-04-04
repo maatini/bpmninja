@@ -146,7 +146,7 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.variables = token.variables.clone();
-            inst.definition_key.clone()
+            inst.definition_key
         };
 
         // Advance token to the next node
@@ -182,11 +182,7 @@ impl WorkflowEngine {
             let mut inst = inst_arc.write().await;
             inst.current_node = next;
         }
-        if let Some(p) = &self.persistence {
-            if let Err(e) = p.save_token(&token).await {
-                log::error!("Failed to save token after service task: {}", e);
-            }
-        }
+
 
         self.remove_persisted_service_task(task_id).await;
 

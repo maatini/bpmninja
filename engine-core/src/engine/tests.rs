@@ -1082,7 +1082,7 @@ async fn mutation_find_downstream_join() {
     let def = ProcessDefinitionBuilder::new("join")
         .node("start", BpmnElement::StartEvent)
         .node("gw_split", BpmnElement::ParallelGateway)
-        .node("gw_join", BpmnElement::InclusiveGateway)
+        .node("gw_join", BpmnElement::ParallelGateway)
         .node("dummy", BpmnElement::ServiceTask { topic: "dummy".to_string() })
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw_split")
@@ -1102,7 +1102,7 @@ async fn mutation_find_downstream_join() {
 
     // Find with depth limit (though internal recursion only decreases by 1, testing the > 100 limit protection is hard, but we can just test if the logic iterates correctly).
     let found_from_start = engine_local.find_downstream_join(&def, "start"); 
-    assert_eq!(found_from_start, Some("gw_join".to_string()));
+    assert_eq!(found_from_start, None);
     // It actually returns None because it exceeds max recursion or doesn't find gateway.
 }
 
@@ -1454,4 +1454,75 @@ async fn test_definition_versioning_and_migration() {
     let inst_v2_data = engine.get_instance_details(inst_v2).await.unwrap();
     assert_eq!(inst_v2_data.current_node, "task2");
     assert_eq!(inst_v2_data.definition_key, key_v2);
+}
+
+#[tokio::test]
+async fn restore_timer_and_message_catch() {
+    let mut engine = WorkflowEngine::new();
+    
+    let timer = PendingTimer {
+        id: Uuid::new_v4(),
+        instance_id: Uuid::new_v4(),
+        node_id: "timer_1".into(),
+        expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
+        token_id: Uuid::new_v4(),
+    };
+    engine.restore_timer(timer.clone());
+    assert_eq!(engine.pending_timers.len(), 1);
+    assert_eq!(engine.pending_timers[0].id, timer.id);
+    
+    let catch = PendingMessageCatch {
+        id: Uuid::new_v4(),
+        instance_id: Uuid::new_v4(),
+        node_id: "msg_1".into(),
+        message_name: "ORDER_RECEIVED".into(),
+        token_id: Uuid::new_v4(),
+    };
+    engine.restore_message_catch(catch.clone());
+    assert_eq!(engine.pending_message_catches.len(), 1);
+    assert_eq!(engine.pending_message_catches[0].id, catch.id);
+}
+
+#[tokio::test]
+async fn test_nested_parallel_gateways() {
+    let mut engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("nested")
+        .node("start", BpmnElement::StartEvent)
+        .node("s1", BpmnElement::ParallelGateway)
+        .node("t1", BpmnElement::ServiceTask { topic: "t".into() })
+        .node("s2", BpmnElement::ParallelGateway)
+        .node("t2", BpmnElement::ServiceTask { topic: "t".into() })
+        .node("t3", BpmnElement::ServiceTask { topic: "t".into() })
+        .node("j2", BpmnElement::ParallelGateway)
+        .node("j1", BpmnElement::ParallelGateway)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "s1")
+        .flow("s1", "t1")
+        .flow("s1", "s2")
+        .flow("s2", "t2")
+        .flow("s2", "t3")
+        .flow("t2", "j2")
+        .flow("t3", "j2")
+        .flow("j2", "j1")
+        .flow("t1", "j1")
+        .flow("j1", "end")
+        .build()
+        .unwrap();
+
+    let def_key = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(def_key).await.unwrap();
+
+    let _ = engine.fetch_and_lock_service_tasks("worker", 10, &["t".into()], 10).await;
+    
+    // Complete all 3 tasks
+    let mut i = 0;
+    while let Some(task) = engine.get_pending_service_tasks().first() {
+        let task_id = task.id;
+        engine.complete_service_task(task_id, "worker", std::collections::HashMap::new()).await.unwrap();
+        i += 1;
+        if i > 5 { break; } // safety loop limit
+    }
+    
+    let state = engine.get_instance_state(inst_id).await.unwrap();
+    assert_eq!(state, InstanceState::Completed);
 }

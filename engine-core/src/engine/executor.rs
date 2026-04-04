@@ -40,8 +40,7 @@ impl WorkflowEngine {
         let mut queue = VecDeque::new();
         queue.push_back(initial_token);
 
-        // Keep track of any tokens that need to be saved
-        let mut tokens_to_save = Vec::new();
+
 
         while let Some(mut token) = queue.pop_front() {
             let old_state = if let Some(lk) = self.instances.get(&instance_id).await { Some(lk.read().await.clone()) } else { None };
@@ -72,7 +71,6 @@ impl WorkflowEngine {
 
             match action {
                 NextAction::Continue(next_token) => {
-                    tokens_to_save.push(next_token.clone());
                     queue.push_back(next_token);
                 }
                 NextAction::ContinueMultiple(forked_tokens) => {
@@ -81,13 +79,17 @@ impl WorkflowEngine {
                     self.register_join_barrier_if_needed(instance_id, &current_gateway_id, branch_count).await?;
 
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
-            let mut inst = inst_arc.write().await;
+                        let mut inst = inst_arc.write().await;
+                        // The original token has been consumed by the split gateway
+                        if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == token.id) {
+                            active.completed = true;
+                        }
+                        
                         inst.state = InstanceState::ParallelExecution { active_token_count: inst.active_tokens.len() + branch_count };
                         inst.current_node = current_gateway_id.clone();
                     }
 
                     for (idx, fork_token) in forked_tokens.into_iter().enumerate() {
-                        tokens_to_save.push(fork_token.clone());
                         self.register_active_token(instance_id, &current_gateway_id, idx, &fork_token).await?;
                         queue.push_back(fork_token);
                     }
@@ -223,13 +225,7 @@ impl WorkflowEngine {
 
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
-        if let Some(p) = &self.persistence {
-            for t in tokens_to_save {
-                if let Err(e) = p.save_token(&t).await {
-                    log::error!("Failed to save token: {}", e);
-                }
-            }
-        }
+
         
         // After batch finishes for this instance, if it completed, check parent
         let mut completed = false;
@@ -495,23 +491,49 @@ impl WorkflowEngine {
         Ok(())
     }
 
+fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElement) -> bool {
+    matches!(
+        (a, b),
+        (crate::model::BpmnElement::ExclusiveGateway { .. }, crate::model::BpmnElement::ExclusiveGateway { .. }) |
+        (crate::model::BpmnElement::InclusiveGateway, crate::model::BpmnElement::InclusiveGateway) |
+        (crate::model::BpmnElement::ParallelGateway, crate::model::BpmnElement::ParallelGateway)
+    )
+}
+
     pub(crate) fn find_downstream_join(&self, def: &ProcessDefinition, start_node: &str) -> Option<String> {
+        let split_element = def.nodes.get(start_node)?;
         let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
+        let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new(); // (node_id, depth)
+        
         for flow in def.next_nodes(start_node) {
-            queue.push_back(flow.target.clone());
+            queue.push_back((flow.target.clone(), 1));
         }
         
-        while let Some(node) = queue.pop_front() {
+        while let Some((node, depth)) = queue.pop_front() {
             if visited.contains(&node) { continue; }
             visited.insert(node.clone());
             
-            if def.is_join_gateway(&node) {
-                return Some(node);
+            if let Some(element) = def.nodes.get(&node) {
+                if def.is_join_gateway(&node) && Self::same_gateway_type(split_element, element) {
+                    if depth == 1 {
+                        return Some(node.clone());
+                    }
+                    for flow in def.next_nodes(&node) {
+                        queue.push_back((flow.target.clone(), depth - 1));
+                    }
+                    continue;
+                }
+
+                if def.is_split_gateway(&node) && Self::same_gateway_type(split_element, element) {
+                    for flow in def.next_nodes(&node) {
+                        queue.push_back((flow.target.clone(), depth + 1));
+                    }
+                    continue;
+                }
             }
             
             for flow in def.next_nodes(&node) {
-                queue.push_back(flow.target.clone());
+                queue.push_back((flow.target.clone(), depth));
             }
         }
         None
@@ -536,23 +558,24 @@ impl WorkflowEngine {
         token: Token,
     ) -> EngineResult<Option<Token>> {
         let def_key_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let def_key = def_key_arc.read().await.definition_key.clone();
+        let def_key = def_key_arc.read().await.definition_key;
         let def = self.definitions.get(&def_key).await
             .ok_or(EngineError::NoSuchDefinition(def_key))?.clone();
         
-        let expected = def.incoming_flow_count(gateway_id);
+        let structural_expected = def.incoming_flow_count(gateway_id);
         let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         
-        let expected_count = expected;
+        let expected_count;
         let current_arrived;
         
         {
             let barrier = inst.join_barriers.entry(gateway_id.to_string()).or_insert_with(|| JoinBarrier {
                 gateway_node_id: gateway_id.to_string(),
-                expected_count: expected_count,
+                expected_count: structural_expected,
                 arrived_tokens: Vec::new(),
             });
+            expected_count = barrier.expected_count;
             barrier.arrived_tokens.push(token.clone());
             current_arrived = barrier.arrived_tokens.len();
         }
@@ -560,7 +583,10 @@ impl WorkflowEngine {
         inst.audit_log.push(format!("➔ Token arrived at join '{}' ({}/{})", gateway_id, current_arrived, expected_count));
         
         if current_arrived >= expected_count {
-            let all_tokens = inst.join_barriers.remove(gateway_id).unwrap().arrived_tokens;
+            let all_tokens = inst.join_barriers.remove(gateway_id)
+                .ok_or_else(|| EngineError::InvalidDefinition(
+                    format!("Join barrier for gateway '{}' not found in instance {}", gateway_id, instance_id)
+                ))?.arrived_tokens;
             
             for t in &all_tokens {
                 if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == t.id) {

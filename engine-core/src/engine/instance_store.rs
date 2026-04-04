@@ -37,15 +37,18 @@ impl InstanceStore {
     }
 
     /// Calculates the number of instances present in the store
+    #[allow(dead_code)]
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()
     }
     
+    #[allow(dead_code)]
     pub async fn is_empty(&self) -> bool {
         self.inner.read().await.is_empty()
     }
 
     /// Clears the entire store (mostly for tests)
+    #[allow(dead_code)]
     pub async fn clear(&self) {
         self.inner.write().await.clear();
     }
