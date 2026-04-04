@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Server, Settings2, Database } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 /**
  * Formats bytes into a human-readable string (B, KB, MB, GB).
@@ -73,7 +74,20 @@ export function Monitoring() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {!data && !error && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[1,2,3,4,5,6,7,8].map(i => (
+                    <Card key={i} className="bg-muted/30 border-muted-foreground/20">
+                      <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
+                        <Skeleton className="h-8 w-12 mb-2" />
+                        <Skeleton className="h-3 w-[100px]" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+              {data && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="bg-muted/30 border-muted-foreground/20">
                   <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
                     <span className="text-3xl font-bold tracking-tight">{data?.definitions_count ?? '–'}</span>
@@ -122,7 +136,8 @@ export function Monitoring() {
                     <span className="text-xs text-muted-foreground mt-1 text-center">Pending Messages</span>
                   </CardContent>
                 </Card>
-              </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

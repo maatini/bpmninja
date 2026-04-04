@@ -306,7 +306,10 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                                 <span className="font-normal text-muted-foreground ml-2">(#{inst.id.substring(0, 8)})</span>
                               </span>
                               <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                <Network className="h-3 w-3" /> {inst.current_node}
+                                <Network className="h-3 w-3" /> 
+                                {inst.state === 'Completed' 
+                                  ? <span className="italic">Process ended</span> 
+                                  : inst.current_node}
                               </span>
                             </div>
                           </div>
@@ -379,7 +382,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <Card className="p-4 flex flex-col gap-1.5 shadow-sm">
                     <span className="text-xs uppercase font-semibold text-muted-foreground">State</span>
-                    <Badge className={cn("w-fit, border-none", stateBadgeClass(selected.state))}>
+                    <Badge className={cn("w-fit border-none", stateBadgeClass(selected.state))}>
                       {stateLabel(selected.state)}
                     </Badge>
                   </Card>

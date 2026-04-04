@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { save } from '@tauri-apps/api/dialog';
 import { writeTextFile } from '@tauri-apps/api/fs';
 import { listDefinitions, getDefinitionXml, listInstances, deleteDefinition, type DefinitionInfo, type ProcessInstance } from './lib/tauri';
-import { RefreshCw, Eye, Download, Activity, Clock, Trash, FileCode2, Network, Key, Boxes, Layers } from 'lucide-react';
+import { RefreshCw, Eye, Download, Activity, Clock, Trash, FileCode2, Network, Key, Boxes, Database } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -139,7 +139,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
           {error && <div className="text-destructive font-medium">Error: {error}</div>}
           {!loading && !error && grouped.size === 0 && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <Layers className="h-16 w-16 text-muted-foreground/30 mb-4" />
+              <Database className="h-16 w-16 text-muted-foreground/30 mb-4" />
               <h3 className="text-lg font-semibold text-muted-foreground">No Deployed Processes</h3>
               <p className="text-sm text-muted-foreground/70 mt-1 max-w-sm">
                 Deploy a BPMN process from the Modeler to see it listed here.

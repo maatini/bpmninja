@@ -65,11 +65,12 @@ desktop-tauri/
 - NATS auto-connect on startup (graceful fallback to in-memory)
 - Full state restore from NATS on startup
 
-## Styling (IMPORTANT)
-- **Vanilla CSS only** — all styles in `src/index.css`
-- NO Tailwind, NO shadcn/ui, NO CSS-in-JS
-- CSS custom properties for theming (`:root` variables)
+## Styling
+- **TailwindCSS 3** with `tailwind.config.js` for theme configuration
+- **shadcn/ui** components based on Radix UI primitives (in `components/ui/`)
+- CSS custom properties (HSL format) for light/dark theming in `src/index.css`
 - Lucide React icons for all iconography
+- `Geist Variable` font via `@fontsource-variable/geist`
 
 ## TypeScript Strict Mode
 - `useUnknownInCatchVariables: true` — never use bare `catch (e)`

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getApiUrl, setApiUrl, getMonitoringData } from './lib/tauri'
-import { Server, CheckCircle, XCircle, Palette } from 'lucide-react'
+import { Server, CheckCircle, XCircle, Palette, Monitor, Sun, Moon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
@@ -138,19 +138,19 @@ export function Settings() {
                 variant={theme === 'auto' ? 'default' : 'outline'}
                 onClick={() => handleThemeChange('auto')}
               >
-                🖥 System
+                <Monitor className="h-4 w-4 mr-1.5" /> System
               </Button>
               <Button 
                 variant={theme === 'light' ? 'default' : 'outline'}
                 onClick={() => handleThemeChange('light')}
               >
-                ☀️ Light
+                <Sun className="h-4 w-4 mr-1.5" /> Light
               </Button>
               <Button 
                 variant={theme === 'dark' ? 'default' : 'outline'}
                 onClick={() => handleThemeChange('dark')}
               >
-                🌙 Dark
+                <Moon className="h-4 w-4 mr-1.5" /> Dark
               </Button>
             </div>
           </CardContent>
