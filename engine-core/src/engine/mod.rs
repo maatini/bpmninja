@@ -22,12 +22,13 @@ pub use types::*;
 pub struct WorkflowEngine {
     pub(crate) definitions: registry::DefinitionRegistry,
     pub(crate) instances: crate::engine::instance_store::InstanceStore,
-    pub(crate) pending_user_tasks: Vec<PendingUserTask>,
-    pub(crate) pending_service_tasks: Vec<PendingServiceTask>,
-    pub(crate) pending_timers: Vec<PendingTimer>,
-    pub(crate) pending_message_catches: Vec<PendingMessageCatch>,
+    pub(crate) pending_user_tasks: HashMap<Uuid, PendingUserTask>,
+    pub(crate) pending_service_tasks: HashMap<Uuid, PendingServiceTask>,
+    pub(crate) pending_timers: HashMap<Uuid, PendingTimer>,
+    pub(crate) pending_message_catches: HashMap<Uuid, PendingMessageCatch>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) script_engine: rhai::Engine,
+    pub(crate) persistence_error_count: std::sync::atomic::AtomicU64,
 }
 
 impl WorkflowEngine {
@@ -37,12 +38,13 @@ impl WorkflowEngine {
         Self {
             definitions: registry::DefinitionRegistry::new(),
             instances: crate::engine::instance_store::InstanceStore::new(),
-            pending_user_tasks: Vec::new(),
-            pending_service_tasks: Vec::new(),
-            pending_timers: Vec::new(),
-            pending_message_catches: Vec::new(),
+            pending_user_tasks: HashMap::new(),
+            pending_service_tasks: HashMap::new(),
+            pending_timers: HashMap::new(),
+            pending_message_catches: HashMap::new(),
             persistence: None,
             script_engine: rhai::Engine::new(),
+            persistence_error_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -72,25 +74,25 @@ impl WorkflowEngine {
     /// Restores a pending user task from persistence.
     pub fn restore_user_task(&mut self, task: PendingUserTask) {
         log::info!("Restored user task {} (instance: {})", task.task_id, task.instance_id);
-        self.pending_user_tasks.push(task);
+        self.pending_user_tasks.insert(task.task_id, task);
     }
 
     /// Restores a pending service task from persistence.
     pub fn restore_service_task(&mut self, task: PendingServiceTask) {
         log::info!("Restored service task {} (instance: {})", task.id, task.instance_id);
-        self.pending_service_tasks.push(task);
+        self.pending_service_tasks.insert(task.id, task);
     }
 
     /// Restores a pending timer from persistence (e.g. on server startup).
     pub fn restore_timer(&mut self, timer: PendingTimer) {
         log::info!("Restored timer {} (instance: {}, node: {})", timer.id, timer.instance_id, timer.node_id);
-        self.pending_timers.push(timer);
+        self.pending_timers.insert(timer.id, timer);
     }
 
     /// Restores a pending message catch from persistence (e.g. on server startup).
     pub fn restore_message_catch(&mut self, catch: PendingMessageCatch) {
         log::info!("Restored message catch {} (instance: {}, message: {})", catch.id, catch.instance_id, catch.message_name);
-        self.pending_message_catches.push(catch);
+        self.pending_message_catches.insert(catch.id, catch);
     }
 
     /// Returns summary statistics for monitoring dashboards.
@@ -118,6 +120,7 @@ impl WorkflowEngine {
             pending_service_tasks: self.pending_service_tasks.len(),
             pending_timers: self.pending_timers.len(),
             pending_message_catches: self.pending_message_catches.len(),
+            persistence_errors: self.persistence_error_count.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -140,6 +143,12 @@ impl WorkflowEngine {
     }
 
     // ----- History Recording -----------------------------------------------
+
+    /// Logs and counts a persistence error (fire-and-forget pattern).
+    fn log_persistence_error(&self, context: &str, err: impl std::fmt::Display) {
+        self.persistence_error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        log::error!("PERSISTENCE FAILURE [{}]: {}", context, err);
+    }
 
     /// Helper to record a history entry for an instance, calculating the diff automatically.
     async fn record_history_event(
@@ -179,7 +188,7 @@ impl WorkflowEngine {
             if let Some(curr) = new_state {
                 entry = entry.with_node(curr.current_node.clone());
 
-                // Snapshot-Heuristik: Alle 8 Audit-Log Einträge einen Snapshot speichern
+                // Snapshot heuristic: store a full snapshot every 8 audit log entries
                 if !curr.audit_log.is_empty() && curr.audit_log.len() % 8 == 0 {
                     if let Ok(json_state) = serde_json::to_value(curr) {
                         entry = entry.with_snapshot(json_state);
@@ -188,7 +197,7 @@ impl WorkflowEngine {
             }
 
             if let Err(e) = p.append_history_entry(&entry).await {
-                log::error!("Failed to record history entry for {}: {}", instance_id, e);
+                self.log_persistence_error(&format!("record_history_event({})", instance_id), e);
             }
         }
     }
@@ -197,9 +206,15 @@ impl WorkflowEngine {
     /// layer is configured). Logs and swallows errors.
     async fn persist_instance(&self, instance_id: Uuid) {
         if let (Some(p), Some(inst_arc)) = (&self.persistence, self.instances.get(&instance_id).await) {
-            let inst = inst_arc.read().await;
+            let mut inst = inst_arc.write().await;
+            // Trim audit log to prevent NATS KV 1MB value overflow
+            if inst.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
+                let overflow = inst.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+                inst.audit_log = inst.audit_log.split_off(overflow);
+                inst.audit_log.insert(0, format!("... ({} older entries trimmed, see History API)", overflow));
+            }
             if let Err(e) = p.save_instance(&inst).await {
-                log::error!("Failed to persist instance {}: {}", instance_id, e);
+                self.log_persistence_error(&format!("save_instance({})", instance_id), e);
             }
         }
     }
@@ -208,7 +223,7 @@ impl WorkflowEngine {
     async fn persist_definition(&self, key: Uuid) {
         if let (Some(p), Some(def)) = (&self.persistence, self.definitions.get(&key).await) {
             if let Err(e) = p.save_definition(&def).await {
-                log::error!("Failed to persist definition {}: {}", key, e);
+                self.log_persistence_error(&format!("save_definition({})", key), e);
             }
         }
     }
@@ -216,9 +231,9 @@ impl WorkflowEngine {
     /// Persists a pending user task to the KV store.
     async fn persist_user_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(task) = self.pending_user_tasks.iter().find(|t| t.task_id == task_id) {
+            if let Some(task) = self.pending_user_tasks.get(&task_id) {
                 if let Err(e) = p.save_user_task(task).await {
-                    log::error!("Failed to persist user task {}: {}", task_id, e);
+                    self.log_persistence_error(&format!("save_user_task({})", task_id), e);
                 }
             }
         }
@@ -228,7 +243,7 @@ impl WorkflowEngine {
     async fn remove_persisted_user_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
             if let Err(e) = p.delete_user_task(task_id).await {
-                log::error!("Failed to delete persisted user task {}: {}", task_id, e);
+                self.log_persistence_error(&format!("delete_user_task({})", task_id), e);
             }
         }
     }
@@ -236,9 +251,9 @@ impl WorkflowEngine {
     /// Persists a pending service task to the KV store.
     pub(crate) async fn persist_service_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(task) = self.pending_service_tasks.iter().find(|t| t.id == task_id) {
+            if let Some(task) = self.pending_service_tasks.get(&task_id) {
                 if let Err(e) = p.save_service_task(task).await {
-                    log::error!("Failed to persist external task {}: {}", task_id, e);
+                    self.log_persistence_error(&format!("save_service_task({})", task_id), e);
                 }
             }
         }
@@ -248,7 +263,7 @@ impl WorkflowEngine {
     pub(crate) async fn remove_persisted_service_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
             if let Err(e) = p.delete_service_task(task_id).await {
-                log::error!("Failed to delete persisted external task {}: {}", task_id, e);
+                self.log_persistence_error(&format!("delete_service_task({})", task_id), e);
             }
         }
     }
@@ -256,9 +271,9 @@ impl WorkflowEngine {
     /// Persists a pending timer to the KV store.
     async fn persist_timer(&self, timer_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(timer) = self.pending_timers.iter().find(|t| t.id == timer_id) {
+            if let Some(timer) = self.pending_timers.get(&timer_id) {
                 if let Err(e) = p.save_timer(timer).await {
-                    log::error!("Failed to persist timer {}: {}", timer_id, e);
+                    self.log_persistence_error(&format!("save_timer({})", timer_id), e);
                 }
             }
         }
@@ -268,7 +283,7 @@ impl WorkflowEngine {
     async fn remove_persisted_timer(&self, timer_id: Uuid) {
         if let Some(p) = &self.persistence {
             if let Err(e) = p.delete_timer(timer_id).await {
-                log::error!("Failed to delete persisted timer {}: {}", timer_id, e);
+                self.log_persistence_error(&format!("delete_timer({})", timer_id), e);
             }
         }
     }
@@ -276,9 +291,9 @@ impl WorkflowEngine {
     /// Persists a pending message catch to the KV store.
     async fn persist_message_catch(&self, catch_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(catch) = self.pending_message_catches.iter().find(|t| t.id == catch_id) {
+            if let Some(catch) = self.pending_message_catches.get(&catch_id) {
                 if let Err(e) = p.save_message_catch(catch).await {
-                    log::error!("Failed to persist message catch {}: {}", catch_id, e);
+                    self.log_persistence_error(&format!("save_message_catch({})", catch_id), e);
                 }
             }
         }
@@ -288,7 +303,7 @@ impl WorkflowEngine {
     async fn remove_persisted_message_catch(&self, catch_id: Uuid) {
         if let Some(p) = &self.persistence {
             if let Err(e) = p.delete_message_catch(catch_id).await {
-                log::error!("Failed to delete persisted message catch {}: {}", catch_id, e);
+                self.log_persistence_error(&format!("delete_message_catch({})", catch_id), e);
             }
         }
     }
@@ -600,37 +615,6 @@ impl WorkflowEngine {
         Ok(instance_id)
     }
 
-    /// Schedules a timer that, after sleeping for the given duration,
-    /// will trigger a timer-start instance. Returns immediately.
-    ///
-    /// Note: this uses `tokio::time::sleep` in a spawned task. The engine
-    /// reference is not carried into the task — instead the caller should
-    /// poll or use channels in a production setup. For the demo, we return
-    /// the duration and let the main code handle it.
-    pub async fn schedule_timer_start(
-        &self,
-        definition_key: Uuid,
-        duration: Duration,
-    ) -> EngineResult<()> {
-        if !self.definitions.contains_key(&definition_key).await {
-            return Err(EngineError::NoSuchDefinition(definition_key));
-        }
-
-        log::info!(
-            "Scheduled timer for def key '{definition_key}' — will fire in {}s",
-            duration.as_secs()
-        );
-
-        tokio::spawn(async move {
-            tokio::time::sleep(duration).await;
-            log::info!("⏰ Timer fired for def key '{definition_key}' after {}s", duration.as_secs());
-            // In a real engine this would send a message via mpsc channel
-            // to the engine to start the instance. For demo purposes we log.
-        });
-
-        Ok(())
-    }
-
 
 
     // ----- Phase 1 API: timers and messages ---------------------------------
@@ -644,7 +628,7 @@ impl WorkflowEngine {
         let mut affected_instances = Vec::new();
         let mut to_resume = Vec::new();
         
-        for catch in &self.pending_message_catches {
+        for catch in self.pending_message_catches.values() {
             if catch.message_name == message_name {
                 if let Some(inst_arc) = self.instances.get(&catch.instance_id).await {
             let inst = inst_arc.read().await;
@@ -660,9 +644,8 @@ impl WorkflowEngine {
         }
         
         for catch_id in to_resume {
-            let idx = self.pending_message_catches.iter().position(|p| p.id == catch_id)
+            let catch = self.pending_message_catches.remove(&catch_id)
                 .ok_or_else(|| EngineError::InvalidDefinition(format!("Message catch {catch_id} disappeared")))?;
-            let catch = self.pending_message_catches.remove(idx);
             
             // Retrieve token from central store
             let mut token = {
@@ -735,7 +718,7 @@ impl WorkflowEngine {
         let now = chrono::Utc::now();
         let mut expired = Vec::new();
         
-        for timer in &self.pending_timers {
+        for timer in self.pending_timers.values() {
             if timer.expires_at <= now {
                 expired.push(timer.id);
             }
@@ -743,9 +726,8 @@ impl WorkflowEngine {
         
         let count = expired.len();
         for tid in expired {
-            let idx = self.pending_timers.iter().position(|p| p.id == tid)
+            let timer = self.pending_timers.remove(&tid)
                 .ok_or_else(|| EngineError::InvalidDefinition(format!("Timer {tid} disappeared")))?;
-            let timer = self.pending_timers.remove(idx);
             
             let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await { Some(lk.read().await.clone()) } else { None };
             let def_key = {
@@ -801,16 +783,12 @@ impl WorkflowEngine {
         additional_vars: HashMap<String, Value>,
     ) -> EngineResult<()> {
         // Find and remove the pending task
-        let idx = self
-            .pending_user_tasks
-            .iter()
-            .position(|p| p.task_id == task_id)
+        let pending = self.pending_user_tasks.remove(&task_id)
             .ok_or_else(|| EngineError::TaskNotPending {
                 task_id,
                 actual_state: "not found in pending tasks".into(),
             })?;
 
-        let pending = self.pending_user_tasks.remove(idx);
         let instance_id = pending.instance_id;
 
         // Retrieve token from central store and merge additional variables
@@ -901,13 +879,13 @@ impl WorkflowEngine {
     }
 
     /// Returns all currently pending user tasks.
-    pub fn get_pending_user_tasks(&self) -> &[PendingUserTask] {
-        &self.pending_user_tasks
+    pub fn get_pending_user_tasks(&self) -> Vec<PendingUserTask> {
+        self.pending_user_tasks.values().cloned().collect()
     }
 
     /// Returns all pending service tasks (for debugging / admin).
-    pub fn get_pending_service_tasks(&self) -> &[PendingServiceTask] {
-        &self.pending_service_tasks
+    pub fn get_pending_service_tasks(&self) -> Vec<PendingServiceTask> {
+        self.pending_service_tasks.values().cloned().collect()
     }
 
     /// Returns a list of all process instances (cloned).
@@ -957,12 +935,12 @@ impl WorkflowEngine {
         };
         
         // Collect timer IDs to delete from persistence
-        let timer_ids_to_delete: std::collections::HashSet<Uuid> = self.pending_timers.iter()
+        let timer_ids_to_delete: std::collections::HashSet<Uuid> = self.pending_timers.values()
             .filter(|t| t.instance_id == instance_id && bound_timers.contains(&t.node_id))
             .map(|t| t.id)
             .collect();
             
-        self.pending_timers.retain(|t| !(t.instance_id == instance_id && bound_timers.contains(&t.node_id)));
+        self.pending_timers.retain(|_, t| !(t.instance_id == instance_id && bound_timers.contains(&t.node_id)));
         
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -988,19 +966,19 @@ impl WorkflowEngine {
             }
 
             // Delete associated user tasks from persistence
-            for task in self.pending_user_tasks.iter().filter(|t| t.instance_id == instance_id) {
+            for task in self.pending_user_tasks.values().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_user_task(task.task_id).await;
             }
             // Delete associated service tasks from persistence
-            for task in self.pending_service_tasks.iter().filter(|t| t.instance_id == instance_id) {
+            for task in self.pending_service_tasks.values().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_service_task(task.id).await;
             }
             // Delete associated timers from persistence
-            for timer in self.pending_timers.iter().filter(|t| t.instance_id == instance_id) {
+            for timer in self.pending_timers.values().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_timer(timer.id).await;
             }
             // Delete associated message catches from persistence
-            for catch in self.pending_message_catches.iter().filter(|t| t.instance_id == instance_id) {
+            for catch in self.pending_message_catches.values().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_message_catch(catch.id).await;
             }
             // Delete instance from persistence
@@ -1008,16 +986,16 @@ impl WorkflowEngine {
         }
 
         // Clean up pending user tasks in memory
-        self.pending_user_tasks.retain(|t| t.instance_id != instance_id);
+        self.pending_user_tasks.retain(|_, t| t.instance_id != instance_id);
         
         // Clean up pending service tasks in memory
-        self.pending_service_tasks.retain(|t| t.instance_id != instance_id);
+        self.pending_service_tasks.retain(|_, t| t.instance_id != instance_id);
 
         // Clean up pending timers in memory
-        self.pending_timers.retain(|t| t.instance_id != instance_id);
+        self.pending_timers.retain(|_, t| t.instance_id != instance_id);
 
         // Clean up pending message catches in memory
-        self.pending_message_catches.retain(|t| t.instance_id != instance_id);
+        self.pending_message_catches.retain(|_, t| t.instance_id != instance_id);
 
         Ok(())
     }

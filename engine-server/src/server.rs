@@ -118,6 +118,7 @@ struct MonitoringData {
     pending_service_tasks: usize,
     pending_timers: usize,
     pending_message_catches: usize,
+    persistence_errors: u64,
     storage_info: Option<StorageInfo>,
 }
 
@@ -259,8 +260,20 @@ pub fn build_app_with_engine(
         .route("/api/service-task/:id/failure", post(fail_service_task))
         .route("/api/service-task/:id/extendLock", post(extend_lock))
         .route("/api/service-task/:id/bpmnError", post(bpmn_error))
+        .route("/api/health", get(|| async { axum::http::StatusCode::OK }))
+        .route("/api/ready", get(ready_endpoint))
+        .layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024))
         .layer(cors)
         .with_state(state)
+}
+
+async fn ready_endpoint(State(state): State<Arc<AppState>>) -> axum::response::Response {
+    if let Some(ref p) = state.persistence {
+        if p.get_storage_info().await.is_err() {
+            return (axum::http::StatusCode::SERVICE_UNAVAILABLE, "NATS disconnected").into_response();
+        }
+    }
+    (axum::http::StatusCode::OK, "Ready").into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -762,6 +775,7 @@ async fn get_monitoring_data(
         pending_service_tasks: stats.pending_service_tasks,
         pending_timers: stats.pending_timers,
         pending_message_catches: stats.pending_message_catches,
+        persistence_errors: stats.persistence_errors,
         storage_info,
     })
 }

@@ -113,7 +113,7 @@ impl WorkflowEngine {
                             inst.state = InstanceState::WaitingOnUserTask { task_id };
                         }
                     }
-                    self.pending_user_tasks.push(pending);
+                    self.pending_user_tasks.insert(task_id, pending);
                     self.persist_user_task(task_id).await;
                 }
                 NextAction::WaitForServiceTask(svc_task) => {
@@ -124,7 +124,7 @@ impl WorkflowEngine {
                             inst.state = InstanceState::WaitingOnServiceTask { task_id };
                         }
                     }
-                    self.pending_service_tasks.push(svc_task);
+                    self.pending_service_tasks.insert(task_id, svc_task);
                     self.persist_service_task(task_id).await;
                 }
                 NextAction::WaitForTimer(pending) => {
@@ -135,7 +135,7 @@ impl WorkflowEngine {
                             inst.state = InstanceState::WaitingOnTimer { timer_id };
                         }
                     }
-                    self.pending_timers.push(pending);
+                    self.pending_timers.insert(timer_id, pending);
                     self.persist_timer(timer_id).await;
                 }
                 NextAction::WaitForMessage(pending) => {
@@ -146,7 +146,7 @@ impl WorkflowEngine {
                             inst.state = InstanceState::WaitingOnMessage { message_id };
                         }
                     }
-                    self.pending_message_catches.push(pending);
+                    self.pending_message_catches.insert(message_id, pending);
                     self.persist_message_catch(message_id).await;
                 }
                 NextAction::WaitForCallActivity { called_element, token: call_token } => {
@@ -309,7 +309,7 @@ impl WorkflowEngine {
             BpmnElement::UserTask(assignee) => {
                 let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
-                    self.pending_timers.push(t);
+                    self.pending_timers.insert(t.id, t);
                 }
 
                 let pending = PendingUserTask {
@@ -334,7 +334,7 @@ impl WorkflowEngine {
             BpmnElement::ServiceTask { topic } => {
                 let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
-                    self.pending_timers.push(t);
+                    self.pending_timers.insert(t.id, t);
                 }
 
                 let svc_task = PendingServiceTask {
@@ -432,7 +432,7 @@ impl WorkflowEngine {
             BpmnElement::CallActivity { called_element } => {
                 let pending_timers = setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
-                    self.pending_timers.push(t);
+                    self.pending_timers.insert(t.id, t);
                 }
                 
                 let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;

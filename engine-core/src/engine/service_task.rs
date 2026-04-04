@@ -52,7 +52,7 @@ impl WorkflowEngine {
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
 
-        for task in &mut self.pending_service_tasks {
+        for task in self.pending_service_tasks.values_mut() {
             if result.len() >= max_tasks {
                 break;
             }
@@ -101,18 +101,15 @@ impl WorkflowEngine {
         worker_id: &str,
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
-        let idx = self
+        let task = self
             .pending_service_tasks
-            .iter()
-            .position(|t| t.id == task_id)
+            .get(&task_id)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
-
-        let task = &self.pending_service_tasks[idx];
 
         // Verify lock ownership
         verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
-        let task = self.pending_service_tasks.remove(idx);
+        let task = self.pending_service_tasks.remove(&task_id).unwrap();
         let instance_id = task.instance_id;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await { Some(lk.read().await.clone()) } else { None };
@@ -212,8 +209,7 @@ impl WorkflowEngine {
         let instance_id = {
             let task = self
                 .pending_service_tasks
-                .iter_mut()
-                .find(|t| t.id == task_id)
+                .get_mut(&task_id)
                 .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
             // Verify lock ownership
@@ -279,8 +275,7 @@ impl WorkflowEngine {
         {
             let task = self
                 .pending_service_tasks
-                .iter_mut()
-                .find(|t| t.id == task_id)
+                .get_mut(&task_id)
                 .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
             verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
@@ -308,17 +303,14 @@ impl WorkflowEngine {
         worker_id: &str,
         error_code: &str,
     ) -> EngineResult<()> {
-        let idx = self
+        let task = self
             .pending_service_tasks
-            .iter()
-            .position(|t| t.id == task_id)
+            .get(&task_id)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
-
-        let task = &self.pending_service_tasks[idx];
 
         verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
-        let task = self.pending_service_tasks.remove(idx);
+        let task = self.pending_service_tasks.remove(&task_id).unwrap();
         let instance_id = task.instance_id;
 
         let def_key = {

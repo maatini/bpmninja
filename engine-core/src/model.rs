@@ -123,7 +123,7 @@ pub struct Token {
     pub id: Uuid,
     pub current_node: String,
     pub variables: HashMap<String, Value>,
-    #[serde(skip, default)]
+    #[serde(default)]
     pub is_merged: bool,
 }
 
@@ -566,6 +566,15 @@ mod tests {
         let token = Token::new("start");
         assert_eq!(token.current_node, "start");
         assert!(token.variables.is_empty());
+    }
+
+    #[test]
+    fn token_is_merged_survives_serialization() {
+        let mut token = Token::new("gw_join");
+        token.is_merged = true;
+        let json = serde_json::to_string(&token).unwrap();
+        let restored: Token = serde_json::from_str(&json).unwrap();
+        assert!(restored.is_merged, "is_merged must survive roundtrip");
     }
 
     #[test]

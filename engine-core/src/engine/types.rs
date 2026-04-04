@@ -8,6 +8,14 @@ use uuid::Uuid;
 use crate::model::{Token, FileReference};
 
 // ---------------------------------------------------------------------------
+// Constants 
+// ---------------------------------------------------------------------------
+
+/// Maximum number of audit log entries retained in-memory per instance.
+/// Older entries are available via the History API.
+pub const MAX_AUDIT_LOG_ENTRIES: usize = 200;
+
+// ---------------------------------------------------------------------------
 // Pending user task
 // ---------------------------------------------------------------------------
 
@@ -203,4 +211,6 @@ pub struct EngineStats {
     pub pending_service_tasks: usize,
     pub pending_timers: usize,
     pub pending_message_catches: usize,
+    /// Number of persistence write failures since engine start.
+    pub persistence_errors: u64,
 }
