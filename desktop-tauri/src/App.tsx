@@ -69,31 +69,33 @@ function App() {
     <div className="app-container">
       <div className="sidebar">
         <div className="sidebar-header">Mini BPM</div>
-        <div className={`nav-item ${activeTab === 'modeler' ? 'active' : ''}`} onClick={() => setActiveTab('modeler')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <PenTool size={18} /> BPMN Modeler
-        </div>
-        <div className={`nav-item ${activeTab === 'definitions' ? 'active' : ''}`} onClick={() => setActiveTab('definitions')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Database size={18} /> Deployed Processes
-        </div>
-        <div className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`} onClick={() => setActiveTab('tasks')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ListTodo size={18} /> Pending Tasks
-        </div>
-        <div className={`nav-item ${activeTab === 'incidents' ? 'active' : ''}`} onClick={() => setActiveTab('incidents')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <AlertTriangle size={18} /> Incidents
-        </div>
-        <div className={`nav-item ${activeTab === 'instances' ? 'active' : ''}`} onClick={() => { setSelectedInstanceId(null); setActiveTab('instances'); }} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Layers size={18} /> Instances
-        </div>
-        <div className={`nav-item ${activeTab === 'monitoring' ? 'active' : ''}`} onClick={() => setActiveTab('monitoring')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <BarChart2 size={18} /> Monitoring
-        </div>
-        <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <SettingsIcon size={18} /> Settings
-        </div>
+        <nav className="sidebar-nav" style={{ display: 'flex', flexDirection: 'column' }}>
+          <button className={`nav-item ${activeTab === 'modeler' ? 'active' : ''}`} onClick={() => setActiveTab('modeler')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <PenTool size={18} /> BPMN Modeler
+          </button>
+          <button className={`nav-item ${activeTab === 'definitions' ? 'active' : ''}`} onClick={() => setActiveTab('definitions')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Database size={18} /> Deployed Processes
+          </button>
+          <button className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`} onClick={() => setActiveTab('tasks')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ListTodo size={18} /> Pending Tasks
+          </button>
+          <button className={`nav-item ${activeTab === 'incidents' ? 'active' : ''}`} onClick={() => setActiveTab('incidents')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={18} /> Incidents
+          </button>
+          <button className={`nav-item ${activeTab === 'instances' ? 'active' : ''}`} onClick={() => { setSelectedInstanceId(null); setActiveTab('instances'); }} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Layers size={18} /> Instances
+          </button>
+          <button className={`nav-item ${activeTab === 'monitoring' ? 'active' : ''}`} onClick={() => setActiveTab('monitoring')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <BarChart2 size={18} /> Monitoring
+          </button>
+          <button className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <SettingsIcon size={18} /> Settings
+          </button>
 
-        <div className="nav-item" onClick={() => setShowMessageDialog(true)} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Mail size={18} /> Send Message
-        </div>
+          <button className="nav-item" onClick={() => setShowMessageDialog(true)} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Mail size={18} /> Send Message
+          </button>
+        </nav>
 
         <div className="sidebar-footer">
           <span className="backend-badge backend-nats">
@@ -103,9 +105,9 @@ function App() {
       </div>
       
       <div className="main-content">
-        {activeTab === 'modeler' && (
+        <div style={{ display: activeTab === 'modeler' ? 'flex' : 'none', flex: 1, flexDirection: 'column' }}>
           <Modeler onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} onOpenFile={handleOpenFile} initialXml={viewXml} />
-        )}
+        </div>
 
         {activeTab === 'definitions' && (
           <DeployedProcesses 

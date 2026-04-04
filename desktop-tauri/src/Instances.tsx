@@ -6,7 +6,6 @@ import { VariableEditor, type VariableRow, parseVariables, serializeVariables } 
 import { HistoryTimeline } from './HistoryTimeline';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useToast } from './ToastContext';
-import { useRef } from 'react';
 
 // Helper to render the instance state as a readable string
 function stateLabel(state: ProcessInstance['state']): string {
@@ -61,7 +60,6 @@ function groupInstances(instances: ProcessInstance[], definitions: DefinitionInf
 
 export function Instances({ selectedInstanceId, onClearSelection }: { selectedInstanceId?: string | null, onClearSelection?: () => void }) {
   const toast = useToast();
-  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [instances, setInstances] = useState<ProcessInstance[]>([]);
   const [definitions, setDefinitions] = useState<DefinitionInfo[]>([]);
 
@@ -96,20 +94,12 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
 
   useEffect(() => {
     fetchData();
-    // Auto-refresh every 3 seconds when no detail is open
-    refreshIntervalRef.current = setInterval(() => {
-      setInstances(prev => prev); // dummy use of setIntances to not trigger linter if not needed
-      // Actually we must check if details is open, but we use the regular effect closure for selected.
-    }, 3000);
-    // Overriding the previous dummy code for the real setInterval logic:
-    if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
-    refreshIntervalRef.current = setInterval(() => {
-      // The simplest way to not fetch while selected is true is to use the selected dependency in the effect
-      if (!selected) fetchData();
-    }, 3000);
-    return () => {
-      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
-    };
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (selected) return; // Don't poll while detail view is open
+    const id = setInterval(fetchData, 3000);
+    return () => clearInterval(id);
   }, [fetchData, selected]);
 
   const handleSelect = useCallback(async (inst: ProcessInstance) => {
@@ -243,7 +233,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                   {activeCount > 0 && <span className="stat-pill highlight">{activeCount} active</span>}
                 </div>
               </div>
-              <div style={{ padding: '16px', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="instance-group-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {groupInstances.map(inst => {
                   const def = defMap.get(inst.definition_key);
                   const varCount = Object.keys(inst.variables || {}).length;
@@ -266,9 +256,9 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                           </span>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <span style={{ fontWeight: 600, color: '#1e293b' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>
                             {inst.business_key || inst.id.substring(0, 8)} 
-                            <span style={{ fontWeight: 'normal', color: '#94a3b8', marginLeft: '8px' }}>(#{inst.id.substring(0, 8)})</span>
+                            <span style={{ fontWeight: 'normal', color: 'var(--text-muted)', marginLeft: '8px' }}>(#{inst.id.substring(0, 8)})</span>
                           </span>
                           <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
                             <Network size={12} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {inst.current_node}
@@ -286,11 +276,10 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                         <span className="stat-pill" title={`${logCount} audit entries`}><Activity size={12} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {logCount}</span>
                         
                         <button
-                          style={{ background: 'transparent', color: '#ef4444', border: '1px solid transparent', borderRadius: '4px', padding: '6px', cursor: 'pointer', transition: 'all 0.2s', marginLeft: '8px' }}
+                          className="delete-icon-btn"
+                          style={{ background: 'transparent', border: '1px solid transparent', borderRadius: '4px', marginLeft: '8px' }}
                           onClick={(e) => handleDelete(e, inst.id)}
                           title="Delete Instance"
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.borderColor = '#fca5a5'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
                         >
                           <Trash size={16} />
                         </button>
@@ -310,7 +299,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                   Unknown Definitions
                 </div>
               </div>
-              <div style={{ padding: '16px', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="instance-group-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {unknownGroup.map(inst => (
                    <div key={inst.id} className="instance-list-item" style={{ margin: 0 }} onClick={() => handleSelect(inst)}>
                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -327,43 +316,43 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
 
       {/* Detail view overlay */}
       {selected && (
-        <div className="vars-dialog-overlay" style={{ zIndex: 50, padding: '20px', alignItems: 'flex-start', overflowY: 'auto' }}>
-          <div className="instance-detail card" style={{ maxWidth: '900px', width: '100%', margin: '0 auto', background: 'white' }}>
-            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
-              <span style={{ fontSize: '1.2rem' }}>Instance: {selected.id.substring(0, 8)}…</span>
+        <div className="detail-overlay" style={{ overflowY: 'auto' }}>
+          <div className="instance-detail card" style={{ maxWidth: '900px', width: '100%', margin: '20px auto' }}>
+            <div className="detail-header" style={{ marginBottom: '16px' }}>
+              <span className="process-title">Instance: {selected.id.substring(0, 8)}…</span>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="button" onClick={(e) => handleDelete(e, selected.id)} style={{ background: '#ef4444', fontSize: '0.85rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button className="button" onClick={(e) => handleDelete(e, selected.id)} style={{ background: 'var(--danger-color)', fontSize: '0.85rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Trash size={14} /> Delete
                 </button>
-                <button className="button" onClick={handleClose} style={{ background: '#64748b', fontSize: '0.85rem', padding: '6px 16px' }}>Close View</button>
+                <button className="button button-secondary" onClick={handleClose} style={{ fontSize: '0.85rem', padding: '6px 16px' }}>Close View</button>
               </div>
             </div>
 
             {detailLoading ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>Loading instance context...</div>
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading instance context...</div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                  <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>State</div>
+                <div className="info-grid">
+                  <div className="info-grid-cell">
+                    <div className="info-grid-label">State</div>
                     <span className={stateBadgeClass(selected.state)}>{stateLabel(selected.state)}</span>
                   </div>
-                  <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Business Key</div>
+                  <div className="info-grid-cell">
+                    <div className="info-grid-label">Business Key</div>
                     <span style={{ fontWeight: 600 }}>{selected.business_key || 'None'}</span>
                   </div>
-                  <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Process ID</div>
+                  <div className="info-grid-cell">
+                    <div className="info-grid-label">Process ID</div>
                     <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{defMap.get(selected.definition_key)?.bpmn_id || selected.definition_key.substring(0, 8)}</span>
                     {defMap.get(selected.definition_key) && (
-                      <span className="version-pill older" style={{ marginLeft: '8px' }}>v{defMap.get(selected.definition_key)!.version}</span>
+                      <span className="version-pill older" style={{ marginLeft: '8px' }}>v{defMap.get(selected.definition_key)?.version}</span>
                     )}
                   </div>
                 </div>
 
                 {definitionXml && (
-                  <div style={{ marginBottom: 24 }}>
-                    <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '12px' }}>Process Workflow</h3>
+                  <div style={{ marginBottom: 24, padding: '0 20px' }}>
+                    <h3 style={{ fontSize: '1rem', color: 'var(--text-color)', marginBottom: '12px' }}>Process Workflow</h3>
                     <ErrorBoundary>
                       <InstanceViewer 
                         xml={definitionXml} 
@@ -372,7 +361,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                       />
                     </ErrorBoundary>
                     {!showNodeDetails && (
-                      <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '8px' }}>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '8px' }}>
                         Click on the highlighted active node ({selected.current_node}) to view variables and state details.
                       </div>
                     )}
@@ -380,20 +369,21 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                 )}
 
                 {(!definitionXml || showNodeDetails) && (
+                  <div style={{ padding: '0 20px 20px 20px' }}>
                   <ErrorBoundary>
-                  <div style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '20px' }}>
-                    <h3 style={{ fontSize: '1rem', color: '#1e293b', margin: '0 0 16px 0', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                      Node Context: <span style={{ fontFamily: 'monospace', color: '#2563eb' }}>{selected?.current_node || 'Unknown'}</span>
+                  <div className="node-context-panel">
+                    <h3 style={{ fontSize: '1rem', color: 'var(--text-color)', margin: '0 0 16px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+                      Node Context: <span style={{ fontFamily: 'monospace', color: 'var(--primary-color)' }}>{selected?.current_node || 'Unknown'}</span>
                     </h3>
 
                     {/* Pending user task info */}
                     {pendingTasks?.length > 0 && (
-                      <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '6px' }}>
-                        <strong style={{ color: '#0f172a' }}>Assigned User Tasks:</strong>
+                      <div className="context-section">
+                        <strong style={{ color: 'var(--text-strong)' }}>Assigned User Tasks:</strong>
                         {pendingTasks.map(task => (
-                          <div key={task.task_id} style={{ marginTop: 8, padding: '8px', background: '#f8fafc', borderRadius: '4px' }}>
-                            <span style={{ fontWeight: 500, color: '#334155' }}>Node: {task.node_id}</span>
-                            <br/><span style={{ fontSize: '0.9rem', color: '#64748b' }}>Assignee: {task.assignee || 'Unassigned'}</span>
+                          <div key={task.task_id} style={{ marginTop: 8, padding: '8px', background: 'var(--bg-subtle)', borderRadius: '4px' }}>
+                            <span style={{ fontWeight: 500, color: 'var(--text-color)' }}>Node: {task.node_id}</span>
+                            <br/><span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Assignee: {task.assignee || 'Unassigned'}</span>
                           </div>
                         ))}
                       </div>
@@ -401,13 +391,13 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
 
                     {/* Pending service task info */}
                     {pendingServiceTasks?.length > 0 && (
-                      <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '6px' }}>
-                        <strong style={{ color: '#0f172a' }}>Pending Service Tasks (Workers):</strong>
-                        {pendingServiceTasks.map(task => (
-                          <div key={task?.id || Math.random().toString()} style={{ marginTop: 8, padding: '8px', background: '#f8fafc', borderRadius: '4px' }}>
-                            <span style={{ fontWeight: 500, color: '#334155' }}>Node: {task?.node_id}</span>
-                            <br/>Topic: <span style={{ fontWeight: 600, color: '#0369a1' }}>{task?.topic}</span>
-                            <div style={{ fontSize: '0.85em', color: '#64748b', marginTop: '4px' }}>
+                      <div className="context-section">
+                        <strong style={{ color: 'var(--text-strong)' }}>Pending Service Tasks (Workers):</strong>
+                        {pendingServiceTasks.map((task, index) => (
+                          <div key={task?.id || `fallback-${index}`} style={{ marginTop: 8, padding: '8px', background: 'var(--bg-subtle)', borderRadius: '4px' }}>
+                            <span style={{ fontWeight: 500, color: 'var(--text-color)' }}>Node: {task?.node_id}</span>
+                            <br/>Topic: <span style={{ fontWeight: 600, color: 'var(--primary-color)' }}>{task?.topic}</span>
+                            <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginTop: '4px' }}>
                               Worker ID: {task?.worker_id || 'Unlocked'} · Remaining Retries: {task?.retries}
                             </div>
                           </div>
@@ -417,16 +407,16 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
 
                     {/* Execution History Timeline */}
                     <div style={{ marginBottom: 20 }}>
-                      <strong style={{ display: 'block', marginBottom: '12px', color: '#0f172a' }}>Execution History:</strong>
-                      <div style={{ background: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '12px' }}>
+                      <strong style={{ display: 'block', marginBottom: '12px', color: 'var(--text-strong)' }}>Execution History:</strong>
+                      <div className="context-section">
                         <HistoryTimeline instanceId={selected.id} refreshTrigger={historyRefreshTrigger} />
                       </div>
                     </div>
 
                     {/* Editable variables */}
                     <div style={{ marginTop: 16 }}>
-                      <strong style={{ display: 'block', marginBottom: '12px', color: '#0f172a' }}>Variables:</strong>
-                      <div style={{ background: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '12px' }}>
+                      <strong style={{ display: 'block', marginBottom: '12px', color: 'var(--text-strong)' }}>Variables:</strong>
+                      <div className="context-section">
                         <VariableEditor
                           variables={variables}
                           onChange={setVariables}
@@ -436,7 +426,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                           instanceId={selected.id}
                           onVariablesRefreshRequest={() => handleSelect(selected)}
                         />
-                        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
                           <button className="button save-vars-btn" onClick={handleSaveVariables} style={{ padding: '8px 24px', fontSize: '0.95rem' }}>
                             Save Variables
                           </button>
@@ -445,6 +435,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
                     </div>
                   </div>
                   </ErrorBoundary>
+                  </div>
                 )}
               </>
             )}

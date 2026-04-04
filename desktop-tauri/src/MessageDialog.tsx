@@ -49,7 +49,7 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Message Name *</label>
           <input 
             type="text" 
-            className="input" 
+            className="input-field" 
             value={messageName} 
             onChange={(e) => setMessageName(e.target.value)} 
             placeholder="e.g. PaymentReceivedMessage"
@@ -59,7 +59,7 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Business Key (Optional)</label>
           <input 
             type="text" 
-            className="input" 
+            className="input-field" 
             value={businessKey} 
             onChange={(e) => setBusinessKey(e.target.value)} 
             placeholder="e.g. order-123"
@@ -72,7 +72,7 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
           <VariableEditor variables={variables} onChange={setVariables} />
         </div>
 
-        <div className="vars-dialog-footer">
+        <div className="vars-dialog-actions">
           <button className="button button-secondary" onClick={onClose} disabled={sending}>Cancel</button>
           <button className="button" onClick={handleSend} disabled={sending}>
             {sending ? 'Sending...' : 'Send Message'}

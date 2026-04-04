@@ -13,6 +13,12 @@
   --danger-color: #ef4444;
   --success-color: #10b981;
   --warning-color: #d97706;
+  
+  --bg-subtle: #f8fafc;
+  --bg-inset: #f1f5f9;
+  --bg-white: #ffffff;
+  --border-subtle: #e2e8f0;
+  --text-strong: #0f172a;
 }
 
 /* ── Dark Theme ── */
@@ -30,6 +36,12 @@
   --danger-color: #f87171;
   --success-color: #34d399;
   --warning-color: #fbbf24;
+
+  --bg-subtle: #1e293b;
+  --bg-inset: #0f172a;
+  --bg-white: #1e293b;
+  --border-subtle: #334155;
+  --text-strong: #f1f5f9;
 }
 
 /* Auto-detect system preference */
@@ -48,6 +60,12 @@
     --danger-color: #f87171;
     --success-color: #34d399;
     --warning-color: #fbbf24;
+
+    --bg-subtle: #1e293b;
+    --bg-inset: #0f172a;
+    --bg-white: #1e293b;
+    --border-subtle: #334155;
+    --text-strong: #f1f5f9;
   }
 }
 
@@ -83,7 +101,14 @@ body {
 .nav-item {
   padding: 15px 20px;
   cursor: pointer;
+  background: none;
+  border: none;
   border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  color: inherit;
+  width: 100%;
+  font-family: inherit;
+  font-size: inherit;
   transition: background-color 0.2s;
 }
 
@@ -666,4 +691,67 @@ h2 { margin: 20px; }
   color: #94a3b8;
   display: flex;
   align-items: center;
+}
+
+/* Fix 6: Instances Utility Classes */
+.detail-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-surface);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+.detail-header {
+  padding: 15px 20px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin: 20px;
+}
+.info-grid-cell {
+  background: var(--bg-subtle);
+  padding: 15px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+.info-grid-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+.node-context-panel {
+  background: var(--bg-inset);
+  padding: 15px;
+  border-radius: 6px;
+  margin-top: 15px;
+  border: 1px solid var(--border-color);
+}
+.context-section {
+  background: var(--bg-white);
+  padding: 15px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  margin-top: 10px;
+}
+.delete-icon-btn {
+  color: #ef4444;
+  cursor: pointer;
+  padding: 4px;
+}
+.delete-icon-btn:hover {
+  color: #b91c1c;
+}
+.instance-group-body {
+  padding: 20px;
+  background: var(--bg-subtle);
 }
