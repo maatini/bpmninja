@@ -238,27 +238,29 @@ pub enum BpmnElement {
 Tokens existieren an **genau einer Stelle** zu jedem Zeitpunkt:
 
 ```mermaid
-stateDiagram-v2
-    [*] --> LocalVariable: Token::new() in start_instance
-    LocalVariable --> ExecutionLoop: queue.push_back(token)
-    
-    state ExecutionLoop {
-        [*] --> execute_step
-        execute_step --> NextAction
-        NextAction --> execute_step: Continue
-    }
-    
-    ExecutionLoop --> CentralStore: WaitForUser / WaitForService / WaitForTimer
-    CentralStore --> LocalVariable: complete_*_task → tokens.remove()
-    ExecutionLoop --> Merged: WaitForJoin (parallel)
-    Merged --> ExecutionLoop: All tokens arrived → merge
-    ExecutionLoop --> [*]: EndEvent reached
-    
-    note right of CentralStore
-        instance.tokens: HashMap<Uuid, Token>
-        PendingTasks hold only token_id: Uuid
-    end note
+flowchart TD
+    START(("●")) -->|"Token new"| LV["Local Variable"]
+    LV -->|"queue.push_back"| EL
+
+    subgraph EL ["Execution Loop"]
+        direction LR
+        ES["execute_step"] --> NA["NextAction"]
+        NA -->|"Continue"| ES
+    end
+
+    EL -->|"WaitForUser / Service / Timer"| CS["Central Store<br/>instance.tokens"]
+    CS -->|"complete task<br/>tokens.remove"| LV
+    EL -->|"WaitForJoin"| MG["Merged"]
+    MG -->|"All tokens arrived"| EL
+    EL -->|"EndEvent reached"| DONE(("●"))
+
+    style CS fill:#fef3c7,stroke:#ca8a04,color:#0f172a
+    style EL fill:#eff6ff,stroke:#2563eb
+    style DONE fill:#16a34a,stroke:#16a34a,color:#fff
+    style START fill:#1e293b,stroke:#1e293b,color:#fff
 ```
+
+> **Central Store**: `instance.tokens: HashMap<Uuid, Token>` — PendingTasks halten nur `token_id: Uuid`.
 
 ### 4.2 Execution Loop (run_instance_batch)
 
