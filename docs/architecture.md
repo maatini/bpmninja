@@ -11,11 +11,11 @@ Das Projekt ist ein Cargo-Workspace mit 6 Crates, einer Tauri Desktop-App und ei
 
 | Crate | Lib LoC | Test LoC | Zweck |
 |---|---|---|---|
-| **engine-core** | ~4.500 | ~2.276 | Reine State Machine, Token-Execution, Gateways, Scripting |
-| **bpmn-parser** | ~938 | — | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
-| **persistence-nats** | ~787 | — | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
-| **engine-server** | ~1.032 | ~950 | Axum REST API (HTTP-Adapter) + Background Timer Scheduler |
-| **desktop-tauri** | ~3.700 (TS) + ~495 (Rust) | — | Tauri + React + bpmn-js Modeler (Thin Client) |
+| **engine-core** | ~4.546 | ~2.276 | Reine State Machine, Token-Execution, Gateways, Scripting |
+| **bpmn-parser** | ~579 | ~224 | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
+| **persistence-nats** | ~705 | ~89 | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
+| **engine-server** | ~1.051 | ~1.232 | Axum REST API (HTTP-Adapter) + Background Timer Scheduler |
+| **desktop-tauri** | ~4.036 (TS) + ~478 (Rust) | — | Tauri + React + TailwindCSS + bpmn-js Modeler (Thin Client) |
 | **agent-orchestrator** | stub | — | External Worker Orchestrierung (geplant) |
 
 ### Workspace Dependency Graph
@@ -517,20 +517,22 @@ tokio::spawn(async move {
 
 | Datei | LoC | Zweck |
 |---|---|---|
-| `App.tsx` | 218 | Main Layout, Tab-Navigation (6 Tabs) |
-| `Modeler.tsx` | 279 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
-| `Instances.tsx` | 455 | Instanz-Liste (grouped by Definition), Detail-Overlay |
-| `InstanceViewer.tsx` | 105 | Read-only BPMN-Viewer mit aktiver Node-Markierung |
-| `HistoryTimeline.tsx` | 210 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
-| `DeployedProcesses.tsx` | 267 | Versions-Gruppierung, Accordion, Cascade Delete |
-| `VariableEditor.tsx` | 440 | Typed Editor (6 Typen inkl. File), Upload/Download |
-| `Monitoring.tsx` | 191 | 8 Metric Cards, NATS Storage Breakdown, Auto-Refresh (5s) |
-| `Settings.tsx` | 103 | API URL Config + Connection Verify |
-| `ToastContext.tsx` | 60 | Non-blocking Toast Notification System |
-| `ErrorBoundary.tsx` | 46 | React Error Boundary |
-| `lib/tauri.ts` | 224 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
+| `App.tsx` | 169 | Main Layout, Tab-Navigation (6 Tabs) |
+| `Modeler.tsx` | 311 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
+| `Instances.tsx` | 518 | Instanz-Liste (grouped by Definition), Detail-Overlay |
+| `InstanceViewer.tsx` | 108 | Read-only BPMN-Viewer mit aktiver Node-Markierung |
+| `HistoryTimeline.tsx` | 225 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
+| `DeployedProcesses.tsx` | 299 | Versions-Gruppierung, Accordion, Cascade Delete |
+| `VariableEditor.tsx` | 479 | Typed Editor (6 Typen inkl. File), Upload/Download |
+| `Monitoring.tsx` | 239 | 8 Metric Cards, NATS Storage Breakdown, Auto-Refresh (5s) |
+| `PendingTasks.tsx` | 286 | User & Service Task Listen mit Completion-Dialogen |
+| `Settings.tsx` | 161 | API URL Config + Connection Verify |
+| `ErrorBoundary.tsx` | 72 | React Error Boundary |
+| `MessageDialog.tsx` | 93 | Message-Korrelations-Dialog |
+| `IncidentsView.tsx` | 120 | Incident-List (Persistence Errors) |
+| `lib/tauri.ts` | 240 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
 | Custom Properties | ~337 | Condition, Script, Topic Extensions für bpmn-js |
-| `index.css` | 578 | Globale Styles (Vanilla CSS, keine Frameworks) |
+| `index.css` | 161 | TailwindCSS + HSL Design-Token-Variablen |
 
 ### 7.2 Thin-Client Architektur
 
@@ -539,7 +541,7 @@ Die Desktop-App operiert als **Thin Client** — alle Workflow-Logik liegt im `e
 ```mermaid
 graph TD
     UI["React UI<br/>(desktop-tauri/src)"]
-    UI -->|"invoke('deploy_definition')"| TC["Tauri Commands<br/>(src-tauri/main.rs, 494 LoC)"]
+    UI -->|"invoke('deploy_definition')"| TC["Tauri Commands<br/>(src-tauri/src/, 478 LoC)"]
     TC -->|"HTTP REST (reqwest)"| SERVER["engine-server<br/>:8081"]
     SERVER --> ENGINE["WorkflowEngine"]
     ENGINE -.-> NATS[("NATS JetStream")]
@@ -607,15 +609,27 @@ Jeder State-Übergang wird als `HistoryEntry` gespeichert:
 
 ## 10. Code-Statistiken
 
+> Stand: 04.04.2026 — gemessen via `wc -l` und `cargo test --workspace`
+
 | Bereich | Dateien | LOC |
 |---|---|---|
-| engine-core (lib) | 12 | 4.498 |
+| engine-core (lib) | 16 | 4.546 |
 | engine-core (tests) | 2 | 2.276 |
-| bpmn-parser | 2 | 938 |
-| persistence-nats | 2 | 787 |
-| engine-server (lib + main) | 3 | 1.035 |
-| engine-server (e2e tests) | 3 | ~950 |
-| **Rust Workspace Gesamt** | **24** | **~10.484** |
-| desktop-tauri (TypeScript + CSS) | 19 | 3.713 |
-| desktop-tauri (Rust Backend) | 1 | 494 |
-| **Projekt Gesamt** | **~44** | **~14.691** |
+| bpmn-parser | 4 | 803 |
+| persistence-nats | 5 | 794 |
+| engine-server (lib + main) | 3 | 1.051 |
+| engine-server (E2E tests) | 9 | 1.232 |
+| **Rust Workspace Gesamt** | **39** | **~10.702** |
+| desktop-tauri (TypeScript + CSS) | 22 | 4.036 |
+| desktop-tauri (Rust Backend) | 8 | 478 |
+| **Projekt Gesamt** | **~69** | **~15.216** |
+
+### Test-Übersicht (115 Tests, alle ✅)
+
+| Crate | Unit | E2E | Gesamt |
+|---|---|---|---|
+| engine-core | 88 | — | 88 |
+| bpmn-parser | 6 | — | 6 |
+| persistence-nats | 2 | — | 2 |
+| engine-server | — | 19 | 19 |
+| **Gesamt** | **96** | **19** | **115** |
