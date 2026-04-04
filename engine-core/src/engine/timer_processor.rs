@@ -1,0 +1,63 @@
+use super::WorkflowEngine;
+use crate::error::{EngineError, EngineResult};
+use crate::InstanceState;
+
+impl WorkflowEngine {
+    pub async fn process_timers(&mut self) -> EngineResult<usize> {
+        let now = chrono::Utc::now();
+        let mut expired = Vec::new();
+        
+        for timer in self.pending_timers.values() {
+            if timer.expires_at <= now {
+                expired.push(timer.id);
+            }
+        }
+        
+        let count = expired.len();
+        for tid in expired {
+            let timer = self.pending_timers.remove(&tid)
+                .ok_or_else(|| EngineError::InvalidDefinition(format!("Timer {tid} disappeared")))?;
+            
+            let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await { Some(lk.read().await.clone()) } else { None };
+            let def_key = {
+                let inst_arc = self.instances.get(&timer.instance_id).await.ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.state = InstanceState::Running;
+                inst.audit_log.push(format!("⏱ Timer '{}' expired, resuming", timer.node_id));
+                inst.definition_key
+            };
+            
+            self.record_history_event(
+                timer.instance_id,
+                crate::history::HistoryEventType::TokenAdvanced,
+                "Timer expired",
+                crate::history::ActorType::Timer,
+                None,
+                old_state.as_ref()
+            ).await;
+            
+            // Retrieve token from central store
+            let mut token = {
+                let inst_arc = self.instances.get(&timer.instance_id).await.ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.tokens.remove(&timer.token_id)
+                    .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", timer.token_id)))?
+            };
+            let def = self.definitions.get(&def_key).await
+                .ok_or(EngineError::NoSuchDefinition(def_key))?;
+            let next = crate::engine::executor::resolve_next_target(&def, &timer.node_id, &token.variables)?;
+            token.current_node = next.clone();
+            
+            {
+                let inst_arc = self.instances.get(&timer.instance_id).await.ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.current_node = next;
+            }
+            
+            self.remove_persisted_timer(tid).await;
+            self.run_instance_batch(timer.instance_id, token).await?;
+        }
+        
+        Ok(count)
+    }
+}

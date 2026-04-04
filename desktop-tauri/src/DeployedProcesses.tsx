@@ -43,7 +43,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
       const [list, instList] = await Promise.all([listDefinitions(), listInstances()]);
       setDefinitions(list);
       setInstances(instList);
-    } catch (e) {
+    } catch (e: any) {
       setError(String(e));
     } finally {
       setLoading(false);
@@ -65,7 +65,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
       if (filePath) {
         await writeTextFile(filePath, xml);
       }
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: 'Download failed: ' + e });
     } finally {
       setDownloading(null);

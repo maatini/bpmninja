@@ -36,7 +36,7 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
       setBusinessKey('');
       setVariables([]);
       onClose();
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: 'Correlation failed: ' + e });
     } finally {
       setSending(false);

@@ -36,7 +36,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
 
       const result = await getInstanceHistory(instanceId, query);
       setEntries(result);
-    } catch (e) {
+    } catch (e: any) {
       setError(String(e));
     } finally {
       setLoading(false);

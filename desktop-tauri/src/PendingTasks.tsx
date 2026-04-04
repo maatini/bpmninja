@@ -33,7 +33,7 @@ export function PendingTasks() {
       ]);
       setTasks(pending);
       setServiceTasks(pendingServices);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to fetch tasks", e);
     } finally {
       setLoading(false);
@@ -64,7 +64,7 @@ export function PendingTasks() {
       toast({ description: 'Task completed successfully!' });
       setCompletingTask(null);
       fetchTasks();
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: 'Error: ' + e });
     }
   };
@@ -87,7 +87,7 @@ export function PendingTasks() {
       await completeServiceTask(task.id, "tauri-ui")
       fetchTasks()
       toast({ description: "Service Task completed!" })
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: "Error completing service task: " + e })
     }
   }

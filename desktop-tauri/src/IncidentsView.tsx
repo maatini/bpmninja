@@ -20,7 +20,7 @@ export function IncidentsView({ onViewInstance }: { onViewInstance?: (id: string
       // Filter: incidents = service tasks with retries <= 0
       setIncidents(all.filter(t => t.retries <= 0));
       setLoading(false);
-    } catch (e) { 
+    } catch (e: any) { 
       toast({ variant: 'destructive', description: 'Failed to load incidents: ' + e }); 
     }
   };

@@ -1,0 +1,91 @@
+use std::collections::HashMap;
+use serde_json::Value;
+use uuid::Uuid;
+use super::WorkflowEngine;
+use crate::error::{EngineError, EngineResult};
+use crate::InstanceState;
+
+impl WorkflowEngine {
+    /// Completes a pending user task by its task_id, optionally merging variables.
+    ///
+    /// Resumes the process instance after the user task.
+    pub async fn complete_user_task(
+        &mut self,
+        task_id: Uuid,
+        additional_vars: HashMap<String, Value>,
+    ) -> EngineResult<()> {
+        // Find and remove the pending task
+        let pending = self.pending_user_tasks.remove(&task_id)
+            .ok_or_else(|| EngineError::TaskNotPending {
+                task_id,
+                actual_state: "not found in pending tasks".into(),
+            })?;
+
+        let instance_id = pending.instance_id;
+
+        // Retrieve token from central store and merge additional variables
+        let mut token = {
+            let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+            inst.tokens.remove(&pending.token_id)
+                .ok_or_else(|| EngineError::InvalidDefinition(format!("Token {} not found in instance", pending.token_id)))?
+        };
+        for (k, v) in additional_vars {
+            token.variables.insert(k, v);
+        }
+
+        self.remove_persisted_user_task(task_id).await;
+        self.cancel_boundary_timers(instance_id, &pending.node_id).await;
+
+        let old_state = if let Some(lk) = self.instances.get(&instance_id).await { Some(lk.read().await.clone()) } else { None };
+
+        log::info!(
+            "Instance {instance_id}: completed user task '{}' (task_id: {task_id})",
+            pending.node_id
+        );
+
+        let def_key = {
+            let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+            inst.audit_log
+                .push(format!("✅ User task '{}' completed", pending.node_id));
+            
+            if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                inst.state = InstanceState::Running;
+            }
+            inst.current_node = pending.node_id.clone();
+            inst.definition_key
+        };
+
+        // Advance token to the next node
+        let def = self
+            .definitions
+            .get(&def_key)
+            .await
+            .ok_or(EngineError::NoSuchDefinition(def_key))?;
+        // Current node's end scripts
+        self.run_end_scripts(instance_id, &mut token, &def, &pending.node_id).await?;
+
+        let next = crate::engine::executor::resolve_next_target(&def, &pending.node_id, &token.variables)?;
+
+        token.current_node = next.clone();
+        // Update instance current_node so UI highlights correctly
+        let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
+        {
+            let mut inst = inst_arc.write().await;
+            inst.current_node = next;
+        }
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::TaskCompleted,
+            &format!("User task '{}' completed", pending.node_id),
+            crate::history::ActorType::User,
+            Some(pending.assignee.clone()),
+            old_state.as_ref()
+        ).await;
+
+        // Continue running
+        self.run_instance_batch(instance_id, token).await
+    }
+}

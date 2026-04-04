@@ -100,7 +100,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
       setInstances(instList);
       setDefinitions(defList);
       setHistoryRefreshTrigger(prev => prev + 1);
-    } catch (e) {
+    } catch (e: any) {
       setError(String(e));
     } finally {
       setLoading(false);
@@ -151,7 +151,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
         setPendingTasks([]);
         setPendingServiceTasks([]);
       }
-    } catch (e) {
+    } catch {
       setSelected(inst);
       setVariables(parseVariables(inst.variables));
       setPendingTasks([]);
@@ -177,7 +177,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
       setVariables(parseVariables(updated.variables));
       setDeletedKeys(new Set());
       setHistoryRefreshTrigger(prev => prev + 1);
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: 'Error saving variables: ' + e });
     }
   };

@@ -1,3 +1,7 @@
-pub mod bpmn_parser;
+pub(crate) mod models;
+pub mod parser;
 
-pub use bpmn_parser::parse_bpmn_xml;
+#[cfg(test)]
+mod tests;
+
+pub use parser::parse_bpmn_xml;

@@ -251,7 +251,7 @@ export function VariableEditor({
       if (!savePath) return;
 
       await downloadInstanceFile(instanceId, varName, savePath);
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: `Download failed: ${e}` });
     }
   };

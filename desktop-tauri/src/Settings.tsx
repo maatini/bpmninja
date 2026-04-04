@@ -24,7 +24,7 @@ export function Settings() {
     try {
       const currentUrl = await getApiUrl()
       setLocalApiUrl(currentUrl)
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load API URL', e)
     }
   }
@@ -43,7 +43,7 @@ export function Settings() {
       
       setStatus('success')
       setMessage(`Successfully connected to Workflow Engine at ${apiUrl}`)
-    } catch (e) {
+    } catch (e: any) {
       setStatus('error')
       setMessage(`Connection failed: ${String(e)}`)
     } finally {

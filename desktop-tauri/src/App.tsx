@@ -42,7 +42,7 @@ function App() {
     try {
       const id = await deployDefinition(xml, 'modeler-process')
       toast({ description: "Deployed! Definition: " + id.substring(0, 8) })
-    } catch (e) {
+    } catch (e: any) {
       toast({ variant: 'destructive', description: "Deploy failed: " + e })
     }
   }
