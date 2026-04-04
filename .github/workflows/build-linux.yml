@@ -52,5 +52,5 @@ jobs:
         with:
           name: linux-binary
           path: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/appimage/*.AppImage
+            desktop-tauri/src-tauri/target/release/bundle/deb/*.deb
+            desktop-tauri/src-tauri/target/release/bundle/appimage/*.AppImage
