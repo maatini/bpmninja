@@ -121,7 +121,28 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let app = build_app_with_engine(Arc::new(RwLock::new(engine)), nats_persistence, xml_cache);
+    let engine_arc = Arc::new(RwLock::new(engine));
+    let app = build_app_with_engine(engine_arc.clone(), nats_persistence, xml_cache);
+
+    // Background timer scheduler — processes expired timers automatically
+    let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let timer_engine = engine_arc.clone();
+    tokio::spawn(async move {
+        let interval = tokio::time::Duration::from_millis(timer_interval_ms);
+        log::info!("Timer scheduler started (interval: {}ms)", timer_interval_ms);
+        loop {
+            tokio::time::sleep(interval).await;
+            let mut engine = timer_engine.write().await;
+            match engine.process_timers().await {
+                Ok(0) => {} // No expired timers — silent
+                Ok(n) => log::info!("Timer scheduler: processed {} expired timer(s)", n),
+                Err(e) => log::error!("Timer scheduler error: {}", e),
+            }
+        }
+    });
 
     let port = env::var("PORT").unwrap_or_else(|_| "8081".to_string());
     let addr = format!("0.0.0.0:{}", port);
