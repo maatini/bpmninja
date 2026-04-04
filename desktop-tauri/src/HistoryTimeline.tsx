@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
 import { getInstanceHistory, type HistoryEntry, type HistoryQuery } from './lib/tauri';
 import { 
-  Play, CheckCircle, Activity, Settings, 
-  XCircle, Filter, Camera, ArrowRightCircle, X
+  Play, CheckCircle, Activity, Settings as SettingsIcon, 
+  XCircle, Filter, Camera, ArrowRightCircle
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 interface HistoryTimelineProps {
   instanceId: string;
@@ -46,40 +50,51 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
 
   const getEventIcon = (type: string) => {
     switch (type) {
-      case 'InstanceStarted': return <Play size={16} style={{ color: '#3b82f6' }} />;
-      case 'InstanceCompleted': return <CheckCircle size={16} style={{ color: 'var(--success-color)' }} />;
-      case 'InstanceFailed': return <XCircle size={16} style={{ color: 'var(--danger-color)' }} />;
-      case 'TokenAdvanced': return <ArrowRightCircle size={16} style={{ color: 'var(--text-muted)' }} />;
-      case 'VariablesChanged': return <Settings size={16} style={{ color: '#6366f1' }} />;
-      default: return <Activity size={16} style={{ color: 'var(--text-muted)' }} />;
+      case 'InstanceStarted': return <Play className="h-4 w-4 text-blue-500" />;
+      case 'InstanceCompleted': return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'InstanceFailed': return <XCircle className="h-4 w-4 text-destructive" />;
+      case 'TokenAdvanced': return <ArrowRightCircle className="h-4 w-4 text-muted-foreground" />;
+      case 'VariablesChanged': return <SettingsIcon className="h-4 w-4 text-indigo-500" />;
+      default: return <Activity className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
-  const getActorStyle = (type?: string): React.CSSProperties => {
-    if (!type) return { background: 'var(--code-bg)', color: 'var(--text-muted)', borderColor: 'var(--border-color)' };
+  const getActorVariant = (type?: string): "default" | "secondary" | "outline" | "destructive" => {
+    if (!type) return 'outline';
     switch (type.toLowerCase()) {
-      case 'engine': return { background: '#f3e8ff', color: '#7c3aed', borderColor: '#ddd6fe' };
-      case 'serviceworker': return { background: '#ffedd5', color: '#c2410c', borderColor: '#fed7aa' };
-      case 'user': return { background: '#cffafe', color: '#0e7490', borderColor: '#a5f3fc' };
-      case 'timer': return { background: '#fef3c7', color: '#b45309', borderColor: '#fde68a' };
-      case 'api': return { background: '#d1fae5', color: '#047857', borderColor: '#a7f3d0' };
-      default: return { background: 'var(--code-bg)', color: 'var(--text-muted)', borderColor: 'var(--border-color)' };
+      case 'engine': return 'default';
+      case 'serviceworker': return 'secondary';
+      case 'user': return 'default'; // Maybe distinct class later
+      case 'timer': return 'outline';
+      case 'api': return 'secondary';
+      default: return 'outline';
+    }
+  };
+
+  const getActorCustomClass = (type?: string) => {
+    if (!type) return '';
+    switch (type.toLowerCase()) {
+      case 'engine': return 'bg-purple-100 text-purple-700 hover:bg-purple-100 dark:bg-purple-900/40 dark:text-purple-400';
+      case 'serviceworker': return 'bg-orange-100 text-orange-700 hover:bg-orange-100 dark:bg-orange-900/40 dark:text-orange-400';
+      case 'user': return 'bg-cyan-100 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/40 dark:text-cyan-400';
+      case 'timer': return 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-400';
+      case 'api': return 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-400';
+      default: return '';
     }
   };
 
   return (
-    <div className="history-timeline-container" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      
+    <div className="flex flex-col gap-4">
       {/* Filters */}
-      <div style={{ display: 'flex', gap: '12px', padding: '12px', backgroundColor: 'var(--bg-subtle)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-           <Filter size={16} color="var(--text-muted)" />
-           <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-color)' }}>Filters</span>
+      <div className="flex flex-wrap items-center gap-3 p-3 bg-muted/40 rounded-md border">
+         <div className="flex items-center gap-2 text-muted-foreground">
+           <Filter className="h-4 w-4" />
+           <span className="text-sm font-semibold text-foreground">Filters</span>
          </div>
          <select 
             value={eventTypes} 
             onChange={e => setEventTypes(e.target.value)}
-            style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.85rem', background: 'var(--bg-surface)', color: 'var(--text-color)' }}
+            className="h-9 rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
          >
            <option value="">All Events</option>
            <option value="InstanceStarted,InstanceCompleted,InstanceFailed">Lifecycle Only</option>
@@ -90,7 +105,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
          <select 
             value={actorTypes} 
             onChange={e => setActorTypes(e.target.value)}
-            style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.85rem', background: 'var(--bg-surface)', color: 'var(--text-color)' }}
+            className="h-9 rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
          >
            <option value="">All Actors</option>
            <option value="engine">Engine</option>
@@ -100,111 +115,111 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
          </select>
       </div>
 
-      {loading && <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Loading history...</div>}
-      {error && <div style={{ fontSize: '0.9rem', color: 'var(--danger-color)' }}>Error: {error}</div>}
+      {loading && <div className="text-sm text-muted-foreground py-2">Loading history...</div>}
+      {error && <div className="text-sm text-destructive font-medium py-2">Error: {error}</div>}
 
       {!loading && entries.length === 0 && (
-        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>No history entries found for the current filters.</div>
+        <div className="text-sm text-muted-foreground py-4 text-center border rounded-md bg-muted/20">No history entries found for the current filters.</div>
       )}
 
       {/* Compact List View */}
-      <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead style={{ backgroundColor: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)' }}>
-            <tr>
-              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)', width: '40px' }}></th>
-              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>Action</th>
-              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>Who</th>
-              <th style={{ padding: '12px 16px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>When</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr 
-                key={entry.id} 
-                onClick={() => setSelectedEntry(entry)}
-                style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', backgroundColor: 'var(--bg-surface)', transition: 'background 0.2s' }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--hover-bg)'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--bg-surface)'}
-              >
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                  {getEventIcon(entry.event_type)}
-                </td>
-                <td style={{ padding: '10px 16px', fontSize: '0.85rem', color: 'var(--text-color)', fontWeight: 500 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Snapshot details">
-                    {(entry.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
-                    {entry.is_snapshot && <Camera size={12} color="var(--text-muted)" />}
-                  </div>
-                </td>
-                <td style={{ padding: '10px 16px' }}>
-                  <span style={{ ...getActorStyle(entry.actor_type), fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', border: '1px solid', textTransform: 'capitalize' }}>
-                    {(entry.actor_type || 'Unknown').toLowerCase()}{entry.actor_id ? ` (${entry.actor_id})` : ''}
-                  </span>
-                </td>
-                <td style={{ padding: '10px 16px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  {new Date(entry.timestamp).toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Detail Dialog */}
-      {selectedEntry && (
-        <div className="vars-dialog-overlay" style={{ zIndex: 1000 }}>
-          <div style={{ backgroundColor: 'var(--bg-surface)', borderRadius: '8px', padding: '24px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.4)', position: 'relative' }}>
-            <button 
-              onClick={() => setSelectedEntry(null)} 
-              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-            >
-              <X size={20} />
-            </button>
-            
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: 0, color: 'var(--text-color)', fontSize: '1.25rem' }}>
-              {getEventIcon(selectedEntry.event_type)}
-              {(selectedEntry.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
-            </h2>
-
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-              <span style={{ ...getActorStyle(selectedEntry.actor_type), fontSize: '0.75rem', padding: '4px 10px', borderRadius: '12px', border: '1px solid', textTransform: 'capitalize' }}>
-                {selectedEntry.actor_type || 'Unknown'}{selectedEntry.actor_id ? ` (${selectedEntry.actor_id})` : ''}
-              </span>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                {new Date(selectedEntry.timestamp).toLocaleString()}
-              </span>
-              {selectedEntry.node_id && (
-                <span style={{ fontSize: '0.75rem', padding: '4px 10px', backgroundColor: 'var(--bg-subtle)', color: 'var(--text-color)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                  Node: {selectedEntry.node_id}
-                </span>
-              )}
-            </div>
-
-            <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--bg-subtle)', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.95rem', color: 'var(--text-color)' }}>
-              {selectedEntry.description}
-            </div>
-
-            {selectedEntry.diff?.human_readable && (
-              <div style={{ marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Changes</h3>
-                <div style={{ padding: '10px 14px', backgroundColor: 'var(--code-bg)', borderLeft: '3px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-color)', whiteSpace: 'pre-wrap' }}>
-                  {selectedEntry.diff.human_readable}
-                </div>
-              </div>
-            )}
-
-            {selectedEntry.diff?.changes && Object.keys(selectedEntry.diff.changes).length > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Raw Data Changes</h3>
-                <pre style={{ backgroundColor: '#1e293b', color: '#e2e8f0', padding: '12px', borderRadius: '6px', fontSize: '0.85rem', overflowX: 'auto' }}>
-                  {JSON.stringify(selectedEntry.diff.changes, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
+      {entries.length > 0 && (
+        <div className="border rounded-md overflow-hidden bg-background">
+          <Table>
+            <TableHeader className="bg-muted/40 hover:bg-muted/40">
+              <TableRow>
+                <TableHead className="w-10 text-center"></TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Who</TableHead>
+                <TableHead>When</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((entry) => (
+                <TableRow 
+                  key={entry.id} 
+                  onClick={() => setSelectedEntry(entry)}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                >
+                  <TableCell className="text-center py-2 h-10 w-10">
+                    <div className="flex justify-center items-center w-full h-full"> 
+                      {getEventIcon(entry.event_type)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2" title="Snapshot details">
+                      {(entry.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
+                      {entry.is_snapshot && <Camera className="h-3 w-3 text-muted-foreground" />}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={getActorVariant(entry.actor_type)} className={cn("lowercase capitalize", getActorCustomClass(entry.actor_type))}>
+                      {entry.actor_type || 'Unknown'}{entry.actor_id ? ` (${entry.actor_id})` : ''}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {new Date(entry.timestamp).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
 
+      {/* Detail Dialog */}
+      <Dialog open={!!selectedEntry} onOpenChange={(open) => !open && setSelectedEntry(null)}>
+        <DialogContent className="sm:max-w-[600px] h-fit max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 py-4 border-b">
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+              {selectedEntry && getEventIcon(selectedEntry.event_type)}
+              {(selectedEntry?.event_type || 'Unknown').replace(/([A-Z])/g, ' $1').trim()}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedEntry && (
+            <div className="flex-1 p-6 overflow-y-auto min-h-0 relative">
+              <div className="space-y-6">
+                <div className="flex flex-wrap gap-3">
+                  <Badge variant={getActorVariant(selectedEntry.actor_type)} className={cn("lowercase capitalize", getActorCustomClass(selectedEntry.actor_type))}>
+                    {selectedEntry.actor_type || 'Unknown'}{selectedEntry.actor_id ? ` (${selectedEntry.actor_id})` : ''}
+                  </Badge>
+                  <span className="text-sm text-muted-foreground flex items-center">
+                    {new Date(selectedEntry.timestamp).toLocaleString()}
+                  </span>
+                  {selectedEntry.node_id && (
+                    <Badge variant="outline" className="font-mono bg-muted/30">
+                      Node: {selectedEntry.node_id}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="p-3 bg-muted/40 rounded-md border text-sm text-foreground">
+                  {selectedEntry.description}
+                </div>
+
+                {selectedEntry.diff?.human_readable && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Changes</h3>
+                    <div className="p-3 bg-muted/20 border-l-4 border-l-primary/50 text-sm whitespace-pre-wrap font-mono">
+                      {selectedEntry.diff.human_readable}
+                    </div>
+                  </div>
+                )}
+
+                {selectedEntry.diff?.changes && Object.keys(selectedEntry.diff.changes).length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Raw Data Changes</h3>
+                    <pre className="bg-muted border text-foreground p-4 rounded-md text-xs overflow-x-auto">
+                      {JSON.stringify(selectedEntry.diff.changes, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

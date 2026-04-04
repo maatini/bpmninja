@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Focus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 // @ts-ignore
 import NavigatedViewer from 'bpmn-js/lib/NavigatedViewer';
@@ -87,18 +88,20 @@ export function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewe
           }
         `}
       </style>
-      <div style={{ position: 'relative', marginBottom: '16px' }}>
+      <div className="relative w-full h-full min-h-[300px] border border-border rounded-md bg-muted/20">
         <div 
           ref={containerRef} 
-          style={{ width: '100%', height: '300px', border: '1px solid #e2e8f0', borderRadius: '4px', backgroundColor: '#fafafa' }}
+          className="w-full h-full flex-1 min-h-[300px] bg-background"
         />
-        <button 
+        <Button 
+          variant="outline"
+          size="icon"
           onClick={handleCenter}
-          style={{ position: 'absolute', bottom: '48px', right: '16px', zIndex: 99, padding: '6px 8px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          className="absolute bottom-4 right-4 z-10 shadow-md bg-background/90 backdrop-blur"
           title="Center Workflow"
         >
-          <Focus size={18} color="#475569" />
-        </button>
+          <Focus className="h-5 w-5 text-muted-foreground" />
+        </Button>
       </div>
     </>
   );

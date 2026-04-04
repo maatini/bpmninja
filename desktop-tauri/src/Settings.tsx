@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
 import { getApiUrl, setApiUrl, getMonitoringData } from './lib/tauri'
-import { Server, CheckCircle, XCircle } from 'lucide-react'
+import { Server, CheckCircle, XCircle, Palette } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
 
 export function Settings() {
   const [apiUrl, setLocalApiUrl] = useState('http://localhost:8081')
@@ -51,81 +55,106 @@ export function Settings() {
     setTheme(newTheme)
     localStorage.setItem('theme', newTheme)
     if (newTheme === 'auto') {
-      document.documentElement.removeAttribute('data-theme')
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
     } else {
       document.documentElement.setAttribute('data-theme', newTheme)
     }
   }
 
   return (
-    <div>
-      <h2>Settings</h2>
-      
-      <div className="card" style={{ maxWidth: 520 }}>
-        <div className="card-title">Engine API Configuration</div>
-        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: 20 }}>
-          This desktop application operates as a Thin Client. It delegates workflow execution to the configured Engine Server via REST.
-        </p>
-
-        {/* API URL input */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', marginBottom: 6, fontWeight: 500, fontSize: '0.9rem' }}>
-            Engine REST API URL
-          </label>
-          <input
-            className="input-field"
-            type="text"
-            value={apiUrl}
-            onChange={(e) => setLocalApiUrl(e.target.value)}
-            placeholder="http://localhost:8081"
-            disabled={loading}
-          />
-        </div>
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-          <button
-            className="button"
-            onClick={handleSaveAndVerify}
-            disabled={loading || !apiUrl.trim()}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-          >
-            <Server size={16} /> Save & Verify Connection
-          </button>
-
-          {status === 'success' && (
-            <span style={{ color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.9rem', fontWeight: 500 }}>
-              <CheckCircle size={16} /> OK
-            </span>
-          )}
-          {status === 'error' && (
-            <span style={{ color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.9rem', fontWeight: 500 }}>
-              <XCircle size={16} /> Failed
-            </span>
-          )}
-        </div>
-
-        {/* Feedback message */}
-        {message && (
-          <div className={`status-message ${status === 'success' ? 'status-success' : 'status-error'}`}>
-            {message}
-          </div>
-        )}
+    <div className="flex flex-col h-full bg-background">
+      <div className="flex items-center justify-between px-6 py-4 border-b bg-background">
+        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
       </div>
+      
+      <div className="p-6 space-y-6 max-w-2xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>Engine API Configuration</CardTitle>
+            <CardDescription>
+              This desktop application operates as a Thin Client. It delegates workflow execution to the configured Engine Server via REST.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* API URL input */}
+            <div className="space-y-2">
+              <Label htmlFor="apiUrl">Engine REST API URL</Label>
+              <Input
+                id="apiUrl"
+                type="text"
+                value={apiUrl}
+                onChange={(e: any) => setLocalApiUrl(e.target.value)}
+                placeholder="http://localhost:8081"
+                disabled={loading}
+              />
+            </div>
 
-      <div className="card" style={{ maxWidth: 520, marginTop: 16 }}>
-        <div className="card-title">🎨 Appearance</div>
-        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: 12 }}>
-          Choose your preferred theme for the user interface.
-        </p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {(['auto', 'light', 'dark'] as const).map(t => (
-            <button key={t} className={`button ${theme === t ? '' : 'button-secondary'}`} 
-              onClick={() => handleThemeChange(t)}>
-              {t === 'auto' ? '🖥 System' : t === 'light' ? '☀️ Light' : '🌙 Dark'}
-            </button>
-          ))}
-        </div>
+            {/* Action buttons */}
+            <div className="flex items-center gap-4 pt-2">
+              <Button
+                onClick={handleSaveAndVerify}
+                disabled={loading || !apiUrl.trim()}
+                className="gap-2"
+              >
+                <Server className="h-4 w-4" /> Save & Verify Connection
+              </Button>
+
+              {status === 'success' && (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-500">
+                  <CheckCircle className="h-4 w-4" /> OK
+                </span>
+              )}
+              {status === 'error' && (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                  <XCircle className="h-4 w-4" /> Failed
+                </span>
+              )}
+            </div>
+
+            {/* Feedback message */}
+            {message && (
+              <div className={`p-3 rounded-md text-sm border mt-4 ${
+                status === 'success' 
+                  ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20' 
+                  : 'bg-destructive/10 text-destructive border-destructive/20'
+              }`}>
+                {message}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Palette className="h-5 w-5" /> Appearance</CardTitle>
+            <CardDescription>
+              Choose your preferred theme for the user interface.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button 
+                variant={theme === 'auto' ? 'default' : 'outline'}
+                onClick={() => handleThemeChange('auto')}
+              >
+                🖥 System
+              </Button>
+              <Button 
+                variant={theme === 'light' ? 'default' : 'outline'}
+                onClick={() => handleThemeChange('light')}
+              >
+                ☀️ Light
+              </Button>
+              <Button 
+                variant={theme === 'dark' ? 'default' : 'outline'}
+                onClick={() => handleThemeChange('dark')}
+              >
+                🌙 Dark
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

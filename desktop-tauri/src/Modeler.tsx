@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/api/dialog';
 import { readBpmnFile, uploadInstanceFile } from './lib/tauri';
 import { FilePlus, FolderOpen, UploadCloud, Play, Focus } from 'lucide-react';
-import { useToast } from './ToastContext';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 
 // Make sure to ignore TS types for modules that might not have types
 // @ts-ignore
@@ -64,7 +68,7 @@ function generateEmptyBpmn(): string {
 }
 
 export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXml }: ModelerProps) {
-  const toast = useToast();
+  const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const propertiesRef = useRef<HTMLDivElement>(null);
   const modelerRef = useRef<any>(null);
@@ -159,7 +163,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
       }
       onOpenFile();
     } catch (e: any) {
-      toast.error('Failed to open BPMN file: ' + e);
+      toast({ variant: 'destructive', description: 'Failed to open BPMN file: ' + e });
     }
   };
 
@@ -190,7 +194,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
 
     const serialized = serializeVariables(startVariables);
     if (serialized === null) {
-      toast.error('Invalid variables format. Please check JSON or Numbers.');
+      toast({ variant: 'destructive', description: 'Invalid variables format. Please check JSON or Numbers.' });
       return;
     }
 
@@ -218,65 +222,90 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
         }
       }
     } catch (e: any) {
-      toast.error('Failed to start process: ' + e);
+      toast({ variant: 'destructive', description: 'Failed to start process: ' + e });
     } finally {
       setIsStarting(false);
     }
   };
 
   return (
-    <>
-      <div className="header-actions">
-        <button className="button" onClick={handleNewDiagram} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><FilePlus size={16} /> New Diagram</button>
-        <button className="button" onClick={handleOpenFile} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><FolderOpen size={16} /> Open File</button>
-        <button className="button" onClick={handleDeploy} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><UploadCloud size={16} /> Deploy Process</button>
-        <button className="button" onClick={handleStartClick} style={{ backgroundColor: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}><Play size={16} /> Start Instance</button>
+    <div className="flex flex-col h-full overflow-hidden bg-background">
+      <div className="flex items-center gap-2 px-6 py-3 border-b bg-background shadow-sm z-10 flex-shrink-0">
+        <Button variant="outline" size="sm" onClick={handleNewDiagram} className="gap-2">
+          <FilePlus className="h-4 w-4" /> New
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleOpenFile} className="gap-2">
+          <FolderOpen className="h-4 w-4" /> Open
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleDeploy} className="gap-2 ml-auto lg:ml-4 border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-blue-900 dark:hover:bg-blue-900/30">
+          <UploadCloud className="h-4 w-4" /> Deploy
+        </Button>
+        <Button size="sm" onClick={handleStartClick} className="gap-2 bg-green-600 hover:bg-green-700 text-white">
+          <Play className="h-4 w-4" /> Start Instance
+        </Button>
       </div>
-      <div className="modeler-container" style={{ position: 'relative' }}>
-        <div className="canvas" ref={containerRef} />
-        <button 
+
+      <div className="flex-1 flex relative overflow-hidden bg-background">
+        <div className="canvas flex-1 w-full h-full" ref={containerRef} />
+        
+        <Button
+          variant="outline"
+          size="icon"
           onClick={handleCenter}
-          style={{ position: 'absolute', bottom: '48px', right: '316px', zIndex: 99, padding: '6px 8px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          className="absolute bottom-6 right-[320px] z-10 shadow-md bg-background/90 backdrop-blur"
           title="Center Workflow"
         >
-          <Focus size={18} color="#475569" />
-        </button>
-        <div className="properties-panel-parent" ref={propertiesRef} />
+          <Focus className="h-5 w-5 text-muted-foreground" />
+        </Button>
+        
+        <div className="properties-panel-parent w-[300px] border-l bg-card overflow-y-auto" ref={propertiesRef} />
       </div>
 
-      {showVarsDialog && (
-        <div className="vars-dialog-overlay" onClick={() => setShowVarsDialog(false)}>
-          <div className="vars-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Start Process Instance</h3>
-            
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem', color: '#475569', fontWeight: 500 }}>
-              Business Key (optional)
-            </label>
-            <input
-              type="text"
-              value={businessKey}
-              onChange={(e) => setBusinessKey(e.target.value)}
-              placeholder="e.g. ORDER-1000"
-              style={{ width: '100%', padding: '8px', marginBottom: '16px', border: '1px solid #cbd5e1', borderRadius: '4px', fontFamily: 'inherit', fontSize: '0.9rem' }}
-            />
+      <Dialog open={showVarsDialog} onOpenChange={setShowVarsDialog}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Start Process Instance</DialogTitle>
+            <DialogDescription>
+              Provide an optional business key and initial process variables.
+            </DialogDescription>
+          </DialogHeader>
 
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem', color: '#475569', fontWeight: 500 }}>
-              Process Variables
-            </label>
-            <VariableEditor
-              variables={startVariables}
-              onChange={setStartVariables}
-              allowPendingFiles={true}
-            />
-            <div className="vars-dialog-actions">
-              <button className="button" onClick={() => setShowVarsDialog(false)} style={{backgroundColor: '#6b7280'}}>Cancel</button>
-              <button className="button" onClick={handleStartConfirm} style={{backgroundColor: '#10b981'}} disabled={isStarting}>
-                {isStarting ? 'Deploying & Starting…' : 'Start'}
-              </button>
+          <div className="py-2 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="businessKey">Business Key (optional)</Label>
+              <Input
+                id="businessKey"
+                type="text"
+                value={businessKey}
+                onChange={(e: any) => setBusinessKey(e.target.value)}
+                placeholder="e.g. ORDER-1000"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Process Variables</Label>
+              <div className="bg-muted/30 border rounded-md p-3">
+                <VariableEditor
+                  variables={startVariables}
+                  onChange={setStartVariables}
+                  allowPendingFiles={true}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowVarsDialog(false)}>Cancel</Button>
+            <Button onClick={handleStartConfirm} disabled={isStarting} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+               {isStarting ? (
+                 <>Deploying & Starting…</>
+               ) : (
+                 <><Play className="h-4 w-4"/> Start</>
+               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

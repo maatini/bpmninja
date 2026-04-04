@@ -7,16 +7,29 @@ import { Settings } from './Settings'
 import { Monitoring } from './Monitoring'
 import { PendingTasks } from './PendingTasks'
 import { MessageDialog } from './MessageDialog'
-import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle } from 'lucide-react'
-import { useToast } from './ToastContext'
+import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle, Activity } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
 import { IncidentsView } from './IncidentsView'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 
 function App() {
-  const toast = useToast()
+  const { toast } = useToast()
   useEffect(() => {
     const saved = localStorage.getItem('theme')
-    if (saved && saved !== 'auto') {
-      document.documentElement.setAttribute('data-theme', saved)
+    
+    const applySystemTheme = () => {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+    };
+
+    if (!saved || saved === 'auto') {
+      applySystemTheme();
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      mql.addEventListener('change', applySystemTheme);
+      return () => mql.removeEventListener('change', applySystemTheme);
+    } else {
+      document.documentElement.setAttribute('data-theme', saved);
     }
   }, [])
 
@@ -25,13 +38,12 @@ function App() {
   const [viewXml, setViewXml] = useState<string | null>(null)
   const [showMessageDialog, setShowMessageDialog] = useState(false)
 
-
   const handleDeploy = async (xml: string) => {
     try {
       const id = await deployDefinition(xml, 'modeler-process')
-      toast.success("Deployed! Definition: " + id.substring(0, 8))
+      toast({ description: "Deployed! Definition: " + id.substring(0, 8) })
     } catch (e) {
-      toast.error("Deploy failed: " + e)
+      toast({ variant: 'destructive', description: "Deploy failed: " + e })
     }
   }
 
@@ -65,47 +77,66 @@ function App() {
     setViewXml(null)
   }
 
-  return (
-    <div className="app-container">
-      <div className="sidebar">
-        <div className="sidebar-header">Mini BPM</div>
-        <nav className="sidebar-nav" style={{ display: 'flex', flexDirection: 'column' }}>
-          <button className={`nav-item ${activeTab === 'modeler' ? 'active' : ''}`} onClick={() => setActiveTab('modeler')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <PenTool size={18} /> BPMN Modeler
-          </button>
-          <button className={`nav-item ${activeTab === 'definitions' ? 'active' : ''}`} onClick={() => setActiveTab('definitions')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Database size={18} /> Deployed Processes
-          </button>
-          <button className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`} onClick={() => setActiveTab('tasks')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ListTodo size={18} /> Pending Tasks
-          </button>
-          <button className={`nav-item ${activeTab === 'incidents' ? 'active' : ''}`} onClick={() => setActiveTab('incidents')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <AlertTriangle size={18} /> Incidents
-          </button>
-          <button className={`nav-item ${activeTab === 'instances' ? 'active' : ''}`} onClick={() => { setSelectedInstanceId(null); setActiveTab('instances'); }} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Layers size={18} /> Instances
-          </button>
-          <button className={`nav-item ${activeTab === 'monitoring' ? 'active' : ''}`} onClick={() => setActiveTab('monitoring')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <BarChart2 size={18} /> Monitoring
-          </button>
-          <button className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <SettingsIcon size={18} /> Settings
-          </button>
+  const navItems = [
+    { id: 'modeler', icon: PenTool, label: 'BPMN Modeler' },
+    { id: 'definitions', icon: Database, label: 'Deployed Processes' },
+    { id: 'tasks', icon: ListTodo, label: 'Pending Tasks' },
+    { id: 'incidents', icon: AlertTriangle, label: 'Incidents' },
+    { id: 'instances', icon: Layers, label: 'Instances', 
+      onClick: () => { setSelectedInstanceId(null); setActiveTab('instances'); } 
+    },
+    { id: 'monitoring', icon: BarChart2, label: 'Monitoring' },
+    { id: 'settings', icon: SettingsIcon, label: 'Settings' },
+  ];
 
-          <button className="nav-item" onClick={() => setShowMessageDialog(true)} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Mail size={18} /> Send Message
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+      {/* SIDEBAR */}
+      <div className="w-[250px] bg-muted/20 border-r flex flex-col flex-shrink-0">
+        <div className="p-5 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+          <div className="flex items-center gap-2.5">
+            <Activity className="h-6 w-6" />
+            <span className="text-xl font-bold tracking-tight">Mini BPM</span>
+          </div>
+          <span className="text-xs text-blue-200 mt-1 block">Workflow Engine</span>
+        </div>
+        
+        <nav className="flex-1 flex flex-col pt-2 overflow-y-auto w-full">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={item.onClick || (() => setActiveTab(item.id))}
+              className={cn(
+                "w-full flex items-center gap-3 px-5 py-3.5 text-sm font-medium transition-colors border-b border-transparent",
+                activeTab === item.id 
+                  ? "bg-accent text-primary border-r-4 border-r-primary pointer-events-none" 
+                  : "hover:bg-accent/50 hover:text-foreground text-muted-foreground"
+              )}
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </button>
+          ))}
+
+          <button 
+            className="w-full flex items-center gap-3 px-5 py-3.5 text-sm font-medium transition-colors hover:bg-accent/50 mt-auto text-muted-foreground border-t"
+            onClick={() => setShowMessageDialog(true)}
+          >
+            <Mail className="h-4 w-4" /> 
+            Send Message
           </button>
         </nav>
 
-        <div className="sidebar-footer">
-          <span className="backend-badge backend-nats">
-            ● Thin Client
-          </span>
+        <div className="p-4 border-t bg-background/50">
+          <Badge className="bg-green-600 hover:bg-green-700 text-white border-0 font-medium tracking-wide">
+             <span className="mr-1.5 text-[0.65rem] leading-none">●</span> Thin Client
+          </Badge>
         </div>
       </div>
       
-      <div className="main-content">
-        <div style={{ display: activeTab === 'modeler' ? 'flex' : 'none', flex: 1, flexDirection: 'column' }}>
+      {/* MAIN CONTENT */}
+      <div className="flex-1 flex flex-col relative overflow-hidden bg-background">
+        <div className={cn("flex-1 flex flex-col h-full", activeTab === 'modeler' ? 'flex' : 'hidden')}>
           <Modeler onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} onOpenFile={handleOpenFile} initialXml={viewXml} />
         </div>
 
@@ -116,14 +147,9 @@ function App() {
           />
         )}
 
-        {activeTab === 'tasks' && (
-          <PendingTasks />
-        )}
-
-        {activeTab === 'incidents' && (
-          <IncidentsView onViewInstance={(id) => { setSelectedInstanceId(id); setActiveTab('instances'); }} />
-        )}
-
+        {activeTab === 'tasks' && <PendingTasks />}
+        {activeTab === 'incidents' && <IncidentsView onViewInstance={(id) => { setSelectedInstanceId(id); setActiveTab('instances'); }} />}
+        
         {activeTab === 'instances' && (
           <Instances 
             selectedInstanceId={selectedInstanceId} 
@@ -131,18 +157,13 @@ function App() {
           />
         )}
 
-        {activeTab === 'monitoring' && (
-          <Monitoring />
-        )}
-
-        {activeTab === 'settings' && (
-          <Settings />
-        )}
+        {activeTab === 'monitoring' && <Monitoring />}
+        {activeTab === 'settings' && <Settings />}
       </div>
+      
       <MessageDialog open={showMessageDialog} onClose={() => setShowMessageDialog(false)} />
     </div>
   )
 }
 
 export default App
-

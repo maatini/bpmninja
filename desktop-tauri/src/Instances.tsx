@@ -1,31 +1,47 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listInstances, getInstanceDetails, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, getDefinitionXml, deleteInstance, listDefinitions, type ProcessInstance, type PendingUserTask, type PendingServiceTask, type DefinitionInfo } from './lib/tauri';
 import { InstanceViewer } from './InstanceViewer';
-import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText } from 'lucide-react';
+import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers } from 'lucide-react';
 import { VariableEditor, type VariableRow, parseVariables, serializeVariables } from './VariableEditor';
 import { HistoryTimeline } from './HistoryTimeline';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useToast } from './ToastContext';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
-// Helper to render the instance state as a readable string
 function stateLabel(state: ProcessInstance['state']): string {
   if (state === 'Running') return 'Running';
   if (state === 'Completed') return 'Completed';
-  if (typeof state === 'object' && 'WaitingOnUserTask' in state) return 'Wait: User Task';
-  if (typeof state === 'object' && 'WaitingOnServiceTask' in state) return 'Wait: Service Task';
-  if (typeof state === 'object' && 'WaitingOnTimer' in state) return 'Wait: Timer';
-  if (typeof state === 'object' && 'WaitingOnMessage' in state) return 'Wait: Message';
+  if ((state as any) === 'Errored') return 'Errored';
+  if ((state as any) === 'Cancelled') return 'Cancelled';
+  if (typeof state === 'object') {
+    if ('WaitingOnUserTask' in state) return 'Wait: User Task';
+    if ('WaitingOnServiceTask' in state) return 'Wait: Service Task';
+    if ('WaitingOnTimer' in state) return 'Wait: Timer';
+    if ('WaitingOnMessage' in state) return 'Wait: Message';
+    return Object.keys(state)[0]?.replace(/([A-Z])/g, ' $1').trim() || 'Unknown';
+  }
   return String(state);
 }
 
-// Helper to pick a CSS class for the state badge
 function stateBadgeClass(state: ProcessInstance['state']): string {
-  if (state === 'Running') return 'state-badge state-running';
-  if (state === 'Completed') return 'state-badge state-completed';
-  if (typeof state === 'object' && 'WaitingOnServiceTask' in state) return 'state-badge state-waiting state-service-task';
-  if (typeof state === 'object' && 'WaitingOnTimer' in state) return 'state-badge state-waiting';
-  if (typeof state === 'object' && 'WaitingOnMessage' in state) return 'state-badge state-waiting';
-  return 'state-badge state-waiting';
+  if (state === 'Running') return 'bg-blue-600 hover:bg-blue-700 text-white';
+  if (state === 'Completed') return 'bg-green-600 hover:bg-green-700 text-white border-none';
+  if ((state as any) === 'Errored') return 'bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20 outline outline-1 outline-destructive';
+  if ((state as any) === 'Cancelled') return 'bg-muted text-muted-foreground hover:bg-muted/80 outline outline-1 outline-muted';
+  if (typeof state === 'object') {
+    if ('WaitingOnUserTask' in state) return 'bg-amber-500/20 text-amber-700 hover:bg-amber-500/30 border-amber-500/30 dark:text-amber-400';
+    if ('WaitingOnServiceTask' in state) return 'bg-purple-500/20 text-purple-700 hover:bg-purple-500/30 border-purple-500/30 dark:text-purple-400';
+    if ('WaitingOnTimer' in state) return 'bg-cyan-500/20 text-cyan-700 hover:bg-cyan-500/30 border-cyan-500/30 dark:text-cyan-400';
+    if ('WaitingOnMessage' in state) return 'bg-indigo-500/20 text-indigo-700 hover:bg-indigo-500/30 border-indigo-500/30 dark:text-indigo-400';
+  }
+  return 'bg-secondary text-secondary-foreground hover:bg-secondary/80';
 }
 
 function groupInstances(instances: ProcessInstance[], definitions: DefinitionInfo[]) {
@@ -46,7 +62,6 @@ function groupInstances(instances: ProcessInstance[], definitions: DefinitionInf
     }
   }
 
-  // Sort each group so running processes are at the top, then by instance id roughly
   for (const [, insts] of groups) {
     insts.sort((a, b) => {
       if (a.state === 'Completed' && b.state !== 'Completed') return 1;
@@ -59,7 +74,7 @@ function groupInstances(instances: ProcessInstance[], definitions: DefinitionInf
 }
 
 export function Instances({ selectedInstanceId, onClearSelection }: { selectedInstanceId?: string | null, onClearSelection?: () => void }) {
-  const toast = useToast();
+  const { toast } = useToast();
   const [instances, setInstances] = useState<ProcessInstance[]>([]);
   const [definitions, setDefinitions] = useState<DefinitionInfo[]>([]);
 
@@ -73,9 +88,9 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
   const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
 
-  // Variables state is typed using VariableRow from VariableEditor
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
   const [showNodeDetails, setShowNodeDetails] = useState(true);
+  const [instanceToDelete, setInstanceToDelete] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -97,7 +112,7 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
   }, [fetchData]);
 
   useEffect(() => {
-    if (selected) return; // Don't poll while detail view is open
+    if (selected) return;
     const id = setInterval(fetchData, 3000);
     return () => clearInterval(id);
   }, [fetchData, selected]);
@@ -119,7 +134,6 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
       }
 
       setVariables(parseVariables(details.variables));
-      // If waiting on user task, fetch pending tasks to show info
       if (typeof details.state === 'object') {
         if ('WaitingOnUserTask' in details.state) {
           const tasks = await getPendingTasks();
@@ -151,20 +165,20 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
     if (!selected) return;
     const varsToSave = serializeVariables(variables, deletedKeys);
     if (varsToSave === null) {
-      toast.error('Invalid variables format (check JSON or Numbers)');
+      toast({ variant: 'destructive', description: 'Invalid variables format (check JSON or Numbers)' });
       return;
     }
 
     try {
       await updateInstanceVariables(selected.id, varsToSave);
-      toast.success('Variables saved successfully.');
+      toast({ description: 'Variables saved successfully.' });
       const updated = await getInstanceDetails(selected.id);
       setSelected(updated);
       setVariables(parseVariables(updated.variables));
       setDeletedKeys(new Set());
       setHistoryRefreshTrigger(prev => prev + 1);
     } catch (e) {
-      toast.error('Error saving variables: ' + e);
+      toast({ variant: 'destructive', description: 'Error saving variables: ' + e });
     }
   };
 
@@ -176,17 +190,23 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
     setShowNodeDetails(true);
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteRequest = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!window.confirm("Are you sure you want to delete this process instance?")) return;
+    setInstanceToDelete(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!instanceToDelete) return;
     try {
-      await deleteInstance(id);
-      if (selected?.id === id) {
+      await deleteInstance(instanceToDelete);
+      if (selected?.id === instanceToDelete) {
         handleClose();
       }
       fetchData();
     } catch (err) {
-      toast.error("Failed to delete instance: " + err);
+      toast({ variant: 'destructive', description: "Failed to delete instance: " + err });
+    } finally {
+      setInstanceToDelete(null);
     }
   };
 
@@ -203,245 +223,293 @@ export function Instances({ selectedInstanceId, onClearSelection }: { selectedIn
   const { groups, unknownGroup, defMap } = groupInstances(instances, definitions);
 
   return (
-    <div>
-      <h2>Instances</h2>
-      <div className="header-actions">
-        <button className="button" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><RefreshCw size={16} /> Refresh</button>
-        <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
-          Auto-refreshing
-        </span>
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-6 py-4 border-b bg-background">
+        <h2 className="text-2xl font-bold tracking-tight">Instances</h2>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-muted-foreground">Auto-refreshing</span>
+          <Button onClick={fetchData} variant="outline" size="sm" className="gap-2">
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </Button>
+        </div>
       </div>
 
-      {loading && <div style={{ margin: 20 }}>Loading instances...</div>}
-      {error && <div style={{ margin: 20, color: '#dc2626' }}>Error: {error}</div>}
-      {!loading && !error && instances.length === 0 && (
-        <div style={{ margin: 20 }}>No instances found.</div>
-      )}
+      <ScrollArea className="flex-1">
+        <div className="p-6 space-y-6">
+          {loading && (
+            <div className="space-y-4">
+              {[1,2,3].map(i => (
+                <Card key={i} className="p-4">
+                  <div className="flex items-center gap-4">
+                    <Skeleton className="h-6 w-[120px] rounded-full" />
+                    <Skeleton className="h-5 w-[200px]" />
+                    <Skeleton className="h-5 w-[80px] ml-auto" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+          {error && <div className="text-destructive font-medium">Error: {error}</div>}
+          {!loading && !error && instances.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Layers className="h-16 w-16 text-muted-foreground/30 mb-4" />
+              <h3 className="text-lg font-semibold text-muted-foreground">No Instances Yet</h3>
+              <p className="text-sm text-muted-foreground/70 mt-1 max-w-sm">
+                Deploy a BPMN process and start your first instance from the Modeler.
+              </p>
+            </div>
+          )}
 
-      <div style={{ padding: '0 20px' }}>
-        {[...groups.entries()].map(([bpmnId, groupInstances]) => {
-          const activeCount = groupInstances.filter(i => i.state !== 'Completed').length;
-          
-          return (
-            <div key={bpmnId} className="process-group-card" style={{ margin: '20px 0' }}>
-              <div className="process-group-header">
-                <div className="process-title" style={{ fontSize: '1.2rem' }}>
-                  <FileCode2 size={20} color="#2563eb" /> {bpmnId}
-                </div>
-                <div className="process-stats">
-                  <span className="stat-pill">{groupInstances.length} total</span>
-                  {activeCount > 0 && <span className="stat-pill highlight">{activeCount} active</span>}
-                </div>
-              </div>
-              <div className="instance-group-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {groupInstances.map(inst => {
-                  const def = defMap.get(inst.definition_key);
-                  const varCount = Object.keys(inst.variables || {}).length;
-                  const logCount = inst.audit_log?.length || 0;
-                  
-                  return (
-                    <div
-                      key={inst.id}
-                      className="instance-list-item"
-                      style={{ margin: 0 }}
-                      onClick={() => handleSelect(inst)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
-                        <div style={{ minWidth: '130px' }}>
-                          <span className={stateBadgeClass(inst.state)} style={{ width: '100%', textAlign: 'center', boxSizing: 'border-box' }}>
-                            {inst.state === 'Running' && <Activity size={10} style={{marginRight: 4}} />}
-                            {inst.state === 'Completed' && <CheckCircle size={10} style={{marginRight: 4}} />}
-                            {typeof inst.state === 'object' && <Clock size={10} style={{marginRight: 4}} />}
-                            {stateLabel(inst.state)}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>
-                            {inst.business_key || inst.id.substring(0, 8)} 
-                            <span style={{ fontWeight: 'normal', color: 'var(--text-muted)', marginLeft: '8px' }}>(#{inst.id.substring(0, 8)})</span>
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                            <Network size={12} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {inst.current_node}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        {def && (
-                          <span className={`version-pill ${def.is_latest ? 'latest' : 'older'}`} title={`Definition Key: ${def.key}`}>
-                            v{def.version}
-                          </span>
-                        )}
-                        <span className="stat-pill" title={`${varCount} variables active`}><ScrollText size={12} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {varCount}</span>
-                        <span className="stat-pill" title={`${logCount} audit entries`}><Activity size={12} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> {logCount}</span>
-                        
-                        <button
-                          className="delete-icon-btn"
-                          style={{ background: 'transparent', border: '1px solid transparent', borderRadius: '4px', marginLeft: '8px' }}
-                          onClick={(e) => handleDelete(e, inst.id)}
-                          title="Delete Instance"
+          {[...groups.entries()].map(([bpmnId, groupInstances]) => {
+            const activeCount = groupInstances.filter(i => i.state !== 'Completed').length;
+            
+            return (
+              <Card key={bpmnId} className="overflow-hidden">
+                <CardHeader className="bg-muted/40 py-4 flex flex-row items-center justify-between border-b">
+                  <div className="flex items-center gap-2">
+                    <FileCode2 className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-xl">{bpmnId}</CardTitle>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge variant="secondary">{groupInstances.length} total</Badge>
+                    {activeCount > 0 && <Badge variant="default" className="bg-yellow-500/20 text-yellow-700 hover:bg-yellow-500/30 border-yellow-500/50 dark:text-yellow-400">{activeCount} active</Badge>}
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="divide-y text-sm">
+                    {groupInstances.map(inst => {
+                      const def = defMap.get(inst.definition_key);
+                      const varCount = Object.keys(inst.variables || {}).length;
+                      const logCount = inst.audit_log?.length || 0;
+                      
+                      return (
+                        <div
+                          key={inst.id}
+                          className="flex items-center justify-between p-4 hover:bg-accent/50 cursor-pointer transition-colors"
+                          onClick={() => handleSelect(inst)}
                         >
-                          <Trash size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                          <div className="flex gap-6 items-center flex-1">
+                            <div className="w-[140px]">
+                              <Badge className={cn(
+                                "flex items-center justify-center gap-1.5 w-full",
+                                stateBadgeClass(inst.state)
+                              )}>
+                                {inst.state === 'Running' && <Activity className="h-3 w-3" />}
+                                {inst.state === 'Completed' && <CheckCircle className="h-3 w-3" />}
+                                {typeof inst.state === 'object' && <Clock className="h-3 w-3" />}
+                                {stateLabel(inst.state)}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="font-semibold">
+                                {inst.business_key || inst.id.substring(0, 8)} 
+                                <span className="font-normal text-muted-foreground ml-2">(#{inst.id.substring(0, 8)})</span>
+                              </span>
+                              <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                <Network className="h-3 w-3" /> {inst.current_node}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {def && (
+                              <Badge variant="outline" className={cn("font-mono text-xs", def.is_latest ? "bg-blue-500/10 text-blue-700 border-blue-500/30 dark:text-blue-400" : "")} title={`ByKey: ${def.key}`}>
+                                v{def.version}
+                              </Badge>
+                            )}
+                            <Badge variant="secondary" className="flex items-center gap-1"><ScrollText className="h-3 w-3"/>{varCount}</Badge>
+                            <Badge variant="secondary" className="flex items-center gap-1"><Activity className="h-3 w-3"/>{logCount}</Badge>
+                            
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 ml-2"
+                              onClick={(e) => handleDeleteRequest(e, inst.id)}
+                            >
+                              <Trash className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+
+          {unknownGroup.length > 0 && (
+            <Card className="opacity-80">
+               <CardHeader className="bg-muted py-3">
+                  <CardTitle className="text-lg text-muted-foreground">Unknown Definitions</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="divide-y text-sm">
+                    {unknownGroup.map(inst => (
+                       <div key={inst.id} className="flex items-center gap-6 p-4 hover:bg-accent/50 cursor-pointer" onClick={() => handleSelect(inst)}>
+                         <Badge className={stateBadgeClass(inst.state)}>{stateLabel(inst.state)}</Badge>
+                         <span className="font-medium">{inst.business_key || inst.id.substring(0, 8)}</span>
+                         <span className="text-muted-foreground">{inst.definition_key.substring(0, 8)}…</span>
+                       </div>
+                    ))}
+                  </div>
+                </CardContent>
+            </Card>
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* Detail view overlay via full-screen dialog */}
+      <Dialog open={!!selected} onOpenChange={(open) => !open && handleClose()}>
+        <DialogContent className="max-w-[70vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden bg-background">
+          <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between sticky top-0 bg-background/95 backdrop-blur z-10 shrink-0">
+            <DialogTitle className="text-xl">Instance Details: {selected?.id.substring(0, 8)}…</DialogTitle>
+            <div className="flex gap-2 items-center !m-0">
+              <Button variant="destructive" size="sm" className="gap-2" onClick={(e) => selected && handleDeleteRequest(e as any, selected.id)}>
+                <Trash className="h-4 w-4" /> Delete
+              </Button>
             </div>
-          );
-        })}
+          </DialogHeader>
 
-        {unknownGroup.length > 0 && (
-          <div className="process-group-card" style={{ margin: '20px 0', opacity: 0.8 }}>
-             <div className="process-group-header">
-                <div className="process-title" style={{ fontSize: '1.2rem', color: '#64748b' }}>
-                  Unknown Definitions
-                </div>
-              </div>
-              <div className="instance-group-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {unknownGroup.map(inst => (
-                   <div key={inst.id} className="instance-list-item" style={{ margin: 0 }} onClick={() => handleSelect(inst)}>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                       <span className={stateBadgeClass(inst.state)}>{stateLabel(inst.state)}</span>
-                       <span style={{ fontWeight: 600 }}>{inst.business_key || inst.id.substring(0, 8)}</span>
-                     </div>
-                     <div>{inst.definition_key.substring(0, 8)}…</div>
-                   </div>
-                ))}
-              </div>
-          </div>
-        )}
-      </div>
-
-      {/* Detail view overlay */}
-      {selected && (
-        <div className="detail-overlay" style={{ overflowY: 'auto' }}>
-          <div className="instance-detail card" style={{ maxWidth: '900px', width: '100%', margin: '20px auto' }}>
-            <div className="detail-header" style={{ marginBottom: '16px' }}>
-              <span className="process-title">Instance: {selected.id.substring(0, 8)}…</span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="button" onClick={(e) => handleDelete(e, selected.id)} style={{ background: 'var(--danger-color)', fontSize: '0.85rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Trash size={14} /> Delete
-                </button>
-                <button className="button button-secondary" onClick={handleClose} style={{ fontSize: '0.85rem', padding: '6px 16px' }}>Close View</button>
-              </div>
-            </div>
-
-            {detailLoading ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading instance context...</div>
+          <div className="flex-1 p-6 overflow-y-auto min-h-0 relative">
+            {detailLoading || !selected ? (
+              <div className="text-center text-muted-foreground py-8">Loading instance context...</div>
             ) : (
-              <>
-                <div className="info-grid">
-                  <div className="info-grid-cell">
-                    <div className="info-grid-label">State</div>
-                    <span className={stateBadgeClass(selected.state)}>{stateLabel(selected.state)}</span>
-                  </div>
-                  <div className="info-grid-cell">
-                    <div className="info-grid-label">Business Key</div>
-                    <span style={{ fontWeight: 600 }}>{selected.business_key || 'None'}</span>
-                  </div>
-                  <div className="info-grid-cell">
-                    <div className="info-grid-label">Process ID</div>
-                    <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{defMap.get(selected.definition_key)?.bpmn_id || selected.definition_key.substring(0, 8)}</span>
-                    {defMap.get(selected.definition_key) && (
-                      <span className="version-pill older" style={{ marginLeft: '8px' }}>v{defMap.get(selected.definition_key)?.version}</span>
-                    )}
-                  </div>
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Card className="p-4 flex flex-col gap-1.5 shadow-sm">
+                    <span className="text-xs uppercase font-semibold text-muted-foreground">State</span>
+                    <Badge className={cn("w-fit, border-none", stateBadgeClass(selected.state))}>
+                      {stateLabel(selected.state)}
+                    </Badge>
+                  </Card>
+                  <Card className="p-4 flex flex-col gap-1.5 shadow-sm">
+                    <span className="text-xs uppercase font-semibold text-muted-foreground">Business Key</span>
+                    <span className="font-semibold text-base">{selected.business_key || 'None'}</span>
+                  </Card>
+                  <Card className="p-4 flex flex-col gap-1.5 shadow-sm">
+                    <span className="text-xs uppercase font-semibold text-muted-foreground">Process ID</span>
+                    <div className="flex items-center gap-2">
+                       <span className="font-mono text-base font-semibold">{defMap.get(selected.definition_key)?.bpmn_id || selected.definition_key.substring(0, 8)}</span>
+                       {defMap.get(selected.definition_key) && (
+                         <Badge variant="outline">v{defMap.get(selected.definition_key)?.version}</Badge>
+                       )}
+                    </div>
+                  </Card>
                 </div>
 
                 {definitionXml && (
-                  <div style={{ marginBottom: 24, padding: '0 20px' }}>
-                    <h3 style={{ fontSize: '1rem', color: 'var(--text-color)', marginBottom: '12px' }}>Process Workflow</h3>
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold border-b pb-2">Process Workflow</h3>
                     <ErrorBoundary>
-                      <InstanceViewer 
-                        xml={definitionXml} 
-                        activeNodeId={selected.current_node} 
-                        onNodeClick={() => setShowNodeDetails((prev) => !prev)} 
-                      />
+                      <div className="border rounded-md bg-card overflow-hidden h-[400px]">
+                        <InstanceViewer 
+                          xml={definitionXml} 
+                          activeNodeId={selected.current_node} 
+                          onNodeClick={() => setShowNodeDetails((prev) => !prev)} 
+                        />
+                      </div>
                     </ErrorBoundary>
                     {!showNodeDetails && (
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                      <p className="text-sm text-muted-foreground">
                         Click on the highlighted active node ({selected.current_node}) to view variables and state details.
-                      </div>
+                      </p>
                     )}
                   </div>
                 )}
 
                 {(!definitionXml || showNodeDetails) && (
-                  <div style={{ padding: '0 20px 20px 20px' }}>
-                  <ErrorBoundary>
-                  <div className="node-context-panel">
-                    <h3 style={{ fontSize: '1rem', color: 'var(--text-color)', margin: '0 0 16px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
-                      Node Context: <span style={{ fontFamily: 'monospace', color: 'var(--primary-color)' }}>{selected?.current_node || 'Unknown'}</span>
-                    </h3>
+                  <div className="space-y-6">
+                    <ErrorBoundary>
+                      <div className="bg-muted/30 border rounded-lg p-5">
+                        <h3 className="text-lg font-semibold flex items-center gap-2 border-b pb-3 mb-4">
+                          Node Context: <code className="text-primary bg-primary/10 px-1.5 py-0.5 rounded">{selected.current_node || 'Unknown'}</code>
+                        </h3>
 
-                    {/* Pending user task info */}
-                    {pendingTasks?.length > 0 && (
-                      <div className="context-section">
-                        <strong style={{ color: 'var(--text-strong)' }}>Assigned User Tasks:</strong>
-                        {pendingTasks.map(task => (
-                          <div key={task.task_id} style={{ marginTop: 8, padding: '8px', background: 'var(--bg-subtle)', borderRadius: '4px' }}>
-                            <span style={{ fontWeight: 500, color: 'var(--text-color)' }}>Node: {task.node_id}</span>
-                            <br/><span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Assignee: {task.assignee || 'Unassigned'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                        <div className="space-y-6">
+                          {/* Pending user task info */}
+                          {pendingTasks?.length > 0 && (
+                            <div className="bg-background border rounded-md p-4">
+                              <h4 className="font-semibold text-foreground mb-3">Assigned User Tasks:</h4>
+                              <div className="space-y-3">
+                                {pendingTasks.map(task => (
+                                  <div key={task.task_id} className="bg-muted/50 p-3 rounded-md border text-sm">
+                                    <div className="font-medium">Node: {task.node_id}</div>
+                                    <div className="text-muted-foreground mt-1">Assignee: <span className="font-medium text-foreground">{task.assignee || 'Unassigned'}</span></div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
-                    {/* Pending service task info */}
-                    {pendingServiceTasks?.length > 0 && (
-                      <div className="context-section">
-                        <strong style={{ color: 'var(--text-strong)' }}>Pending Service Tasks (Workers):</strong>
-                        {pendingServiceTasks.map((task, index) => (
-                          <div key={task?.id || `fallback-${index}`} style={{ marginTop: 8, padding: '8px', background: 'var(--bg-subtle)', borderRadius: '4px' }}>
-                            <span style={{ fontWeight: 500, color: 'var(--text-color)' }}>Node: {task?.node_id}</span>
-                            <br/>Topic: <span style={{ fontWeight: 600, color: 'var(--primary-color)' }}>{task?.topic}</span>
-                            <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginTop: '4px' }}>
-                              Worker ID: {task?.worker_id || 'Unlocked'} · Remaining Retries: {task?.retries}
+                          {/* Pending service task info */}
+                          {pendingServiceTasks?.length > 0 && (
+                            <div className="bg-background border rounded-md p-4">
+                              <h4 className="font-semibold text-foreground mb-3">Pending Service Tasks (Workers):</h4>
+                              <div className="space-y-3">
+                                {pendingServiceTasks.map((task, index) => (
+                                  <div key={task?.id || `fallback-${index}`} className="bg-muted/50 p-3 rounded-md border text-sm">
+                                    <div className="font-medium">Node: {task?.node_id}</div>
+                                    <div className="mt-1">Topic: <Badge variant="secondary" className="font-mono">{task?.topic}</Badge></div>
+                                    <div className="text-muted-foreground mt-2">
+                                      Worker: {task?.worker_id || 'Unlocked'} &middot; Retries: {task?.retries}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Execution History Timeline */}
+                          <div>
+                            <h4 className="font-semibold text-foreground mb-3">Execution History:</h4>
+                            <div className="bg-background border rounded-md p-4">
+                              <HistoryTimeline instanceId={selected.id} refreshTrigger={historyRefreshTrigger} />
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
 
-                    {/* Execution History Timeline */}
-                    <div style={{ marginBottom: 20 }}>
-                      <strong style={{ display: 'block', marginBottom: '12px', color: 'var(--text-strong)' }}>Execution History:</strong>
-                      <div className="context-section">
-                        <HistoryTimeline instanceId={selected.id} refreshTrigger={historyRefreshTrigger} />
-                      </div>
-                    </div>
-
-                    {/* Editable variables */}
-                    <div style={{ marginTop: 16 }}>
-                      <strong style={{ display: 'block', marginBottom: '12px', color: 'var(--text-strong)' }}>Variables:</strong>
-                      <div className="context-section">
-                        <VariableEditor
-                          variables={variables}
-                          onChange={setVariables}
-                          readOnlyNames={true}
-                          deletedKeys={deletedKeys}
-                          onDeletedKeysChange={setDeletedKeys}
-                          instanceId={selected.id}
-                          onVariablesRefreshRequest={() => handleSelect(selected)}
-                        />
-                        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                          <button className="button save-vars-btn" onClick={handleSaveVariables} style={{ padding: '8px 24px', fontSize: '0.95rem' }}>
-                            Save Variables
-                          </button>
+                          {/* Editable variables */}
+                          <div>
+                            <h4 className="font-semibold text-foreground mb-3">Variables:</h4>
+                            <div className="bg-background border rounded-md p-4">
+                              <VariableEditor
+                                variables={variables}
+                                onChange={setVariables}
+                                readOnlyNames={true}
+                                deletedKeys={deletedKeys}
+                                onDeletedKeysChange={setDeletedKeys}
+                                instanceId={selected.id}
+                                onVariablesRefreshRequest={() => handleSelect(selected)}
+                              />
+                              <div className="mt-4 pt-4 border-t flex justify-end">
+                                <Button onClick={handleSaveVariables}>Save Variables</Button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                  </ErrorBoundary>
+                    </ErrorBoundary>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={!!instanceToDelete} onOpenChange={open => !open && setInstanceToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Instance</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this process instance? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -2,12 +2,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { ToastProvider } from './ToastContext.tsx'
+import { Toaster } from '@/components/ui/toaster'
+import { ErrorBoundary } from './ErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ToastProvider>
+    <ErrorBoundary>
       <App />
-    </ToastProvider>
+      <Toaster />
+    </ErrorBoundary>
   </StrictMode>,
 )

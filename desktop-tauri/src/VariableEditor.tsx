@@ -1,7 +1,14 @@
 import { Trash, Paperclip, Download } from 'lucide-react';
 import { open, save } from '@tauri-apps/api/dialog';
 import { uploadInstanceFile, downloadInstanceFile, type FileReference } from './lib/tauri';
-import { useToast } from './ToastContext';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useState } from 'react';
 
 // Shared type definitions for the variable editor
 export type VarType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Null' | 'File';
@@ -126,7 +133,10 @@ export function VariableEditor({
   onVariablesRefreshRequest,
   allowPendingFiles = false,
 }: VariableEditorProps) {
-  const toast = useToast();
+  const { toast } = useToast();
+  const [varNamePromptOpen, setVarNamePromptOpen] = useState(false);
+  const [pendingFilePaths, setPendingFilePaths] = useState<string | null>(null);
+  const [newVarName, setNewVarName] = useState('');
 
   const handleChange = (index: number, field: keyof VariableRow, newValue: unknown) => {
     const updated = [...variables];
@@ -160,31 +170,43 @@ export function VariableEditor({
       });
       if (!filePaths || Array.isArray(filePaths)) return;
 
-      const varName = prompt('Enter a variable name for this file:');
-      if (!varName || !varName.trim()) return;
+      setPendingFilePaths(filePaths as string);
+      setNewVarName('');
+      setVarNamePromptOpen(true);
+    } catch (e: any) {
+      toast({ variant: 'destructive', description: `File upload failed: ${e}` });
+    }
+  };
 
+  const submitNewVariable = async () => {
+    const varName = newVarName.trim();
+    const filePaths = pendingFilePaths;
+    
+    if (!varName || !filePaths) return;
+    setVarNamePromptOpen(false);
+    setPendingFilePaths(null);
+    
+    try {
       if (instanceId) {
         // Immediate upload to existing instance
-        await uploadInstanceFile(instanceId, varName.trim(), filePaths as string);
+        await uploadInstanceFile(instanceId, varName, filePaths);
         if (onVariablesRefreshRequest) {
           onVariablesRefreshRequest();
         }
       } else {
         // Deferred upload: store file path locally as a pending row
-        const fileName = (filePaths as string).split('/').pop() || 'file';
+        const fileName = filePaths.split('/').pop() || 'file';
         const pendingRow: VariableRow = {
-          name: varName.trim(),
+          name: varName,
           type: 'File',
           value: { filename: fileName, pendingPath: filePaths },
           isNew: true,
-          pendingFilePath: filePaths as string,
+          pendingFilePath: filePaths,
         };
         onChange([...variables, pendingRow]);
       }
-      return null;
     } catch (e: any) {
-      toast.error(`File upload failed: ${e}`);
-      return null;
+      toast({ variant: 'destructive', description: `File handling failed: ${e}` });
     }
   };
 
@@ -215,7 +237,7 @@ export function VariableEditor({
         onChange(updated);
       }
     } catch (e: any) {
-      toast.error(`File selection failed: ${e}`);
+      toast({ variant: 'destructive', description: `File selection failed: ${e}` });
     }
   };
 
@@ -230,7 +252,7 @@ export function VariableEditor({
 
       await downloadInstanceFile(instanceId, varName, savePath);
     } catch (e) {
-      toast.error(`Download failed: ${e}`);
+      toast({ variant: 'destructive', description: `Download failed: ${e}` });
     }
   };
 
@@ -249,192 +271,209 @@ export function VariableEditor({
   };
 
   return (
-    <>
-      <table className="variables-table">
-        <thead>
-          <tr>
-            <th style={{ width: '25%' }}>Name</th>
-            <th style={{ width: '20%' }}>Type</th>
-            <th>Value</th>
-            <th style={{ width: '40px', textAlign: 'center' }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {variables.map((v, idx) => (
-            <tr key={idx}>
-              <td>
-                <input
-                  type="text"
-                  className="var-input"
-                  value={v.name}
-                  onChange={(e) => handleChange(idx, 'name', e.target.value)}
-                  placeholder="Variable name"
-                  readOnly={readOnlyNames && !v.isNew}
-                  style={{ backgroundColor: readOnlyNames && !v.isNew ? '#f8fafc' : '#ffffff' }}
-                  autoCapitalize="off"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </td>
-              <td>
-                <select
-                  className="var-select"
-                  value={v.type}
-                  onChange={(e) => handleChange(idx, 'type', e.target.value)}
-                  disabled={v.type === 'File'}
-                >
-                  <option value="String">String</option>
-                  <option value="Number">Number</option>
-                  <option value="Boolean">Boolean</option>
-                  <option value="Object">Object</option>
-                  <option value="File">File</option>
-                  <option value="Null">Null</option>
-                </select>
-              </td>
-              <td>
-                {v.type === 'String' && (
-                  <input
+    <div className="space-y-4">
+      <div className="border rounded-md overflow-hidden bg-background">
+        <Table>
+          <TableHeader className="bg-muted/40 hover:bg-muted/40">
+            <TableRow>
+              <TableHead className="w-[30%]">Name</TableHead>
+              <TableHead className="w-[20%]">Type</TableHead>
+              <TableHead>Value</TableHead>
+              <TableHead className="w-12 text-center"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {variables.map((v, idx) => (
+              <TableRow key={idx}>
+                <TableCell className="p-2">
+                  <Input
                     type="text"
-                    className="var-input"
-                    value={v.value as string}
-                    onChange={(e) => handleChange(idx, 'value', e.target.value)}
-                    placeholder="String value"
+                    value={v.name}
+                    onChange={(e: any) => handleChange(idx, 'name', e.target.value)}
+                    placeholder="Variable name"
+                    readOnly={readOnlyNames && !v.isNew}
+                    className={readOnlyNames && !v.isNew ? "bg-muted/50" : ""}
                     autoCapitalize="off"
                     autoComplete="off"
                     spellCheck={false}
                   />
-                )}
-                {v.type === 'Number' && (
-                  <input
-                    type="number"
-                    className="var-input"
-                    value={v.value as number}
-                    onChange={(e) => handleChange(idx, 'value', parseFloat(e.target.value))}
-                    placeholder="Number value"
-                  />
-                )}
-                {v.type === 'Boolean' && (
-                  <input
-                    type="checkbox"
-                    className="var-checkbox"
-                    checked={v.value as boolean}
-                    onChange={(e) => handleChange(idx, 'value', e.target.checked)}
-                  />
-                )}
-                {v.type === 'Object' && (
-                  <textarea
-                    className="vars-textarea"
-                    value={v.value as string}
-                    onChange={(e) => handleChange(idx, 'value', e.target.value)}
-                    rows={2}
-                    spellCheck={false}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                )}
-                {v.type === 'Null' && (
-                  <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '0.85rem' }}>null</span>
-                )}
-                {v.type === 'File' && v.pendingFilePath && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} className="file-pending-row">
-                    <span className="file-badge">
-                      <Paperclip size={12} />
-                      {(v.value as any)?.filename || v.pendingFilePath.split('/').pop()}
-                    </span>
-                    <span className="pending-text">(Pending upload...)</span>
-                  </div>
-                )}
-                {v.type === 'File' && !v.pendingFilePath && !isFileReference(v.value) && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      className="button"
-                      onClick={() => handlePickFileForRow(idx)}
-                      style={{
-                        background: '#f1f5f9',
-                        color: '#334155',
-                        border: '1px solid #cbd5e1',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontSize: '0.85rem',
-                        padding: '4px 10px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Paperclip size={14} /> Choose File…
-                    </button>
-                    <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '0.85rem' }}>
-                      No file selected
-                    </span>
-                  </div>
-                )}
-                {v.type === 'File' && !v.pendingFilePath && isFileReference(v.value) && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div
-                      onClick={() => {
-                        if (instanceId) {
-                          handleDownloadFile(v.name, (v.value as FileReference).filename);
-                        }
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: instanceId ? 'pointer' : 'default', color: instanceId ? '#0f172a' : 'inherit' }}
-                      title={instanceId ? "Download file" : ""}
-                      className="file-download-trigger"
-                    >
-                      <Paperclip size={14} />
-                      <span style={{ fontWeight: 500 }}>{(v.value as FileReference)?.filename}</span>
+                </TableCell>
+                <TableCell className="p-2">
+                  <select
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background text-foreground px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={v.type}
+                    onChange={(e) => handleChange(idx, 'type', e.target.value)}
+                    disabled={v.type === 'File'}
+                  >
+                    <option value="String">String</option>
+                    <option value="Number">Number</option>
+                    <option value="Boolean">Boolean</option>
+                    <option value="Object">Object</option>
+                    <option value="File">File</option>
+                    <option value="Null">Null</option>
+                  </select>
+                </TableCell>
+                <TableCell className="p-2">
+                  {v.type === 'String' && (
+                    <Input
+                      type="text"
+                      value={v.value as string}
+                      onChange={(e: any) => handleChange(idx, 'value', e.target.value)}
+                      placeholder="String value"
+                      autoCapitalize="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  )}
+                  {v.type === 'Number' && (
+                    <Input
+                      type="number"
+                      value={v.value as number}
+                      onChange={(e: any) => handleChange(idx, 'value', parseFloat(e.target.value))}
+                      placeholder="Number value"
+                    />
+                  )}
+                  {v.type === 'Boolean' && (
+                    <div className="flex h-10 items-center pl-2">
+                      <input
+                        type="checkbox"
+                        checked={v.value as boolean}
+                        onChange={(e) => handleChange(idx, 'value', e.target.checked)}
+                        className="h-4 w-4 rounded border-input text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      />
                     </div>
-                    <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
-                      ({formatFileSize((v.value as FileReference)?.size_bytes || 0)})
-                    </span>
-                    {instanceId && (
-                      <button 
-                        onClick={() => handleDownloadFile(v.name, (v.value as FileReference).filename)}
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  )}
+                  {v.type === 'Object' && (
+                    <Textarea
+                      value={v.value as string}
+                      onChange={(e: any) => handleChange(idx, 'value', e.target.value)}
+                      rows={2}
+                      spellCheck={false}
+                      className="min-h-[2.5rem] font-mono text-xs"
+                    />
+                  )}
+                  {v.type === 'Null' && (
+                    <div className="flex h-10 items-center pl-2">
+                      <span className="text-muted-foreground italic text-sm">null</span>
+                    </div>
+                  )}
+                  {v.type === 'File' && v.pendingFilePath && (
+                    <div className="flex h-10 items-center gap-2">
+                      <Badge variant="outline" className="gap-1 font-mono bg-muted/50">
+                        <Paperclip className="h-3 w-3" />
+                        {(v.value as any)?.filename || v.pendingFilePath.split('/').pop()}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground italic">(Pending upload...)</span>
+                    </div>
+                  )}
+                  {v.type === 'File' && !v.pendingFilePath && !isFileReference(v.value) && (
+                    <div className="flex h-10 items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handlePickFileForRow(idx)}
+                        className="gap-1.5 h-8 text-xs"
                       >
-                        <Download size={14} /> Download
-                      </button>
-                    )}
-                  </div>
-                )}
-              </td>
-              <td style={{ textAlign: 'center' }}>
-                <button
-                  className="button"
-                  style={{ background: 'transparent', color: '#ef4444', border: 'none', padding: '4px', cursor: 'pointer' }}
-                  onClick={() => handleRemove(idx)}
-                  title="Delete Variable"
-                >
-                  <Trash size={16} />
-                </button>
-              </td>
-            </tr>
-          ))}
-          {variables.length === 0 && (
-            <tr>
-              <td colSpan={4} style={{ textAlign: 'center', color: '#64748b', padding: '16px' }}>
-                No variables configured.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-start', gap: '8px' }}>
-        <button
-          className="button"
+                        <Paperclip className="h-3.5 w-3.5" /> Choose File…
+                      </Button>
+                      <span className="text-muted-foreground italic text-xs">
+                        No file selected
+                      </span>
+                    </div>
+                  )}
+                  {v.type === 'File' && !v.pendingFilePath && isFileReference(v.value) && (
+                    <div className="flex h-10 items-center justify-between gap-2 max-w-full group">
+                      <div
+                        onClick={() => {
+                          if (instanceId) {
+                            handleDownloadFile(v.name, (v.value as FileReference).filename);
+                          }
+                        }}
+                        className={`flex items-center gap-2 overflow-hidden ${instanceId ? 'cursor-pointer hover:underline text-primary' : 'text-foreground'}`}
+                        title={instanceId ? "Download file" : ""}
+                      >
+                        <Paperclip className="h-4 w-4 shrink-0" />
+                        <span className="font-medium truncate text-sm">{(v.value as FileReference)?.filename}</span>
+                        <span className="text-muted-foreground text-xs shrink-0">
+                          ({formatFileSize((v.value as FileReference)?.size_bytes || 0)})
+                        </span>
+                      </div>
+                      
+                      {instanceId && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleDownloadFile(v.name, (v.value as FileReference).filename)}
+                          className="h-8 gap-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20 shrink-0"
+                        >
+                          <Download className="h-3.5 w-3.5" /> Download
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="p-2 text-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => handleRemove(idx)}
+                    title="Delete Variable"
+                  >
+                    <Trash className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {variables.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                  No variables configured.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
           onClick={handleAdd}
-          style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }}
+          className="gap-2"
         >
           + Add Variable
-        </button>
+        </Button>
         {(instanceId || allowPendingFiles) && (
-          <button
-            className="button"
+          <Button
+            variant="outline"
             onClick={handleUploadFile}
-            style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}
+            className="gap-2"
           >
-            <Paperclip size={16} /> Attach File
-          </button>
+            <Paperclip className="h-4 w-4" /> Attach File
+          </Button>
         )}
       </div>
-    </>
+      
+      <Dialog open={varNamePromptOpen} onOpenChange={setVarNamePromptOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Variable Name</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input 
+              autoFocus
+              placeholder="e.g. uploaded_document"
+              value={newVarName}
+              onChange={e => setNewVarName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submitNewVariable()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVarNamePromptOpen(false)}>Cancel</Button>
+            <Button onClick={submitNewVariable} disabled={!newVarName.trim()}>Add File Variable</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
