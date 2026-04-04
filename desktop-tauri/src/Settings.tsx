@@ -8,6 +8,10 @@ export function Settings() {
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState<string | null>(null)
 
+  const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>(
+    () => (localStorage.getItem('theme') as any) || 'auto'
+  )
+
   useEffect(() => {
     loadInfo()
   }, [])
@@ -40,6 +44,16 @@ export function Settings() {
       setMessage(`Connection failed: ${String(e)}`)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleThemeChange = (newTheme: 'auto' | 'light' | 'dark') => {
+    setTheme(newTheme)
+    localStorage.setItem('theme', newTheme)
+    if (newTheme === 'auto') {
+      document.documentElement.removeAttribute('data-theme')
+    } else {
+      document.documentElement.setAttribute('data-theme', newTheme)
     }
   }
 
@@ -97,6 +111,21 @@ export function Settings() {
             {message}
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ maxWidth: 520, marginTop: 16 }}>
+        <div className="card-title">🎨 Appearance</div>
+        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: 12 }}>
+          Choose your preferred theme for the user interface.
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(['auto', 'light', 'dark'] as const).map(t => (
+            <button key={t} className={`button ${theme === t ? '' : 'button-secondary'}`} 
+              onClick={() => handleThemeChange(t)}>
+              {t === 'auto' ? '🖥 System' : t === 'light' ? '☀️ Light' : '🌙 Dark'}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { deployDefinition, startInstance } from './lib/tauri'
 import { Modeler } from './Modeler'
 import { Instances } from './Instances'
@@ -7,11 +7,19 @@ import { Settings } from './Settings'
 import { Monitoring } from './Monitoring'
 import { PendingTasks } from './PendingTasks'
 import { MessageDialog } from './MessageDialog'
-import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail } from 'lucide-react'
+import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle } from 'lucide-react'
 import { useToast } from './ToastContext'
+import { IncidentsView } from './IncidentsView'
 
 function App() {
   const toast = useToast()
+  useEffect(() => {
+    const saved = localStorage.getItem('theme')
+    if (saved && saved !== 'auto') {
+      document.documentElement.setAttribute('data-theme', saved)
+    }
+  }, [])
+
   const [activeTab, setActiveTab] = useState('definitions')
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [viewXml, setViewXml] = useState<string | null>(null)
@@ -70,6 +78,9 @@ function App() {
         <div className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`} onClick={() => setActiveTab('tasks')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <ListTodo size={18} /> Pending Tasks
         </div>
+        <div className={`nav-item ${activeTab === 'incidents' ? 'active' : ''}`} onClick={() => setActiveTab('incidents')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={18} /> Incidents
+        </div>
         <div className={`nav-item ${activeTab === 'instances' ? 'active' : ''}`} onClick={() => { setSelectedInstanceId(null); setActiveTab('instances'); }} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Layers size={18} /> Instances
         </div>
@@ -105,6 +116,10 @@ function App() {
 
         {activeTab === 'tasks' && (
           <PendingTasks />
+        )}
+
+        {activeTab === 'incidents' && (
+          <IncidentsView onViewInstance={(id) => { setSelectedInstanceId(id); setActiveTab('instances'); }} />
         )}
 
         {activeTab === 'instances' && (
