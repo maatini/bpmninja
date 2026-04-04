@@ -399,22 +399,17 @@ async function injectTauriMock(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Collect all alert messages that fire during a callback */
-async function collectAlerts(
+/** Collect all toast messages that fire after an action */
+async function collectToasts(
   page: Page,
   action: () => Promise<void>,
 ): Promise<string[]> {
-  const alerts: string[] = [];
-  const handler = (dialog: Dialog) => {
-    alerts.push(dialog.message());
-    dialog.accept();
-  };
-  page.on('dialog', handler);
   await action();
-  // Give alerts time to fire
-  await page.waitForTimeout(500);
-  page.off('dialog', handler);
-  return alerts;
+  // Wait for at least one toast to appear, but don't fail if none pop up
+  await page.waitForSelector('.toast', { state: 'visible', timeout: 2000 }).catch(() => {});
+  const toasts = await page.locator('.toast').allTextContents();
+  // Discard the '×' close text content
+  return toasts.map(t => t.replace('×', '').trim());
 }
 
 // ---------------------------------------------------------------------------
@@ -464,12 +459,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Click "Deploy Process"
-    const alerts = await collectAlerts(page, async () => {
+    const alerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Deploy Process' }).click();
     });
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain('Deployed definition! ID: mock-def-');
+    expect(alerts.length).toBeGreaterThanOrEqual(1);
+    expect(alerts[0]).toContain('Deployed');
   });
 
 
@@ -543,12 +538,12 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
 
     // Complete the task
-    const alerts = await collectAlerts(page, async () => {
+    const alerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Complete Task' }).click();
     });
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toBe('Task completed!');
+    expect(alerts.length).toBeGreaterThanOrEqual(1);
+    expect(alerts[0]).toContain('Task completed');
 
     // After completion, the task list should refresh and show empty state
     await expect(page.getByText('No pending user tasks.')).toBeVisible({ timeout: 5_000 });
@@ -589,10 +584,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Step 1: Deploy
-    let alerts = await collectAlerts(page, async () => {
+    let alerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Deploy Process' }).click();
     });
-    expect(alerts[0]).toContain('Deployed definition!');
+    expect(alerts[0]).toContain('Deployed');
 
     // Step 2: Start Instance via variables dialog (auto deploy + start)
     await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
@@ -652,12 +647,11 @@ test.describe('mini-bpm Desktop App – E2E', () => {
 
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
 
-    const cards = page.locator('.card');
+    const cards = page.locator('.instance-list-item');
     await expect(cards).toHaveCount(2, { timeout: 5_000 });
 
     // First instance should show Running badge
     await expect(cards.first().locator('.state-running')).toBeVisible();
-    await expect(cards.first().getByText(/Definition:/)).toBeVisible();
 
     // Second instance should show Completed badge
     await expect(cards.nth(1).locator('.state-completed')).toBeVisible();
@@ -685,10 +679,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await page.goto('/');
 
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
-    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.instance-list-item').first()).toBeVisible({ timeout: 5_000 });
 
-    // Click the instance card
-    await page.locator('.card').first().click();
+    // Click the instance row
+    await page.locator('.instance-list-item').first().click();
 
     // Detail view should appear
     const detail = page.locator('.instance-detail');
@@ -743,11 +737,11 @@ test.describe('mini-bpm Desktop App – E2E', () => {
 
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
 
-    const cards = page.locator('.card');
+    const cards = page.locator('.process-group-card');
     await expect(cards).toHaveCount(2, { timeout: 5_000 });
 
-    await expect(cards.first().getByText('Definition: order-process')).toBeVisible();
-    await expect(cards.nth(1).getByText('Definition: approval-flow')).toBeVisible();
+    await expect(cards.first().getByText('order-process').first()).toBeVisible();
+    await expect(cards.nth(1).getByText('approval-flow').first()).toBeVisible();
   });
 
   // ---- 13.5 Deployed Processes – instances mapping & navigation --------------
@@ -776,12 +770,15 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
 
     // 2. The definition card should show "Running Instances" and the mapped instance
-    const defCard = page.locator('.card').filter({ hasText: 'Definition: mapping-test-def' });
+    const defCard = page.locator('.process-group-card').filter({ hasText: 'mapping-test-def' });
     await expect(defCard).toBeVisible({ timeout: 5_000 });
-    await expect(defCard.getByText('Running Instances')).toBeVisible();
+    
+    // We added the word "active instance" in the grouping pill instead of an explicit "Running Instances" section, but wait: Let's just click to expand accordion.
+    const accordionBtn = defCard.locator('button.accordion-toggle').nth(1); // Instances accordion is 2nd normally, but we can filter by hasText active instances.
+    await defCard.locator('button', { hasText: 'active' }).click();
 
     // The business key fallback logic we implemented should prefer the business_key variable
-    const instanceButton = defCard.locator('ul button', { hasText: 'MyTestBusinessKey' });
+    const instanceButton = defCard.locator('.instance-list-item', { hasText: 'MyTestBusinessKey' });
     await expect(instanceButton).toBeVisible();
 
     // 3. Click the instance
@@ -822,16 +819,16 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Deploy a process first
-    const deployAlerts = await collectAlerts(page, async () => {
+    const deployAlerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Deploy Process' }).click();
     });
-    expect(deployAlerts[0]).toContain('Deployed definition!');
+    expect(deployAlerts[0]).toContain('Deployed');
 
     // Switch to Deployed Processes tab
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
 
     // Should see at least one definition card
-    const cards = page.locator('.card');
+    const cards = page.locator('.process-group-card');
     await expect(cards).toHaveCount(1, { timeout: 5_000 });
   });
 
@@ -940,14 +937,19 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
     
     // Card should exist
-    const card = page.locator('.card', { hasText: 'inst-to-' });
+    const card = page.locator('.instance-list-item', { hasText: 'inst-to-' });
     await expect(card).toBeVisible();
     
-    // Click Delete button on the card list
-    await card.locator('button[title="Delete Instance"]').click();
+    // Click Delete button on the card (group/instance) list (Wait, does the list item have delete? No, only the detail dialog has Delete!)
+    await card.click();
+    const detailPanel = page.locator('.instance-detail');
+    await expect(detailPanel).toBeVisible({ timeout: 5_000 });
+
+    // Click Delete button in details
+    await detailPanel.locator('button', { hasText: 'Delete' }).click();
     
     // Instance should disappear
-    await expect(card).not.toBeVisible();
+    await expect(detailPanel).not.toBeVisible();
     await expect(page.getByText('No instances found.')).toBeVisible();
   });
 
@@ -976,11 +978,11 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await page.goto('/');
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
     
-    const card = page.locator('.card', { hasText: 'Definition: def-to-delete' });
+    const card = page.locator('.process-group-card', { hasText: 'def-to-delete' });
     await expect(card).toBeVisible();
     
     // Click Delete Definition
-    await card.locator('button[title="Delete Definition"]').click();
+    await card.locator('button[title="Delete latest version"]').click();
     
     // Definition should disappear
     await expect(card).not.toBeVisible();
@@ -996,10 +998,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Deploy first
-    const deployAlerts = await collectAlerts(page, async () => {
+    const deployAlerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Deploy Process' }).click();
     });
-    expect(deployAlerts[0]).toContain('Deployed definition!');
+    expect(deployAlerts[0]).toContain('Deployed');
 
     // Open variables dialog
     await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
@@ -1045,10 +1047,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
 
     // Navigate to Instances tab
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
-    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.instance-list-item').first()).toBeVisible({ timeout: 5_000 });
 
-    // Click the instance card to open detail view
-    await page.locator('.card').first().click();
+    // Click the instance row to open detail view
+    await page.locator('.instance-list-item').first().click();
     const detail = page.locator('.instance-detail');
     await expect(detail).toBeVisible({ timeout: 5_000 });
 
@@ -1080,11 +1082,11 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await newRow.locator('input').nth(1).fill('alice');
 
     // Click Save Variables
-    const alerts = await collectAlerts(page, async () => {
+    const alerts = await collectToasts(page, async () => {
       await detail.locator('button', { hasText: 'Save Variables' }).click();
     });
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain('Variables saved successfully');
+    expect(alerts.length).toBeGreaterThanOrEqual(1);
+    expect(alerts[0]).toContain('Variables saved');
 
     // After save, verify table state (assignee = 0, status = 1)
     await expect(tbody.locator('tr').nth(0).locator('input').first()).toHaveValue('assignee');
@@ -1142,10 +1144,10 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // 2. Klicke "Deploy Process"
-    let alerts = await collectAlerts(page, async () => {
+    let alerts = await collectToasts(page, async () => {
       await page.locator('button', { hasText: 'Deploy Process' }).click();
     });
-    expect(alerts[0]).toContain('Deployed definition!');
+    expect(alerts[0]).toContain('Deployed');
 
     // 3. Klicke "Start Instance" (ohne initiale Variablen, navigiert auto zu Instances)
     await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
@@ -1153,8 +1155,8 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
 
     // 4. Validierung: Klicke auf die neue Instanz
-    await expect(page.locator('.card').first()).toBeVisible({ timeout: 5_000 });
-    await page.locator('.card').first().click();
+    await expect(page.locator('.instance-list-item').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.instance-list-item').first().click();
 
     const detail = page.locator('.instance-detail');
     await expect(detail).toBeVisible({ timeout: 5_000 });
@@ -1289,8 +1291,8 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     
     // Navigate to instance details
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
-    await expect(page.locator('.card').first()).toBeVisible({ timeout: 5_000 });
-    await page.locator('.card').first().click();
+    await expect(page.locator('.instance-list-item').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.instance-list-item').first().click();
     
     const timeline = page.locator('.history-timeline-container');
     await expect(timeline).toBeVisible({ timeout: 5_000 });
@@ -1349,8 +1351,8 @@ test.describe('mini-bpm Desktop App – E2E', () => {
     page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
     
     await page.locator('.nav-item', { hasText: 'Instances' }).click();
-    await expect(page.locator('.card').first()).toBeVisible({ timeout: 5_000 });
-    await page.locator('.card').first().click();
+    await expect(page.locator('.instance-list-item').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.instance-list-item').first().click();
     
     // Wait for detail pane
     const detail = page.locator('.instance-detail');

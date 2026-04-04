@@ -3,6 +3,7 @@ import { save } from '@tauri-apps/api/dialog';
 import { writeTextFile } from '@tauri-apps/api/fs';
 import { listDefinitions, getDefinitionXml, listInstances, deleteDefinition, type DefinitionInfo, type ProcessInstance } from './lib/tauri';
 import { RefreshCw, Eye, Download, Activity, Clock, Trash, ChevronDown, ChevronRight, FileCode2, Network, Key, Boxes } from 'lucide-react';
+import { useToast } from './ToastContext';
 
 function groupByProcess(defs: DefinitionInfo[]): Map<string, DefinitionInfo[]> {
   const map = new Map<string, DefinitionInfo[]>();
@@ -18,6 +19,7 @@ function groupByProcess(defs: DefinitionInfo[]): Map<string, DefinitionInfo[]> {
 }
 
 export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: string) => void, onViewInstance?: (id: string) => void }) {
+  const toast = useToast();
   const [definitions, setDefinitions] = useState<DefinitionInfo[]>([]);
   const [instances, setInstances] = useState<ProcessInstance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +78,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
         await writeTextFile(filePath, xml);
       }
     } catch (e) {
-      alert('Download failed: ' + e);
+      toast.error('Download failed: ' + e);
     } finally {
       setDownloading(null);
     }
@@ -88,7 +90,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
       const xml = await getDefinitionXml(defId);
       onView(xml);
     } catch (e: any) {
-      alert('Failed to load definition: ' + e);
+      toast.error('Failed to load definition: ' + e);
     } finally {
       setViewingId(null);
     }
@@ -110,7 +112,7 @@ export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: st
       await deleteDefinition(defId, cascade);
       fetchDefinitions();
     } catch (e: any) {
-      alert('Delete failed: ' + e);
+      toast.error('Delete failed: ' + e);
     }
   };
 

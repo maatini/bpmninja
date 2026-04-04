@@ -1,6 +1,7 @@
 import { Trash, Paperclip, Download } from 'lucide-react';
 import { open, save } from '@tauri-apps/api/dialog';
 import { uploadInstanceFile, downloadInstanceFile, type FileReference } from './lib/tauri';
+import { useToast } from './ToastContext';
 
 // Shared type definitions for the variable editor
 export type VarType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Null' | 'File';
@@ -51,7 +52,7 @@ export function parseVariables(vars: Record<string, unknown>): VariableRow[] {
 
 /**
  * Serialize VariableRow[] back into a plain Record<string, unknown>.
- * Returns null and shows an alert if validation fails.
+ * Returns null if validation fails. Caller should handle the error notification.
  */
 export function serializeVariables(
   variables: VariableRow[],
@@ -75,13 +76,11 @@ export function serializeVariables(
       try {
         result[v.name] = JSON.parse(v.value as string);
       } catch {
-        alert(`Invalid JSON for variable '${v.name}'`);
         return null;
       }
     } else if (v.type === 'Number') {
       const num = Number(v.value);
       if (isNaN(num)) {
-        alert(`Invalid number for variable '${v.name}'`);
         return null;
       }
       result[v.name] = num;
@@ -127,6 +126,8 @@ export function VariableEditor({
   onVariablesRefreshRequest,
   allowPendingFiles = false,
 }: VariableEditorProps) {
+  const toast = useToast();
+
   const handleChange = (index: number, field: keyof VariableRow, newValue: unknown) => {
     const updated = [...variables];
     const row = { ...updated[index] };
@@ -182,7 +183,7 @@ export function VariableEditor({
       }
       return null;
     } catch (e: any) {
-      alert(`File upload failed: ${e}`);
+      toast.error(`File upload failed: ${e}`);
       return null;
     }
   };
@@ -214,7 +215,7 @@ export function VariableEditor({
         onChange(updated);
       }
     } catch (e: any) {
-      alert(`File selection failed: ${e}`);
+      toast.error(`File selection failed: ${e}`);
     }
   };
 
@@ -229,7 +230,7 @@ export function VariableEditor({
 
       await downloadInstanceFile(instanceId, varName, savePath);
     } catch (e) {
-      alert(`Download failed: ${e}`);
+      toast.error(`Download failed: ${e}`);
     }
   };
 

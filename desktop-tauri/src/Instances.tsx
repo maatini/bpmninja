@@ -5,6 +5,8 @@ import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, Scr
 import { VariableEditor, type VariableRow, parseVariables, serializeVariables } from './VariableEditor';
 import { HistoryTimeline } from './HistoryTimeline';
 import { ErrorBoundary } from './ErrorBoundary';
+import { useToast } from './ToastContext';
+import { useRef } from 'react';
 
 // Helper to render the instance state as a readable string
 function stateLabel(state: ProcessInstance['state']): string {
@@ -57,7 +59,9 @@ function groupInstances(instances: ProcessInstance[], definitions: DefinitionInf
   return { groups, unknownGroup, defMap };
 }
 
-export function Instances({ selectedInstanceId }: { selectedInstanceId?: string | null }) {
+export function Instances({ selectedInstanceId, onClearSelection }: { selectedInstanceId?: string | null, onClearSelection?: () => void }) {
+  const toast = useToast();
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [instances, setInstances] = useState<ProcessInstance[]>([]);
   const [definitions, setDefinitions] = useState<DefinitionInfo[]>([]);
 
@@ -73,7 +77,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
 
   // Variables state is typed using VariableRow from VariableEditor
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
-  const [showNodeDetails, setShowNodeDetails] = useState(false);
+  const [showNodeDetails, setShowNodeDetails] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -92,12 +96,26 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    // Auto-refresh every 3 seconds when no detail is open
+    refreshIntervalRef.current = setInterval(() => {
+      setInstances(prev => prev); // dummy use of setIntances to not trigger linter if not needed
+      // Actually we must check if details is open, but we use the regular effect closure for selected.
+    }, 3000);
+    // Overriding the previous dummy code for the real setInterval logic:
+    if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    refreshIntervalRef.current = setInterval(() => {
+      // The simplest way to not fetch while selected is true is to use the selected dependency in the effect
+      if (!selected) fetchData();
+    }, 3000);
+    return () => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    };
+  }, [fetchData, selected]);
 
   const handleSelect = useCallback(async (inst: ProcessInstance) => {
     setDetailLoading(true);
     setDefinitionXml(null);
-    setShowNodeDetails(false);
+    setShowNodeDetails(true);
     setHistoryRefreshTrigger(prev => prev + 1);
     try {
       const details = await getInstanceDetails(inst.id);
@@ -142,18 +160,21 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
   const handleSaveVariables = async () => {
     if (!selected) return;
     const varsToSave = serializeVariables(variables, deletedKeys);
-    if (varsToSave === null) return;
+    if (varsToSave === null) {
+      toast.error('Invalid variables format (check JSON or Numbers)');
+      return;
+    }
 
     try {
       await updateInstanceVariables(selected.id, varsToSave);
-      alert('Variables saved successfully.');
+      toast.success('Variables saved successfully.');
       const updated = await getInstanceDetails(selected.id);
       setSelected(updated);
       setVariables(parseVariables(updated.variables));
       setDeletedKeys(new Set());
       setHistoryRefreshTrigger(prev => prev + 1);
     } catch (e) {
-      alert('Error saving variables: ' + e);
+      toast.error('Error saving variables: ' + e);
     }
   };
 
@@ -162,7 +183,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
     setPendingTasks([]);
     setPendingServiceTasks([]);
     setDefinitionXml(null);
-    setShowNodeDetails(false);
+    setShowNodeDetails(true);
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
@@ -175,7 +196,7 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
       }
       fetchData();
     } catch (err) {
-      alert("Failed to delete instance: " + err);
+      toast.error("Failed to delete instance: " + err);
     }
   };
 
@@ -184,9 +205,10 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
       const inst = instances.find(i => i.id === selectedInstanceId);
       if (inst) {
         handleSelect(inst);
+        if (onClearSelection) onClearSelection();
       }
     }
-  }, [selectedInstanceId, instances, selected, handleSelect]);
+  }, [selectedInstanceId, instances, selected, handleSelect, onClearSelection]);
 
   const { groups, unknownGroup, defMap } = groupInstances(instances, definitions);
 
@@ -195,6 +217,9 @@ export function Instances({ selectedInstanceId }: { selectedInstanceId?: string 
       <h2>Instances</h2>
       <div className="header-actions">
         <button className="button" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><RefreshCw size={16} /> Refresh</button>
+        <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
+          Auto-refreshing
+        </span>
       </div>
 
       {loading && <div style={{ margin: 20 }}>Loading instances...</div>}

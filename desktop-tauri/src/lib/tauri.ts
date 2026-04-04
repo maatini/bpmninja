@@ -34,8 +34,8 @@ export async function getPendingTasks(): Promise<PendingUserTask[]> {
   return invoke('get_pending_tasks');
 }
 
-export async function completeTask(taskId: string): Promise<void> {
-  return invoke('complete_task', { taskId });
+export async function completeTask(taskId: string, variables?: Record<string, unknown>): Promise<void> {
+  return invoke('complete_task', { taskId, variables: variables || null });
 }
 
 export interface PendingServiceTask {

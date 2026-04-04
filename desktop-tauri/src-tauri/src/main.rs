@@ -119,10 +119,10 @@ async fn get_pending_tasks(state: tauri::State<'_, AppState>) -> Result<serde_js
 }
 
 #[tauri::command]
-async fn complete_task(state: tauri::State<'_, AppState>, task_id: String) -> Result<(), String> {
+async fn complete_task(state: tauri::State<'_, AppState>, task_id: String, variables: Option<HashMap<String, serde_json::Value>>) -> Result<(), String> {
     let url = format!("{}/api/complete/{}", *state.base_url.lock().unwrap(), task_id);
     let payload = serde_json::json!({
-        "variables": {}
+        "variables": variables.unwrap_or_default()
     });
     
     let res = state.client.post(&url)

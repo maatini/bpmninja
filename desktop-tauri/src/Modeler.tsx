@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/api/dialog';
 import { readBpmnFile, uploadInstanceFile } from './lib/tauri';
 import { FilePlus, FolderOpen, UploadCloud, Play, Focus } from 'lucide-react';
+import { useToast } from './ToastContext';
 
 // Make sure to ignore TS types for modules that might not have types
 // @ts-ignore
@@ -63,6 +64,7 @@ function generateEmptyBpmn(): string {
 }
 
 export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXml }: ModelerProps) {
+  const toast = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const propertiesRef = useRef<HTMLDivElement>(null);
   const modelerRef = useRef<any>(null);
@@ -157,7 +159,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
       }
       onOpenFile();
     } catch (e: any) {
-      alert('Failed to open BPMN file: ' + e);
+      toast.error('Failed to open BPMN file: ' + e);
     }
   };
 
@@ -187,7 +189,10 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
     if (!modelerRef.current) return;
 
     const serialized = serializeVariables(startVariables);
-    if (serialized === null) return;
+    if (serialized === null) {
+      toast.error('Invalid variables format. Please check JSON or Numbers.');
+      return;
+    }
 
     if (businessKey.trim() !== '') {
       serialized.business_key = businessKey.trim();
@@ -213,7 +218,7 @@ export function Modeler({ onDeploy, onStart, onNewDiagram, onOpenFile, initialXm
         }
       }
     } catch (e: any) {
-      alert('Failed to start process: ' + e);
+      toast.error('Failed to start process: ' + e);
     } finally {
       setIsStarting(false);
     }
