@@ -1,7 +1,7 @@
 # mini-bpm — Architektur-Dokumentation
 
 > BPMN 2.0 Workflow Engine in Rust, token-basierte Execution
-> Stand: 2026-04-03
+> Stand: 2026-04-04
 
 ---
 
@@ -9,14 +9,14 @@
 
 Das Projekt ist ein Cargo-Workspace mit 6 Crates, einer Tauri Desktop-App und einem API-Spec:
 
-| Crate | LOC | Zweck |
-|---|---|---|
-| **engine-core** | ~4.200 | Reine State Machine, Token-Execution, Gateways, Scripting |
-| **bpmn-parser** | ~910 | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
-| **persistence-nats** | ~720 | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
-| **engine-server** | ~920 | Axum REST API (HTTP-Adapter) |
-| **desktop-tauri** | ~8.500 | Tauri + React + bpmn-js Modeler |
-| **agent-orchestrator** | stub | External Worker Orchestrierung (geplant) |
+| Crate | Lib LoC | Test LoC | Zweck |
+|---|---|---|---|
+| **engine-core** | ~4.500 | ~2.276 | Reine State Machine, Token-Execution, Gateways, Scripting |
+| **bpmn-parser** | ~938 | — | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
+| **persistence-nats** | ~787 | — | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
+| **engine-server** | ~1.032 | ~950 | Axum REST API (HTTP-Adapter) + Background Timer Scheduler |
+| **desktop-tauri** | ~3.700 (TS) + ~495 (Rust) | — | Tauri + React + bpmn-js Modeler (Thin Client) |
+| **agent-orchestrator** | stub | — | External Worker Orchestrierung (geplant) |
 
 ### Workspace Dependency Graph
 
@@ -64,7 +64,7 @@ graph TB
         end
         
         subgraph "engine module"
-            MOD["mod.rs<br/>WorkflowEngine<br/>(1.107 LOC)"]
+            MOD["mod.rs<br/>WorkflowEngine<br/>(1.139 LOC)"]
             TYPES["types.rs<br/>ProcessInstance<br/>PendingTasks<br/>InstanceState"]
             EXEC["executor.rs<br/>run_instance_batch<br/>execute_step"]
             GW["gateway.rs<br/>XOR / AND / OR"]
@@ -113,18 +113,19 @@ Die Engine ist in fokussierte Komponenten aufgeteilt:
 ```rust
 pub struct WorkflowEngine {
     // K2: Komponenten statt God-Object
-    definitions:             DefinitionRegistry,        // Immutable definition store
-    instances:               InstanceStore,              // Per-instance locking (K1)
+    definitions:             DefinitionRegistry,                  // Immutable definition store
+    instances:               InstanceStore,                       // Per-instance locking (K1)
     
-    // Wait-State Queues
-    pending_user_tasks:      Vec<PendingUserTask>,
-    pending_service_tasks:   Vec<PendingServiceTask>,
-    pending_timers:          Vec<PendingTimer>,
-    pending_message_catches: Vec<PendingMessageCatch>,
+    // Wait-State Queues (HashMap for O(1) lookup by ID)
+    pending_user_tasks:      HashMap<Uuid, PendingUserTask>,
+    pending_service_tasks:   HashMap<Uuid, PendingServiceTask>,
+    pending_timers:          HashMap<Uuid, PendingTimer>,
+    pending_message_catches: HashMap<Uuid, PendingMessageCatch>,
     
     // Infrastructure
     persistence:             Option<Arc<dyn WorkflowPersistence>>,
     script_engine:           rhai::Engine,
+    persistence_error_count: AtomicU64,                           // Error counter for monitoring
 }
 ```
 
@@ -132,7 +133,7 @@ pub struct WorkflowEngine {
 |---|---|---|
 | **DefinitionRegistry** | `Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Shared, immutable nach Deploy |
 | **InstanceStore** | `Arc<RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>>` | Per-Instance fine-grained (K1) |
-| **PendingTask-Queues** | `Vec<Pending*>` | Engine-level mutable borrow |
+| **PendingTask-Queues** | `HashMap<Uuid, Pending*>` | Engine-level mutable borrow, O(1) lookup |
 
 ---
 
@@ -401,7 +402,9 @@ pub trait WorkflowPersistence: Send + Sync {
 
 ## 6. REST API (engine-server)
 
-### 6.1 Route-Übersicht
+> Vollständige OpenAPI 3.0 Spezifikation: **[docs/openapi.yaml](openapi.yaml)**
+
+### 6.1 Route-Übersicht (30 Endpoints)
 
 ```mermaid
 graph LR
@@ -414,6 +417,7 @@ graph LR
     
     subgraph "Process Instances"
         I1["POST /api/start"]
+        I1b["POST /api/start/latest"]
         I2["GET /api/instances"]
         I3["GET /api/instances/:id"]
         I4["DELETE /api/instances/:id"]
@@ -445,30 +449,63 @@ graph LR
         E2["POST /api/timers/process"]
     end
     
-    subgraph "Monitoring"
+    subgraph "Monitoring & Health"
+        M0["GET /api/health"]
+        M0b["GET /api/ready"]
         M1["GET /api/info"]
         M2["GET /api/monitoring"]
         M3["GET /api/instances/:id/history"]
+        M3b["GET /api/instances/:id/history/:eid"]
     end
     
     style D1 fill:#2ed573,color:#fff
     style I1 fill:#2ed573,color:#fff
+    style I1b fill:#2ed573,color:#fff
     style S2 fill:#ff9f43,color:#fff
+    style M0 fill:#2ed573,color:#fff
+    style M0b fill:#2ed573,color:#fff
 ```
 
 ### 6.2 Server-Architektur
 
 ```rust
 struct AppState {
-    engine:       Arc<RwLock<WorkflowEngine>>,   // Global engine lock
-    persistence:  Arc<dyn WorkflowPersistence>,   // Shared persistence
-    deployed_xml: Arc<RwLock<HashMap<Uuid, String>>>,  // XML cache
-    nats_url:     String,
+    engine:       Arc<RwLock<WorkflowEngine>>,                   // Global engine lock
+    persistence:  Option<Arc<dyn WorkflowPersistence>>,          // Optional NATS backend
+    deployed_xml: Arc<RwLock<HashMap<String, String>>>,          // XML cache (key → XML)
+    nats_url:     String,                                        // For /api/info endpoint
 }
 ```
 
 > Der Server hält den gesamten Engine-State hinter `Arc<RwLock<WorkflowEngine>>`.
 > Pro Request wird ein Write- oder Read-Lock akquiriert. Dank **K1 (Per-Instance-Locking)** blockieren sich Requests an verschiedene Instanzen nicht gegenseitig auf Instance-State-Ebene.
+
+### 6.3 Background Timer Scheduler
+
+Der Server startet einen Tokio-Background-Task, der periodisch `engine.process_timers()` aufruft:
+
+```rust
+// main.rs — automatisches Timer-Polling
+let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
+    .ok().and_then(|v| v.parse().ok()).unwrap_or(1000);
+
+tokio::spawn(async move {
+    loop {
+        tokio::time::sleep(Duration::from_millis(timer_interval_ms)).await;
+        let mut engine = timer_engine.write().await;
+        engine.process_timers().await;
+    }
+});
+```
+
+> **Konfiguration**: `TIMER_INTERVAL_MS` (Default: 1000ms). Kein externer Cron nötig.
+
+### 6.4 Health & Readiness
+
+| Endpoint | Funktion | Prüfung |
+|----------|----------|---------|
+| `GET /api/health` | Liveness Probe | Immer `200 OK` wenn Server läuft |
+| `GET /api/ready` | Readiness Probe | Prüft NATS-Verbindung, `503` wenn disconnected |
 
 ---
 
@@ -476,31 +513,42 @@ struct AppState {
 
 ### 7.1 Frontend-Komponenten
 
-| Datei | Zweck |
-|---|---|
-| `App.tsx` | Main Layout, Tab-Navigation |
-| `Modeler.tsx` | bpmn-js Modeler mit Deploy & Start |
-| `Instances.tsx` | Instanz-Tabelle mit Status, Actions |
-| `InstanceViewer.tsx` | Detail-Ansicht einer Instanz |
-| `HistoryTimeline.tsx` | Chronologische History mit Diffs |
-| `DeployedProcesses.tsx` | Definition-Verwaltung |
-| `VariableEditor.tsx` | JSON Variable Editor inkl. File-Upload |
-| `Monitoring.tsx` | Engine-Stats Dashboard |
-| `Settings.tsx` | Backend-URL Konfiguration |
+| Datei | LoC | Zweck |
+|---|---|---|
+| `App.tsx` | 218 | Main Layout, Tab-Navigation (6 Tabs) |
+| `Modeler.tsx` | 279 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
+| `Instances.tsx` | 455 | Instanz-Liste (grouped by Definition), Detail-Overlay |
+| `InstanceViewer.tsx` | 105 | Read-only BPMN-Viewer mit aktiver Node-Markierung |
+| `HistoryTimeline.tsx` | 210 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
+| `DeployedProcesses.tsx` | 267 | Versions-Gruppierung, Accordion, Cascade Delete |
+| `VariableEditor.tsx` | 440 | Typed Editor (6 Typen inkl. File), Upload/Download |
+| `Monitoring.tsx` | 191 | 8 Metric Cards, NATS Storage Breakdown, Auto-Refresh (5s) |
+| `Settings.tsx` | 103 | API URL Config + Connection Verify |
+| `ToastContext.tsx` | 60 | Non-blocking Toast Notification System |
+| `ErrorBoundary.tsx` | 46 | React Error Boundary |
+| `lib/tauri.ts` | 224 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
+| Custom Properties | ~337 | Condition, Script, Topic Extensions für bpmn-js |
+| `index.css` | 578 | Globale Styles (Vanilla CSS, keine Frameworks) |
 
-### 7.2 Dual-Mode Backend
+### 7.2 Thin-Client Architektur
+
+Die Desktop-App operiert als **Thin Client** — alle Workflow-Logik liegt im `engine-server`.
 
 ```mermaid
 graph TD
-    UI["React UI"]
-    UI -->|"invoke('deploy_definition')"| TC["Tauri Commands<br/>(src-tauri/main.rs)"]
-    TC -->|HTTP Requests| SERVER["engine-server<br/>:3030"]
+    UI["React UI<br/>(desktop-tauri/src)"]
+    UI -->|"invoke('deploy_definition')"| TC["Tauri Commands<br/>(src-tauri/main.rs, 494 LoC)"]
+    TC -->|"HTTP REST (reqwest)"| SERVER["engine-server<br/>:8081"]
     SERVER --> ENGINE["WorkflowEngine"]
+    ENGINE -.-> NATS[("NATS JetStream")]
     
     style UI fill:#ff6b81,color:#fff
     style TC fill:#a55eea,color:#fff
     style SERVER fill:#4a9eff,color:#fff
+    style NATS fill:#2ed573,color:#fff
 ```
+
+> **Konfiguration**: `ENGINE_API_URL` Environment-Variable (Default: `http://localhost:8081`).
 
 ---
 
@@ -559,11 +607,13 @@ Jeder State-Übergang wird als `HistoryEntry` gespeichert:
 
 | Bereich | Dateien | LOC |
 |---|---|---|
-| engine-core (lib) | 10 | 2.747 |
-| engine-core (tests) | 1 | 1.457 |
-| bpmn-parser | 2 | 912 |
-| persistence-nats | 2 | 721 |
-| engine-server | 3 | 919 |
-| **Workspace Gesamt** | **18** | **~8.400** |
-| desktop-tauri (TypeScript) | ~17 | ~8.500 |
-| **Projekt Gesamt** | **~35** | **~16.900** |
+| engine-core (lib) | 12 | 4.498 |
+| engine-core (tests) | 2 | 2.276 |
+| bpmn-parser | 2 | 938 |
+| persistence-nats | 2 | 787 |
+| engine-server (lib + main) | 3 | 1.035 |
+| engine-server (e2e tests) | 3 | ~950 |
+| **Rust Workspace Gesamt** | **24** | **~10.484** |
+| desktop-tauri (TypeScript + CSS) | 19 | 3.713 |
+| desktop-tauri (Rust Backend) | 1 | 494 |
+| **Projekt Gesamt** | **~44** | **~14.691** |
