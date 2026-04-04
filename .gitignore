@@ -68,3 +68,11 @@ tarpaulin-report/
 cobertura.xml
 *.profraw
 *.profdata
+
+# ========================
+# End-to-End Testing & Temp
+# ========================
+playwright-report/
+test-results/
+.playwright/
+blob-report/
