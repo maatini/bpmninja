@@ -413,6 +413,32 @@ async fn delete_definition(state: tauri::State<'_, AppState>, definition_id: Str
 }
 
 #[tauri::command]
+async fn correlate_message(
+    state: tauri::State<'_, AppState>,
+    message_name: String,
+    business_key: Option<String>,
+    variables: Option<HashMap<String, serde_json::Value>>,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/api/message", *state.base_url.lock().unwrap());
+    let payload = serde_json::json!({
+        "messageName": message_name,
+        "businessKey": business_key,
+        "variables": variables.unwrap_or_default()
+    });
+    
+    let res = state.client.post(&url).json(&payload).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() { 
+        return Err(format!("Correlation failed: {}", res.status())); 
+    }
+    
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let ids = data["affectedInstances"].as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    Ok(ids)
+}
+
+#[tauri::command]
 async fn get_api_url(state: tauri::State<'_, AppState>) -> Result<String, String> {
     Ok(state.base_url.lock().unwrap().clone())
 }
@@ -487,7 +513,8 @@ fn main() {
             get_instance_history,
             upload_instance_file,
             download_instance_file,
-            delete_instance_file
+            delete_instance_file,
+            correlate_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

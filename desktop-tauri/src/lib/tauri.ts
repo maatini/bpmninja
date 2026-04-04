@@ -137,6 +137,18 @@ export async function deleteDefinition(definitionId: string, cascade: boolean = 
 // Backend info & switching
 // ---------------------------------------------------------------------------
 
+export async function resetDatabase(): Promise<void> {
+  return invoke('reset_database');
+}
+
+export async function correlateMessage(
+  messageName: string,
+  businessKey?: string,
+  variables?: Record<string, unknown>
+): Promise<string[]> {
+  return invoke('correlate_message', { messageName, businessKey, variables });
+}
+
 export async function getApiUrl(): Promise<string> {
   return invoke('get_api_url');
 }

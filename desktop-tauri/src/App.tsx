@@ -6,7 +6,8 @@ import { DeployedProcesses } from './DeployedProcesses'
 import { Settings } from './Settings'
 import { Monitoring } from './Monitoring'
 import { PendingTasks } from './PendingTasks'
-import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon } from 'lucide-react'
+import { MessageDialog } from './MessageDialog'
+import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail } from 'lucide-react'
 import { useToast } from './ToastContext'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('definitions')
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [viewXml, setViewXml] = useState<string | null>(null)
+  const [showMessageDialog, setShowMessageDialog] = useState(false)
 
 
   const handleDeploy = async (xml: string) => {
@@ -78,6 +80,10 @@ function App() {
           <SettingsIcon size={18} /> Settings
         </div>
 
+        <div className="nav-item" onClick={() => setShowMessageDialog(true)} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Mail size={18} /> Send Message
+        </div>
+
         <div className="sidebar-footer">
           <span className="backend-badge backend-nats">
             ● Thin Client
@@ -116,6 +122,7 @@ function App() {
           <Settings />
         )}
       </div>
+      <MessageDialog open={showMessageDialog} onClose={() => setShowMessageDialog(false)} />
     </div>
   )
 }
