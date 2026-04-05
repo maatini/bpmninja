@@ -217,4 +217,6 @@ pub struct EngineStats {
     pub pending_message_catches: usize,
     /// Number of persistence write failures since engine start.
     pub persistence_errors: u64,
+    /// Number of pending retry jobs in the background queue (0 = healthy).
+    pub pending_retry_jobs: usize,
 }

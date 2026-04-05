@@ -31,6 +31,7 @@ mod user_task;
 mod process_start;
 mod instance_ops;
 mod definition_ops;
+pub(crate) mod retry_queue;
 
 pub use types::*;
 
@@ -45,6 +46,7 @@ pub struct WorkflowEngine {
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) script_engine: rhai::Engine,
     pub(crate) persistence_error_count: std::sync::atomic::AtomicU64,
+    pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
 }
 
 impl WorkflowEngine {
@@ -64,6 +66,7 @@ impl WorkflowEngine {
             persistence: None,
             script_engine,
             persistence_error_count: std::sync::atomic::AtomicU64::new(0),
+            retry_tx: None,
         }
     }
 
@@ -75,13 +78,37 @@ impl WorkflowEngine {
 
     /// Attaches a persistence layer to the engine.
     pub fn with_persistence(mut self, persistence: Arc<dyn WorkflowPersistence>) -> Self {
+        let (tx, rx) = retry_queue::create_retry_queue();
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        retry_queue::spawn_retry_worker(
+            rx,
+            Arc::clone(&persistence),
+            self.instances.clone(),
+            self.definitions.clone(),
+            error_counter,
+        );
+
         self.persistence = Some(persistence);
+        self.retry_tx = Some(tx);
         self
     }
 
     /// Sets the persistence layer (builder-style alternative to `with_persistence`).
     pub fn set_persistence(&mut self, persistence: Arc<dyn WorkflowPersistence>) {
+        let (tx, rx) = retry_queue::create_retry_queue();
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        retry_queue::spawn_retry_worker(
+            rx,
+            Arc::clone(&persistence),
+            self.instances.clone(),
+            self.definitions.clone(),
+            error_counter,
+        );
+
         self.persistence = Some(persistence);
+        self.retry_tx = Some(tx);
     }
 
     /// Restores a process instance from persistence (e.g. on server startup).

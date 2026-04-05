@@ -34,6 +34,7 @@ impl WorkflowEngine {
             pending_timers: self.pending_timers.len(),
             pending_message_catches: self.pending_message_catches.len(),
             persistence_errors: self.persistence_error_count.load(std::sync::atomic::Ordering::Relaxed),
+            pending_retry_jobs: 0, // mpsc unbounded channel has no len(); always 0 in stats for now
         }
     }
 
