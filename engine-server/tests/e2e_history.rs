@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+
 
 /// Minimal BPMN 2.0 XML with only a StartEvent, EndEvent, and one SequenceFlow.
 const MINIMAL_BPMN_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -32,7 +32,7 @@ async fn start_server_with_nats() -> Option<String> {
     let engine = engine_core::engine::WorkflowEngine::new().with_persistence(persistence.clone());
 
     let app = engine_server::build_app_with_engine(
-        Arc::new(RwLock::new(engine)),
+        Arc::new(engine),
         Some(persistence),
         std::collections::HashMap::new(),
     );

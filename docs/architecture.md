@@ -1,7 +1,7 @@
 # mini-bpm — Architektur-Dokumentation
 
 > BPMN 2.0 Workflow Engine in Rust, token-basierte Execution
-> Stand: 2026-04-04
+> Stand: 2026-04-05
 
 ---
 
@@ -113,19 +113,19 @@ Die Engine ist in fokussierte Komponenten aufgeteilt:
 ```rust
 pub struct WorkflowEngine {
     // K2: Komponenten statt God-Object
-    definitions:             DefinitionRegistry,                  // Immutable definition store
-    instances:               InstanceStore,                       // Per-instance locking (K1)
+    pub(crate) definitions:             DefinitionRegistry,                  // Immutable definition store
+    pub(crate) instances:               InstanceStore,                       // Per-instance locking (K1)
     
-    // Wait-State Queues (HashMap for O(1) lookup by ID)
-    pending_user_tasks:      HashMap<Uuid, PendingUserTask>,
-    pending_service_tasks:   HashMap<Uuid, PendingServiceTask>,
-    pending_timers:          HashMap<Uuid, PendingTimer>,
-    pending_message_catches: HashMap<Uuid, PendingMessageCatch>,
+    // Wait-State Queues (DashMap for lock-free sharding/concurrency)
+    pub(crate) pending_user_tasks:      Arc<DashMap<Uuid, PendingUserTask>>,
+    pub(crate) pending_service_tasks:   Arc<DashMap<Uuid, PendingServiceTask>>,
+    pub(crate) pending_timers:          Arc<DashMap<Uuid, PendingTimer>>,
+    pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     
     // Infrastructure
-    persistence:             Option<Arc<dyn WorkflowPersistence>>,
-    script_engine:           rhai::Engine,
-    persistence_error_count: AtomicU64,                           // Error counter for monitoring
+    pub(crate) persistence:             Option<Arc<dyn WorkflowPersistence>>,
+    pub(crate) persistence_error_count: AtomicU64,
+    pub(crate) retry_tx:                Option<retry_queue::RetryQueueTx>,
 }
 ```
 
@@ -133,7 +133,7 @@ pub struct WorkflowEngine {
 |---|---|---|
 | **DefinitionRegistry** | `Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Shared, immutable nach Deploy |
 | **InstanceStore** | `Arc<RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>>` | Per-Instance fine-grained (K1) |
-| **PendingTask-Queues** | `HashMap<Uuid, Pending*>` | Engine-level mutable borrow, O(1) lookup |
+| **PendingTask-Queues** | `Arc<DashMap<Uuid, Pending*>>` | Lock-free Sharding, concurrent O(1) ops |
 
 ---
 
@@ -400,6 +400,13 @@ pub trait WorkflowPersistence: Send + Sync {
 | `bpm_history` | `HistoryEntry` (JSON) | `hist-{uuid}` |
 | **ObjectStore** `instance_files` | Binärdateien | `file:{instance}-{var}-{filename}` |
 
+### 5.3 Fault-Tolerant Retry Queue (K6)
+
+Da NATS Ausfälle haben kann, verwendet die Engine einen zweistufigen Retry-Mechanismus für zustandsbehaltende I/O-Operationen:
+1. **Inline-Retry**: Kurzes Backoff (z.B. 50ms) beim direkten Aufruf. Bei Erfolg geht es sofort weiter.
+2. **Background Retry Queue**: Schlägt der Inline-Retry fehl (z.B. NATS ist offline), wird ein `RetryJob` an einen asynchronen Background-Worker übermittelt. Dieser Worker liest mit *exponentiellem Backoff* asynchron aus dem In-Memory-State den aktuellsten Stand aus und speist in NATS ein, sobald das System wieder online ist.
+Dadurch entsteht kein State-Verlust nach einem transienten Netzwerkfehler.
+
 ---
 
 ## 6. REST API (engine-server)
@@ -472,15 +479,14 @@ graph LR
 
 ```rust
 struct AppState {
-    engine:       Arc<RwLock<WorkflowEngine>>,                   // Global engine lock
-    persistence:  Option<Arc<dyn WorkflowPersistence>>,          // Optional NATS backend
-    deployed_xml: Arc<RwLock<HashMap<String, String>>>,          // XML cache (key → XML)
-    nats_url:     String,                                        // For /api/info endpoint
+    pub(crate) engine:       Arc<WorkflowEngine>,                           // Global shared instance (no RwLock needed!)
+    pub(crate) persistence:  Option<Arc<dyn WorkflowPersistence>>,          // Optional NATS backend
+    pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,          // XML cache (key → XML)
+    pub(crate) nats_url:     String,                                        // For /api/info endpoint
 }
 ```
 
-> Der Server hält den gesamten Engine-State hinter `Arc<RwLock<WorkflowEngine>>`.
-> Pro Request wird ein Write- oder Read-Lock akquiriert. Dank **K1 (Per-Instance-Locking)** blockieren sich Requests an verschiedene Instanzen nicht gegenseitig auf Instance-State-Ebene.
+> Der Server teilt die Engine lediglich über `Arc<WorkflowEngine>`. Da alle inneren Collections (`DashMap`, `RwLock<HashMap>`) Thread-Safe sind und Mutationen über `&self` ablaufen, gibt es keinen monolithischen Read/Write-Lock mehr für die gesamte Engine. Dies eliminiert Contention bei hohem HTTP-Traffic. Instanzen sind über **K1 (Per-Instance-Locking)** via `InstanceStore` isoliert.
 
 ### 6.3 Background Timer Scheduler
 
@@ -561,14 +567,14 @@ graph TD
 ### 8.1 Lock-Hierarchie
 
 ```
-WorkflowEngine (mutable borrow)
+WorkflowEngine (Arc)
 ├── DefinitionRegistry       → Arc<RwLock<HashMap>>          (1 globaler Lock)
 ├── InstanceStore             → Arc<RwLock<HashMap>>          (1 globaler Lock für Map)
 │   └── ProcessInstance[i]   → Arc<RwLock<ProcessInstance>>  (per-Instance Lock!)
-├── pending_user_tasks       → Vec (Engine borrow)
-├── pending_service_tasks    → Vec (Engine borrow)
-├── pending_timers           → Vec (Engine borrow)
-└── pending_message_catches  → Vec (Engine borrow)
+├── pending_user_tasks       → Arc<DashMap>                  (lock-free / sharded)
+├── pending_service_tasks    → Arc<DashMap>                  (lock-free / sharded)
+├── pending_timers           → Arc<DashMap>                  (lock-free / sharded)
+└── pending_message_catches  → Arc<DashMap>                  (lock-free / sharded)
 ```
 
 ### 8.2 Deadlock-Prevention Pattern
@@ -613,23 +619,23 @@ Jeder State-Übergang wird als `HistoryEntry` gespeichert:
 
 | Bereich | Dateien | LOC |
 |---|---|---|
-| engine-core (lib) | 16 | 4.546 |
-| engine-core (tests) | 2 | 2.276 |
+| engine-core (lib) | 17 | 4.750 |
+| engine-core (tests) | 2 | 2.400 |
 | bpmn-parser | 4 | 803 |
 | persistence-nats | 5 | 794 |
 | engine-server (lib + main) | 3 | 1.051 |
-| engine-server (E2E tests) | 9 | 1.232 |
-| **Rust Workspace Gesamt** | **39** | **~10.702** |
+| engine-server (E2E tests) | 12 | 1.800 |
+| **Rust Workspace Gesamt** | **43** | **~11.600** |
 | desktop-tauri (TypeScript + CSS) | 22 | 4.036 |
 | desktop-tauri (Rust Backend) | 8 | 478 |
-| **Projekt Gesamt** | **~69** | **~15.216** |
+| **Projekt Gesamt** | **~73** | **~16.100** |
 
-### Test-Übersicht (115 Tests, alle ✅)
+### Test-Übersicht (136 Tests, alle ✅)
 
 | Crate | Unit | E2E | Gesamt |
 |---|---|---|---|
-| engine-core | 88 | — | 88 |
+| engine-core | 92 | — | 92 |
 | bpmn-parser | 6 | — | 6 |
 | persistence-nats | 2 | — | 2 |
-| engine-server | — | 19 | 19 |
-| **Gesamt** | **96** | **19** | **115** |
+| engine-server | — | 36 | 36 |
+| **Gesamt** | **100** | **36** | **136** |

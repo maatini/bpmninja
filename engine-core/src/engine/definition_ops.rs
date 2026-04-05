@@ -30,7 +30,7 @@ impl WorkflowEngine {
     /// exists, the new definition receives a fresh UUID key and an incremented version.
     /// Existing running instances continue on their original definition untouched.
     /// Returns (definition_key, version).
-    pub async fn deploy_definition(&mut self, definition: ProcessDefinition) -> (Uuid, i32) {
+    pub async fn deploy_definition(&self, definition: ProcessDefinition) -> (Uuid, i32) {
         // Find highest version of existing definitions with matching ID
         let highest_version = self.definitions.highest_version(&definition.id).await;
             
@@ -48,7 +48,7 @@ impl WorkflowEngine {
 
     /// Deletes a process definition. 
     /// If cascade is true, deletes all associated process instances first.
-    pub async fn delete_definition(&mut self, definition_key: Uuid, cascade: bool) -> EngineResult<()> {
+    pub async fn delete_definition(&self, definition_key: Uuid, cascade: bool) -> EngineResult<()> {
         if !self.definitions.contains_key(&definition_key).await {
             return Err(EngineError::NoSuchDefinition(definition_key));
         }

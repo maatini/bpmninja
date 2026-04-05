@@ -14,7 +14,7 @@ pub(crate) struct CompleteRequest {
 pub(crate) async fn get_tasks(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<PendingUserTask>> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let tasks = engine.get_pending_user_tasks().to_vec();
     Json(tasks)
 }
@@ -22,7 +22,7 @@ pub(crate) async fn get_tasks(
 pub(crate) async fn get_service_tasks(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<PendingServiceTask>> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let tasks = engine.get_pending_service_tasks().to_vec();
     Json(tasks)
 }
@@ -32,7 +32,7 @@ pub(crate) async fn complete_task(
     Path(id): Path<String>,
     Json(payload): Json<CompleteRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
     let vars = payload.variables.unwrap_or_default();
 
@@ -71,7 +71,7 @@ pub(crate) async fn fetch_and_lock_service_tasks(
     let start = tokio::time::Instant::now();
     loop {
         let tasks = {
-            let mut engine = state.engine.write().await;
+            let engine = &state.engine;
             engine.fetch_and_lock_service_tasks(
                 &payload.worker_id,
                 payload.max_tasks,
@@ -104,7 +104,7 @@ pub(crate) async fn complete_service_task(
     Path(id): Path<String>,
     Json(payload): Json<CompleteServiceTaskRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
     let vars = payload.variables.unwrap_or_default();
 
@@ -129,7 +129,7 @@ pub(crate) async fn fail_service_task(
     Path(id): Path<String>,
     Json(payload): Json<FailServiceTaskRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
 
     engine.fail_service_task(
@@ -155,7 +155,7 @@ pub(crate) async fn extend_lock(
     Path(id): Path<String>,
     Json(payload): Json<ExtendLockRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
 
     engine.extend_lock(task_id, &payload.worker_id, payload.new_duration).await?;
@@ -175,7 +175,7 @@ pub(crate) async fn bpmn_error(
     Path(id): Path<String>,
     Json(payload): Json<BpmnErrorRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
 
     engine.handle_bpmn_error(task_id, &payload.worker_id, &payload.error_code).await?;

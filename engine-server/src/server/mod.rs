@@ -1,3 +1,4 @@
+use tokio::sync::RwLock;
 pub(crate) mod state;
 pub(crate) mod deploy;
 pub(crate) mod instances;
@@ -15,7 +16,6 @@ use axum::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use engine_core::engine::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
@@ -26,11 +26,11 @@ use state::AppState;
 /// Exposed as `pub` so integration tests can create the app without
 /// starting a full server binary.
 pub fn build_app() -> Router {
-    build_app_with_engine(Arc::new(RwLock::new(WorkflowEngine::new())), None, HashMap::new())
+    build_app_with_engine(Arc::new(WorkflowEngine::new()), None, HashMap::new())
 }
 
 pub fn build_app_with_engine(
-    engine: Arc<RwLock<WorkflowEngine>>,
+    engine: Arc<WorkflowEngine>,
     persistence: Option<Arc<dyn WorkflowPersistence>>,
     xml_cache: HashMap<String, String>,
 ) -> Router {

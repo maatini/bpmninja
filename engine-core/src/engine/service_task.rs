@@ -42,7 +42,7 @@ impl WorkflowEngine {
     /// `topics`. Each returned task is locked for `lock_duration` seconds
     /// and assigned to `worker_id`.
     pub async fn fetch_and_lock_service_tasks(
-        &mut self,
+        &self,
         worker_id: &str,
         max_tasks: usize,
         topics: &[String],
@@ -52,7 +52,7 @@ impl WorkflowEngine {
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
 
-        for task in self.pending_service_tasks.values_mut() {
+        for mut task in self.pending_service_tasks.iter_mut() {
             if result.len() >= max_tasks {
                 break;
             }
@@ -96,20 +96,21 @@ impl WorkflowEngine {
     ///
     /// The task must be locked by `worker_id`. Optional variables are merged.
     pub async fn complete_service_task(
-        &mut self,
+        &self,
         task_id: Uuid,
         worker_id: &str,
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
-        let task = self
+        let task_ref = self
             .pending_service_tasks
             .get(&task_id)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
         // Verify lock ownership
-        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
+        verify_lock_ownership(task_id, &task_ref.worker_id, worker_id)?;
+        drop(task_ref);
 
-        let task = self.pending_service_tasks.remove(&task_id)
+        let task = self.pending_service_tasks.remove(&task_id).map(|(_, v)| v)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
         let instance_id = task.instance_id;
 
@@ -160,8 +161,9 @@ impl WorkflowEngine {
             let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
             let crate::ProcessInstance { audit_log, variables, .. } = &mut *inst;
+            let script_engine = crate::engine::create_script_engine();
             crate::script_runner::run_end_scripts(
-                &self.script_engine,
+                &script_engine,
                 instance_id,
                 &mut token,
                 &def,
@@ -200,7 +202,7 @@ impl WorkflowEngine {
     ///
     /// Decrements retries. When retries reach 0, the task becomes an incident.
     pub async fn fail_service_task(
-        &mut self,
+        &self,
         task_id: Uuid,
         worker_id: &str,
         retries: Option<i32>,
@@ -208,7 +210,7 @@ impl WorkflowEngine {
         error_details: Option<String>,
     ) -> EngineResult<()> {
         let instance_id = {
-            let task = self
+            let mut task = self
                 .pending_service_tasks
                 .get_mut(&task_id)
                 .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
@@ -268,13 +270,13 @@ impl WorkflowEngine {
 
     /// Extends the lock on an service task.
     pub async fn extend_lock(
-        &mut self,
+        &self,
         task_id: Uuid,
         worker_id: &str,
         additional_duration: i64,
     ) -> EngineResult<()> {
         {
-            let task = self
+            let mut task = self
                 .pending_service_tasks
                 .get_mut(&task_id)
                 .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
@@ -299,19 +301,20 @@ impl WorkflowEngine {
     /// Simple implementation: logs the error and creates an incident-style
     /// audit entry. The task is removed from the pending queue.
     pub async fn handle_bpmn_error(
-        &mut self,
+        &self,
         task_id: Uuid,
         worker_id: &str,
         error_code: &str,
     ) -> EngineResult<()> {
-        let task = self
+        let task_ref = self
             .pending_service_tasks
             .get(&task_id)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
-        verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
+        verify_lock_ownership(task_id, &task_ref.worker_id, worker_id)?;
+        drop(task_ref);
 
-        let task = self.pending_service_tasks.remove(&task_id)
+        let task = self.pending_service_tasks.remove(&task_id).map(|(_, v)| v)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
         let instance_id = task.instance_id;
 

@@ -58,12 +58,12 @@ impl WorkflowEngine {
 
     /// Returns all currently pending user tasks.
     pub fn get_pending_user_tasks(&self) -> Vec<PendingUserTask> {
-        self.pending_user_tasks.values().cloned().collect()
+        self.pending_user_tasks.iter().map(|it| it.value().clone()).collect()
     }
 
     /// Returns all pending service tasks (for debugging / admin).
     pub fn get_pending_service_tasks(&self) -> Vec<PendingServiceTask> {
-        self.pending_service_tasks.values().cloned().collect()
+        self.pending_service_tasks.iter().map(|it| it.value().clone()).collect()
     }
 
     /// Returns a list of all process instances (cloned).
@@ -90,7 +90,7 @@ impl WorkflowEngine {
     /// - Keys with non-null values are created or overwritten.
     /// - Keys with `Value::Null` are removed from the instance variables.
     pub async fn update_instance_variables(
-        &mut self,
+        &self,
         instance_id: Uuid,
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
@@ -169,7 +169,7 @@ impl WorkflowEngine {
     }
 
     /// Deletes a process instance and cleans up associated pending tasks.
-    pub async fn delete_instance(&mut self, instance_id: Uuid) -> EngineResult<()> {
+    pub async fn delete_instance(&self, instance_id: Uuid) -> EngineResult<()> {
         let removed_inst_arc = self.instances.remove(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
         let removed_inst = removed_inst_arc.read().await.clone();
 
@@ -182,19 +182,19 @@ impl WorkflowEngine {
             }
 
             // Delete associated user tasks from persistence
-            for task in self.pending_user_tasks.values().filter(|t| t.instance_id == instance_id) {
+            for task in self.pending_user_tasks.iter().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_user_task(task.task_id).await;
             }
             // Delete associated service tasks from persistence
-            for task in self.pending_service_tasks.values().filter(|t| t.instance_id == instance_id) {
+            for task in self.pending_service_tasks.iter().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_service_task(task.id).await;
             }
             // Delete associated timers from persistence
-            for timer in self.pending_timers.values().filter(|t| t.instance_id == instance_id) {
+            for timer in self.pending_timers.iter().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_timer(timer.id).await;
             }
             // Delete associated message catches from persistence
-            for catch in self.pending_message_catches.values().filter(|t| t.instance_id == instance_id) {
+            for catch in self.pending_message_catches.iter().filter(|t| t.instance_id == instance_id) {
                 let _ = persistence.delete_message_catch(catch.id).await;
             }
             // Delete instance from persistence

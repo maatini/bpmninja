@@ -161,10 +161,10 @@ impl WorkflowEngine {
     /// Persists a pending user task to the KV store.
     pub(crate) async fn persist_user_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(task) = self.pending_user_tasks.get(&task_id) {
+            if let Some(task_ref) = self.pending_user_tasks.get(&task_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
-                    match p.save_user_task(task).await {
+                    match p.save_user_task(&*task_ref).await {
                         Ok(()) => { last_err = None; break; }
                         Err(e) if attempt < INLINE_RETRIES => {
                             let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
@@ -209,10 +209,10 @@ impl WorkflowEngine {
     /// Persists a pending service task to the KV store.
     pub(crate) async fn persist_service_task(&self, task_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(task) = self.pending_service_tasks.get(&task_id) {
+            if let Some(task_ref) = self.pending_service_tasks.get(&task_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
-                    match p.save_service_task(task).await {
+                    match p.save_service_task(&*task_ref).await {
                         Ok(()) => { last_err = None; break; }
                         Err(e) if attempt < INLINE_RETRIES => {
                             let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
@@ -255,10 +255,10 @@ impl WorkflowEngine {
     /// Persists a pending timer to the KV store.
     pub(crate) async fn persist_timer(&self, timer_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(timer) = self.pending_timers.get(&timer_id) {
+            if let Some(timer_ref) = self.pending_timers.get(&timer_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
-                    match p.save_timer(timer).await {
+                    match p.save_timer(&*timer_ref).await {
                         Ok(()) => { last_err = None; break; }
                         Err(e) if attempt < INLINE_RETRIES => {
                             let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
@@ -301,10 +301,10 @@ impl WorkflowEngine {
     /// Persists a pending message catch to the KV store.
     pub(crate) async fn persist_message_catch(&self, catch_id: Uuid) {
         if let Some(p) = &self.persistence {
-            if let Some(catch) = self.pending_message_catches.get(&catch_id) {
+            if let Some(catch_ref) = self.pending_message_catches.get(&catch_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
-                    match p.save_message_catch(catch).await {
+                    match p.save_message_catch(&*catch_ref).await {
                         Ok(()) => { last_err = None; break; }
                         Err(e) if attempt < INLINE_RETRIES => {
                             let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);

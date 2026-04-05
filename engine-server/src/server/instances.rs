@@ -22,7 +22,7 @@ pub(crate) async fn start_instance(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<StartRequest>,
 ) -> Result<Json<StartResponse>, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let def_key = parse_uuid(&payload.definition_key)?;
     let id = match payload.variables {
         Some(vars) if !vars.is_empty() => {
@@ -54,7 +54,7 @@ pub(crate) async fn start_instance_latest(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<StartLatestRequest>,
 ) -> Result<Json<StartLatestResponse>, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let vars = payload.variables.unwrap_or_default();
     let (inst_id, def_key) = engine.start_instance_latest(&payload.bpmn_id, vars).await?;
 
@@ -72,7 +72,7 @@ pub(crate) async fn start_instance_latest(
 pub(crate) async fn list_instances(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<ProcessInstance>> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let instances = engine.list_instances().await;
     Json(instances)
 }
@@ -81,7 +81,7 @@ pub(crate) async fn get_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ProcessInstance>, AppError> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
 
     let instance = engine.get_instance_details(instance_id).await?;
@@ -99,7 +99,7 @@ pub(crate) async fn update_instance_variables(
     Path(id): Path<String>,
     Json(payload): Json<UpdateVariablesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
 
     engine.update_instance_variables(instance_id, payload.variables).await?;
@@ -111,7 +111,7 @@ pub(crate) async fn delete_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
 
     engine.delete_instance(instance_id).await?;

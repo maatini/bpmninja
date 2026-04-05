@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use engine_core::engine::WorkflowEngine;
@@ -121,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let engine_arc = Arc::new(RwLock::new(engine));
+    let engine_arc = Arc::new(engine);
     let app = build_app_with_engine(engine_arc.clone(), nats_persistence, xml_cache);
 
     // Background timer scheduler — processes expired timers automatically
@@ -135,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         log::info!("Timer scheduler started (interval: {}ms)", timer_interval_ms);
         loop {
             tokio::time::sleep(interval).await;
-            let mut engine = timer_engine.write().await;
+            let engine = &timer_engine;
             match engine.process_timers().await {
                 Ok(0) => {} // No expired timers — silent
                 Ok(n) => log::info!("Timer scheduler: processed {} expired timer(s)", n),

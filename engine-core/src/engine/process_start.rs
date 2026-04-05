@@ -13,7 +13,7 @@ impl WorkflowEngine {
     ///
     /// The definition must have a plain `StartEvent`.
     /// Delegates to `start_instance_with_variables` with an empty variable map.
-    pub async fn start_instance(&mut self, definition_key: Uuid) -> EngineResult<Uuid> {
+    pub async fn start_instance(&self, definition_key: Uuid) -> EngineResult<Uuid> {
         self.start_instance_with_variables(definition_key, HashMap::new()).await
     }
 
@@ -22,7 +22,7 @@ impl WorkflowEngine {
     /// Like `start_instance`, but the token carries initial variables from the
     /// caller. The instance's `variables` field is also seeded.
     pub async fn start_instance_with_variables(
-        &mut self,
+        &self,
         definition_key: Uuid,
         variables: HashMap<String, Value>,
     ) -> EngineResult<Uuid> {
@@ -34,7 +34,7 @@ impl WorkflowEngine {
     /// Looks up the definition with the highest version matching `bpmn_id`
     /// and starts an instance from it. Returns the (instance_id, definition_key) tuple.
     pub async fn start_instance_latest(
-        &mut self,
+        &self,
         bpmn_id: &str,
         variables: HashMap<String, Value>,
     ) -> EngineResult<(Uuid, Uuid)> {
@@ -49,7 +49,7 @@ impl WorkflowEngine {
 
     /// Internal method to start an instance and link it to a parent call activity
     pub(crate) async fn start_instance_with_variables_and_parent(
-        &mut self,
+        &self,
         definition_key: Uuid,
         mut variables: HashMap<String, Value>,
         parent_instance_id: Option<Uuid>,
@@ -120,7 +120,7 @@ impl WorkflowEngine {
 
     /// Spawns a call activity sub-process
     pub(crate) async fn spawn_call_activity(
-        &mut self,
+        &self,
         child_def_key: Uuid,
         parent_instance_id: Uuid,
         called_node: String,
@@ -141,7 +141,7 @@ impl WorkflowEngine {
     }
 
     /// Checks if a completed instance has a parent, and if so, resumes the parent.
-    pub(crate) async fn resume_parent_if_needed(&mut self, completed_instance_id: Uuid, error_code: Option<String>) -> EngineResult<()> {
+    pub(crate) async fn resume_parent_if_needed(&self, completed_instance_id: Uuid, error_code: Option<String>) -> EngineResult<()> {
         let inst_arc = self.instances.get(&completed_instance_id).await.ok_or(EngineError::NoSuchInstance(completed_instance_id))?;
         let inst = inst_arc.read().await;
             
@@ -241,7 +241,7 @@ impl WorkflowEngine {
     ///
     /// Validates the duration against the definition, then spawns the instance.
     pub async fn trigger_timer_start(
-        &mut self,
+        &self,
         definition_key: Uuid,
         provided_duration: Duration,
     ) -> EngineResult<Uuid> {

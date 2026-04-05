@@ -34,6 +34,7 @@ impl WorkflowPersistence for NatsPersistence {
         
         let consumer = stream.create_consumer(async_nats::jetstream::consumer::pull::Config {
             deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
             ..Default::default()
         }).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to create consumer: {}", e))
@@ -47,7 +48,6 @@ impl WorkflowPersistence for NatsPersistence {
         
         while let Ok(Some(msg)) = tokio::time::timeout(std::time::Duration::from_millis(500), messages.next()).await {
             if let Ok(msg) = msg {
-                let _ = msg.ack().await;
                 if let Ok(token) = serde_json::from_slice::<Token>(&msg.payload) {
                     token_map.insert(token.id, token);
                 }
@@ -486,6 +486,7 @@ impl WorkflowPersistence for NatsPersistence {
         
         let consumer = stream.create_consumer(async_nats::jetstream::consumer::pull::Config {
             deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+            ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
             filter_subject: subject.clone(),
             ..Default::default()
         }).await.map_err(|e| {
@@ -501,7 +502,6 @@ impl WorkflowPersistence for NatsPersistence {
         // Timeout to drain all existing messages
         while let Ok(Some(msg)) = tokio::time::timeout(std::time::Duration::from_millis(100), messages.next()).await {
             if let Ok(msg) = msg {
-                let _ = msg.ack().await;
                 if let Ok(entry) = serde_json::from_slice::<engine_core::history::HistoryEntry>(&msg.payload) {
                     let mut matched = true;
                     if let Some(types) = &query.event_types { if !types.contains(&entry.event_type) { matched = false; } }

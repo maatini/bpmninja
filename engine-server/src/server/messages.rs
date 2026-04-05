@@ -23,7 +23,7 @@ pub(crate) async fn correlate_message(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CorrelateMessageRequest>,
 ) -> Result<Json<CorrelateMessageResponse>, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let vars = payload.variables.unwrap_or_default();
     let affected = engine.correlate_message(payload.message_name, payload.business_key, vars).await?;
     let affected_strs = affected.into_iter().map(|id| id.to_string()).collect();

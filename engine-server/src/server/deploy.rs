@@ -25,7 +25,7 @@ pub(crate) async fn deploy_definition(
             "XML too large: {} bytes (max {})", payload.xml.len(), MAX_XML_BYTES
         )));
     }
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let def = bpmn_parser::parse_bpmn_xml(&payload.xml)
         .map_err(|e| AppError::BadRequest(format!("Invalid BPMN XML: {e:?}")))?;
     let (key, version) = engine.deploy_definition(def).await;
@@ -53,7 +53,7 @@ pub(crate) struct DefinitionInfo {
 pub(crate) async fn list_definitions(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<DefinitionInfo>> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let raw = engine.list_definitions().await;
 
     // Determine the latest version per bpmn_id
@@ -86,8 +86,8 @@ pub(crate) async fn get_definition_xml(
     Path(id): Path<String>,
 ) -> Result<String, AppError> {
     {
-        let xml_store = state.deployed_xml.read().await;
-        if let Some(xml) = xml_store.get(&id) {
+        let xml_store = &state.deployed_xml;
+        if let Some(xml) = xml_store.read().await.get(&id) {
             return Ok(xml.clone());
         }
     }
@@ -111,7 +111,7 @@ pub(crate) async fn delete_definition(
     Path(id): Path<String>,
     axum::extract::Query(query): axum::extract::Query<DeleteDefinitionQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let def_key = parse_uuid(&id)?;
 
     engine.delete_definition(def_key, query.cascade.unwrap_or(false)).await?;

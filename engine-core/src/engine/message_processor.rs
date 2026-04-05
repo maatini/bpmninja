@@ -8,7 +8,7 @@ use crate::model::BpmnElement;
 
 impl WorkflowEngine {
     pub async fn correlate_message(
-        &mut self,
+        &self,
         message_name: String,
         business_key: Option<String>,
         variables: HashMap<String, Value>,
@@ -16,7 +16,7 @@ impl WorkflowEngine {
         let mut affected_instances = Vec::new();
         let mut to_resume = Vec::new();
         
-        for catch in self.pending_message_catches.values() {
+        for catch in self.pending_message_catches.iter() {
             if catch.message_name == message_name {
                 if let Some(inst_arc) = self.instances.get(&catch.instance_id).await {
                     let inst = inst_arc.read().await;
@@ -32,7 +32,7 @@ impl WorkflowEngine {
         }
         
         for catch_id in to_resume {
-            let catch = self.pending_message_catches.remove(&catch_id)
+            let catch = self.pending_message_catches.remove(&catch_id).map(|(_, v)| v)
                 .ok_or_else(|| EngineError::InvalidDefinition(format!("Message catch {catch_id} disappeared")))?;
             
             // Retrieve token from central store

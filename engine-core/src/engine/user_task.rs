@@ -10,12 +10,12 @@ impl WorkflowEngine {
     ///
     /// Resumes the process instance after the user task.
     pub async fn complete_user_task(
-        &mut self,
+        &self,
         task_id: Uuid,
         additional_vars: HashMap<String, Value>,
     ) -> EngineResult<()> {
         // Find and remove the pending task
-        let pending = self.pending_user_tasks.remove(&task_id)
+        let pending = self.pending_user_tasks.remove(&task_id).map(|(_, v)| v)
             .ok_or_else(|| EngineError::TaskNotPending {
                 task_id,
                 actual_state: "not found in pending tasks".into(),

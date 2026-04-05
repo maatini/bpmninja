@@ -9,7 +9,7 @@ pub(crate) async fn upload_instance_file(
     Path((id, var_name)): Path<(String, String)>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
     if engine.get_instance_details(instance_id).await.is_err() {
         return Err(AppError::BadRequest("Instance not found".into()));
@@ -47,7 +47,7 @@ pub(crate) async fn get_instance_file(
     State(state): State<Arc<AppState>>,
     Path((id, var_name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
     let instance = engine.get_instance_details(instance_id).await?;
     
@@ -78,7 +78,7 @@ pub(crate) async fn delete_instance_file(
     State(state): State<Arc<AppState>>,
     Path((id, var_name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
     let instance = engine.get_instance_details(instance_id).await?;
     

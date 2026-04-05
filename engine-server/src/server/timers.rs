@@ -12,7 +12,7 @@ pub(crate) struct ProcessTimersResponse {
 pub(crate) async fn process_timers(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ProcessTimersResponse>, AppError> {
-    let mut engine = state.engine.write().await;
+    let engine = &state.engine;
     let count = engine.process_timers().await?;
     Ok(Json(ProcessTimersResponse { triggered: count }))
 }

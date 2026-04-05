@@ -1,10 +1,10 @@
+use tokio::sync::RwLock;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use engine_core::engine::WorkflowEngine;
 use engine_core::error::EngineError;
 use engine_core::persistence::WorkflowPersistence;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Unified error type for all REST handlers.
@@ -71,7 +71,7 @@ pub(crate) fn parse_uuid(raw: &str) -> Result<Uuid, AppError> {
 }
 
 pub struct AppState {
-    pub(crate) engine: Arc<RwLock<WorkflowEngine>>,
+    pub(crate) engine: Arc<WorkflowEngine>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,
     pub(crate) nats_url: String, // Store URL for /api/info

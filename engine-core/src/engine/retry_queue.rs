@@ -5,6 +5,8 @@
 //! re-reads the current in-memory state, and retries the persistence call
 //! with exponential backoff.
 
+use dashmap::DashMap;
+use super::types::*;
 use std::sync::Arc;
 use uuid::Uuid;
 use tokio::sync::mpsc;
@@ -97,6 +99,10 @@ pub(crate) fn spawn_retry_worker(
     persistence: Arc<dyn WorkflowPersistence>,
     instances: crate::engine::instance_store::InstanceStore,
     definitions: crate::engine::registry::DefinitionRegistry,
+    pending_user_tasks: Arc<DashMap<Uuid, PendingUserTask>>,
+    pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
+    pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
+    pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     error_counter: Arc<std::sync::atomic::AtomicU64>,
 ) {
     tokio::spawn(async move {
@@ -113,6 +119,10 @@ pub(crate) fn spawn_retry_worker(
                     &persistence,
                     &instances,
                     &definitions,
+                    &pending_user_tasks,
+                    &pending_service_tasks,
+                    &pending_timers,
+                    &pending_message_catches,
                 ).await;
 
                 match result {
@@ -159,6 +169,10 @@ async fn execute_job(
     persistence: &Arc<dyn WorkflowPersistence>,
     instances: &crate::engine::instance_store::InstanceStore,
     definitions: &crate::engine::registry::DefinitionRegistry,
+    pending_user_tasks: &Arc<DashMap<Uuid, PendingUserTask>>,
+    pending_service_tasks: &Arc<DashMap<Uuid, PendingServiceTask>>,
+    pending_timers: &Arc<DashMap<Uuid, PendingTimer>>,
+    pending_message_catches: &Arc<DashMap<Uuid, PendingMessageCatch>>,
 ) -> Result<(), String> {
     match job {
         PersistJob::SaveInstance(id) => {
@@ -180,40 +194,48 @@ async fn execute_job(
             }
         }
         PersistJob::SaveUserTask(id) => {
-            // User tasks are stored in WorkflowEngine.pending_user_tasks which is
-            // not directly accessible here. For save operations on pending tasks,
-            // the inline retries should handle most cases. If we reach the background
-            // queue for a save, and the task has since been completed (removed),
-            // we skip it. The next persist_instance call will capture the state.
-            //
-            // We attempt a delete as a fallback — if the task doesn't exist in
-            // NATS either, delete is also a no-op.
-            log::debug!("SaveUserTask({}) reached background queue — entity may be stale", id);
-            Ok(())
+            if let Some(task_ref) = pending_user_tasks.get(id) {
+                persistence.save_user_task(&*task_ref).await
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
         }
         PersistJob::DeleteUserTask(id) => {
             persistence.delete_user_task(*id).await
                 .map_err(|e| e.to_string())
         }
         PersistJob::SaveServiceTask(id) => {
-            log::debug!("SaveServiceTask({}) reached background queue — entity may be stale", id);
-            Ok(())
+            if let Some(task_ref) = pending_service_tasks.get(id) {
+                persistence.save_service_task(&*task_ref).await
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
         }
         PersistJob::DeleteServiceTask(id) => {
             persistence.delete_service_task(*id).await
                 .map_err(|e| e.to_string())
         }
         PersistJob::SaveTimer(id) => {
-            log::debug!("SaveTimer({}) reached background queue — entity may be stale", id);
-            Ok(())
+            if let Some(timer_ref) = pending_timers.get(id) {
+                persistence.save_timer(&*timer_ref).await
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
         }
         PersistJob::DeleteTimer(id) => {
             persistence.delete_timer(*id).await
                 .map_err(|e| e.to_string())
         }
         PersistJob::SaveMessageCatch(id) => {
-            log::debug!("SaveMessageCatch({}) reached background queue — entity may be stale", id);
-            Ok(())
+            if let Some(catch_ref) = pending_message_catches.get(id) {
+                persistence.save_message_catch(&*catch_ref).await
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
         }
         PersistJob::DeleteMessageCatch(id) => {
             persistence.delete_message_catch(*id).await

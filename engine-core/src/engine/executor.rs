@@ -48,7 +48,7 @@ pub(crate) fn find_boundary_error_event(
 impl WorkflowEngine {
     /// Non-recursive batched execution loop.
     pub(crate) async fn run_instance_batch(
-        &mut self,
+        &self,
         instance_id: Uuid,
         initial_token: Token,
     ) -> EngineResult<()> {
@@ -273,7 +273,7 @@ impl WorkflowEngine {
     }
 
     pub(crate) async fn execute_step(
-        &mut self,
+        &self,
         instance_id: Uuid,
         token: &mut Token,
     ) -> EngineResult<NextAction> {
@@ -298,8 +298,9 @@ impl WorkflowEngine {
         let def_clone = Arc::clone(&def);
 
         let mut start_audits = Vec::new();
+        let script_engine = crate::engine::create_script_engine();
         script_runner::run_node_scripts(
-            &self.script_engine,
+            &script_engine,
             instance_id,
             token,
             &def_clone,
@@ -500,7 +501,7 @@ impl WorkflowEngine {
     // ----- Helper: Token-Registry & Parallel Execution ---------------------
 
     pub(crate) async fn register_join_barrier_if_needed(
-        &mut self,
+        &self,
         instance_id: Uuid,
         split_gateway_id: &str,
         branch_count: usize,
@@ -571,7 +572,7 @@ fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElemen
         None
     }
 
-    pub(crate) async fn register_active_token(&mut self, instance_id: Uuid, fork_id: &str, branch_index: usize, token: &Token) -> EngineResult<()> {
+    pub(crate) async fn register_active_token(&self, instance_id: Uuid, fork_id: &str, branch_index: usize, token: &Token) -> EngineResult<()> {
         let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         inst.active_tokens.push(ActiveToken {
@@ -584,7 +585,7 @@ fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElemen
     }
 
     pub(crate) async fn arrive_at_join(
-        &mut self,
+        &self,
         instance_id: Uuid,
         gateway_id: &str,
         token: Token,
@@ -652,7 +653,7 @@ fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElemen
         }
     }
 
-    pub(crate) async fn complete_branch_token(&mut self, instance_id: Uuid, token_id: Uuid) -> EngineResult<()> {
+    pub(crate) async fn complete_branch_token(&self, instance_id: Uuid, token_id: Uuid) -> EngineResult<()> {
         let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         if let Some(active) = inst.active_tokens.iter_mut().find(|at| at.token.id == token_id) {
@@ -673,7 +674,7 @@ fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElemen
 
     /// Helper: runs End scripts, commits variables to instance state.
     pub(crate) async fn run_end_scripts(
-        &mut self,
+        &self,
         instance_id: Uuid,
         token: &mut Token,
         def: &ProcessDefinition,
@@ -682,8 +683,9 @@ fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElemen
         let inst_arc = self.instances.get(&instance_id).await.ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         let crate::ProcessInstance { audit_log, variables, .. } = &mut *inst;
+        let script_engine = crate::engine::create_script_engine();
         crate::script_runner::run_end_scripts(
-            &self.script_engine,
+            &script_engine,
             instance_id,
             token,
             def,

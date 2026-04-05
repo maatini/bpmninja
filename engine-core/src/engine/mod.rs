@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use dashmap::DashMap;
 use uuid::Uuid;
 
 // Re-export model types used by test modules via `use super::*`
@@ -39,32 +40,36 @@ pub use types::*;
 pub struct WorkflowEngine {
     pub(crate) definitions: registry::DefinitionRegistry,
     pub(crate) instances: crate::engine::instance_store::InstanceStore,
-    pub(crate) pending_user_tasks: HashMap<Uuid, PendingUserTask>,
-    pub(crate) pending_service_tasks: HashMap<Uuid, PendingServiceTask>,
-    pub(crate) pending_timers: HashMap<Uuid, PendingTimer>,
-    pub(crate) pending_message_catches: HashMap<Uuid, PendingMessageCatch>,
+    pub(crate) pending_user_tasks: Arc<DashMap<Uuid, PendingUserTask>>,
+    pub(crate) pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
+    pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
+    pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
-    pub(crate) script_engine: rhai::Engine,
     pub(crate) persistence_error_count: std::sync::atomic::AtomicU64,
     pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
+}
+
+/// Creates a configured Rhai script engine.
+/// Called per-evaluation to avoid Sync issues and lock contention.
+pub(crate) fn create_script_engine() -> rhai::Engine {
+    let mut engine = rhai::Engine::new();
+    engine.set_max_operations(10_000);
+    engine
 }
 
 impl WorkflowEngine {
     /// Creates a new, empty engine.
     pub fn new() -> Self {
         log::info!("WorkflowEngine initialized");
-        let mut script_engine = rhai::Engine::new();
-        script_engine.set_max_operations(10_000); // Prevent infinite loops
 
         Self {
             definitions: registry::DefinitionRegistry::new(),
             instances: crate::engine::instance_store::InstanceStore::new(),
-            pending_user_tasks: HashMap::new(),
-            pending_service_tasks: HashMap::new(),
-            pending_timers: HashMap::new(),
-            pending_message_catches: HashMap::new(),
+            pending_user_tasks: Arc::new(DashMap::new()),
+            pending_service_tasks: Arc::new(DashMap::new()),
+            pending_timers: Arc::new(DashMap::new()),
+            pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
-            script_engine,
             persistence_error_count: std::sync::atomic::AtomicU64::new(0),
             retry_tx: None,
         }
@@ -86,6 +91,10 @@ impl WorkflowEngine {
             Arc::clone(&persistence),
             self.instances.clone(),
             self.definitions.clone(),
+            Arc::clone(&self.pending_user_tasks),
+            Arc::clone(&self.pending_service_tasks),
+            Arc::clone(&self.pending_timers),
+            Arc::clone(&self.pending_message_catches),
             error_counter,
         );
 
@@ -104,6 +113,10 @@ impl WorkflowEngine {
             Arc::clone(&persistence),
             self.instances.clone(),
             self.definitions.clone(),
+            Arc::clone(&self.pending_user_tasks),
+            Arc::clone(&self.pending_service_tasks),
+            Arc::clone(&self.pending_timers),
+            Arc::clone(&self.pending_message_catches),
             error_counter,
         );
 
@@ -112,37 +125,37 @@ impl WorkflowEngine {
     }
 
     /// Restores a process instance from persistence (e.g. on server startup).
-    pub async fn restore_instance(&mut self, instance: ProcessInstance) {
+    pub async fn restore_instance(&self, instance: ProcessInstance) {
         log::info!("Restored instance {} (def: {})", instance.id, instance.definition_key);
         self.instances.insert(instance.id, instance).await;
     }
 
     /// Restores a pending user task from persistence.
-    pub fn restore_user_task(&mut self, task: PendingUserTask) {
+    pub fn restore_user_task(&self, task: PendingUserTask) {
         log::info!("Restored user task {} (instance: {})", task.task_id, task.instance_id);
         self.pending_user_tasks.insert(task.task_id, task);
     }
 
     /// Restores a pending service task from persistence.
-    pub fn restore_service_task(&mut self, task: PendingServiceTask) {
+    pub fn restore_service_task(&self, task: PendingServiceTask) {
         log::info!("Restored service task {} (instance: {})", task.id, task.instance_id);
         self.pending_service_tasks.insert(task.id, task);
     }
 
     /// Restores a pending timer from persistence (e.g. on server startup).
-    pub fn restore_timer(&mut self, timer: PendingTimer) {
+    pub fn restore_timer(&self, timer: PendingTimer) {
         log::info!("Restored timer {} (instance: {}, node: {})", timer.id, timer.instance_id, timer.node_id);
         self.pending_timers.insert(timer.id, timer);
     }
 
     /// Restores a pending message catch from persistence (e.g. on server startup).
-    pub fn restore_message_catch(&mut self, catch: PendingMessageCatch) {
+    pub fn restore_message_catch(&self, catch: PendingMessageCatch) {
         log::info!("Restored message catch {} (instance: {}, message: {})", catch.id, catch.instance_id, catch.message_name);
         self.pending_message_catches.insert(catch.id, catch);
     }
 
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
-    pub(crate) async fn cancel_boundary_timers(&mut self, instance_id: Uuid, task_node_id: &str) {
+    pub(crate) async fn cancel_boundary_timers(&self, instance_id: Uuid, task_node_id: &str) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             inst.definition_key
@@ -169,9 +182,9 @@ impl WorkflowEngine {
         };
         
         // Collect timer IDs to delete from persistence
-        let timer_ids_to_delete: std::collections::HashSet<Uuid> = self.pending_timers.values()
-            .filter(|t| t.instance_id == instance_id && bound_timers.contains(&t.node_id))
-            .map(|t| t.id)
+        let timer_ids_to_delete: std::collections::HashSet<Uuid> = self.pending_timers.iter()
+            .filter(|r| r.instance_id == instance_id && bound_timers.contains(&r.node_id))
+            .map(|r| r.id)
             .collect();
             
         self.pending_timers.retain(|_, t| !(t.instance_id == instance_id && bound_timers.contains(&t.node_id)));

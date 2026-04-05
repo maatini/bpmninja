@@ -56,7 +56,7 @@ pub(crate) async fn get_backend_info(
 pub(crate) async fn get_monitoring_data(
     State(state): State<Arc<AppState>>,
 ) -> Json<MonitoringData> {
-    let engine = state.engine.read().await;
+    let engine = &state.engine;
 
     let stats = engine.get_stats().await;
 

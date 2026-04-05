@@ -31,11 +31,13 @@ mini-bpm ist eine leichtgewichtige, embeddable BPMN 2.0 Engine mit folgenden Ker
 
 - **Token-basierte Ausführung** — jeder Pfad wird als eigenständiger Token verfolgt
 - **16 BPMN-Elemente** — Start/End Events, User/Service Tasks, Gateways, Timer, Messages, Boundary Events
+- **Lock-Free Concurrency** — Multi-threaded Skalierung dank `DashMap` Wait-State Queues
 - **NATS JetStream Persistenz** — KV-Stores für Instanzen, Object Store für Dateien, Event-Streaming für History
+- **Fault-Tolerant Retry Queue** — 2-stufiges Retry-System mit Background-Worker gegen NATS-Ausfälle
 - **Automatischer Timer-Scheduler** — Background-Task verarbeitet abgelaufene Timer (konfigurierbar via `TIMER_INTERVAL_MS`)
 - **Camunda-kompatible Service Tasks** — Fetch-and-Lock Pattern mit Long-Polling
 - **Rhai Script Engine** — Execution Listeners für dynamische Variablenmanipulation
-- **Desktop-UI** — Tauri-App mit bpmn-js Modeler und Live-Instanzverfolgung
+- **Desktop-UI** — Tauri-App mit bpmn-js Modeler und Live-Instanzverfolgung (inkl. plattformübergreifender GitHub Actions CI-Releases)
 
 ---
 

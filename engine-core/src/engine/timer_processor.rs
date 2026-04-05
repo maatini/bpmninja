@@ -3,11 +3,11 @@ use crate::error::{EngineError, EngineResult};
 use crate::InstanceState;
 
 impl WorkflowEngine {
-    pub async fn process_timers(&mut self) -> EngineResult<usize> {
+    pub async fn process_timers(&self) -> EngineResult<usize> {
         let now = chrono::Utc::now();
         let mut expired = Vec::new();
         
-        for timer in self.pending_timers.values() {
+        for timer in self.pending_timers.iter() {
             if timer.expires_at <= now {
                 expired.push(timer.id);
             }
@@ -15,7 +15,7 @@ impl WorkflowEngine {
         
         let count = expired.len();
         for tid in expired {
-            let timer = self.pending_timers.remove(&tid)
+            let timer = self.pending_timers.remove(&tid).map(|(_, v)| v)
                 .ok_or_else(|| EngineError::InvalidDefinition(format!("Timer {tid} disappeared")))?;
             
             let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await { Some(lk.read().await.clone()) } else { None };

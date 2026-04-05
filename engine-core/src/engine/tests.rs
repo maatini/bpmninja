@@ -11,7 +11,7 @@ use crate::model::ListenerEvent;
 
 async fn complete_all_service_tasks(engine: &mut WorkflowEngine, worker: &str, vars: HashMap<String, Value>) {
     let mut to_complete = Vec::new();
-    for task in engine.pending_service_tasks.values() {
+    for task in engine.pending_service_tasks.iter().map(|r| r.value().clone()) {
         to_complete.push((task.id, task.topic.clone()));
     }
     for (id, topic) in to_complete {
@@ -85,7 +85,7 @@ async fn start_instance_pauses_at_user_task() {
     assert_eq!(
         engine.get_instance_state(inst_id).await.unwrap(),
         InstanceState::WaitingOnUserTask {
-            task_id: engine.pending_user_tasks.values().next().unwrap().task_id
+            task_id: engine.pending_user_tasks.iter().map(|r| r.value().clone()).next().unwrap().task_id
         }
     );
     assert_eq!(engine.pending_user_tasks.len(), 1);
@@ -97,7 +97,7 @@ async fn complete_user_task_reaches_end() {
     let inst_id = engine.start_instance(def_key).await.unwrap();
     complete_all_service_tasks(&mut engine, "worker", HashMap::new()).await;
 
-    let task_id = engine.pending_user_tasks.values().next().unwrap().task_id;
+    let task_id = engine.pending_user_tasks.iter().map(|r| r.value().clone()).next().unwrap().task_id;
     engine
         .complete_user_task(task_id, HashMap::new())
         .await
@@ -135,7 +135,7 @@ async fn service_handler_modifies_variables() {
     complete_all_service_tasks(&mut engine, "worker_1", vars).await;
 
     // The token stored centrally should have 'validated: true' from the service handler
-    let pending = engine.pending_user_tasks.values().next().unwrap();
+    let pending = engine.pending_user_tasks.iter().map(|r| r.value().clone()).next().unwrap();
     let inst_arc = engine.instances.get(&inst_id).await.unwrap();
     let inst = inst_arc.read().await;
     let token = inst.tokens.get(&pending.token_id).unwrap();
@@ -223,7 +223,7 @@ async fn audit_log_captures_all_steps() {
     let inst_id = engine.start_instance(def_key).await.unwrap();
     complete_all_service_tasks(&mut engine, "worker", HashMap::new()).await;
 
-    let task_id = engine.pending_user_tasks.values().next().unwrap().task_id;
+    let task_id = engine.pending_user_tasks.iter().map(|r| r.value().clone()).next().unwrap().task_id;
     engine
         .complete_user_task(task_id, HashMap::new())
         .await
@@ -825,7 +825,7 @@ async fn parallel_gateway_forks_and_joins() {
     assert_eq!(engine.pending_service_tasks.len(), 2);
 
     // Complete task A
-    let task_a = engine.pending_service_tasks.values().find(|t| t.topic == "task_a").unwrap().id;
+    let task_a = engine.pending_service_tasks.iter().map(|r| r.value().clone()).find(|t| t.topic == "task_a").unwrap().id;
     // Need to fetch and lock it first
     let _ = engine.fetch_and_lock_service_tasks("worker", 10, &["task_a".into()], 1000).await;
     
@@ -850,7 +850,7 @@ async fn parallel_gateway_forks_and_joins() {
     drop(inst_lock);
 
     // Complete task B
-    let task_b = engine.pending_service_tasks.values().find(|t| t.topic == "task_b").unwrap().id;
+    let task_b = engine.pending_service_tasks.iter().map(|r| r.value().clone()).find(|t| t.topic == "task_b").unwrap().id;
     let _ = engine.fetch_and_lock_service_tasks("worker", 10, &["task_b".into()], 1000).await;
     let mut vars_b = std::collections::HashMap::new();
     vars_b.insert("var_b".into(), serde_json::Value::Bool(true));
@@ -1146,7 +1146,7 @@ async fn timer_catch_event_succeeds() {
     let (def_key, _) = engine.deploy_definition(def).await;
     let inst_id = engine.start_instance(def_key).await.unwrap();
     
-    assert_eq!(engine.get_instance_state(inst_id).await.unwrap(), InstanceState::WaitingOnTimer { timer_id: engine.pending_timers.values().next().unwrap().id });
+    assert_eq!(engine.get_instance_state(inst_id).await.unwrap(), InstanceState::WaitingOnTimer { timer_id: engine.pending_timers.iter().map(|r| r.value().clone()).next().unwrap().id });
     
     // Won't trigger immediately
     let triggered = engine.process_timers().await.unwrap();
@@ -1315,8 +1315,8 @@ async fn in_memory_simultaneous_timer_and_message_race() {
     tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
     
     // Race: The message arrives precisely when the timer is due.
-    let msgs = engine.pending_message_catches.clone();
-    engine.correlate_message(msgs.values().next().unwrap().message_name.clone(), None, std::collections::HashMap::new()).await.unwrap();
+    let msg_name = engine.pending_message_catches.iter().map(|r| r.value().clone()).next().unwrap().message_name.clone();
+    engine.correlate_message(msg_name, None, std::collections::HashMap::new()).await.unwrap();
     
     // Since message was processed first, the instance was routed to join, and blocked on parallel gate
     let _inst = engine.get_instance_details(inst_id).await.unwrap();
@@ -1469,7 +1469,7 @@ async fn restore_timer_and_message_catch() {
     };
     engine.restore_timer(timer.clone());
     assert_eq!(engine.pending_timers.len(), 1);
-    assert_eq!(engine.pending_timers.values().next().unwrap().id, timer.id);
+    assert_eq!(engine.pending_timers.iter().map(|r| r.value().clone()).next().unwrap().id, timer.id);
     
     let catch = PendingMessageCatch {
         id: Uuid::new_v4(),
@@ -1480,7 +1480,7 @@ async fn restore_timer_and_message_catch() {
     };
     engine.restore_message_catch(catch.clone());
     assert_eq!(engine.pending_message_catches.len(), 1);
-    assert_eq!(engine.pending_message_catches.values().next().unwrap().id, catch.id);
+    assert_eq!(engine.pending_message_catches.iter().map(|r| r.value().clone()).next().unwrap().id, catch.id);
 }
 
 #[tokio::test]
@@ -1638,4 +1638,12 @@ async fn call_activity_unhandled_error_becomes_incident() {
 
     let log = engine.get_audit_log(instance_id).await.unwrap();
     assert!(log.iter().any(|l| l.contains("INCIDENT") && l.contains("UNHANDLED_CODE")));
+}
+
+#[test]
+fn engine_is_send_and_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+    assert_send::<super::WorkflowEngine>();
+    assert_sync::<super::WorkflowEngine>();
 }
