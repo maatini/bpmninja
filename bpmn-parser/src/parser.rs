@@ -326,7 +326,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         builder = add_listeners(builder, &node_id, None);
     }
 
-    // 8. Process Sequence Flows
+    // 10. Process Sequence Flows
     for flow in process.sequence_flows {
         if let Some(cond) = flow.condition_expression {
             builder = builder.conditional_flow(flow.source_ref, flow.target_ref, cond.value.trim());

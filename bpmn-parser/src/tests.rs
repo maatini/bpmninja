@@ -486,3 +486,94 @@ fn parse_duration_rejects_invalid_input() {
     assert!(parse_bpmn_xml(&template("HELLO")).is_err(), "Garbage should be rejected");
     assert!(parse_bpmn_xml(&template("PT")).is_err(), "PT without value should be rejected");
 }
+
+#[test]
+fn parse_event_based_gateway() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <message id="msg1" name="Approval" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <eventBasedGateway id="ebgw" />
+                <intermediateCatchEvent id="wait_msg">
+                    <messageEventDefinition messageRef="msg1" />
+                </intermediateCatchEvent>
+                <intermediateCatchEvent id="wait_timer">
+                    <timerEventDefinition>
+                        <timeDuration>PT30S</timeDuration>
+                    </timerEventDefinition>
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ebgw" />
+                <sequenceFlow id="f2" sourceRef="ebgw" targetRef="wait_msg" />
+                <sequenceFlow id="f3" sourceRef="ebgw" targetRef="wait_timer" />
+                <sequenceFlow id="f4" sourceRef="wait_msg" targetRef="e1" />
+                <sequenceFlow id="f5" sourceRef="wait_timer" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert!(
+        matches!(def.nodes.get("ebgw").unwrap(), BpmnElement::EventBasedGateway),
+        "Expected EventBasedGateway"
+    );
+    assert_eq!(def.next_nodes("ebgw").len(), 2);
+    // Verify the targets are correct event types
+    assert!(matches!(
+        def.nodes.get("wait_msg").unwrap(),
+        BpmnElement::MessageCatchEvent { .. }
+    ));
+    assert!(matches!(
+        def.nodes.get("wait_timer").unwrap(),
+        BpmnElement::TimerCatchEvent(_)
+    ));
+}
+
+#[test]
+fn parse_event_subprocess_accepted() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <error id="err1" errorCode="VALIDATION_FAILED" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+                <subProcess id="sub1" triggeredByEvent="true">
+                    <startEvent id="sub_s1">
+                        <errorEventDefinition errorRef="err1" />
+                    </startEvent>
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sub_f1" sourceRef="sub_s1" targetRef="sub_e1" />
+                </subProcess>
+            </process>
+        </definitions>
+    "#;
+
+    // Event sub-processes (triggeredByEvent="true") must NOT cause a parse error
+    let result = parse_bpmn_xml(xml);
+    assert!(result.is_ok(), "Event sub-process should be accepted: {:?}", result.err());
+}
+
+#[test]
+fn parse_regular_subprocess_rejected() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sub_f1" sourceRef="sub_s1" targetRef="sub_e1" />
+                </subProcess>
+            </process>
+        </definitions>
+    "#;
+
+    // Regular embedded sub-processes must still be rejected
+    let result = parse_bpmn_xml(xml);
+    assert!(result.is_err(), "Regular sub-process should be rejected");
+}

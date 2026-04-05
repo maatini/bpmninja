@@ -153,7 +153,6 @@ pub(crate) struct BpmnProcess {
     /// Intermediate events — treated as pass-through nodes.
     #[serde(rename = "intermediateThrowEvent", default)]
     pub intermediate_throw_events: Vec<BpmnGenericTask>,
-    #[allow(dead_code)]
     #[serde(rename = "intermediateCatchEvent", default)]
     pub intermediate_catch_events: Vec<BpmnIntermediateCatchEvent>,
 }
