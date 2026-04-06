@@ -55,7 +55,7 @@ impl TimerDefinition {
             }
             TimerDefinition::CronCycle { expression, .. } => {
                 // Uses croner for next occurrence
-                let cron = croner::Cron::new(expression).parse().ok()?;
+                let cron = expression.parse::<croner::Cron>().ok()?;
                 cron.find_next_occurrence(&now, false).ok()
             }
             TimerDefinition::RepeatingInterval { interval, .. } => {

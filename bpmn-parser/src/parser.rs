@@ -157,7 +157,7 @@ fn parse_timer_definition(
         }
         // Otherwise treat as cron expression
         // Validate by parsing
-        croner::Cron::new(s).parse().map_err(|e| {
+        s.parse::<croner::Cron>().map_err(|e| {
             EngineError::InvalidDefinition(format!("Invalid cron expression '{}': {}", s, e))
         })?;
         return Ok(TimerDefinition::CronCycle {
