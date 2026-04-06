@@ -68,9 +68,12 @@ bpmninja ist eine leichtgewichtige BPMN 2.0 Engine mit folgenden Kernfeatures:
 | <img src="readme-assets/bpmn-icons/timer-start-event.svg" width="28"> | **TimerStartEvent** | Timer-gesteuerter Start nach ISO 8601 Dauer (`PT30S`, `PT5M`). |
 | <img src="readme-assets/bpmn-icons/message-start-event.svg" width="28"> | **MessageStartEvent** | Prozess wird durch eingehende Nachricht (via `messageName`) gestartet. |
 | <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
+| <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **TerminateEndEvent** | Endpunkt — Bricht alle aktiven Tokens sofort ab. |
 | <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminiert den Prozess mit einem BPMN-Fehlercode (`errorCode`). |
 | <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
 | <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | Externe Verarbeitung via Fetch-and-Lock Pattern (Camunda-kompatibel). |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ScriptTask** | Führt inline verankerte Scripte über die Rhai Engine aus. |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **SendTask** | Versendet via Throw Event eine Message und läuft direkt weiter. |
 
 ### Gateways
 
@@ -79,7 +82,7 @@ bpmninja ist eine leichtgewichtige BPMN 2.0 Engine mit folgenden Kernfeatures:
 | <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Genau ein Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
 | <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | Alle Pfade werden parallel verfolgt (Token-Fork). Join wartet auf alle Tokens (JoinBarrier). |
 | <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Alle Pfade mit `true`-Bedingung werden parallel verfolgt. Join wartet auf erwartete Tokens. |
-| <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **EventBasedGateway** | Execution pausiert bis genau eines der Ziel-Catch-Events (Timer/Message) auslöst. |
+| <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pausiert bis genau eines der Ziel-Catch-Events (Timer/Message) auslöst. |
 
 ### Intermediate Events
 
@@ -95,7 +98,8 @@ bpmninja ist eine leichtgewichtige BPMN 2.0 Engine mit folgenden Kernfeatures:
 | BPMN | Element | Beschreibung |
 |:---:|---|---|
 | <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **CallActivity** | Ruft eine andere Prozessdefinition auf (`calledElement`). Variablen werden propagiert. |
-| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **SubProcess** | Eingebetteter Sub-Prozess mit eigenem Scope und Event-Sub-Process-Support. |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **EmbeddedSubProcess** | Eingebetteter Sub-Prozess (wird in den Graph geflattened). |
+| <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **SubProcessEndEvent** | Internes End-Event eines Embedded-Sub-Process (generiert beim Flattening). |
 
 ### Zusätzliche Konzepte
 
