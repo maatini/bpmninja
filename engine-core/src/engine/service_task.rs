@@ -143,6 +143,8 @@ impl WorkflowEngine {
 
         self.cancel_boundary_timers(instance_id, &task.node_id)
             .await;
+        self.cancel_boundary_message_catches(instance_id, &task.node_id)
+            .await;
 
         tracing::info!(
             "Instance {}: completed service task '{}' (task_id: {task_id})",
@@ -361,6 +363,8 @@ impl WorkflowEngine {
         };
 
         self.cancel_boundary_timers(instance_id, &task.node_id)
+            .await;
+        self.cancel_boundary_message_catches(instance_id, &task.node_id)
             .await;
 
         let target_boundary = if let Some(def) = self.definitions.get(&def_key).await {

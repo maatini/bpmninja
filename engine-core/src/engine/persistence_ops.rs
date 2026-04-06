@@ -13,11 +13,10 @@ impl WorkflowEngine {
 
     /// Enqueues a failed job for background retry (if retry queue is available).
     fn enqueue_retry(&self, job: PersistJob) {
-        if let Some(ref tx) = self.retry_tx {
-            if let Err(e) = tx.send(job) {
+        if let Some(ref tx) = self.retry_tx
+            && let Err(e) = tx.send(job) {
                 tracing::error!("Failed to enqueue retry job: {} (channel closed)", e);
             }
-        }
     }
 
     /// Helper to record a history entry for an instance, calculating the diff automatically.
@@ -63,21 +62,19 @@ impl WorkflowEngine {
             if !diff.is_empty() {
                 entry = entry.with_diff(diff);
             }
-            if let Some(curr) = new_state.as_ref().or(old_state) {
-                if let Some(def) = self.definitions.get(&curr.definition_key).await {
+            if let Some(curr) = new_state.as_ref().or(old_state)
+                && let Some(def) = self.definitions.get(&curr.definition_key).await {
                     entry.definition_version = Some(def.version);
                 }
-            }
 
             if let Some(curr) = new_state {
                 entry = entry.with_node(curr.current_node.clone());
 
                 // Snapshot heuristic: store a full snapshot every 8 audit log entries
-                if !curr.audit_log.is_empty() && curr.audit_log.len() % 8 == 0 {
-                    if let Ok(json_state) = serde_json::to_value(curr) {
+                if !curr.audit_log.is_empty() && curr.audit_log.len() % 8 == 0
+                    && let Ok(json_state) = serde_json::to_value(curr) {
                         entry = entry.with_snapshot(json_state);
                     }
-                }
             }
 
             // Inline retry for history entries
@@ -200,8 +197,8 @@ impl WorkflowEngine {
 
     /// Persists a pending user task to the KV store.
     pub(crate) async fn persist_user_task(&self, task_id: Uuid) {
-        if let Some(p) = &self.persistence {
-            if let Some(task_ref) = self.pending_user_tasks.get(&task_id) {
+        if let Some(p) = &self.persistence
+            && let Some(task_ref) = self.pending_user_tasks.get(&task_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
                     match p.save_user_task(&task_ref).await {
@@ -232,7 +229,6 @@ impl WorkflowEngine {
                     self.enqueue_retry(PersistJob::SaveUserTask(task_id));
                 }
             }
-        }
     }
 
     /// Deletes a completed pending user task from the KV store.
@@ -264,8 +260,8 @@ impl WorkflowEngine {
 
     /// Persists a pending service task to the KV store.
     pub(crate) async fn persist_service_task(&self, task_id: Uuid) {
-        if let Some(p) = &self.persistence {
-            if let Some(task_ref) = self.pending_service_tasks.get(&task_id) {
+        if let Some(p) = &self.persistence
+            && let Some(task_ref) = self.pending_service_tasks.get(&task_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
                     match p.save_service_task(&task_ref).await {
@@ -288,7 +284,6 @@ impl WorkflowEngine {
                     self.enqueue_retry(PersistJob::SaveServiceTask(task_id));
                 }
             }
-        }
     }
 
     /// Deletes a completed pending service task from the KV store.
@@ -320,8 +315,8 @@ impl WorkflowEngine {
 
     /// Persists a pending timer to the KV store.
     pub(crate) async fn persist_timer(&self, timer_id: Uuid) {
-        if let Some(p) = &self.persistence {
-            if let Some(timer_ref) = self.pending_timers.get(&timer_id) {
+        if let Some(p) = &self.persistence
+            && let Some(timer_ref) = self.pending_timers.get(&timer_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
                     match p.save_timer(&timer_ref).await {
@@ -344,7 +339,6 @@ impl WorkflowEngine {
                     self.enqueue_retry(PersistJob::SaveTimer(timer_id));
                 }
             }
-        }
     }
 
     /// Deletes a completed pending timer from the KV store.
@@ -376,8 +370,8 @@ impl WorkflowEngine {
 
     /// Persists a pending message catch to the KV store.
     pub(crate) async fn persist_message_catch(&self, catch_id: Uuid) {
-        if let Some(p) = &self.persistence {
-            if let Some(catch_ref) = self.pending_message_catches.get(&catch_id) {
+        if let Some(p) = &self.persistence
+            && let Some(catch_ref) = self.pending_message_catches.get(&catch_id) {
                 let mut last_err = None;
                 for attempt in 0..=INLINE_RETRIES {
                     match p.save_message_catch(&catch_ref).await {
@@ -400,7 +394,6 @@ impl WorkflowEngine {
                     self.enqueue_retry(PersistJob::SaveMessageCatch(catch_id));
                 }
             }
-        }
     }
 
     /// Deletes a completed pending message catch from the KV store.

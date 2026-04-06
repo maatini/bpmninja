@@ -158,14 +158,14 @@ impl WorkflowEngine {
                     original
                 } else {
                     // Interrupting timer: Remove original token
-                    let removed = inst.tokens.remove(&timer.token_id).ok_or_else(|| {
+                    
+                    // Clean up orphaned pending tasks that matched this token
+                    inst.tokens.remove(&timer.token_id).ok_or_else(|| {
                         EngineError::InvalidDefinition(format!(
                             "Token {} not found in instance",
                             timer.token_id
                         ))
-                    })?;
-                    // Clean up orphaned pending tasks that matched this token
-                    removed
+                    })?
                 }
             };
 
@@ -225,8 +225,8 @@ impl WorkflowEngine {
             self.run_instance_batch(timer.instance_id, token).await?;
 
             // Re-schedule recurring timers
-            if let Some(ref def) = timer.timer_def {
-                if def.is_recurring() {
+            if let Some(ref def) = timer.timer_def
+                && def.is_recurring() {
                     let should_repeat = !matches!(timer.remaining_repetitions, Some(0));
                     if should_repeat {
                         let now = chrono::Utc::now();
@@ -246,7 +246,6 @@ impl WorkflowEngine {
                         }
                     }
                 }
-            }
         }
 
         Ok(count)

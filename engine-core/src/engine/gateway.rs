@@ -45,20 +45,18 @@ pub(crate) fn execute_exclusive_gateway(
 
     // Evaluate conditions in order; first match wins
     for sf in outgoing {
-        if let Some(ref cond) = sf.condition {
-            if evaluate_condition(cond, &token.variables) {
+        if let Some(ref cond) = sf.condition
+            && evaluate_condition(cond, &token.variables) {
                 chosen_target = Some(sf.target.clone());
                 break;
             }
-        }
     }
 
     // Fallback to default flow if no condition matched
-    if chosen_target.is_none() {
-        if let Some(default_target) = default {
+    if chosen_target.is_none()
+        && let Some(default_target) = default {
             chosen_target = Some(default_target.clone());
         }
-    }
 
     let target =
         chosen_target.ok_or_else(|| EngineError::NoMatchingCondition(current_id.to_string()))?;

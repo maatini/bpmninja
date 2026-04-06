@@ -26,15 +26,14 @@ pub(crate) struct MonitoringData {
 }
 
 pub(crate) async fn ready_endpoint(State(state): State<Arc<AppState>>) -> axum::response::Response {
-    if let Some(ref p) = state.persistence {
-        if p.get_storage_info().await.is_err() {
+    if let Some(ref p) = state.persistence
+        && p.get_storage_info().await.is_err() {
             return (
                 axum::http::StatusCode::SERVICE_UNAVAILABLE,
                 "NATS disconnected",
             )
                 .into_response();
         }
-    }
     (axum::http::StatusCode::OK, "Ready").into_response()
 }
 

@@ -54,11 +54,10 @@ impl WorkflowPersistence for NatsPersistence {
         while let Ok(Some(msg)) =
             tokio::time::timeout(std::time::Duration::from_millis(500), messages.next()).await
         {
-            if let Ok(msg) = msg {
-                if let Ok(token) = serde_json::from_slice::<Token>(&msg.payload) {
+            if let Ok(msg) = msg
+                && let Ok(token) = serde_json::from_slice::<Token>(&msg.payload) {
                     token_map.insert(token.id, token);
                 }
-            }
         }
 
         Ok(token_map.into_values().collect())
@@ -559,42 +558,36 @@ impl WorkflowPersistence for NatsPersistence {
         while let Ok(Some(msg)) =
             tokio::time::timeout(std::time::Duration::from_millis(100), messages.next()).await
         {
-            if let Ok(msg) = msg {
-                if let Ok(entry) =
+            if let Ok(msg) = msg
+                && let Ok(entry) =
                     serde_json::from_slice::<engine_core::history::HistoryEntry>(&msg.payload)
                 {
                     let mut matched = true;
-                    if let Some(types) = &query.event_types {
-                        if !types.contains(&entry.event_type) {
+                    if let Some(types) = &query.event_types
+                        && !types.contains(&entry.event_type) {
                             matched = false;
                         }
-                    }
-                    if let Some(nid) = &query.node_id {
-                        if entry.node_id.as_deref() != Some(nid) {
+                    if let Some(nid) = &query.node_id
+                        && entry.node_id.as_deref() != Some(nid) {
                             matched = false;
                         }
-                    }
-                    if let Some(aty) = &query.actor_type {
-                        if &entry.actor_type != aty {
+                    if let Some(aty) = &query.actor_type
+                        && &entry.actor_type != aty {
                             matched = false;
                         }
-                    }
-                    if let Some(f) = query.from {
-                        if entry.timestamp < f {
+                    if let Some(f) = query.from
+                        && entry.timestamp < f {
                             matched = false;
                         }
-                    }
-                    if let Some(t) = query.to {
-                        if entry.timestamp > t {
+                    if let Some(t) = query.to
+                        && entry.timestamp > t {
                             matched = false;
                         }
-                    }
 
                     if matched {
                         entries.push(entry);
                     }
                 }
-            }
         }
 
         // Ensure chronological order

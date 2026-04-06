@@ -216,6 +216,7 @@ pub(crate) struct BpmnEndEvent {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "errorEventDefinition")]
     pub error_event_definition: Option<BpmnErrorEventDefinition>,
+    #[allow(dead_code)]
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "terminateEventDefinition")]

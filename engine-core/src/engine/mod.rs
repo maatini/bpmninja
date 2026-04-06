@@ -225,6 +225,56 @@ impl WorkflowEngine {
         }
     }
 
+    /// Helper to cancel any pending boundary message catches attached to a task node that is being completed/aborted.
+    pub(crate) async fn cancel_boundary_message_catches(&self, instance_id: Uuid, task_node_id: &str) {
+        let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let inst = inst_arc.read().await;
+            inst.definition_key
+        } else {
+            return;
+        };
+
+        let bound_messages: Vec<String> = if let Some(def) = self.definitions.get(&def_key).await {
+            def.nodes
+                .iter()
+                .filter_map(|(id, node)| {
+                    if let crate::model::BpmnElement::BoundaryMessageEvent { attached_to, .. } = node
+                    {
+                        if attached_to == task_node_id {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Collect message catch IDs to delete from persistence
+        let msg_ids_to_delete: std::collections::HashSet<Uuid> = self
+            .pending_message_catches
+            .iter()
+            .filter(|r| r.instance_id == instance_id && bound_messages.contains(&r.node_id))
+            .map(|r| r.id)
+            .collect();
+
+        self.pending_message_catches
+            .retain(|_, m| !(m.instance_id == instance_id && bound_messages.contains(&m.node_id)));
+
+        // Delete from persistence
+        if let Some(persistence) = &self.persistence {
+            for msg_id in msg_ids_to_delete {
+                if let Err(e) = persistence.delete_message_catch(msg_id).await {
+                    self.log_persistence_error(&format!("delete_boundary_message_catch({})", msg_id), e);
+                }
+            }
+        }
+    }
+
     /// Clears any pending wait states (timers, messages) associated with a specific token.
     /// Used by Event-Based Gateways to cancel alternative events when one fires.
     pub async fn clear_wait_states_for_token(&self, instance_id: Uuid, token_id: &Uuid) {

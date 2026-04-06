@@ -23,7 +23,7 @@ async fn complete_all_service_tasks(
     }
     for (id, topic) in to_complete {
         let _ = engine
-            .fetch_and_lock_service_tasks(worker, 10, &[topic.clone()], 60000)
+            .fetch_and_lock_service_tasks(worker, 10, std::slice::from_ref(&topic), 60000)
             .await;
         engine
             .complete_service_task(id, worker, vars.clone())
@@ -2228,7 +2228,7 @@ async fn event_based_gateway_message_wins() {
 async fn test_non_interrupting_timer_boundary() {
     // A process with a user task that has a non-interrupting timer boundary.
     // The timer fires: the process forks to a second user task, while the first ONE is STILL alive!
-    let mut eng = WorkflowEngine::new();
+    let eng = WorkflowEngine::new();
     let def = ProcessDefinitionBuilder::new("test_bnd")
         .node("start", BpmnElement::StartEvent)
         .flow("start", "task")
@@ -2342,7 +2342,7 @@ async fn test_non_interrupting_timer_boundary() {
 
 #[tokio::test]
 async fn test_interrupting_timer_boundary_cleanup() {
-    let mut eng = WorkflowEngine::new();
+    let eng = WorkflowEngine::new();
     let def = ProcessDefinitionBuilder::new("test_bnd_2")
         .node("start", BpmnElement::StartEvent)
         .flow("start", "task")
@@ -2416,7 +2416,7 @@ async fn test_interrupting_timer_boundary_cleanup() {
 
 #[tokio::test]
 async fn test_non_interrupting_message_boundary() {
-    let mut eng = WorkflowEngine::new();
+    let eng = WorkflowEngine::new();
     let def = ProcessDefinitionBuilder::new("test_bnd_3")
         .node("start", BpmnElement::StartEvent)
         .flow("start", "task")

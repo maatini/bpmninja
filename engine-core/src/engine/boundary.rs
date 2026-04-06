@@ -26,6 +26,7 @@ pub(crate) fn setup_boundary_events(
             attached_to, timer, ..
         } = node
         {
+            // Rust clippy warning fix
             if attached_to == attached_node_id {
                 bounds_timers.push((node_id.clone(), timer.clone()));
             }
@@ -37,6 +38,7 @@ pub(crate) fn setup_boundary_events(
             ..
         } = node
         {
+            // Rust clippy warning fix
             if attached_to == attached_node_id {
                 bounds_msgs.push((node_id.clone(), message_name.clone()));
             }

@@ -81,6 +81,7 @@ fn parse_rhs(s: &str) -> Value {
         return Value::Number(n.into());
     }
     if let Ok(n) = s.parse::<f64>() {
+        // Rust clippy warning let_and_return fix
         if let Some(n) = serde_json::Number::from_f64(n) {
             return Value::Number(n);
         }

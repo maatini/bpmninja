@@ -90,7 +90,8 @@ bpmninja ist eine leichtgewichtige BPMN 2.0 Engine mit folgenden Kernfeatures:
 |:---:|---|---|
 | <img src="readme-assets/bpmn-icons/timer-catch-event.svg" width="28"> | **TimerCatchEvent** | Pausiert den Prozess bis ein Timer abläuft. Wird automatisch vom Timer-Scheduler verarbeitet. |
 | <img src="readme-assets/bpmn-icons/message-catch-event.svg" width="28"> | **MessageCatchEvent** | Pausiert den Prozess bis eine passende Nachricht via `POST /api/message` korreliert wird. |
-| <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event (interrupting). Timer wird bei Task-Abschluss automatisch storniert. |
+| <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event (interrupting/non-interrupting). Timer wird bei Task-Abschluss automatisch storniert. |
+| <img src="readme-assets/bpmn-icons/boundary-message-event.svg" width="28"> | **BoundaryMessageEvent** | An einen Task angeheftetes Message-Event (interrupting/non-interrupting). Wartet asynchron auf externe Nachrichten. |
 | <img src="readme-assets/bpmn-icons/boundary-error-event.svg" width="28"> | **BoundaryErrorEvent** | Fängt BPMN-Fehler (`errorCode`) eines ServiceTasks ab und leitet auf einen alternativen Pfad. |
 
 ### Aktivitäten & Sub-Prozesse
@@ -130,7 +131,6 @@ Die Engine orientiert sich an einem zweckmäßigen und performanten Kern-Feature
 
 - **Weitere Task-Typen:** `BusinessRuleTask` (kein DMN-Support), `ManualTask`, `ReceiveTask`.
 - **Spezifische Intermediate/Boundary Events:** `SignalEvent`, `EscalationEvent`, `CompensationEvent`, `CancelEvent`, `LinkEvent`.
-
 - **Erweiterte Sub-Prozesse:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
 - **Spezialisierte Gateways:** `Complex Gateway`.
 - **Data Objects / Data Stores:** Visuelle Datenobjekte und Assoziationen (`Data Input/Output Association`) werden ignoriert. Der Datenaustausch erfolgt ausnahmslos über den JSON-Variablen-State (`HashMap<String, serde_json::Value>`).

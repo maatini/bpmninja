@@ -44,13 +44,11 @@ pub(crate) fn find_boundary_error_event(
             attached_to,
             error_code: bound_err,
         } = node
-        {
-            if attached_to == attached_to_node
+            && attached_to == attached_to_node
                 && (bound_err.is_none() || bound_err.as_deref() == Some(error_code))
             {
                 return Some(node_id.clone());
             }
-        }
         None
     })
 }
@@ -371,10 +369,7 @@ impl WorkflowEngine {
                         )
                         .await;
 
-                        // Check if we need to resume a parent instance (Call Activity)
-                        // Note: we can't do this while borrowing `self.instances`, so we do this here.
-                        // Actually wait we need to avoid borrowing conflicts!
-                        // It's safe to just call the method here.
+                        // Parent resume happens after batch completes (see end of run_instance_batch)
                     }
                 }
                 NextAction::ErrorEnd { error_code } => {
@@ -385,8 +380,8 @@ impl WorkflowEngine {
                         inst.tokens.remove(&token.id);
                     }
 
-                    if self.all_tokens_completed(instance_id).await? {
-                        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                    if self.all_tokens_completed(instance_id).await?
+                        && let Some(inst_arc) = self.instances.get(&instance_id).await {
                             let mut inst = inst_arc.write().await;
                             inst.state = InstanceState::CompletedWithError {
                                 error_code: error_code.clone(),
@@ -395,7 +390,6 @@ impl WorkflowEngine {
                                 "💥 All tokens completed at Error End with code '{error_code}'"
                             ));
                         }
-                    }
                 }
                 NextAction::Terminate => {
                     // Cancel ALL pending items for this instance
@@ -435,7 +429,11 @@ impl WorkflowEngine {
                 NextAction::MultiInstanceFork { node_id, tokens } => {
                     let branch_count = tokens.len();
                     let join_id = format!("MI_JOIN_{node_id}");
-                    let inst_arc = self.instances.get(&instance_id).await.unwrap();
+                    let inst_arc = self
+                        .instances
+                        .get(&instance_id)
+                        .await
+                        .ok_or(EngineError::NoSuchInstance(instance_id))?;
                     {
                         let mut inst = inst_arc.write().await;
                         inst.join_barriers.insert(
