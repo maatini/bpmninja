@@ -47,7 +47,11 @@ impl TimerDefinition {
                 Some(now + chrono_dur)
             }
             TimerDefinition::AbsoluteDate(dt) => {
-                if *dt > now { Some(*dt) } else { None }
+                if *dt > now {
+                    Some(*dt)
+                } else {
+                    None
+                }
             }
             TimerDefinition::CronCycle { expression, .. } => {
                 // Uses croner for next occurrence

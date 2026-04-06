@@ -347,6 +347,12 @@ impl WorkflowEngine {
                 }
                 NextAction::Complete => {
                     self.complete_branch_token(instance_id, token.id).await?;
+
+                    if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                        let mut inst = inst_arc.write().await;
+                        inst.tokens.remove(&token.id);
+                    }
+
                     if self.all_tokens_completed(instance_id).await? {
                         if let Some(inst_arc) = self.instances.get(&instance_id).await {
                             let mut inst = inst_arc.write().await;
@@ -373,6 +379,12 @@ impl WorkflowEngine {
                 }
                 NextAction::ErrorEnd { error_code } => {
                     self.complete_branch_token(instance_id, token.id).await?;
+
+                    if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                        let mut inst = inst_arc.write().await;
+                        inst.tokens.remove(&token.id);
+                    }
+
                     if self.all_tokens_completed(instance_id).await? {
                         if let Some(inst_arc) = self.instances.get(&instance_id).await {
                             let mut inst = inst_arc.write().await;
@@ -387,10 +399,14 @@ impl WorkflowEngine {
                 }
                 NextAction::Terminate => {
                     // Cancel ALL pending items for this instance
-                    self.pending_user_tasks.retain(|_, t| t.instance_id != instance_id);
-                    self.pending_service_tasks.retain(|_, t| t.instance_id != instance_id);
-                    self.pending_timers.retain(|_, t| t.instance_id != instance_id);
-                    self.pending_message_catches.retain(|_, t| t.instance_id != instance_id);
+                    self.pending_user_tasks
+                        .retain(|_, t| t.instance_id != instance_id);
+                    self.pending_service_tasks
+                        .retain(|_, t| t.instance_id != instance_id);
+                    self.pending_timers
+                        .retain(|_, t| t.instance_id != instance_id);
+                    self.pending_message_catches
+                        .retain(|_, t| t.instance_id != instance_id);
 
                     // Mark all active tokens as completed
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -399,9 +415,8 @@ impl WorkflowEngine {
                             at.completed = true;
                         }
                         inst.state = InstanceState::Completed;
-                        inst.audit_log.push(
-                            "⛔ Process terminated. All tokens killed.".to_string(),
-                        );
+                        inst.audit_log
+                            .push("⛔ Process terminated. All tokens killed.".to_string());
                     }
 
                     // Clear the execution queue — no more tokens should be processed
@@ -443,13 +458,8 @@ impl WorkflowEngine {
                         };
                     }
                     for (idx, fork_token) in tokens.into_iter().enumerate() {
-                        self.register_active_token(
-                            instance_id,
-                            &node_id,
-                            idx,
-                            &fork_token,
-                        )
-                        .await?;
+                        self.register_active_token(instance_id, &node_id, idx, &fork_token)
+                            .await?;
                         queue.push_back(fork_token);
                     }
                 }
@@ -584,10 +594,13 @@ impl WorkflowEngine {
             }
 
             BpmnElement::UserTask(assignee) => {
-                let pending_timers =
+                let (pending_timers, pending_msgs) =
                     setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
                     self.pending_timers.insert(t.id, t);
+                }
+                for m in pending_msgs {
+                    self.pending_message_catches.insert(m.id, m);
                 }
 
                 let pending = PendingUserTask {
@@ -618,12 +631,16 @@ impl WorkflowEngine {
                 Ok(NextAction::WaitForUser(pending))
             }
 
-            BpmnElement::ScriptTask { script, multi_instance: _ } => {
+            BpmnElement::ScriptTask {
+                script,
+                multi_instance: _,
+            } => {
                 // Execute the Rhai script with the token's variables as scope
                 let script_engine = crate::engine::create_script_engine();
                 let mut scope = rhai::Scope::new();
                 for (k, v) in &token.variables {
-                    scope.push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(rhai::Dynamic::UNIT));
+                    scope
+                        .push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(rhai::Dynamic::UNIT));
                 }
 
                 script_engine
@@ -637,30 +654,42 @@ impl WorkflowEngine {
                     }
                 }
 
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id).await?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
+                    .await?;
 
                 let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
                 token.current_node = next.clone();
 
-                let inst_arc = self.instances.get(&instance_id).await
+                let inst_arc = self
+                    .instances
+                    .get(&instance_id)
+                    .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
                 inst.variables = token.variables.clone();
-                inst.audit_log.push(format!("📜 Script task '{current_id}' executed"));
+                inst.audit_log
+                    .push(format!("📜 Script task '{current_id}' executed"));
 
                 Ok(NextAction::Continue(token.clone()))
             }
-            BpmnElement::SendTask { message_name, multi_instance: _ } => {
+            BpmnElement::SendTask {
+                message_name,
+                multi_instance: _,
+            } => {
                 tracing::info!(
                     "Instance {instance_id}: send task '{current_id}' publishing message '{message_name}'"
                 );
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id).await?;
+                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
+                    .await?;
 
                 let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
                 token.current_node = next.clone();
 
-                let inst_arc = self.instances.get(&instance_id).await
+                let inst_arc = self
+                    .instances
+                    .get(&instance_id)
+                    .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
@@ -670,11 +699,17 @@ impl WorkflowEngine {
 
                 Ok(NextAction::Continue(token.clone()))
             }
-            BpmnElement::ServiceTask { topic, multi_instance: _ } => {
-                let pending_timers =
+            BpmnElement::ServiceTask {
+                topic,
+                multi_instance: _,
+            } => {
+                let (pending_timers, pending_msgs) =
                     setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
                     self.pending_timers.insert(t.id, t);
+                }
+                for m in pending_msgs {
+                    self.pending_message_catches.insert(m.id, m);
                 }
 
                 let svc_task = PendingServiceTask {
@@ -875,10 +910,13 @@ impl WorkflowEngine {
             }
 
             BpmnElement::CallActivity { called_element } => {
-                let pending_timers =
+                let (pending_timers, pending_msgs) =
                     setup_boundary_events(&def_clone, &current_id, instance_id, token);
                 for t in pending_timers {
                     self.pending_timers.insert(t.id, t);
+                }
+                for m in pending_msgs {
+                    self.pending_message_catches.insert(m.id, m);
                 }
 
                 let inst_arc = self
@@ -931,7 +969,9 @@ impl WorkflowEngine {
                 })
             }
 
-            BpmnElement::BoundaryTimerEvent { .. } | BpmnElement::BoundaryErrorEvent { .. } => {
+            BpmnElement::BoundaryTimerEvent { .. }
+            | BpmnElement::BoundaryMessageEvent { .. }
+            | BpmnElement::BoundaryErrorEvent { .. } => {
                 let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
                 self.run_end_scripts(instance_id, token, &def_clone, &current_id)
                     .await?;
@@ -1200,6 +1240,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let inst = inst_arc.read().await;
+        if !inst.tokens.is_empty() {
+            return Ok(false);
+        }
         if inst.active_tokens.is_empty() {
             // Linear flow
             return Ok(true);

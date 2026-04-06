@@ -130,7 +130,7 @@ Die Engine orientiert sich an einem zweckmäßigen und performanten Kern-Feature
 
 - **Weitere Task-Typen:** `BusinessRuleTask` (kein DMN-Support), `ManualTask`, `ReceiveTask`.
 - **Spezifische Intermediate/Boundary Events:** `SignalEvent`, `EscalationEvent`, `CompensationEvent`, `CancelEvent`, `LinkEvent`.
-- **Non-Interrupting Boundary Events:** Boundary Events arbeiten derzeit standardmäßig "Interrupting" (der angeheftete Task wird sofort abgebrochen). Non-Interrupting Events werden noch nicht unterstützt.
+
 - **Erweiterte Sub-Prozesse:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
 - **Spezialisierte Gateways:** `Complex Gateway`.
 - **Data Objects / Data Stores:** Visuelle Datenobjekte und Assoziationen (`Data Input/Output Association`) werden ignoriert. Der Datenaustausch erfolgt ausnahmslos über den JSON-Variablen-State (`HashMap<String, serde_json::Value>`).

@@ -97,6 +97,21 @@ impl WorkflowEngine {
             }
 
             // Retrieve token from central store
+            let def = self
+                .definitions
+                .get(&def_key)
+                .await
+                .ok_or(EngineError::NoSuchDefinition(def_key))?;
+
+            let mut is_non_interrupting = false;
+            if let Some(crate::model::BpmnElement::BoundaryTimerEvent {
+                cancel_activity: false,
+                ..
+            }) = def.nodes.get(&timer.node_id)
+            {
+                is_non_interrupting = true;
+            }
+
             let mut token = {
                 let inst_arc = self
                     .instances
@@ -104,18 +119,91 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.tokens.remove(&timer.token_id).ok_or_else(|| {
-                    EngineError::InvalidDefinition(format!(
-                        "Token {} not found in instance",
-                        timer.token_id
-                    ))
-                })?
+
+                if is_non_interrupting {
+                    // Clone the token, leave the original waiting
+                    let mut original = inst
+                        .tokens
+                        .get(&timer.token_id)
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(format!(
+                                "Token {} not found in instance",
+                                timer.token_id
+                            ))
+                        })?
+                        .clone();
+
+                    original.id = uuid::Uuid::new_v4();
+
+                    // Add cloned token as parallel token
+                    inst.tokens.insert(original.id, original.clone());
+
+                    let active = crate::engine::types::ActiveToken {
+                        token: original.clone(),
+                        completed: false,
+                        fork_id: Some(original.current_node.clone()),
+                        branch_index: inst.active_tokens.len(),
+                    };
+                    inst.active_tokens.push(active);
+
+                    if !matches!(
+                        inst.state,
+                        crate::engine::types::InstanceState::ParallelExecution { .. }
+                    ) {
+                        inst.state = crate::engine::types::InstanceState::ParallelExecution {
+                            active_token_count: inst.tokens.len(),
+                        };
+                    }
+
+                    original
+                } else {
+                    // Interrupting timer: Remove original token
+                    let removed = inst.tokens.remove(&timer.token_id).ok_or_else(|| {
+                        EngineError::InvalidDefinition(format!(
+                            "Token {} not found in instance",
+                            timer.token_id
+                        ))
+                    })?;
+                    // Clean up orphaned pending tasks that matched this token
+                    removed
+                }
             };
-            let def = self
-                .definitions
-                .get(&def_key)
-                .await
-                .ok_or(EngineError::NoSuchDefinition(def_key))?;
+
+            // Clean up orphaned tasks outside the instance lock
+            if !is_non_interrupting {
+                let node_to_cancel = &token.current_node;
+
+                // Remove User Tasks
+                let mut to_remove_ut = Vec::new();
+                for r in self.pending_user_tasks.iter() {
+                    if r.value().instance_id == timer.instance_id
+                        && r.value().node_id == *node_to_cancel
+                        && r.value().token_id == timer.token_id
+                    {
+                        to_remove_ut.push(*r.key());
+                    }
+                }
+                for id in to_remove_ut {
+                    self.pending_user_tasks.remove(&id);
+                    self.remove_persisted_user_task(id).await;
+                }
+
+                // Remove Service Tasks
+                let mut to_remove_st = Vec::new();
+                for r in self.pending_service_tasks.iter() {
+                    if r.value().instance_id == timer.instance_id
+                        && r.value().node_id == *node_to_cancel
+                        && r.value().token_id == timer.token_id
+                    {
+                        to_remove_st.push(*r.key());
+                    }
+                }
+                for id in to_remove_st {
+                    self.pending_service_tasks.remove(&id);
+                    self.remove_persisted_service_task(id).await;
+                }
+            }
+
             let next = crate::engine::executor::resolve_next_target(
                 &def,
                 &timer.node_id,
@@ -143,7 +231,8 @@ impl WorkflowEngine {
                     if should_repeat {
                         let now = chrono::Utc::now();
                         if let Some(next_expiry) = def.next_expiry(now) {
-                            let new_remaining = timer.remaining_repetitions.map(|r| r.saturating_sub(1));
+                            let new_remaining =
+                                timer.remaining_repetitions.map(|r| r.saturating_sub(1));
                             let new_pending = crate::engine::types::PendingTimer {
                                 id: uuid::Uuid::new_v4(),
                                 instance_id: timer.instance_id,

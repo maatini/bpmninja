@@ -216,6 +216,8 @@ pub(crate) struct BpmnEndEvent {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "errorEventDefinition")]
     pub error_event_definition: Option<BpmnErrorEventDefinition>,
+    #[serde(rename = "messageEventDefinition")]
+    pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "terminateEventDefinition")]
     pub terminate_event_definition: Option<IgnoredElement>,
 }
@@ -365,6 +367,8 @@ pub(crate) struct BpmnBoundaryEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "errorEventDefinition")]
     pub error_event_definition: Option<BpmnErrorEventDefinition>,
+    #[serde(rename = "messageEventDefinition")]
+    pub message_event_definition: Option<BpmnMessageEventDefinition>,
 }
 
 #[allow(dead_code)]

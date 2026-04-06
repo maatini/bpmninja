@@ -43,7 +43,8 @@ async fn setup_linear_engine() -> (WorkflowEngine, Uuid) {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "validate".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("ut", BpmnElement::UserTask("alice".into()))
         .node("end", BpmnElement::EndEvent)
@@ -67,7 +68,8 @@ async fn conditional_routing_on_service_task() {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end_a", BpmnElement::EndEvent)
         .node("end_b", BpmnElement::EndEvent)
@@ -191,7 +193,10 @@ async fn timer_start_succeeds() {
     let dur = Duration::from_secs(60);
 
     let def = ProcessDefinitionBuilder::new("timer_proc")
-        .node("ts", BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(dur)))
+        .node(
+            "ts",
+            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(dur)),
+        )
         .node("end", BpmnElement::EndEvent)
         .flow("ts", "end")
         .build()
@@ -213,7 +218,12 @@ async fn timer_mismatch_gives_error() {
     let engine = WorkflowEngine::new();
 
     let def = ProcessDefinitionBuilder::new("timer_proc")
-        .node("ts", BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(Duration::from_secs(60))))
+        .node(
+            "ts",
+            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(
+                Duration::from_secs(60),
+            )),
+        )
         .node("end", BpmnElement::EndEvent)
         .flow("ts", "end")
         .build()
@@ -231,7 +241,12 @@ async fn plain_start_rejects_timer_def() {
     let engine = WorkflowEngine::new();
 
     let def = ProcessDefinitionBuilder::new("timer_proc")
-        .node("ts", BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(Duration::from_secs(5))))
+        .node(
+            "ts",
+            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(
+                Duration::from_secs(5),
+            )),
+        )
         .node("end", BpmnElement::EndEvent)
         .flow("ts", "end")
         .build()
@@ -348,13 +363,15 @@ async fn exclusive_gateway_takes_matching_path() {
             "high",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "low",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
@@ -405,13 +422,15 @@ async fn exclusive_gateway_uses_default_when_no_match() {
             "high",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "low",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
@@ -490,13 +509,15 @@ async fn inclusive_gateway_forks_multiple_paths() {
             "svc_a",
             BpmnElement::ServiceTask {
                 topic: "track_a".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "svc_b",
             BpmnElement::ServiceTask {
                 topic: "track_b".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
@@ -546,13 +567,15 @@ async fn inclusive_gateway_single_match_no_fork() {
             "a",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "b",
             BpmnElement::ServiceTask {
                 topic: "noop".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
@@ -800,7 +823,8 @@ fn build_script_test_definition() -> ProcessDefinition {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "calculate".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "svc")
@@ -916,13 +940,15 @@ async fn parallel_gateway_forks_and_joins() {
             "task_a",
             BpmnElement::ServiceTask {
                 topic: "task_a".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "task_b",
             BpmnElement::ServiceTask {
                 topic: "task_b".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("join", BpmnElement::ParallelGateway)
         .node("end", BpmnElement::EndEvent)
@@ -1039,7 +1065,8 @@ async fn service_task_fail_and_retries() {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "fail_test".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "svc")
@@ -1094,7 +1121,8 @@ async fn service_task_extend_lock() {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "ext".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "svc")
@@ -1138,7 +1166,8 @@ async fn service_task_handle_bpmn_error() {
             "svc",
             BpmnElement::ServiceTask {
                 topic: "err".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "svc")
@@ -1269,7 +1298,8 @@ async fn mutation_fetch_service_task_boundary() {
             "t1",
             BpmnElement::ServiceTask {
                 topic: "bound".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "t1")
@@ -1313,7 +1343,8 @@ async fn mutation_find_downstream_join() {
             "dummy",
             BpmnElement::ServiceTask {
                 topic: "dummy".to_string(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw_split")
@@ -1377,7 +1408,9 @@ async fn timer_catch_event_succeeds() {
         .node("start", BpmnElement::StartEvent)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_millis(50))),
+            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                std::time::Duration::from_millis(50),
+            )),
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "timer")
@@ -1426,7 +1459,9 @@ async fn boundary_timer_event_cancels_task() {
             "bound_timer",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_millis(50)),
+                timer: crate::timer_definition::TimerDefinition::Duration(
+                    std::time::Duration::from_millis(50),
+                ),
                 cancel_activity: true,
             },
         )
@@ -1462,7 +1497,8 @@ async fn boundary_error_event_catches_error() {
             "task",
             BpmnElement::ServiceTask {
                 topic: "err_topic".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "bound_err",
@@ -1601,7 +1637,9 @@ async fn in_memory_simultaneous_timer_and_message_race() {
         .node("fork", BpmnElement::ParallelGateway)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_millis(50))),
+            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                std::time::Duration::from_millis(50),
+            )),
         )
         .node(
             "msg",
@@ -1842,10 +1880,28 @@ async fn test_nested_parallel_gateways() {
     let def = ProcessDefinitionBuilder::new("nested")
         .node("start", BpmnElement::StartEvent)
         .node("s1", BpmnElement::ParallelGateway)
-        .node("t1", BpmnElement::ServiceTask { topic: "t".into(), multi_instance: None })
+        .node(
+            "t1",
+            BpmnElement::ServiceTask {
+                topic: "t".into(),
+                multi_instance: None,
+            },
+        )
         .node("s2", BpmnElement::ParallelGateway)
-        .node("t2", BpmnElement::ServiceTask { topic: "t".into(), multi_instance: None })
-        .node("t3", BpmnElement::ServiceTask { topic: "t".into(), multi_instance: None })
+        .node(
+            "t2",
+            BpmnElement::ServiceTask {
+                topic: "t".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "t3",
+            BpmnElement::ServiceTask {
+                topic: "t".into(),
+                multi_instance: None,
+            },
+        )
         .node("j2", BpmnElement::ParallelGateway)
         .node("j1", BpmnElement::ParallelGateway)
         .node("end", BpmnElement::EndEvent)
@@ -2070,7 +2126,9 @@ async fn event_based_gateway_timer_wins() {
         .node("gw", BpmnElement::EventBasedGateway)
         .node(
             "catch_timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(Duration::from_millis(50))),
+            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                Duration::from_millis(50),
+            )),
         )
         .node(
             "catch_msg",
@@ -2124,7 +2182,9 @@ async fn event_based_gateway_message_wins() {
         .node("gw", BpmnElement::EventBasedGateway)
         .node(
             "catch_timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(Duration::from_millis(5000))),
+            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                Duration::from_millis(5000),
+            )),
         ) // Long timer
         .node(
             "catch_msg",
@@ -2162,4 +2222,255 @@ async fn event_based_gateway_message_wins() {
     let log = engine.get_audit_log(instance_id).await.unwrap();
     assert!(log.iter().any(|l| l.contains("cancelled")));
     assert!(log.iter().any(|l| l.contains("'end_msg'")));
+}
+
+#[tokio::test]
+async fn test_non_interrupting_timer_boundary() {
+    // A process with a user task that has a non-interrupting timer boundary.
+    // The timer fires: the process forks to a second user task, while the first ONE is STILL alive!
+    let mut eng = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("test_bnd")
+        .node("start", BpmnElement::StartEvent)
+        .flow("start", "task")
+        .node("task", BpmnElement::UserTask("User1".into()))
+        .node(
+            "timer_bnd",
+            BpmnElement::BoundaryTimerEvent {
+                attached_to: "task".into(),
+                timer: crate::timer_definition::TimerDefinition::Duration(
+                    std::time::Duration::from_secs(1),
+                ),
+                cancel_activity: false, // NON-INTERRUPTING
+            },
+        )
+        // From timer -> goes to task2
+        .flow("timer_bnd", "task2")
+        .node("task2", BpmnElement::UserTask("User1".into()))
+        .flow("task2", "end2")
+        .node("end2", BpmnElement::EndEvent)
+        // From main task -> goes to end1
+        .flow("task", "end1")
+        .node("end1", BpmnElement::EndEvent)
+        .build()
+        .unwrap();
+
+    let (def_key, _) = eng.deploy_definition(def).await;
+    let inst_id = eng
+        .start_instance_with_variables(def_key, Default::default())
+        .await
+        .unwrap();
+
+    // The user task should be pending
+    let tasks = eng
+        .get_pending_user_tasks()
+        .into_iter()
+        .filter(|t| t.instance_id == inst_id)
+        .collect::<Vec<_>>();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].node_id, "task");
+
+    // The timer should be pending
+    let timers = eng
+        .pending_timers
+        .iter()
+        .map(|r| r.value().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(timers.len(), 1);
+
+    // Simulate timer firing
+    let mut pending = eng.pending_timers.get_mut(&timers[0].id).unwrap();
+    pending.expires_at = chrono::Utc::now() - chrono::Duration::hours(1);
+    drop(pending);
+
+    eng.process_timers().await.unwrap();
+
+    // Now, there should be TWO user tasks pending: 'task' and 'task2'
+    let tasks = eng
+        .get_pending_user_tasks()
+        .into_iter()
+        .filter(|t| t.instance_id == inst_id)
+        .collect::<Vec<_>>();
+    let node_ids: std::collections::HashSet<_> = tasks.iter().map(|t| t.node_id.clone()).collect();
+    assert_eq!(node_ids.len(), 2, "Expected both tasks to be pending");
+    assert!(node_ids.contains("task"));
+    assert!(node_ids.contains("task2"));
+
+    // Instance state should be parallel
+    {
+        let inst_lk = eng.instances.get(&inst_id).await.unwrap();
+        let inst = inst_lk.read().await;
+        assert!(matches!(
+            inst.state,
+            crate::engine::types::InstanceState::ParallelExecution {
+                active_token_count: 2
+            }
+        ));
+    }
+
+    // Complete first task
+    let task1_id = tasks.iter().find(|t| t.node_id == "task").unwrap().task_id;
+    eng.complete_user_task(task1_id, Default::default())
+        .await
+        .unwrap();
+
+    // Process still running (waiting on task2)
+    {
+        let inst_lk = eng.instances.get(&inst_id).await.unwrap();
+        let inst = inst_lk.read().await;
+        assert!(!matches!(
+            inst.state,
+            crate::engine::types::InstanceState::Completed
+        ));
+    }
+
+    // Complete second task
+    let task2_id = tasks.iter().find(|t| t.node_id == "task2").unwrap().task_id;
+    eng.complete_user_task(task2_id, Default::default())
+        .await
+        .unwrap();
+
+    // Now completed
+    {
+        let inst_lk = eng.instances.get(&inst_id).await.unwrap();
+        let inst = inst_lk.read().await;
+        assert!(matches!(
+            inst.state,
+            crate::engine::types::InstanceState::Completed
+        ));
+    }
+}
+
+#[tokio::test]
+async fn test_interrupting_timer_boundary_cleanup() {
+    let mut eng = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("test_bnd_2")
+        .node("start", BpmnElement::StartEvent)
+        .flow("start", "task")
+        .node(
+            "task",
+            BpmnElement::ServiceTask {
+                topic: "test".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "timer_bnd",
+            BpmnElement::BoundaryTimerEvent {
+                attached_to: "task".into(),
+                timer: crate::timer_definition::TimerDefinition::Duration(
+                    std::time::Duration::from_secs(1),
+                ),
+                cancel_activity: true, // INTERRUPTING
+            },
+        )
+        .flow("timer_bnd", "end")
+        .flow("task", "end")
+        .node("end", BpmnElement::EndEvent)
+        .build()
+        .unwrap();
+
+    let (def_key, _) = eng.deploy_definition(def).await;
+    let inst_id = eng
+        .start_instance_with_variables(def_key, Default::default())
+        .await
+        .unwrap();
+
+    let service_tasks = eng
+        .get_pending_service_tasks()
+        .into_iter()
+        .filter(|t| t.instance_id == inst_id)
+        .collect::<Vec<_>>();
+    assert_eq!(service_tasks.len(), 1);
+
+    let timers = eng
+        .pending_timers
+        .iter()
+        .map(|r| r.value().clone())
+        .collect::<Vec<_>>();
+    let tid = timers[0].id;
+    let mut pending = eng.pending_timers.get_mut(&tid).unwrap();
+    pending.expires_at = chrono::Utc::now() - chrono::Duration::hours(1);
+    drop(pending);
+
+    eng.process_timers().await.unwrap();
+
+    // The service task should be DELETED, not just orphaned token
+    let service_tasks_after = eng
+        .get_pending_service_tasks()
+        .into_iter()
+        .filter(|t| t.instance_id == inst_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        service_tasks_after.len(),
+        0,
+        "Interrupting boundary event should delete the pending service task"
+    );
+
+    let inst_lk = eng.instances.get(&inst_id).await.unwrap();
+    let inst = inst_lk.read().await;
+    assert!(matches!(
+        inst.state,
+        crate::engine::types::InstanceState::Completed
+    ));
+}
+
+#[tokio::test]
+async fn test_non_interrupting_message_boundary() {
+    let mut eng = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("test_bnd_3")
+        .node("start", BpmnElement::StartEvent)
+        .flow("start", "task")
+        .node("task", BpmnElement::UserTask("User1".into()))
+        .node(
+            "msg_bnd",
+            BpmnElement::BoundaryMessageEvent {
+                attached_to: "task".into(),
+                message_name: "async_signal".into(),
+                cancel_activity: false, // NON-INTERRUPTING
+            },
+        )
+        .flow("msg_bnd", "end2")
+        .node("end2", BpmnElement::EndEvent)
+        .flow("task", "end1")
+        .node("end1", BpmnElement::EndEvent)
+        .build()
+        .unwrap();
+
+    let (def_key, _) = eng.deploy_definition(def).await;
+    let inst_id = eng
+        .start_instance_with_variables(def_key, Default::default())
+        .await
+        .unwrap();
+
+    // Trigger message
+    eng.correlate_message("async_signal".into(), None, Default::default())
+        .await
+        .unwrap();
+
+    // The user task should STILL be pending!
+    let tasks = eng
+        .get_pending_user_tasks()
+        .into_iter()
+        .filter(|t| t.instance_id == inst_id)
+        .collect::<Vec<_>>();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].node_id, "task");
+
+    // Instance state should be parallel, but one branch (end2) just finished.
+    // Wait, the message correlates, starts parallel branch, immediately hits EndEvent.
+    // So the state parallel count decreased by 1 immediately.
+    // Let's just check the instance is not fully completed.
+    let inst_lk = eng.instances.get(&inst_id).await.unwrap();
+    assert!(!matches!(
+        inst_lk.read().await.state,
+        crate::engine::types::InstanceState::Completed
+    ));
+
+    eng.complete_user_task(tasks[0].task_id, Default::default())
+        .await
+        .unwrap();
+    assert!(matches!(
+        inst_lk.read().await.state,
+        crate::engine::types::InstanceState::Completed
+    ));
 }

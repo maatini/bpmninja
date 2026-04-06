@@ -11,24 +11,39 @@ pub(crate) fn setup_boundary_events(
     attached_node_id: &str,
     instance_id: Uuid,
     token: &Token,
-) -> Vec<PendingTimer> {
+) -> (
+    Vec<PendingTimer>,
+    Vec<crate::engine::types::PendingMessageCatch>,
+) {
     let mut pending_timers = Vec::new();
+    let mut pending_msgs = Vec::new();
 
-    let mut bounds = Vec::new();
+    let mut bounds_timers = Vec::new();
+    let mut bounds_msgs = Vec::new();
+
     for (node_id, node) in &def.nodes {
         if let BpmnElement::BoundaryTimerEvent {
+            attached_to, timer, ..
+        } = node
+        {
+            if attached_to == attached_node_id {
+                bounds_timers.push((node_id.clone(), timer.clone()));
+            }
+        }
+
+        if let BpmnElement::BoundaryMessageEvent {
             attached_to,
-            timer,
+            message_name,
             ..
         } = node
         {
             if attached_to == attached_node_id {
-                bounds.push((node_id.clone(), timer.clone()));
+                bounds_msgs.push((node_id.clone(), message_name.clone()));
             }
         }
     }
 
-    for (node_id, timer_def) in bounds {
+    for (node_id, timer_def) in bounds_timers {
         let now = Utc::now();
         let expires_at = timer_def.next_expiry(now).unwrap_or(now);
         let pending = PendingTimer {
@@ -43,5 +58,16 @@ pub(crate) fn setup_boundary_events(
         pending_timers.push(pending);
     }
 
-    pending_timers
+    for (node_id, message_name) in bounds_msgs {
+        let pending = crate::engine::types::PendingMessageCatch {
+            id: Uuid::new_v4(),
+            instance_id,
+            node_id,
+            message_name,
+            token_id: token.id,
+        };
+        pending_msgs.push(pending);
+    }
+
+    (pending_timers, pending_msgs)
 }

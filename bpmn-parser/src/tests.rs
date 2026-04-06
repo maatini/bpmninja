@@ -139,7 +139,9 @@ fn parse_timer_start() {
 
     let def = parse_bpmn_xml(xml).unwrap();
     match def.nodes.get("start1").unwrap() {
-        BpmnElement::TimerStartEvent(engine_core::timer_definition::TimerDefinition::Duration(d)) => assert_eq!(d.as_secs(), 60),
+        BpmnElement::TimerStartEvent(engine_core::timer_definition::TimerDefinition::Duration(
+            d,
+        )) => assert_eq!(d.as_secs(), 60),
         _ => panic!("Expected TimerStartEvent"),
     }
 }
@@ -380,7 +382,9 @@ fn parse_timer_catch_event() {
 
     let def = parse_bpmn_xml(xml).unwrap();
     match def.nodes.get("wait").unwrap() {
-        BpmnElement::TimerCatchEvent(engine_core::timer_definition::TimerDefinition::Duration(d)) => assert_eq!(d.as_secs(), 30),
+        BpmnElement::TimerCatchEvent(engine_core::timer_definition::TimerDefinition::Duration(
+            d,
+        )) => assert_eq!(d.as_secs(), 30),
         other => panic!("Expected TimerCatchEvent, got {:?}", other),
     }
 }
@@ -415,7 +419,9 @@ fn parse_boundary_timer_event() {
         } => {
             assert_eq!(attached_to, "task1");
             match timer {
-                engine_core::timer_definition::TimerDefinition::Duration(d) => assert_eq!(d.as_secs(), 300),
+                engine_core::timer_definition::TimerDefinition::Duration(d) => {
+                    assert_eq!(d.as_secs(), 300)
+                }
                 _ => panic!("Expected Duration timer"),
             }
             assert!(*cancel_activity);
@@ -620,7 +626,10 @@ fn parse_regular_subprocess_accepted() {
 
     // Regular embedded sub-processes are now fully supported.
     let result = parse_bpmn_xml(xml);
-    assert!(result.is_ok(), "Regular embedded sub-process should be parsed");
+    assert!(
+        result.is_ok(),
+        "Regular embedded sub-process should be parsed"
+    );
 }
 
 #[test]
@@ -641,7 +650,9 @@ fn parse_time_date() {
 
     let def = parse_bpmn_xml(xml).unwrap();
     match def.nodes.get("s1").unwrap() {
-        BpmnElement::TimerStartEvent(engine_core::timer_definition::TimerDefinition::AbsoluteDate(dt)) => {
+        BpmnElement::TimerStartEvent(
+            engine_core::timer_definition::TimerDefinition::AbsoluteDate(dt),
+        ) => {
             assert_eq!(dt.to_rfc3339(), "2026-04-06T14:30:00+00:00");
         }
         _ => panic!("Expected TimerStartEvent with AbsoluteDate"),
@@ -666,7 +677,12 @@ fn parse_time_cycle_cron() {
 
     let def = parse_bpmn_xml(xml).unwrap();
     match def.nodes.get("s1").unwrap() {
-        BpmnElement::TimerStartEvent(engine_core::timer_definition::TimerDefinition::CronCycle { expression, max_repetitions }) => {
+        BpmnElement::TimerStartEvent(
+            engine_core::timer_definition::TimerDefinition::CronCycle {
+                expression,
+                max_repetitions,
+            },
+        ) => {
             assert_eq!(expression, "*/5 * * * *");
             assert_eq!(*max_repetitions, None);
         }
@@ -692,7 +708,12 @@ fn parse_time_cycle_repeating_interval() {
 
     let def = parse_bpmn_xml(xml).unwrap();
     match def.nodes.get("s1").unwrap() {
-        BpmnElement::TimerStartEvent(engine_core::timer_definition::TimerDefinition::RepeatingInterval { repetitions, interval }) => {
+        BpmnElement::TimerStartEvent(
+            engine_core::timer_definition::TimerDefinition::RepeatingInterval {
+                repetitions,
+                interval,
+            },
+        ) => {
             assert_eq!(*repetitions, Some(3));
             assert_eq!(interval.as_secs(), 36000);
         }
@@ -755,7 +776,9 @@ fn parse_send_task() {
     "#;
     let def = parse_bpmn_xml(xml).unwrap();
     let node = def.get_node("SendTask_1").unwrap();
-    assert!(matches!(node, BpmnElement::SendTask { message_name, .. } if message_name == "OrderShipped"));
+    assert!(
+        matches!(node, BpmnElement::SendTask { message_name, .. } if message_name == "OrderShipped")
+    );
 }
 
 #[test]
@@ -776,5 +799,7 @@ fn parse_intermediate_message_throw() {
     "#;
     let def = parse_bpmn_xml(xml).unwrap();
     let node = def.get_node("Throw_1").unwrap();
-    assert!(matches!(node, BpmnElement::SendTask { message_name, .. } if message_name == "OrderShipped"));
+    assert!(
+        matches!(node, BpmnElement::SendTask { message_name, .. } if message_name == "OrderShipped")
+    );
 }

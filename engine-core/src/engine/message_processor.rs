@@ -86,6 +86,30 @@ impl WorkflowEngine {
                 continue;
             }
 
+            let def_key = {
+                let inst_arc = self
+                    .instances
+                    .get(&catch.instance_id)
+                    .await
+                    .ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
+                inst_arc.read().await.definition_key
+            };
+
+            let def = self
+                .definitions
+                .get(&def_key)
+                .await
+                .ok_or(EngineError::NoSuchDefinition(def_key))?;
+
+            let mut is_non_interrupting = false;
+            if let Some(crate::model::BpmnElement::BoundaryMessageEvent {
+                cancel_activity: false,
+                ..
+            }) = def.nodes.get(&catch.node_id)
+            {
+                is_non_interrupting = true;
+            }
+
             // Retrieve token from central store
             let mut token = {
                 let inst_arc = self
@@ -94,13 +118,79 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.tokens.remove(&catch.token_id).ok_or_else(|| {
-                    EngineError::InvalidDefinition(format!(
-                        "Token {} not found in instance",
-                        catch.token_id
-                    ))
-                })?
+
+                if is_non_interrupting {
+                    let mut original = inst
+                        .tokens
+                        .get(&catch.token_id)
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(format!(
+                                "Token {} not found in instance",
+                                catch.token_id
+                            ))
+                        })?
+                        .clone();
+
+                    original.id = uuid::Uuid::new_v4();
+                    inst.tokens.insert(original.id, original.clone());
+
+                    let active = crate::engine::types::ActiveToken {
+                        token: original.clone(),
+                        completed: false,
+                        fork_id: Some(original.current_node.clone()),
+                        branch_index: inst.active_tokens.len(),
+                    };
+                    inst.active_tokens.push(active);
+
+                    if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                        inst.state = InstanceState::ParallelExecution {
+                            active_token_count: inst.tokens.len(),
+                        };
+                    }
+
+                    original
+                } else {
+                    inst.tokens.remove(&catch.token_id).ok_or_else(|| {
+                        EngineError::InvalidDefinition(format!(
+                            "Token {} not found in instance",
+                            catch.token_id
+                        ))
+                    })?
+                }
             };
+
+            if !is_non_interrupting {
+                let node_to_cancel = &token.current_node;
+
+                let mut to_remove_ut = Vec::new();
+                for r in self.pending_user_tasks.iter() {
+                    if r.value().instance_id == catch.instance_id
+                        && r.value().node_id == *node_to_cancel
+                        && r.value().token_id == catch.token_id
+                    {
+                        to_remove_ut.push(*r.key());
+                    }
+                }
+                for id in to_remove_ut {
+                    self.pending_user_tasks.remove(&id);
+                    self.remove_persisted_user_task(id).await;
+                }
+
+                let mut to_remove_st = Vec::new();
+                for r in self.pending_service_tasks.iter() {
+                    if r.value().instance_id == catch.instance_id
+                        && r.value().node_id == *node_to_cancel
+                        && r.value().token_id == catch.token_id
+                    {
+                        to_remove_st.push(*r.key());
+                    }
+                }
+                for id in to_remove_st {
+                    self.pending_service_tasks.remove(&id);
+                    self.remove_persisted_service_task(id).await;
+                }
+            }
+
             token.variables.extend(variables.clone());
 
             let old_state = if let Some(lk) = self.instances.get(&catch.instance_id).await {
@@ -108,14 +198,17 @@ impl WorkflowEngine {
             } else {
                 None
             };
-            let def_key = {
+
+            let _def_key_audit = {
                 let inst_arc = self
                     .instances
                     .get(&catch.instance_id)
                     .await
                     .ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.state = InstanceState::Running;
+                if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                    inst.state = InstanceState::Running;
+                }
                 inst.audit_log.push(format!(
                     "✉️ Msg '{}' correlated, resuming '{catch_id}'",
                     message_name

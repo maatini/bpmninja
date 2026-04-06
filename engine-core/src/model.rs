@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::timer_definition::TimerDefinition;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -92,6 +92,12 @@ pub enum BpmnElement {
     MessageStartEvent { message_name: String },
     /// An intermediate catch event waiting for a named message.
     MessageCatchEvent { message_name: String },
+    /// A boundary message event attached to an activity.
+    BoundaryMessageEvent {
+        attached_to: String,
+        message_name: String,
+        cancel_activity: bool,
+    },
     /// A boundary error event attached to an activity.
     BoundaryErrorEvent {
         attached_to: String,
@@ -334,7 +340,15 @@ impl ProcessDefinition {
         // --- at least one end event ---
         let end_count = nodes
             .values()
-            .filter(|e| matches!(e, BpmnElement::EndEvent | BpmnElement::ErrorEndEvent { .. } | BpmnElement::TerminateEndEvent | BpmnElement::SubProcessEndEvent { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    BpmnElement::EndEvent
+                        | BpmnElement::ErrorEndEvent { .. }
+                        | BpmnElement::TerminateEndEvent
+                        | BpmnElement::SubProcessEndEvent { .. }
+                )
+            })
             .count();
         if end_count == 0 {
             return Err(EngineError::InvalidDefinition(
@@ -357,6 +371,7 @@ impl ProcessDefinition {
         // --- boundary events must attach to existing tasks ---
         for (node_id, element) in &nodes {
             if let BpmnElement::BoundaryTimerEvent { attached_to, .. }
+            | BpmnElement::BoundaryMessageEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. } = element
             {
                 if !nodes.contains_key(attached_to) {
@@ -371,7 +386,11 @@ impl ProcessDefinition {
         for (node_id, element) in &nodes {
             if matches!(
                 element,
-                BpmnElement::EndEvent | BpmnElement::ErrorEndEvent { .. } | BpmnElement::TerminateEndEvent | BpmnElement::SubProcessEndEvent { .. } | BpmnElement::EmbeddedSubProcess { .. }
+                BpmnElement::EndEvent
+                    | BpmnElement::ErrorEndEvent { .. }
+                    | BpmnElement::TerminateEndEvent
+                    | BpmnElement::SubProcessEndEvent { .. }
+                    | BpmnElement::EmbeddedSubProcess { .. }
             ) {
                 continue;
             }
@@ -643,7 +662,8 @@ mod tests {
                 "svc",
                 BpmnElement::ServiceTask {
                     topic: "do_it".into(),
-                 multi_instance: None },
+                    multi_instance: None,
+                },
             )
             .node("end", BpmnElement::EndEvent)
             .flow("start", "svc")
@@ -691,7 +711,8 @@ mod tests {
                 "orphan",
                 BpmnElement::ServiceTask {
                     topic: "noop".into(),
-                 multi_instance: None },
+                    multi_instance: None,
+                },
             )
             .node("end", BpmnElement::EndEvent)
             .flow("start", "end")
@@ -710,7 +731,8 @@ mod tests {
                 "svc",
                 BpmnElement::ServiceTask {
                     topic: "action".into(),
-                 multi_instance: None },
+                    multi_instance: None,
+                },
             )
             .node("end", BpmnElement::EndEvent)
             .flow("start", "svc")
@@ -721,8 +743,9 @@ mod tests {
         assert_eq!(
             def.get_node("svc"),
             Some(&BpmnElement::ServiceTask {
-                topic: "action".into()
-             , multi_instance: None })
+                topic: "action".into(),
+                multi_instance: None
+            })
         );
         assert_eq!(def.next_node("start"), Some("svc"));
         assert_eq!(def.next_node("end"), None);
@@ -747,7 +770,12 @@ mod tests {
     #[test]
     fn timer_start_event_definition() {
         let def = ProcessDefinitionBuilder::new("timer")
-            .node("ts", BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_secs(5))))
+            .node(
+                "ts",
+                BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(
+                    std::time::Duration::from_secs(5),
+                )),
+            )
             .node("end", BpmnElement::EndEvent)
             .flow("ts", "end")
             .build();
@@ -813,11 +841,14 @@ mod tests {
                 "task",
                 BpmnElement::ServiceTask {
                     topic: "noop".into(),
-                 multi_instance: None },
+                    multi_instance: None,
+                },
             )
             .node(
                 "catch",
-                BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_secs(5))),
+                BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                    std::time::Duration::from_secs(5),
+                )),
             )
             .node("end", BpmnElement::EndEvent)
             .flow("start", "gw")

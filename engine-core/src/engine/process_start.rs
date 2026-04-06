@@ -364,7 +364,9 @@ impl WorkflowEngine {
         match start_element {
             BpmnElement::TimerStartEvent(expected_timer) => {
                 let is_match = match expected_timer {
-                    crate::timer_definition::TimerDefinition::Duration(d) => *d == provided_duration,
+                    crate::timer_definition::TimerDefinition::Duration(d) => {
+                        *d == provided_duration
+                    }
                     _ => false,
                 };
                 if !is_match {

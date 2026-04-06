@@ -55,7 +55,8 @@ fn parallel_definition(id: &str, n_branches: usize) -> ProcessDefinition {
                 &node_id,
                 BpmnElement::ServiceTask {
                     topic: "parallel_task".to_string(),
-                 multi_instance: None },
+                    multi_instance: None,
+                },
             )
             .flow("fork", &node_id)
             .flow(&node_id, "join");
@@ -222,20 +223,23 @@ async fn correctness_nested_parallel_3_levels() {
             "t2a",
             BpmnElement::ServiceTask {
                 topic: "t2a".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node(
             "t2b",
             BpmnElement::ServiceTask {
                 topic: "t2b".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("join2", BpmnElement::ParallelGateway)
         .node(
             "t_b",
             BpmnElement::ServiceTask {
                 topic: "t_b".into(),
-             multi_instance: None },
+                multi_instance: None,
+            },
         )
         .node("join1", BpmnElement::ParallelGateway)
         .node("end", BpmnElement::EndEvent)
@@ -284,9 +288,27 @@ async fn correctness_inclusive_gateway_partial_match() {
     let def = ProcessDefinitionBuilder::new("incl_part")
         .node("start", BpmnElement::StartEvent)
         .node("gw", BpmnElement::InclusiveGateway)
-        .node("t1", BpmnElement::ServiceTask { topic: "t1".into()  , multi_instance: None })
-        .node("t2", BpmnElement::ServiceTask { topic: "t2".into()  , multi_instance: None })
-        .node("t3", BpmnElement::ServiceTask { topic: "t3".into()  , multi_instance: None })
+        .node(
+            "t1",
+            BpmnElement::ServiceTask {
+                topic: "t1".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "t2",
+            BpmnElement::ServiceTask {
+                topic: "t2".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "t3",
+            BpmnElement::ServiceTask {
+                topic: "t3".into(),
+                multi_instance: None,
+            },
+        )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
         .conditional_flow("gw", "t1", "x == 1")
@@ -345,9 +367,27 @@ async fn correctness_mixed_xor_and_parallel() {
         .node("start", BpmnElement::StartEvent)
         .node("split_par", BpmnElement::ParallelGateway)
         .node("split_xor", BpmnElement::ExclusiveGateway { default: None })
-        .node("t1", BpmnElement::ServiceTask { topic: "t1".into()  , multi_instance: None })
-        .node("t2", BpmnElement::ServiceTask { topic: "t2".into()  , multi_instance: None })
-        .node("t3", BpmnElement::ServiceTask { topic: "t3".into()  , multi_instance: None })
+        .node(
+            "t1",
+            BpmnElement::ServiceTask {
+                topic: "t1".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "t2",
+            BpmnElement::ServiceTask {
+                topic: "t2".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "t3",
+            BpmnElement::ServiceTask {
+                topic: "t3".into(),
+                multi_instance: None,
+            },
+        )
         .node("join_par", BpmnElement::ParallelGateway)
         .node("end", BpmnElement::EndEvent)
         .flow("start", "split_par")
@@ -846,7 +886,9 @@ async fn edge_timer_zero_duration() {
         .node("start", BpmnElement::StartEvent)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(std::time::Duration::from_secs(0))),
+            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+                std::time::Duration::from_secs(0),
+            )),
         )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "timer")

@@ -29,13 +29,13 @@ fn add_listeners(
     builder
 }
 
+use chrono::DateTime;
+use chrono::Utc;
 /// Parse ISO 8601 time-duration (PT subset: hours, minutes, seconds).
 ///
 /// Supported formats: `PT5S`, `PT1H30M`, `PT10M`, `PT1H`.
 /// Returns `Err` for invalid input (empty, no PT prefix, unknown units).
 use engine_core::timer_definition::TimerDefinition;
-use chrono::DateTime;
-use chrono::Utc;
 
 /// Parse full ISO 8601 duration (P-prefix for date components, T-prefix for time).
 ///
@@ -48,17 +48,21 @@ use chrono::Utc;
 fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(EngineError::InvalidDefinition("Timer duration is empty".into()));
+        return Err(EngineError::InvalidDefinition(
+            "Timer duration is empty".into(),
+        ));
     }
     if !s.starts_with('P') {
         return Err(EngineError::InvalidDefinition(format!(
-            "Invalid ISO 8601 duration '{}': must start with 'P'", s
+            "Invalid ISO 8601 duration '{}': must start with 'P'",
+            s
         )));
     }
     let body = &s[1..];
     if body.is_empty() {
         return Err(EngineError::InvalidDefinition(format!(
-            "Invalid ISO 8601 duration '{}': no value after 'P'", s
+            "Invalid ISO 8601 duration '{}': no value after 'P'",
+            s
         )));
     }
 
@@ -71,7 +75,8 @@ fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
         if c == 'T' {
             if !current_num.is_empty() {
                 return Err(EngineError::InvalidDefinition(format!(
-                    "Invalid ISO 8601 duration '{}': digits before 'T' without unit", s
+                    "Invalid ISO 8601 duration '{}': digits before 'T' without unit",
+                    s
                 )));
             }
             in_time_part = true;
@@ -83,23 +88,27 @@ fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
         }
         if current_num.is_empty() {
             return Err(EngineError::InvalidDefinition(format!(
-                "Invalid ISO 8601 duration '{}': missing number before '{}'", s, c
+                "Invalid ISO 8601 duration '{}': missing number before '{}'",
+                s, c
             )));
         }
         let val: u64 = current_num.parse().map_err(|_| {
             EngineError::InvalidDefinition(format!("Invalid number in duration '{}'", s))
         })?;
         match (in_time_part, c) {
-            (false, 'Y') => total_secs += val * 365 * 86400,  // approximate
-            (false, 'M') => total_secs += val * 30 * 86400,   // approximate
+            (false, 'Y') => total_secs += val * 365 * 86400, // approximate
+            (false, 'M') => total_secs += val * 30 * 86400,  // approximate
             (false, 'W') => total_secs += val * 7 * 86400,
             (false, 'D') => total_secs += val * 86400,
-            (true, 'H')  => total_secs += val * 3600,
-            (true, 'M')  => total_secs += val * 60,
-            (true, 'S')  => total_secs += val,
-            _ => return Err(EngineError::InvalidDefinition(format!(
-                "Invalid ISO 8601 duration '{}': unknown unit '{}' (time_part={})", s, c, in_time_part
-            ))),
+            (true, 'H') => total_secs += val * 3600,
+            (true, 'M') => total_secs += val * 60,
+            (true, 'S') => total_secs += val,
+            _ => {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "Invalid ISO 8601 duration '{}': unknown unit '{}' (time_part={})",
+                    s, c, in_time_part
+                )));
+            }
         }
         has_value = true;
         current_num.clear();
@@ -107,13 +116,15 @@ fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
 
     if !current_num.is_empty() {
         return Err(EngineError::InvalidDefinition(format!(
-            "Invalid ISO 8601 duration '{}': trailing digits without unit", s
+            "Invalid ISO 8601 duration '{}': trailing digits without unit",
+            s
         )));
     }
 
     if !has_value {
         return Err(EngineError::InvalidDefinition(format!(
-            "Invalid ISO 8601 duration '{}': no duration components found", s
+            "Invalid ISO 8601 duration '{}': no duration components found",
+            s
         )));
     }
 
@@ -133,9 +144,7 @@ fn parse_timer_definition(
 
     if let Some(ref date_str) = timer.time_date {
         let dt = date_str.trim().parse::<DateTime<Utc>>().map_err(|e| {
-            EngineError::InvalidDefinition(format!(
-                "Invalid timeDate '{}': {}", date_str, e
-            ))
+            EngineError::InvalidDefinition(format!("Invalid timeDate '{}': {}", date_str, e))
         })?;
         return Ok(TimerDefinition::AbsoluteDate(dt));
     }
@@ -149,9 +158,7 @@ fn parse_timer_definition(
         // Otherwise treat as cron expression
         // Validate by parsing
         croner::Cron::new(s).parse().map_err(|e| {
-            EngineError::InvalidDefinition(format!(
-                "Invalid cron expression '{}': {}", s, e
-            ))
+            EngineError::InvalidDefinition(format!("Invalid cron expression '{}': {}", s, e))
         })?;
         return Ok(TimerDefinition::CronCycle {
             expression: s.to_string(),
@@ -168,7 +175,8 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
     let parts: Vec<&str> = s.splitn(2, '/').collect();
     if parts.len() != 2 {
         return Err(EngineError::InvalidDefinition(format!(
-            "Invalid repeating interval '{}': expected R[n]/duration", s
+            "Invalid repeating interval '{}': expected R[n]/duration",
+            s
         )));
     }
     let r_part = parts[0]; // "R" or "R3"
@@ -180,14 +188,18 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
         let count_str = &r_part[1..];
         let count: u32 = count_str.parse().map_err(|_| {
             EngineError::InvalidDefinition(format!(
-                "Invalid repetition count in '{}': '{}' is not a number", s, count_str
+                "Invalid repetition count in '{}': '{}' is not a number",
+                s, count_str
             ))
         })?;
         Some(count)
     };
 
     let interval = parse_iso8601_duration(dur_part)?;
-    Ok(TimerDefinition::RepeatingInterval { repetitions, interval })
+    Ok(TimerDefinition::RepeatingInterval {
+        repetitions,
+        interval,
+    })
 }
 
 fn parse_multi_instance(
@@ -195,7 +207,10 @@ fn parse_multi_instance(
 ) -> Option<engine_core::model::MultiInstanceDef> {
     mi.map(|m| engine_core::model::MultiInstanceDef {
         is_sequential: m.is_sequential.unwrap_or(false),
-        loop_cardinality: m.loop_cardinality.and_then(|c| c.value).map(|v| v.trim().to_string()),
+        loop_cardinality: m
+            .loop_cardinality
+            .and_then(|c| c.value)
+            .map(|v| v.trim().to_string()),
         collection: m.collection.map(|c| c.trim().to_string()),
         element_variable: m.element_variable.map(|e| e.trim().to_string()),
     })
@@ -229,7 +244,6 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
 
     let process_id = process.id.clone();
     let mut builder = ProcessDefinitionBuilder::new(process_id.clone());
-
 
     // Lookup maps for messages and errors
     let message_lookup: HashMap<String, String> = defs
@@ -298,7 +312,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             .or(task.handler)
             .unwrap_or_else(|| task.id.clone());
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, BpmnElement::ServiceTask { topic, multi_instance });
+        builder = builder.node(
+            task.id,
+            BpmnElement::ServiceTask {
+                topic,
+                multi_instance,
+            },
+        );
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
@@ -325,7 +345,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         if script_content.trim().is_empty() {
             // No script body → treat as pass-through service task
             let topic = task.name.unwrap_or_else(|| task.id.clone());
-            builder = builder.node(task.id, BpmnElement::ServiceTask { topic, multi_instance });
+            builder = builder.node(
+                task.id,
+                BpmnElement::ServiceTask {
+                    topic,
+                    multi_instance,
+                },
+            );
         } else {
             builder = builder.node(
                 task.id,
@@ -348,7 +374,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             .or(task.name)
             .unwrap_or_else(|| format!("send_{}", task.id));
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, BpmnElement::SendTask { message_name, multi_instance });
+        builder = builder.node(
+            task.id,
+            BpmnElement::SendTask {
+                message_name,
+                multi_instance,
+            },
+        );
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
@@ -365,7 +397,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         let node_id = task.id.clone();
         let topic = task.name.unwrap_or_else(|| task.id.clone());
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, BpmnElement::ServiceTask { topic, multi_instance });
+        builder = builder.node(
+            task.id,
+            BpmnElement::ServiceTask {
+                topic,
+                multi_instance,
+            },
+        );
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
@@ -449,7 +487,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 .message_ref
                 .and_then(|ref_id| message_lookup.get(&ref_id).cloned())
                 .unwrap_or_else(|| "generic_throw".into());
-            builder = builder.node(evt.id, BpmnElement::SendTask { message_name, multi_instance: None });
+            builder = builder.node(
+                evt.id,
+                BpmnElement::SendTask {
+                    message_name,
+                    multi_instance: None,
+                },
+            );
         } else {
             builder = builder.node(
                 evt.id,
@@ -476,6 +520,19 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 BpmnElement::BoundaryTimerEvent {
                     attached_to,
                     timer: timer_def,
+                    cancel_activity,
+                },
+            );
+        } else if let Some(msg) = bd.message_event_definition {
+            let message_name = msg
+                .message_ref
+                .map(|r| message_lookup.get(&r).cloned().unwrap_or(r))
+                .unwrap_or_else(|| "unknown".into());
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryMessageEvent {
+                    attached_to,
+                    message_name,
                     cancel_activity,
                 },
             );
@@ -529,65 +586,125 @@ fn flatten_subprocess(
     error_lookup: &HashMap<String, String>,
 ) -> ProcessDefinitionBuilder {
     let sub_process_id = sp.id.clone();
-    
-    let start_node_id = sp.start_events.first().map(|s| s.id.clone()).unwrap_or_else(|| format!("{}_start", sub_process_id));
-    builder = builder.node(sub_process_id.clone(), engine_core::model::BpmnElement::EmbeddedSubProcess { start_node_id });
+
+    let start_node_id = sp
+        .start_events
+        .first()
+        .map(|s| s.id.clone())
+        .unwrap_or_else(|| format!("{}_start", sub_process_id));
+    builder = builder.node(
+        sub_process_id.clone(),
+        engine_core::model::BpmnElement::EmbeddedSubProcess { start_node_id },
+    );
 
     for start in sp.start_events {
         // Internal start events are just pass-throughs, execution jumps here from the EmbeddedSubProcess node
-        builder = builder.node(start.id, engine_core::model::BpmnElement::ServiceTask { topic: "noop".into(), multi_instance: None });
+        builder = builder.node(
+            start.id,
+            engine_core::model::BpmnElement::ServiceTask {
+                topic: "noop".into(),
+                multi_instance: None,
+            },
+        );
     }
 
     for end in sp.end_events {
-        builder = builder.node(end.id, engine_core::model::BpmnElement::SubProcessEndEvent {
-            sub_process_id: sub_process_id.clone()
-        });
+        builder = builder.node(
+            end.id,
+            engine_core::model::BpmnElement::SubProcessEndEvent {
+                sub_process_id: sub_process_id.clone(),
+            },
+        );
     }
 
     for task in sp.service_tasks {
-        let topic = task.topic.or(task.handler).unwrap_or_else(|| task.id.clone());
+        let topic = task
+            .topic
+            .or(task.handler)
+            .unwrap_or_else(|| task.id.clone());
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, engine_core::model::BpmnElement::ServiceTask { topic, multi_instance });
+        builder = builder.node(
+            task.id,
+            engine_core::model::BpmnElement::ServiceTask {
+                topic,
+                multi_instance,
+            },
+        );
     }
 
     for task in sp.script_tasks {
-        let script = task.script.and_then(|s| s.content).or(task.data_script).unwrap_or_default();
+        let script = task
+            .script
+            .and_then(|s| s.content)
+            .or(task.data_script)
+            .unwrap_or_default();
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, engine_core::model::BpmnElement::ScriptTask { script, multi_instance });
+        builder = builder.node(
+            task.id,
+            engine_core::model::BpmnElement::ScriptTask {
+                script,
+                multi_instance,
+            },
+        );
     }
 
     for task in sp.user_tasks {
         let assignee = task.assignee.unwrap_or_else(|| "unassigned".into());
         builder = builder.node(task.id, engine_core::model::BpmnElement::UserTask(assignee));
     }
-    
-    let all_generic_tasks = sp.generic_tasks.into_iter()
-        .chain(sp.receive_tasks).chain(sp.manual_tasks)
-        .chain(sp.business_rule_tasks).chain(sp.call_activities);
+
+    let all_generic_tasks = sp
+        .generic_tasks
+        .into_iter()
+        .chain(sp.receive_tasks)
+        .chain(sp.manual_tasks)
+        .chain(sp.business_rule_tasks)
+        .chain(sp.call_activities);
     for task in all_generic_tasks {
         let topic = task.name.unwrap_or_else(|| task.id.clone());
         let multi_instance = parse_multi_instance(task.multi_instance);
-        builder = builder.node(task.id, engine_core::model::BpmnElement::ServiceTask { topic, multi_instance });
+        builder = builder.node(
+            task.id,
+            engine_core::model::BpmnElement::ServiceTask {
+                topic,
+                multi_instance,
+            },
+        );
     }
 
     for gw in sp.exclusive_gateways {
         let default_target = gw.default.clone();
-        builder = builder.node(gw.id, engine_core::model::BpmnElement::ExclusiveGateway { default: default_target });
+        builder = builder.node(
+            gw.id,
+            engine_core::model::BpmnElement::ExclusiveGateway {
+                default: default_target,
+            },
+        );
     }
     for gw in sp.parallel_gateways {
         builder = builder.node(gw.id, engine_core::model::BpmnElement::ParallelGateway);
     }
-    
+
     for flow in sp.sequence_flows {
         if let Some(cond) = flow.condition_expression {
-            builder = builder.conditional_flow(flow.source_ref, flow.target_ref, cond.value.trim().to_string());
+            builder = builder.conditional_flow(
+                flow.source_ref,
+                flow.target_ref,
+                cond.value.trim().to_string(),
+            );
         } else {
             builder = builder.flow(flow.source_ref, flow.target_ref);
         }
     }
 
     for nested_sp in sp.sub_processes {
-        builder = flatten_subprocess(nested_sp, &sub_process_id, builder, message_lookup, error_lookup);
+        builder = flatten_subprocess(
+            nested_sp,
+            &sub_process_id,
+            builder,
+            message_lookup,
+            error_lookup,
+        );
     }
 
     builder
