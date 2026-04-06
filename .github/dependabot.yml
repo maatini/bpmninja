@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Cargo (Rust) packages
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # npm dependencies for Tauri frontend
+  - package-ecosystem: "npm"
+    directory: "/desktop-tauri"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "frontend"
+      - "npm"
+
+  # npm dependencies for API Spec
+  - package-ecosystem: "npm"
+    directory: "/api-spec"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docs"
+      - "npm"
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
