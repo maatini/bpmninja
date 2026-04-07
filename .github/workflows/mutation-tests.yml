@@ -1,0 +1,86 @@
+name: Core Mutation Tests
+
+on:
+  # Täglich um 02:00 Uhr nachts (UTC)
+  schedule:
+    - cron: '0 2 * * *'
+  # Erlaubt manuelles Ausführen über die GitHub UI
+  workflow_dispatch:
+
+jobs:
+  mutation-test:
+    name: Run cargo-mutants
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Separater Cache für Mutation-Tests, um den normalen Build-Cache nicht zu verfälschen
+          shared-key: "mutation-tests"
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@cargo-mutants
+
+      - name: Run cargo-mutants (engine-core)
+        id: mutants
+        # Ausführung auf das Kern-Crate limitiert. Ignoriert Unit-Tests und In-Memory-Mock.
+        # -j 2 verhindert OOM-Kills auf dem CI-Runner
+        run: |
+          cargo mutants -p engine-core -j 2 --timeout 120 --exclude-re "persistence_in_memory|tests|stress_tests" --output mutants.out
+        continue-on-error: true
+
+      - name: Generate Job Summary
+        if: always()
+        run: |
+          python3 -c '
+          import json, os, sys
+          
+          out_file = "mutants.out/outcomes.json"
+          if not os.path.exists(out_file):
+              print("⚠️ Keine Mutation-Ergebnisse (outcomes.json) gefunden.")
+              sys.exit(0)
+              
+          with open(out_file) as f:
+              data = json.load(f)
+          
+          # cargo-mutants JSON enthält eine Liste an Objekten oder ein Dictionary, 
+          # je nach exakter Version. Dies wertet die Outcomes aus.
+          caught = sum(1 for m in data if m.get("status") == "caught")
+          missed = sum(1 for m in data if m.get("status") == "missed")
+          timeout = sum(1 for m in data if m.get("status") == "timeout")
+          unviable = sum(1 for m in data if m.get("status") == "unviable")
+          
+          total_tested = caught + missed + timeout
+          score = (caught / total_tested * 100) if total_tested > 0 else 0
+          
+          summary = f"""## 🧬 Mutation Testing Results
+          
+          **Mutation Score: {score:.1f}%**
+          
+          - ✅ **Caught (Erkannt):** {caught}
+          - ❌ **Missed (Überlebt):** {missed}
+          - ⏱️ **Timeout:** {timeout}
+          - ⚠️ **Unviable (Kompiliert nicht):** {unviable}
+          
+          """
+          
+          if missed > 0:
+              summary += "### ❌ Überlebende Mutanten (Beispiele)\n"
+              summary += "| Pfad | Zeile | Mutation |\n|---|---|---|\n"
+              missed_list = [m for m in data if m.get("status") == "missed"][:10]
+              for m in missed_list:
+                  file = m.get("mutant", {}).get("source_file", "unknown")
+                  line = m.get("mutant", {}).get("line", "?")
+                  mut = m.get("mutant", {}).get("replacement", "unknown mutation")
+                  summary += f"| `{file}` | {line} | `{mut}` |\n"
+                  
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary_file:
+              summary_file.write(summary)
+          '
