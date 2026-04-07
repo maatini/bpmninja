@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { listDefinitions, getDefinitionXml, listInstances, deleteDefinition, deleteAllDefinitions, type DefinitionInfo, type ProcessInstance } from './lib/tauri';
+import { listDefinitions, getDefinitionXml, listInstances, deleteDefinition, deleteAllDefinitions, type DefinitionInfo, type ProcessInstance } from '../../shared/lib/tauri';
 import { RefreshCw, Eye, Download, Activity, Clock, Trash, FileCode2, Network, Key, Boxes, Database } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,7 @@ function groupByProcess(defs: DefinitionInfo[]): Map<string, DefinitionInfo[]> {
   return map;
 }
 
-export function DeployedProcesses({ onView, onViewInstance }: { onView: (xml: string) => void, onViewInstance?: (id: string) => void }) {
+export function DeployedProcessesPage({ onView, onViewInstance }: { onView: (xml: string) => void, onViewInstance?: (id: string) => void }) {
   const { toast } = useToast();
   const [definitions, setDefinitions] = useState<DefinitionInfo[]>([]);
   const [instances, setInstances] = useState<ProcessInstance[]>([]);

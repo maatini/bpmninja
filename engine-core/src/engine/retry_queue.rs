@@ -192,7 +192,7 @@ async fn execute_job(
             }
         }
         PersistJob::SaveDefinition(id) => {
-            if let Some(def) = definitions.get(id).await {
+            if let Some(def) = definitions.get(id) {
                 persistence
                     .save_definition(&def)
                     .await

@@ -49,7 +49,6 @@ impl WorkflowEngine {
                     let (k, _) = self
                         .definitions
                         .find_latest_by_bpmn_id(&child_bpmn_id)
-                        .await
                         .ok_or_else(|| {
                             EngineError::InvalidDefinition(format!(
                                 "Event Subprocess '{child_bpmn_id}' not found"
@@ -96,7 +95,6 @@ impl WorkflowEngine {
             let def = self
                 .definitions
                 .get(&def_key)
-                .await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
             let mut is_non_interrupting = false;
@@ -207,7 +205,7 @@ impl WorkflowEngine {
                 if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                     inst.state = InstanceState::Running;
                 }
-                inst.audit_log.push(format!(
+                inst.push_audit_log(format!(
                     "✉️ Msg '{}' correlated, resuming '{catch_id}'",
                     message_name
                 ));
@@ -227,7 +225,6 @@ impl WorkflowEngine {
             let def = self
                 .definitions
                 .get(&def_key)
-                .await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
             let next = crate::engine::executor::resolve_next_target(
                 &def,
@@ -251,7 +248,7 @@ impl WorkflowEngine {
         }
 
         let mut defs_to_start = Vec::new();
-        let all_defs = self.definitions.all().await;
+        let all_defs = self.definitions.all();
         for (def_key, def) in &all_defs {
             if let Some((
                 _,

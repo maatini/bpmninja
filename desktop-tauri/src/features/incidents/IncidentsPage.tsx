@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { getPendingServiceTasks, type PendingServiceTask } from './lib/tauri';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { getPendingServiceTasks, type PendingServiceTask } from '../../shared/lib/tauri';
 import { useToast } from '@/hooks/use-toast';
 import { AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 
-export function IncidentsView({ onViewInstance }: { onViewInstance?: (id: string) => void }) {
+export function IncidentsPage({ onViewInstance }: { onViewInstance?: (id: string) => void }) {
   const { toast } = useToast();
   const [incidents, setIncidents] = useState<PendingServiceTask[]>([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchIncidents = async () => {
+  const fetchIncidents = useCallback(async () => {
     try {
       const all = await getPendingServiceTasks();
       // Filter: incidents = service tasks with retries <= 0
@@ -23,13 +23,14 @@ export function IncidentsView({ onViewInstance }: { onViewInstance?: (id: string
     } catch (e: any) { 
       toast({ variant: 'destructive', description: 'Failed to load incidents: ' + e }); 
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
+    // eslint-disable-next-line
     fetchIncidents();
     intervalRef.current = setInterval(fetchIncidents, 5000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, []);
+  }, [fetchIncidents]);
 
   return (
     <div className="flex flex-col h-full bg-background">

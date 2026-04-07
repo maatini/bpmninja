@@ -459,8 +459,7 @@ async fn persistence_crash_recovery_user_task() {
         .unwrap();
     new_engine
         .definitions
-        .insert(def_key, std::sync::Arc::new(def))
-        .await;
+        .insert(def_key, std::sync::Arc::new(def));
     new_engine.restore_instance(state).await;
 
     // Validate state was fully restored
@@ -528,8 +527,7 @@ async fn persistence_crash_recovery_parallel() {
         .unwrap();
     new_engine
         .definitions
-        .insert(def_key, std::sync::Arc::new(def))
-        .await;
+        .insert(def_key, std::sync::Arc::new(def));
     new_engine.restore_instance(state).await;
     let tasks_persisted = persistence.list_user_tasks().await.unwrap();
     for t in &tasks_persisted {
@@ -571,7 +569,7 @@ async fn persistence_audit_log_roundtrip_at_max() {
         let mut inst = inst_arc.write().await;
         // Inject 250 log entries
         for i in 0..250 {
-            inst.audit_log.push(format!("Entry {}", i));
+            inst.push_audit_log(format!("Entry {}", i));
         }
     }
 

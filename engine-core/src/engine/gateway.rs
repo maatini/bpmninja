@@ -146,10 +146,10 @@ pub(crate) fn execute_complex_gateway(
             }
         } else {
             // Unconditional flow: Is it the default flow?
-            if let Some(d) = default {
-                if sf.target == *d {
-                    continue; // Skip the default flow during normal evaluation
-                }
+            if let Some(d) = default
+                && sf.target == *d
+            {
+                continue; // Skip the default flow during normal evaluation
             }
             matched_targets.push(sf.target.clone());
         }

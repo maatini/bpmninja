@@ -250,6 +250,24 @@ impl ProcessInstance {
             .map(|(k, _)| k.clone())
             .collect()
     }
+
+    /// Pushes an entry to the audit log, enforcing MAX_AUDIT_LOG_ENTRIES limit.
+    pub fn push_audit_log(&mut self, entry: String) {
+        self.audit_log.push(entry);
+        if self.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
+            let overflow = self.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+            self.audit_log.drain(0..overflow);
+        }
+    }
+
+    /// Appends multiple entries to the audit log, enforcing MAX_AUDIT_LOG_ENTRIES limit.
+    pub fn append_audit_log(&mut self, entries: &mut Vec<String>) {
+        self.audit_log.append(entries);
+        if self.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
+            let overflow = self.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+            self.audit_log.drain(0..overflow);
+        }
+    }
 }
 
 /// Summary statistics for engine monitoring.

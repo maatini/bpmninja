@@ -112,3 +112,61 @@ fn values_cmp(a: &Value, b: &Value) -> Option<Ordering> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_equality() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("approved"));
+        vars.insert("count".to_string(), json!(5));
+
+        assert!(evaluate_condition("status == 'approved'", &vars));
+        assert!(evaluate_condition("status == \"approved\"", &vars));
+        assert!(!evaluate_condition("status == 'rejected'", &vars));
+        assert!(evaluate_condition("status != 'rejected'", &vars));
+
+        assert!(evaluate_condition("count == 5", &vars));
+        assert!(!evaluate_condition("count == 6", &vars));
+    }
+
+    #[test]
+    fn test_numeric_comparisons() {
+        let mut vars = HashMap::new();
+        vars.insert("amount".to_string(), json!(150.5));
+        vars.insert("score".to_string(), json!(10));
+
+        assert!(evaluate_condition("amount > 100", &vars));
+        assert!(evaluate_condition("amount >= 150.5", &vars));
+        assert!(evaluate_condition("amount < 200", &vars));
+        assert!(evaluate_condition("amount <= 150.5", &vars));
+        assert!(!evaluate_condition("amount > 200", &vars));
+
+        assert!(evaluate_condition("score > 5", &vars));
+        assert!(evaluate_condition("score < 15", &vars));
+    }
+
+    #[test]
+    fn test_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("is_valid".to_string(), json!(true));
+        vars.insert("is_empty".to_string(), json!(false));
+        vars.insert("null_val".to_string(), json!(null));
+        vars.insert("name".to_string(), json!("Bob"));
+        vars.insert("empty_str".to_string(), json!(""));
+        vars.insert("num".to_string(), json!(1));
+        vars.insert("zero".to_string(), json!(0));
+
+        assert!(evaluate_condition("is_valid", &vars));
+        assert!(!evaluate_condition("is_empty", &vars));
+        assert!(!evaluate_condition("null_val", &vars));
+        assert!(evaluate_condition("name", &vars));
+        assert!(!evaluate_condition("empty_str", &vars));
+        assert!(evaluate_condition("num", &vars));
+        assert!(!evaluate_condition("zero", &vars));
+        assert!(!evaluate_condition("missing_var", &vars));
+    }
+}

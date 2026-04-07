@@ -9,19 +9,18 @@ use super::WorkflowEngine;
 impl WorkflowEngine {
     /// Returns a list of all deployed definitions (key, BPMN-ID, version, node count).
     pub async fn list_definitions(&self) -> Vec<(Uuid, String, i32, usize)> {
-        self.definitions.list().await
+        self.definitions.list()
     }
 
     /// Returns a given definition by key
     pub async fn get_definition(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.definitions.get(key).await
+        self.definitions.get(key)
     }
 
     /// Returns all versions of a specific BPMN process definition, sorted ascending.
     pub async fn list_definition_versions(&self, bpmn_id: &str) -> Vec<(Uuid, i32, usize)> {
         self.definitions
             .all_versions_of(bpmn_id)
-            .await
             .into_iter()
             .map(|(key, def)| (key, def.version, def.nodes.len()))
             .collect()
@@ -34,7 +33,7 @@ impl WorkflowEngine {
     /// Returns (definition_key, version).
     pub async fn deploy_definition(&self, definition: ProcessDefinition) -> (Uuid, i32) {
         // Find highest version of existing definitions with matching ID
-        let highest_version = self.definitions.highest_version(&definition.id).await;
+        let highest_version = self.definitions.highest_version(&definition.id);
 
         let key = definition.key; // Always use a unique key
         let version = highest_version.map(|v| v + 1).unwrap_or(definition.version);
@@ -56,7 +55,7 @@ impl WorkflowEngine {
             def.version,
             key
         );
-        self.definitions.insert(key, Arc::new(def)).await;
+        self.definitions.insert(key, Arc::new(def));
         self.persist_definition(key).await;
         (key, version)
     }
@@ -64,7 +63,7 @@ impl WorkflowEngine {
     /// Deletes a process definition.
     /// If cascade is true, deletes all associated process instances first.
     pub async fn delete_definition(&self, definition_key: Uuid, cascade: bool) -> EngineResult<()> {
-        if !self.definitions.contains_key(&definition_key).await {
+        if !self.definitions.contains_key(&definition_key) {
             return Err(EngineError::NoSuchDefinition(definition_key));
         }
 
@@ -89,7 +88,7 @@ impl WorkflowEngine {
             }
         }
 
-        self.definitions.remove(&definition_key).await;
+        self.definitions.remove(&definition_key);
 
         if let Some(ref persistence) = self.persistence {
             persistence
@@ -103,7 +102,7 @@ impl WorkflowEngine {
     /// Deletes all process definition versions for a given BPMN ID.
     /// If cascade is true, deletes all associated process instances first.
     pub async fn delete_all_definitions(&self, bpmn_id: &str, cascade: bool) -> EngineResult<()> {
-        let versions = self.definitions.all_versions_of(bpmn_id).await;
+        let versions = self.definitions.all_versions_of(bpmn_id);
         for (key, _) in versions {
             self.delete_definition(key, cascade).await?;
         }

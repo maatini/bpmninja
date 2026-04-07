@@ -5,9 +5,10 @@ file_patterns: ["engine-core/**"]
 
 # BPMN_WORKFLOW_ENGINE.md - Project Specification
 
-## Supported BPMN Elements (21 variants)
+## Supported BPMN Elements (24 variants)
 - **StartEvent** — plain start, process begins immediately
 - **TimerStartEvent(TimerDefinition)** — timer-triggered, fires after configured duration/date/cycle
+- **MessageStartEvent { message_name }** — start event triggered by a named message
 - **EndEvent** — terminal node, marks instance as completed
 - **TerminateEndEvent** — immediately kills all active tokens in the instance
 - **ErrorEndEvent { error_code }** — throws a BPMN error on completion
@@ -18,11 +19,16 @@ file_patterns: ["engine-core/**"]
 - **ExclusiveGateway { default }** — XOR split; first matching condition wins, optional default flow
 - **InclusiveGateway** — OR split; all matching conditions fire (token forking via `ContinueMultiple`)
 - **ParallelGateway** — AND split/join; all outgoing paths taken unconditionally, join waits for ALL incoming tokens
+- **ComplexGateway** — Custom joining logic
 - **EventBasedGateway** — execution pauses until exactly one of the target catch events is triggered (only MessageCatchEvent/TimerCatchEvent targets)
 - **TimerCatchEvent(TimerDefinition)** — intermediate timer catch; pauses token until duration elapses
-- **BoundaryTimerEvent { attached_to, timer, cancel_activity }** — boundary timer attached to an activity
-- **MessageStartEvent { message_name }** — start event triggered by a named message
 - **MessageCatchEvent { message_name }** — intermediate catch event waiting for a message
+- **BoundaryTimerEvent { attached_to, timer, cancel_activity }** — boundary timer attached to an activity
+- **BoundaryMessageEvent { attached_to, message_name, cancel_activity }** — boundary message catching
+- **BoundaryErrorEvent { attached_to, error_code }** — boundary error event attached to an activity
+- **CallActivity { called_element }** — invokes another process definition as a sub-process
+- **EmbeddedSubProcess { start_node_id }** — embedded sub-process with flattened definition
+- **SubProcessEndEvent { sub_process_id }** — internal end event for scope completion
 - **BoundaryErrorEvent { attached_to, error_code }** — boundary error event attached to an activity
 - **CallActivity { called_element }** — invokes another process definition as a sub-process
 - **EmbeddedSubProcess { start_node_id }** — embedded sub-process with flattened definition
@@ -49,9 +55,10 @@ file_patterns: ["engine-core/**"]
 ### 2. Engine Core (`engine/` submodule)
 - `engine/mod.rs` — `WorkflowEngine` public API, `deploy_definition()`, `start_instance()`, message correlation
 - `engine/types.rs` — `ProcessInstance`, `InstanceState`, `NextAction`, `PendingUserTask`, `PendingTimer`, `PendingMessageCatch`, `ActiveToken`
-- `engine/executor.rs` — `execute_step()`, `advance_token()` — dispatches on `BpmnElement`, returns `NextAction`
+- `engine/executor.rs` — Coordinates parallel dispatch (`advance_token()`)
+- `engine/handlers/*.rs` — Distinct handlers for Events, Tasks, Gateways, and SubProcesses. Extracted from `executor.rs` for modularity.
 - `engine/gateway.rs` — XOR/OR/AND gateway routing and join synchronization via `TokenRegistry`
-- `engine/registry.rs` — `TokenRegistry` for parallel/inclusive gateway join synchronization
+- `engine/registry.rs` — `DefinitionRegistry` implemented via lock-free `DashMap` concurrency.
 - `engine/instance_store.rs` — Instance query and storage helpers
 - `engine/boundary.rs` — Boundary event processing (timers, errors)
 - `engine/service_task.rs` — External task operations (fetch-and-lock, complete, fail, extend lock, BPMN error)

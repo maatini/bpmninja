@@ -83,7 +83,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
         // Current node's end scripts
         self.run_end_scripts(instance_id, &mut token, &def, &pending.node_id)

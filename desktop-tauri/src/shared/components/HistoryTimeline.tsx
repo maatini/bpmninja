@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getInstanceHistory, type HistoryEntry, type HistoryQuery } from './lib/tauri';
+import { getInstanceHistory, type HistoryEntry, type HistoryQuery } from '../lib/tauri';
 import { 
   Play, CheckCircle, Activity, Settings as SettingsIcon, 
   XCircle, Filter, Camera, ArrowRightCircle

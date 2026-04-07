@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo } from 'react';
 import { Focus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -14,7 +14,7 @@ interface InstanceViewerProps {
   onNodeClick: () => void;
 }
 
-export function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewerProps) {
+export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
 
@@ -105,4 +105,4 @@ export function InstanceViewer({ xml, activeNodeId, onNodeClick }: InstanceViewe
       </div>
     </>
   );
-}
+});

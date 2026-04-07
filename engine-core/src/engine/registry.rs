@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use dashmap::DashMap;
 use uuid::Uuid;
 
 use crate::model::ProcessDefinition;
@@ -8,7 +8,7 @@ use crate::model::ProcessDefinition;
 /// Thread-safe registry for process definitions.
 #[derive(Clone, Default)]
 pub struct DefinitionRegistry {
-    inner: Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>,
+    inner: Arc<DashMap<Uuid, Arc<ProcessDefinition>>>,
 }
 
 impl DefinitionRegistry {
@@ -16,89 +16,82 @@ impl DefinitionRegistry {
         Self::default()
     }
 
-    pub async fn insert(&self, key: Uuid, def: Arc<ProcessDefinition>) {
-        self.inner.write().await.insert(key, def);
+    pub fn insert(&self, key: Uuid, def: Arc<ProcessDefinition>) {
+        self.inner.insert(key, def);
     }
 
-    pub async fn get(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.inner.read().await.get(key).cloned()
+    pub fn get(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
+        self.inner.get(key).map(|r| r.value().clone())
     }
 
-    pub async fn remove(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.inner.write().await.remove(key)
+    pub fn remove(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
+        self.inner.remove(key).map(|(_, v)| v)
     }
 
-    pub async fn contains_key(&self, key: &Uuid) -> bool {
-        self.inner.read().await.contains_key(key)
+    pub fn contains_key(&self, key: &Uuid) -> bool {
+        self.inner.contains_key(key)
     }
 
-    pub async fn len(&self) -> usize {
-        self.inner.read().await.len()
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 
     #[allow(dead_code)]
-    pub async fn is_empty(&self) -> bool {
-        self.inner.read().await.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
-    pub async fn list(&self) -> Vec<(Uuid, String, i32, usize)> {
+    pub fn list(&self) -> Vec<(Uuid, String, i32, usize)> {
         self.inner
-            .read()
-            .await
             .iter()
-            .map(|(key, def)| (*key, def.id.clone(), def.version, def.nodes.len()))
+            .map(|r| (*r.key(), r.value().id.clone(), r.value().version, r.value().nodes.len()))
             .collect()
     }
 
     #[allow(dead_code)]
-    pub async fn find_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
+    pub fn find_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
-            .read()
-            .await
             .iter()
-            .find(|(_, def)| def.id == bpmn_id)
-            .map(|(k, v)| (*k, Arc::clone(v)))
+            .find(|r| r.value().id == bpmn_id)
+            .map(|r| (*r.key(), Arc::clone(r.value())))
     }
 
-    pub async fn highest_version(&self, bpmn_id: &str) -> Option<i32> {
+    pub fn highest_version(&self, bpmn_id: &str) -> Option<i32> {
         self.inner
-            .read()
-            .await
-            .values()
-            .filter(|d| d.id == bpmn_id)
-            .map(|d| d.version)
+            .iter()
+            .filter(|r| r.value().id == bpmn_id)
+            .map(|r| r.value().version)
             .max()
     }
 
     /// Returns the definition with the highest version for a given BPMN process ID.
-    pub async fn find_latest_by_bpmn_id(
+    pub fn find_latest_by_bpmn_id(
         &self,
         bpmn_id: &str,
     ) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
-            .read()
-            .await
             .iter()
-            .filter(|(_, def)| def.id == bpmn_id)
-            .max_by_key(|(_, def)| def.version)
-            .map(|(k, v)| (*k, Arc::clone(v)))
+            .filter(|r| r.value().id == bpmn_id)
+            .max_by_key(|r| r.value().version)
+            .map(|r| (*r.key(), Arc::clone(r.value())))
     }
 
     /// Returns all versions of a given BPMN process ID, sorted by version ascending.
-    pub async fn all_versions_of(&self, bpmn_id: &str) -> Vec<(Uuid, Arc<ProcessDefinition>)> {
+    pub fn all_versions_of(&self, bpmn_id: &str) -> Vec<(Uuid, Arc<ProcessDefinition>)> {
         let mut versions: Vec<_> = self
             .inner
-            .read()
-            .await
             .iter()
-            .filter(|(_, def)| def.id == bpmn_id)
-            .map(|(k, v)| (*k, Arc::clone(v)))
+            .filter(|r| r.value().id == bpmn_id)
+            .map(|r| (*r.key(), Arc::clone(r.value())))
             .collect();
         versions.sort_by_key(|(_, def)| def.version);
         versions
     }
 
-    pub async fn all(&self) -> HashMap<Uuid, Arc<ProcessDefinition>> {
-        self.inner.read().await.clone()
+    pub fn all(&self) -> HashMap<Uuid, Arc<ProcessDefinition>> {
+        self.inner
+            .iter()
+            .map(|r| (*r.key(), r.value().clone()))
+            .collect()
     }
 }

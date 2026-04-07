@@ -45,7 +45,6 @@ impl WorkflowEngine {
         let (def_key, _) = self
             .definitions
             .find_latest_by_bpmn_id(bpmn_id)
-            .await
             .ok_or_else(|| {
                 EngineError::InvalidDefinition(format!(
                     "No definition found with BPMN ID '{}'",
@@ -68,7 +67,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&definition_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let (start_id, start_element) = def
@@ -246,7 +244,7 @@ impl WorkflowEngine {
                     return Ok(());
                 };
 
-            parent.audit_log.push(format!(
+            parent.push_audit_log(format!(
                 "🔗 Call Activity '{called_node_id}' completed successfully"
             ));
 
@@ -283,7 +281,6 @@ impl WorkflowEngine {
             let def = self
                 .definitions
                 .get(&def_key)
-                .await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
             self.run_end_scripts(parent_id, &mut token, &def, &called_node_id)
@@ -314,7 +311,7 @@ impl WorkflowEngine {
                     sub_instance_id: completed_instance_id,
                     token: token.clone(),
                 };
-                inst.audit_log.push(format!("💥 INCIDENT: Child {completed_instance_id} failed with unhandled BPMN error '{}'", error_code.as_deref().unwrap_or_default()));
+                inst.push_audit_log(format!("💥 INCIDENT: Child {completed_instance_id} failed with unhandled BPMN error '{}'", error_code.as_deref().unwrap_or_default()));
                 self.persist_instance(parent_id).await;
                 return Ok(());
             }
@@ -354,7 +351,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&definition_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let (start_id, start_element) = def

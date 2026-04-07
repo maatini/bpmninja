@@ -159,7 +159,7 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.audit_log.push(format!(
+            inst.push_audit_log(format!(
                 "✅ Service task '{}' completed by worker '{}'",
                 task.node_id, worker_id
             ));
@@ -174,7 +174,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
         let def = Arc::clone(&def);
 
@@ -271,7 +270,7 @@ impl WorkflowEngine {
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
                     let msg = error_message.unwrap_or_else(|| "Unknown error".into());
-                    inst.audit_log.push(format!(
+                    inst.push_audit_log(format!(
                         "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
                         node_id, msg
                     ));
@@ -367,7 +366,7 @@ impl WorkflowEngine {
         self.cancel_boundary_message_catches(instance_id, &task.node_id)
             .await;
 
-        let target_boundary = if let Some(def) = self.definitions.get(&def_key).await {
+        let target_boundary = if let Some(def) = self.definitions.get(&def_key) {
             crate::engine::executor::find_boundary_error_event(&def, &task.node_id, error_code)
         } else {
             None
@@ -386,7 +385,7 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.audit_log.push(format!(
+                inst.push_audit_log(format!(
                     "💥 BPMN Error '{error_code}' caught by boundary event '{boundary_id}'"
                 ));
                 inst.state = InstanceState::Running;
@@ -420,7 +419,6 @@ impl WorkflowEngine {
             let def = self
                 .definitions
                 .get(&def_key)
-                .await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
             let next =
                 crate::engine::executor::resolve_next_target(&def, &boundary_id, &token.variables)?;
@@ -445,7 +443,7 @@ impl WorkflowEngine {
         // If no boundary event found, just log it as an unhandled error/incident.
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
-            inst.audit_log.push(format!(
+            inst.push_audit_log(format!(
                 "🚨 BPMN error '{}' thrown by worker '{}' at service task '{}' (No boundary event caught it)",
                 error_code, worker_id, task.node_id
             ));

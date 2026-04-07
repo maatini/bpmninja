@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { getPendingTasks, getPendingServiceTasks, completeTask, 
          fetchAndLockServiceTasks, completeServiceTask, 
-         type PendingUserTask, type PendingServiceTask } from './lib/tauri';
+         type PendingUserTask, type PendingServiceTask } from '../../shared/lib/tauri';
 import { useToast } from '@/hooks/use-toast';
-import { VariableEditor, type VariableRow, serializeVariables } from './VariableEditor';
+import { VariableEditor, type VariableRow, serializeVariables } from '../../shared/components/VariableEditor';
 import { RefreshCw, UserCircle, Briefcase, CheckCircle2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 
-export function PendingTasks() {
+export function PendingTasksPage() {
   const { toast } = useToast();
   const [tasks, setTasks] = useState<PendingUserTask[]>([]);
   const [serviceTasks, setServiceTasks] = useState<PendingServiceTask[]>([]);
@@ -141,7 +141,7 @@ export function PendingTasks() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {tasks.map(task => (
-                <Card key={task.task_id} className="flex flex-col">
+                <Card key={task.task_id} className="card flex flex-col">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center justify-between">
                       Node: <span className="font-mono text-primary">{task.node_id}</span>
@@ -204,7 +204,7 @@ export function PendingTasks() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {serviceTasks.map(task => (
-                <Card key={task.id} className="border-l-4 border-l-purple-500 flex flex-col">
+                <Card key={task.id} className="card border-l-4 border-l-purple-500 flex flex-col">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                        <span className="font-mono text-sm font-semibold">{task.node_id}</span>

@@ -1792,7 +1792,7 @@ async fn test_definition_versioning_and_migration() {
         .unwrap();
 
     let (key_v1, _) = engine.deploy_definition(def_v1).await;
-    let def_v1_deployed = engine.definitions.get(&key_v1).await.unwrap();
+    let def_v1_deployed = engine.definitions.get(&key_v1).unwrap();
     assert_eq!(def_v1_deployed.version, 1);
 
     // Start instance on V1
@@ -1809,7 +1809,7 @@ async fn test_definition_versioning_and_migration() {
         .unwrap();
 
     let (key_v2, _) = engine.deploy_definition(def_v2).await;
-    let def_v2_deployed = engine.definitions.get(&key_v2).await.unwrap();
+    let def_v2_deployed = engine.definitions.get(&key_v2).unwrap();
 
     // Key should be different, version should be bumped
     assert_ne!(key_v1, key_v2);

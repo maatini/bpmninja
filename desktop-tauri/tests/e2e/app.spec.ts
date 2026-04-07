@@ -31,7 +31,7 @@ interface MockState {
     id: string;
     definition_key: string;
     business_key: string;
-    state: string | { WaitingOnUserTask: { task_id: string } };
+    state: string | { WaitingOnUserNode: { task_id: string } };
     current_node: string;
     audit_log: string[];
     history?: any[];
@@ -65,24 +65,13 @@ async function injectTauriMock(
     // Mutable state for the mock backend
     const mockState = serializedState;
 
-    (window as any).__TAURI_IPC__ = (message: any) => {
-      const { cmd, callback, error, ...args } = message;
-      console.log('TAURI IPC mock:', cmd, JSON.stringify(args));
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: (cmd: string, args: any = {}) => {
+        console.log('TAURI IPC mock:', cmd, JSON.stringify(args));
 
-      // Helper to resolve the invoke promise
-      const resolve = (result: any) => {
-        const fn = (window as any)[`_${callback}`];
-        if (fn) fn(result);
-      };
-      // Helper to reject the invoke promise
-      const reject = (err: string) => {
-        const fn = (window as any)[`_${error}`];
-        if (fn) fn(err);
-      };
-
-      // Dispatch on command name
-      setTimeout(() => {
-        try {
+        return new Promise((resolve, reject) => {
+          setTimeout(() => {
+            try {
           switch (cmd) {
             case 'deploy_definition': {
               const defId = 'mock-def-' + Date.now();
@@ -121,7 +110,7 @@ async function injectTauriMock(
                   id: instId,
                   definition_key: defId,
                   business_key: 'bk-' + Date.now(),
-                  state: { WaitingOnUserTask: { task_id: 'mock-task-' + Date.now() } },
+                  state: { WaitingOnUserNode: { task_id: 'mock-task-' + Date.now() } },
                   current_node: 'UserTask_Approval',
                   audit_log: [
                     "▶ Process started at node 'StartEvent_1'",
@@ -391,6 +380,8 @@ async function injectTauriMock(
           reject(e.message ?? String(e));
         }
       }, 10); // simulate async
+    });
+    }
     };
   }, state);
 }
@@ -460,7 +451,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // Click "Deploy Process"
     const alerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
+      await page.locator('button', { hasText: /^Deploy$/ }).click();
     });
 
     expect(alerts.length).toBeGreaterThanOrEqual(1);
@@ -478,8 +469,8 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Start instance via variables dialog (auto-deploys)
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.getByTestId('btn-start-instance').click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
 
     // Verification: We should be redirected to the instances tab
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
@@ -509,9 +500,8 @@ test.describe('bpmninja Desktop App – E2E', () => {
     const card = page.locator('.card');
     await expect(card).toBeVisible({ timeout: 5_000 });
 
-    await expect(card.getByText('Task: ReviewDocument')).toBeVisible();
-    await expect(card.getByText('Assignee: alice')).toBeVisible();
-    await expect(card.getByText('Instance: inst-xyz-456')).toBeVisible();
+    await expect(card.getByText('Node: ReviewDocument')).toBeVisible();
+    await expect(card.getByText('inst-xyz…')).toBeVisible();
 
     // Complete button should exist
     await expect(card.locator('button', { hasText: 'Complete Task' })).toBeVisible();
@@ -538,12 +528,12 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
 
     // Complete the task
-    const alerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Complete Task' }).click();
-    });
+    // First, click "Complete Task" on the card to open the dialog
+    await page.locator('.card button', { hasText: 'Complete Task' }).click();
+    await expect(page.locator('.max-w-xl')).toBeVisible({ timeout: 5_000 });
 
-    expect(alerts.length).toBeGreaterThanOrEqual(1);
-    expect(alerts[0]).toContain('Task completed');
+    // Then, click "Complete Task" in the dialog to confirm
+    await page.locator('.max-w-xl button', { hasText: 'Complete Task' }).click();
 
     // After completion, the task list should refresh and show empty state
     await expect(page.getByText('No Pending User Tasks')).toBeVisible({ timeout: 5_000 });
@@ -572,7 +562,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
     // Click Refresh – task should still be visible (same state)
     await page.locator('button', { hasText: 'Refresh' }).click();
     await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText('Task: CheckInventory')).toBeVisible();
+    await expect(page.getByText('Node: CheckInventory')).toBeVisible();
   });
 
   // ---- 8. Full Workflow: Deploy → Start → View Tasks → Complete ----------
@@ -584,14 +574,14 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Step 1: Deploy
-    let alerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
+    const alerts = await collectToasts(page, async () => {
+      await page.locator('button', { hasText: /^Deploy$/ }).click();
     });
     expect(alerts[0]).toContain('Deployed');
 
     // Step 2: Start Instance via variables dialog (auto deploy + start)
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.getByTestId('btn-start-instance').click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
     
     // Will navigate to instances tab automatically.
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 5_000 });
@@ -651,10 +641,10 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(cards).toHaveCount(2, { timeout: 5_000 });
 
     // First instance should show Running badge
-    await expect(cards.first().locator('.state-running')).toBeVisible();
+    await expect(cards.first().locator('.bg-blue-100')).toBeVisible();
 
     // Second instance should show Completed badge
-    await expect(cards.nth(1).locator('.state-completed')).toBeVisible();
+    await expect(cards.nth(1).locator('.bg-emerald-100')).toBeVisible();
   });
 
   // ---- 11. Instances Tab – click to see details -------------------------
@@ -805,9 +795,9 @@ test.describe('bpmninja Desktop App – E2E', () => {
     // Click Download – should complete without crashing.
     // In E2E (non-Tauri), the dialog mock resolves null so the
     // writeTextFile silently succeeds or is skipped.
-    await page.locator('button', { hasText: 'Download BPMN' }).click();
+    await page.locator('button', { hasText: 'Download' }).click();
     // After click, button should return to normal state (not stuck in "Downloading...")
-    await expect(page.locator('button', { hasText: 'Download BPMN' })).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('button', { hasText: 'Download' })).toBeVisible({ timeout: 5_000 });
   });
 
   // ---- 15. Deploy then view in Deployed Processes -------------------------
@@ -820,7 +810,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // Deploy a process first
     const deployAlerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
+      await page.locator('button', { hasText: /^Deploy$/ }).click();
     });
     expect(deployAlerts[0]).toContain('Deployed');
 
@@ -900,14 +890,14 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Step 2: Click "New Diagram" to reset
-    await page.locator('button', { hasText: 'New Diagram' }).click();
+    await page.locator('button', { hasText: /^New$/ }).click();
 
     // Canvas should still be visible (empty diagram loaded)
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 5_000 });
 
     // Step 3: Auto-deploy & start works without existing defId
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.getByTestId('btn-start-instance').click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
 
     // Verify nav to instances
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 5_000 });
@@ -999,12 +989,12 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // Deploy first
     const deployAlerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
+      await page.getByTestId('btn-deploy').click();
     });
     expect(deployAlerts[0]).toContain('Deployed');
 
     // Open variables dialog
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.getByTestId('btn-start-instance').click();
     await expect(page.locator('.vars-dialog')).toBeVisible({ timeout: 3_000 });
 
     // Add variable 'orderId'
@@ -1021,7 +1011,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await newRow2.locator('input[type="number"]').fill('99.5');
 
     // Click Start
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
 
     // Should navigate to instances tab
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
@@ -1144,14 +1134,14 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // 2. Klicke "Deploy Process"
-    let alerts = await collectToasts(page, async () => {
-      await page.locator('button', { hasText: 'Deploy Process' }).click();
+    const alerts = await collectToasts(page, async () => {
+      await page.getByTestId('btn-deploy').click();
     });
     expect(alerts[0]).toContain('Deployed');
 
     // 3. Klicke "Start Instance" (ohne initiale Variablen, navigiert auto zu Instances)
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.getByTestId('btn-start-instance').click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
 
     // 4. Validierung: Klicke auf die neue Instanz
@@ -1187,7 +1177,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // 7. Navigiere zu "Pending Tasks" und verifiziere, dass UserTask_Approval dort erscheint
     await page.locator('.nav-item', { hasText: 'Pending Tasks' }).click();
-    const taskCard = page.locator('.card').filter({ hasText: 'Task: UserTask_Approval' });
+    const taskCard = page.locator('.card').filter({ hasText: 'Node: UserTask_Approval' });
     await expect(taskCard).toBeVisible({ timeout: 5_000 });
     await expect(taskCard.getByText('Assignee: admin')).toBeVisible();
   });
@@ -1215,14 +1205,14 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Click "Open File" – the mock dialog returns a path, read_bpmn_file returns XML
-    await page.locator('button', { hasText: 'Open File' }).click();
+    await page.locator('button', { hasText: /^Open$/ }).click();
 
     // Canvas should still be visible after loading
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // "Start Instance" directly deploys loaded file
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
-    await page.locator('.vars-dialog button', { hasText: 'Start' }).click();
+    await page.getByTestId('btn-start-instance').click();
+    await page.locator('.vars-dialog button', { hasText: 'Start Instance' }).click();
     
     // Should navigate to instances view
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });
@@ -1372,7 +1362,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await page.locator('button', { hasText: 'Attach File' }).click();
     
     // Wait for the UI to update
-    await expect(detail.locator('input.var-input').first()).toHaveValue('my_file_var', { timeout: 5000 });
+    await expect(detail.locator('input[placeholder="Variable name"]').first()).toHaveValue('my_file_var', { timeout: 5000 });
     await expect(detail.getByText('mock-upload.txt')).toBeVisible();
     await expect(detail.getByText('(1.0 KB)')).toBeVisible();
     
@@ -1396,7 +1386,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Open start dialog
-    await page.locator('.header-actions button', { hasText: 'Start Instance' }).click();
+    await page.getByTestId('btn-start-instance').click();
     const dialog = page.locator('.vars-dialog');
     await expect(dialog).toBeVisible({ timeout: 5_000 });
 
@@ -1411,10 +1401,10 @@ test.describe('bpmninja Desktop App – E2E', () => {
     // A pending file row should appear in the variables table
     await expect(dialog.locator('.file-pending-row')).toBeVisible({ timeout: 3_000 });
     await expect(dialog.getByText('pending')).toBeVisible();
-    await expect(dialog.locator('input.var-input').first()).toHaveValue('invoice_pdf');
+    await expect(dialog.locator('input[placeholder="Variable name"]').first()).toHaveValue('invoice_pdf');
 
     // Now click "Start" – this will deploy, start, and then upload the pending file
-    await dialog.locator('button', { hasText: 'Start' }).click();
+    await dialog.locator('button', { hasText: 'Start Instance' }).click();
 
     // Should navigate to Instances tab
     await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 10_000 });

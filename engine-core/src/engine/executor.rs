@@ -1,15 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use chrono::Utc;
 use uuid::Uuid;
 
 use crate::condition::evaluate_condition;
-use crate::engine::boundary::setup_boundary_events;
-use crate::engine::gateway::{
-    execute_complex_gateway, execute_exclusive_gateway, execute_inclusive_gateway,
-    execute_parallel_gateway,
-};
 use crate::engine::{WorkflowEngine, types::*};
 use crate::error::{EngineError, EngineResult};
 use crate::model::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
@@ -274,7 +268,7 @@ impl WorkflowEngine {
                 } => {
                     // Start the child subprocess
                     let mut child_def_key = None;
-                    let all_defs = self.definitions.all().await;
+                    let all_defs = self.definitions.all();
                     for (k, v) in &all_defs {
                         if v.id == called_element {
                             child_def_key = Some(*k);
@@ -509,7 +503,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
         let current_id = token.current_node.clone();
@@ -541,483 +534,62 @@ impl WorkflowEngine {
         }
 
         match &element {
-            BpmnElement::StartEvent
-            | BpmnElement::TimerStartEvent(_)
-            | BpmnElement::MessageStartEvent { .. } => {
-                tracing::debug!("Passing through start event '{current_id}'");
-                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                token.current_node = next.clone();
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = next;
-                Ok(NextAction::Continue(token.clone()))
+            BpmnElement::StartEvent | BpmnElement::TimerStartEvent(_) | BpmnElement::MessageStartEvent { .. } => {
+                self.handle_start_event(instance_id, token, &def_clone, &current_id).await
             }
-
             BpmnElement::EndEvent => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.audit_log
-                    .push(format!("⏹ Process completed at end event '{current_id}'"));
-                tracing::info!("Instance {instance_id}: reached end event '{current_id}'");
-                Ok(NextAction::Complete)
+                self.handle_end_event(instance_id, token, &def_clone, &current_id).await
             }
-
             BpmnElement::TerminateEndEvent => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.audit_log.push(format!(
-                    "⛔ Terminate end event '{current_id}' — killing all active tokens"
-                ));
-                tracing::info!("Instance {instance_id}: terminate end event '{current_id}'");
-                Ok(NextAction::Terminate)
+                self.handle_terminate_end_event(instance_id, token, &def_clone, &current_id).await
             }
-
-            BpmnElement::UserTask(assignee) => {
-                let (pending_timers, pending_msgs) =
-                    setup_boundary_events(&def_clone, &current_id, instance_id, token);
-                for t in pending_timers {
-                    self.pending_timers.insert(t.id, t);
-                }
-                for m in pending_msgs {
-                    self.pending_message_catches.insert(m.id, m);
-                }
-
-                let pending = PendingUserTask {
-                    task_id: Uuid::new_v4(),
-                    instance_id,
-                    node_id: current_id.clone(),
-                    assignee: assignee.clone(),
-                    token_id: token.id,
-                    created_at: Utc::now(),
-                };
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.tokens.insert(token.id, token.clone());
-                inst.audit_log.push(format!(
-                    "👤 User task '{current_id}' assigned to '{assignee}' — waiting (task_id: {})",
-                    pending.task_id
-                ));
-                tracing::info!(
-                    "Instance {instance_id}: user task '{current_id}' pending for '{assignee}'"
-                );
-
-                Ok(NextAction::WaitForUser(pending))
-            }
-
-            BpmnElement::ScriptTask {
-                script,
-                multi_instance: _,
-            } => {
-                // Execute the Rhai script with the token's variables as scope
-                let script_engine = crate::engine::create_script_engine();
-                let mut scope = rhai::Scope::new();
-                for (k, v) in &token.variables {
-                    scope
-                        .push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(rhai::Dynamic::UNIT));
-                }
-
-                script_engine
-                    .eval_with_scope::<()>(&mut scope, script)
-                    .map_err(|e| EngineError::ScriptError(e.to_string()))?;
-
-                // Write back modified variables from scope to token
-                for (k, _, v) in scope.iter_raw() {
-                    if let Ok(json_val) = rhai::serde::from_dynamic(v) {
-                        token.variables.insert(k.to_string(), json_val);
-                    }
-                }
-
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-
-                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
-                token.current_node = next.clone();
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = next;
-                inst.variables = token.variables.clone();
-                inst.audit_log
-                    .push(format!("📜 Script task '{current_id}' executed"));
-
-                Ok(NextAction::Continue(token.clone()))
-            }
-            BpmnElement::SendTask {
-                message_name,
-                multi_instance: _,
-            } => {
-                tracing::info!(
-                    "Instance {instance_id}: send task '{current_id}' publishing message '{message_name}'"
-                );
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-
-                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
-                token.current_node = next.clone();
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = next;
-                inst.audit_log.push(format!(
-                    "📤 Send task '{current_id}' published message '{message_name}'"
-                ));
-
-                Ok(NextAction::Continue(token.clone()))
-            }
-            BpmnElement::ServiceTask {
-                topic,
-                multi_instance: _,
-            } => {
-                let (pending_timers, pending_msgs) =
-                    setup_boundary_events(&def_clone, &current_id, instance_id, token);
-                for t in pending_timers {
-                    self.pending_timers.insert(t.id, t);
-                }
-                for m in pending_msgs {
-                    self.pending_message_catches.insert(m.id, m);
-                }
-
-                let svc_task = PendingServiceTask {
-                    id: Uuid::new_v4(),
-                    instance_id,
-                    definition_key: def_key,
-                    node_id: current_id.clone(),
-                    topic: topic.clone(),
-                    token_id: token.id,
-                    variables_snapshot: token.variables.clone(),
-                    created_at: Utc::now(),
-                    worker_id: None,
-                    lock_expiration: None,
-                    retries: 3,
-                    error_message: None,
-                    error_details: None,
-                };
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.tokens.insert(token.id, token.clone());
-                inst.audit_log.push(format!(
-                    "🔗 Service task '{current_id}' created for topic '{topic}' (task_id: {})",
-                    svc_task.id
-                ));
-                tracing::info!(
-                    "Instance {instance_id}: service task '{current_id}' pending for topic '{topic}'"
-                );
-
-                Ok(NextAction::WaitForServiceTask(svc_task))
-            }
-
-            BpmnElement::ParallelGateway => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let action = execute_parallel_gateway(&def_clone, &current_id, token)?;
-                if let NextAction::ContinueMultiple(ref f) = action {
-                    let inst_arc = self
-                        .instances
-                        .get(&instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                    let mut inst = inst_arc.write().await;
-                    inst.current_node = current_id.clone();
-                    inst.audit_log.push(format!(
-                        "■ Parallel gateway '{current_id}' → forked to {} path(s)",
-                        f.len()
-                    ));
-                }
-                Ok(action)
-            }
-
-            BpmnElement::ExclusiveGateway { default } => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let action = execute_exclusive_gateway(&def_clone, &current_id, token, default)?;
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.audit_log.push(format!(
-                    "◆ Exclusive gateway '{current_id}' → took path to '{}'",
-                    token.current_node
-                ));
-                inst.current_node = token.current_node.clone();
-                Ok(action)
-            }
-
-            BpmnElement::InclusiveGateway => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let action = execute_inclusive_gateway(&def_clone, &current_id, token)?;
-                if let NextAction::ContinueMultiple(ref f) = action {
-                    let inst_arc = self
-                        .instances
-                        .get(&instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                    let mut inst = inst_arc.write().await;
-                    inst.current_node = current_id.clone();
-                    inst.audit_log.push(format!(
-                        "◇ Inclusive gateway '{current_id}' → forked to {} path(s)",
-                        f.len()
-                    ));
-                }
-                Ok(action)
-            }
-
-            BpmnElement::ComplexGateway {
-                join_condition: _,
-                default,
-            } => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let action = execute_complex_gateway(&def_clone, &current_id, token, default)?;
-                if let NextAction::ContinueMultiple(ref f) = action {
-                    let inst_arc = self
-                        .instances
-                        .get(&instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                    let mut inst = inst_arc.write().await;
-                    inst.current_node = current_id.clone();
-                    inst.audit_log.push(format!(
-                        "⟡ Complex gateway '{current_id}' → forked to {} path(s)",
-                        f.len()
-                    ));
-                } else if let NextAction::Continue(ref next_token) = action {
-                    let inst_arc = self
-                        .instances
-                        .get(&instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                    let mut inst = inst_arc.write().await;
-                    inst.audit_log.push(format!(
-                        "⟡ Complex gateway '{current_id}' → took path to '{}'",
-                        next_token.current_node
-                    ));
-                    inst.current_node = next_token.current_node.clone();
-                }
-                Ok(action)
-            }
-
-            BpmnElement::EventBasedGateway => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let mut actions = Vec::new();
-                for sf in def_clone.next_nodes(&current_id) {
-                    let target_node = sf.target.clone();
-                    if let Some(target_element) = def_clone.get_node(&target_node) {
-                        match target_element {
-                            BpmnElement::TimerCatchEvent(timer_def) => {
-                                let now = Utc::now();
-                                let expires_at = timer_def.next_expiry(now).unwrap_or(now);
-                                let pending = PendingTimer {
-                                    id: Uuid::new_v4(),
-                                    instance_id,
-                                    node_id: target_node.clone(),
-                                    expires_at,
-                                    token_id: token.id,
-                                    timer_def: Some(timer_def.clone()),
-                                    remaining_repetitions: None,
-                                };
-                                actions.push(NextAction::WaitForTimer(pending));
-                            }
-                            BpmnElement::MessageCatchEvent { message_name } => {
-                                let pending = PendingMessageCatch {
-                                    id: Uuid::new_v4(),
-                                    instance_id,
-                                    node_id: target_node.clone(),
-                                    message_name: message_name.clone(),
-                                    token_id: token.id,
-                                };
-                                actions.push(NextAction::WaitForMessage(pending));
-                            }
-                            _ => {
-                                return Err(EngineError::InvalidDefinition(format!(
-                                    "EventBasedGateway target '{}' is not a catch event",
-                                    target_node
-                                )));
-                            }
-                        }
-                    }
-                }
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.tokens.insert(token.id, token.clone());
-                inst.audit_log.push(format!(
-                    "⭮ Event-based gateway '{current_id}' waiting for {} alternative events",
-                    actions.len()
-                ));
-                Ok(NextAction::WaitForEventGroup(actions))
-            }
-
-            BpmnElement::TimerCatchEvent(timer_def) => {
-                let now = Utc::now();
-                let expires_at = timer_def.next_expiry(now).unwrap_or(now);
-                let pending = PendingTimer {
-                    id: Uuid::new_v4(),
-                    instance_id,
-                    node_id: current_id.clone(),
-                    expires_at,
-                    token_id: token.id,
-                    timer_def: Some(timer_def.clone()),
-                    remaining_repetitions: None,
-                };
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.tokens.insert(token.id, token.clone());
-                inst.audit_log
-                    .push(format!("⏱ Timer catch event '{current_id}' — waiting"));
-                Ok(NextAction::WaitForTimer(pending))
-            }
-
-            BpmnElement::MessageCatchEvent { message_name } => {
-                let pending = PendingMessageCatch {
-                    id: Uuid::new_v4(),
-                    instance_id,
-                    node_id: current_id.clone(),
-                    message_name: message_name.clone(),
-                    token_id: token.id,
-                };
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.tokens.insert(token.id, token.clone());
-                inst.audit_log.push(format!(
-                    "✉️ Message catch event '{current_id}' waiting for '{message_name}'"
-                ));
-                Ok(NextAction::WaitForMessage(pending))
-            }
-
-            BpmnElement::CallActivity { called_element } => {
-                let (pending_timers, pending_msgs) =
-                    setup_boundary_events(&def_clone, &current_id, instance_id, token);
-                for t in pending_timers {
-                    self.pending_timers.insert(t.id, t);
-                }
-                for m in pending_msgs {
-                    self.pending_message_catches.insert(m.id, m);
-                }
-
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.audit_log.push(format!(
-                    "🔗 Call Activity '{current_id}' invoking '{called_element}'"
-                ));
-                tracing::info!(
-                    "Instance {instance_id}: '{current_id}' invoking '{called_element}'"
-                );
-
-                Ok(NextAction::WaitForCallActivity {
-                    called_element: called_element.clone(),
-                    token: token.clone(),
-                })
-            }
-
-            BpmnElement::EmbeddedSubProcess { start_node_id } => {
-                // Redirect the token into the embedded sub-process scope
-                token.current_node = start_node_id.clone();
-                Ok(NextAction::Continue(token.clone()))
-            }
-
-            BpmnElement::SubProcessEndEvent { sub_process_id } => {
-                let next = resolve_next_target(&def_clone, sub_process_id, &token.variables)?;
-                token.current_node = next.clone();
-                Ok(NextAction::Continue(token.clone()))
-            }
-
             BpmnElement::ErrorEndEvent { error_code } => {
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = current_id.clone();
-                inst.audit_log.push(format!(
-                    "💥 Process completed at error end '{current_id}' with error '{error_code}'"
-                ));
-                Ok(NextAction::ErrorEnd {
-                    error_code: error_code.clone(),
-                })
+                self.handle_error_end_event(instance_id, token, &def_clone, &current_id, error_code).await
             }
-
-            BpmnElement::BoundaryTimerEvent { .. }
-            | BpmnElement::BoundaryMessageEvent { .. }
-            | BpmnElement::BoundaryErrorEvent { .. } => {
-                let next = resolve_next_target(&def_clone, &current_id, &token.variables)?;
-                self.run_end_scripts(instance_id, token, &def_clone, &current_id)
-                    .await?;
-                token.current_node = next.clone();
-                let inst_arc = self
-                    .instances
-                    .get(&instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
-                let mut inst = inst_arc.write().await;
-                inst.current_node = next;
-                Ok(NextAction::Continue(token.clone()))
+            BpmnElement::UserTask(assignee) => {
+                self.handle_user_task(instance_id, token, &def_clone, &current_id, assignee).await
+            }
+            BpmnElement::ScriptTask { script, .. } => {
+                self.handle_script_task(instance_id, token, &def_clone, &current_id, script).await
+            }
+            BpmnElement::SendTask { message_name, .. } => {
+                self.handle_send_task(instance_id, token, &def_clone, &current_id, message_name).await
+            }
+            BpmnElement::ServiceTask { topic, .. } => {
+                self.handle_service_task(instance_id, token, &def_clone, &current_id, topic).await
+            }
+            BpmnElement::ParallelGateway => {
+                self.handle_parallel_gateway(instance_id, token, &def_clone, &current_id).await
+            }
+            BpmnElement::ExclusiveGateway { default } => {
+                self.handle_exclusive_gateway(instance_id, token, &def_clone, &current_id, default).await
+            }
+            BpmnElement::InclusiveGateway => {
+                self.handle_inclusive_gateway(instance_id, token, &def_clone, &current_id).await
+            }
+            BpmnElement::ComplexGateway { default, .. } => {
+                self.handle_complex_gateway(instance_id, token, &def_clone, &current_id, default).await
+            }
+            BpmnElement::EventBasedGateway => {
+                self.handle_event_based_gateway(instance_id, token, &def_clone, &current_id).await
+            }
+            BpmnElement::TimerCatchEvent(timer_def) => {
+                self.handle_timer_catch_event(instance_id, token, &current_id, timer_def).await
+            }
+            BpmnElement::MessageCatchEvent { message_name } => {
+                self.handle_message_catch_event(instance_id, token, &current_id, message_name).await
+            }
+            BpmnElement::CallActivity { called_element } => {
+                self.handle_call_activity(instance_id, token, &def_clone, &current_id, called_element).await
+            }
+            BpmnElement::EmbeddedSubProcess { start_node_id } => {
+                self.handle_embedded_sub_process(token, start_node_id).await
+            }
+            BpmnElement::SubProcessEndEvent { sub_process_id } => {
+                self.handle_sub_process_end_event(token, &def_clone, sub_process_id).await
+            }
+            BpmnElement::BoundaryTimerEvent { .. } | BpmnElement::BoundaryMessageEvent { .. } | BpmnElement::BoundaryErrorEvent { .. } => {
+                self.handle_boundary_event(instance_id, token, &def_clone, &current_id).await
             }
         }
     }
@@ -1039,7 +611,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?
             .clone();
 
@@ -1164,7 +735,6 @@ impl WorkflowEngine {
         let def = self
             .definitions
             .get(&def_key)
-            .await
             .ok_or(EngineError::NoSuchDefinition(def_key))?
             .clone();
 

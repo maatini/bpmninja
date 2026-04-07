@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
-import { deployDefinition, startInstance } from './lib/tauri'
-import { Modeler } from './Modeler'
-import { Instances } from './Instances'
-import { DeployedProcesses } from './DeployedProcesses'
-import { Settings } from './Settings'
-import { Monitoring } from './Monitoring'
-import { PendingTasks } from './PendingTasks'
-import { MessageDialog } from './MessageDialog'
+import { deployDefinition, startInstance } from './shared/lib/tauri'
+import { ModelerPage } from './features/modeler/ModelerPage'
+import { InstancesPage } from './features/instances/InstancesPage'
+import { DeployedProcessesPage } from './features/definitions/DeployedProcessesPage'
+import { SettingsPage } from './features/settings/SettingsPage'
+import { MonitoringPage } from './features/monitoring/MonitoringPage'
+import { PendingTasksPage } from './features/tasks/PendingTasksPage'
+import { MessageDialog } from './shared/components/MessageDialog'
 import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { IncidentsView } from './IncidentsView'
+import { IncidentsPage } from './features/incidents/IncidentsPage'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 
@@ -137,28 +137,28 @@ function App() {
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col relative overflow-hidden bg-background">
         <div className={cn("flex-1 flex flex-col h-full", activeTab === 'modeler' ? 'flex' : 'hidden')}>
-          <Modeler onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} onOpenFile={handleOpenFile} initialXml={viewXml} />
+          <ModelerPage onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} onOpenFile={handleOpenFile} initialXml={viewXml} />
         </div>
 
         {activeTab === 'definitions' && (
-          <DeployedProcesses 
+          <DeployedProcessesPage 
             onView={handleViewDefinition} 
-            onViewInstance={(id) => { setSelectedInstanceId(id); setActiveTab('instances'); }}
+            onViewInstance={(id: string) => { setSelectedInstanceId(id); setActiveTab('instances'); }}
           />
         )}
 
-        {activeTab === 'tasks' && <PendingTasks />}
-        {activeTab === 'incidents' && <IncidentsView onViewInstance={(id) => { setSelectedInstanceId(id); setActiveTab('instances'); }} />}
+        {activeTab === 'tasks' && <PendingTasksPage />}
+        {activeTab === 'incidents' && <IncidentsPage onViewInstance={(id: string) => { setSelectedInstanceId(id); setActiveTab('instances'); }} />}
         
         {activeTab === 'instances' && (
-          <Instances 
+          <InstancesPage 
             selectedInstanceId={selectedInstanceId} 
             onClearSelection={() => setSelectedInstanceId(null)} 
           />
         )}
 
-        {activeTab === 'monitoring' && <Monitoring />}
-        {activeTab === 'settings' && <Settings />}
+        {activeTab === 'monitoring' && <MonitoringPage />}
+        {activeTab === 'settings' && <SettingsPage />}
       </div>
       
       <MessageDialog open={showMessageDialog} onClose={() => setShowMessageDialog(false)} />

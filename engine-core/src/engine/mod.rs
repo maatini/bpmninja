@@ -23,6 +23,7 @@ pub(crate) mod boundary;
 mod definition_ops;
 pub(crate) mod executor;
 pub(crate) mod gateway;
+pub(crate) mod handlers;
 mod instance_ops;
 pub(crate) mod instance_store;
 mod message_processor;
@@ -184,7 +185,7 @@ impl WorkflowEngine {
             return;
         };
 
-        let bound_timers: Vec<String> = if let Some(def) = self.definitions.get(&def_key).await {
+        let bound_timers: Vec<String> = if let Some(def) = self.definitions.get(&def_key) {
             def.nodes
                 .iter()
                 .filter_map(|(id, node)| {
@@ -234,7 +235,7 @@ impl WorkflowEngine {
             return;
         };
 
-        let bound_messages: Vec<String> = if let Some(def) = self.definitions.get(&def_key).await {
+        let bound_messages: Vec<String> = if let Some(def) = self.definitions.get(&def_key) {
             def.nodes
                 .iter()
                 .filter_map(|(id, node)| {

@@ -1,26 +1,18 @@
 import { invoke } from '@tauri-apps/api/core';
+import type {
+  PendingUserTask,
+  ProcessInstance,
+  PendingServiceTask,
+  HistoryEntry,
+  HistoryQuery,
+  DefinitionInfo,
+  MonitoringData,
+  BucketEntry,
+  BucketEntryDetail,
+  FileReference
+} from '../types/engine';
 
-export interface PendingUserTask {
-  task_id: string;
-  instance_id: string;
-  node_id: string;
-  assignee: string;
-  created_at: string;
-}
-
-export interface ProcessInstance {
-  id: string;
-  definition_key: string;
-  business_key: string | null;
-  state: 'Running' | 'Completed' 
-    | { WaitingOnUserTask: { task_id: string } } 
-    | { WaitingOnServiceTask: { task_id: string } }
-    | { WaitingOnTimer: { timer_id: string } }
-    | { WaitingOnMessage: { message_name: string } };
-  current_node: string;
-  audit_log: string[];
-  variables: Record<string, unknown>;
-}
+export * from '../types/engine';
 
 export async function deploySimpleProcess(): Promise<string> {
   return invoke('deploy_simple_process');
@@ -40,20 +32,6 @@ export async function getPendingTasks(): Promise<PendingUserTask[]> {
 
 export async function completeTask(taskId: string, variables?: Record<string, unknown>): Promise<void> {
   return invoke('complete_task', { taskId, variables: variables || null });
-}
-
-export interface PendingServiceTask {
-  id: string;
-  instance_id: string;
-  definition_key: string;
-  node_id: string;
-  topic: string;
-  worker_id: string | null;
-  lock_expiration: string | null;
-  retries: number;
-  error_message: string | null;
-  error_details: string | null;
-  created_at: string;
 }
 
 export async function getPendingServiceTasks(): Promise<PendingServiceTask[]> {
@@ -76,31 +54,6 @@ export async function getInstanceDetails(instanceId: string): Promise<ProcessIns
   return invoke('get_instance_details', { instanceId });
 }
 
-export interface HistoryEntry {
-  id: string;
-  instance_id: string;
-  timestamp: string;
-  event_type: string;
-  node_id: string | null;
-  description: string;
-  actor_type: string;
-  actor_id: string | null;
-  diff: {
-    changes: Record<string, any>;
-    human_readable: string | null;
-  } | null;
-  context: Record<string, any>;
-  metadata: Record<string, any> | null;
-  definition_version: number | null;
-  is_snapshot: boolean;
-  full_state_snapshot: Record<string, any> | null;
-}
-
-export interface HistoryQuery {
-  event_types?: string;
-  actor_types?: string;
-}
-
 export async function getInstanceHistory(instanceId: string, query?: HistoryQuery): Promise<HistoryEntry[]> {
   return invoke('get_instance_history', { 
     instanceId,
@@ -111,14 +64,6 @@ export async function getInstanceHistory(instanceId: string, query?: HistoryQuer
 
 export async function updateInstanceVariables(instanceId: string, variables: Record<string, unknown>): Promise<void> {
   return invoke('update_instance_variables', { instanceId, variables });
-}
-
-export interface DefinitionInfo {
-  key: string;
-  bpmn_id: string;
-  version: number;
-  node_count: number;
-  is_latest: boolean;
 }
 
 export async function listDefinitions(): Promise<DefinitionInfo[]> {
@@ -169,50 +114,8 @@ export async function setApiUrl(url: string): Promise<void> {
 // Monitoring
 // ---------------------------------------------------------------------------
 
-export interface BucketInfo {
-  name: string;
-  bucket_type: string;
-  entries: number;
-  size_bytes: number;
-}
-
-export interface StorageInfo {
-  backend_name: string;
-  version: string;
-  host: string;
-  port: number;
-  memory_bytes: number;
-  storage_bytes: number;
-  streams: number;
-  consumers: number;
-  buckets: BucketInfo[];
-}
-
-export interface MonitoringData {
-  definitions_count: number;
-  instances_total: number;
-  instances_running: number;
-  instances_completed: number;
-  pending_user_tasks: number;
-  pending_service_tasks: number;
-  pending_timers: number;
-  pending_message_catches: number;
-  storage_info: StorageInfo | null;
-}
-
 export async function getMonitoringData(): Promise<MonitoringData> {
   return invoke('get_monitoring_data');
-}
-
-export interface BucketEntry {
-  key: string;
-  size_bytes: number | null;
-  created_at: string | null;
-}
-
-export interface BucketEntryDetail {
-  key: string;
-  data: string;
 }
 
 export async function getBucketEntries(bucket: string, offset: number = 0, limit: number = 50): Promise<BucketEntry[]> {
@@ -234,15 +137,6 @@ export async function readBpmnFile(path: string): Promise<string> {
 // ---------------------------------------------------------------------------
 // File Attachments
 // ---------------------------------------------------------------------------
-
-export interface FileReference {
-  type: 'file';
-  object_key: string;
-  filename: string;
-  mime_type: string;
-  size_bytes: number;
-  uploaded_at: string;
-}
 
 export async function uploadInstanceFile(
   instanceId: string, varName: string, filePath: string

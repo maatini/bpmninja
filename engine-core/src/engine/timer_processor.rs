@@ -62,7 +62,6 @@ impl WorkflowEngine {
                     let (k, _) = self
                         .definitions
                         .find_latest_by_bpmn_id(&child_bpmn_id)
-                        .await
                         .ok_or_else(|| {
                             EngineError::InvalidDefinition(format!(
                                 "Event Subprocess '{child_bpmn_id}' not found"
@@ -100,7 +99,6 @@ impl WorkflowEngine {
             let def = self
                 .definitions
                 .get(&def_key)
-                .await
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
             let mut is_non_interrupting = false;

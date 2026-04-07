@@ -29,7 +29,7 @@ impl WorkflowEngine {
             }
         }
         EngineStats {
-            definitions_count: self.definitions.len().await,
+            definitions_count: self.definitions.len(),
             instances_total: all_insts.len(),
             instances_running: running,
             instances_completed: comp,
@@ -148,7 +148,7 @@ impl WorkflowEngine {
                 }
             }
 
-            instance.audit_log.push(format!(
+            instance.push_audit_log(format!(
                 "Variables updated: +{added} ~{modified} -{deleted}"
             ));
 

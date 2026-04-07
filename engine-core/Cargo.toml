@@ -16,4 +16,10 @@ tracing = { workspace = true }
 async-trait = "0.1"
 rhai = { version = "1.19.0", features = ["serde", "sync"] }
 croner = "3"
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
+[[bench]]
+name = "engine_bench"
+harness = false

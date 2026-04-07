@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { getApiUrl, setApiUrl, getMonitoringData } from './lib/tauri'
+import { getApiUrl, setApiUrl, getMonitoringData } from '../../shared/lib/tauri'
 import { Server, CheckCircle, XCircle, Palette, Monitor, Sun, Moon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 
-export function Settings() {
+export function SettingsPage() {
   const [apiUrl, setLocalApiUrl] = useState('http://localhost:8081')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')

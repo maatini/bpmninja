@@ -63,7 +63,7 @@ impl WorkflowEngine {
                 entry = entry.with_diff(diff);
             }
             if let Some(curr) = new_state.as_ref().or(old_state)
-                && let Some(def) = self.definitions.get(&curr.definition_key).await {
+                && let Some(def) = self.definitions.get(&curr.definition_key) {
                     entry.definition_version = Some(def.version);
                 }
 
@@ -162,7 +162,7 @@ impl WorkflowEngine {
 
     /// Persists a process definition to the KV store.
     pub(crate) async fn persist_definition(&self, key: Uuid) {
-        if let (Some(p), Some(def)) = (&self.persistence, self.definitions.get(&key).await) {
+        if let (Some(p), Some(def)) = (&self.persistence, self.definitions.get(&key)) {
             let mut last_err = None;
             for attempt in 0..=INLINE_RETRIES {
                 match p.save_definition(&def).await {

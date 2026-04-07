@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getMonitoringData, getBucketEntries, getBucketEntryDetail, type MonitoringData, type BucketEntry, type BucketEntryDetail } from './lib/tauri'
+import { getMonitoringData, getBucketEntries, getBucketEntryDetail, type MonitoringData, type BucketEntry, type BucketEntryDetail } from '../../shared/lib/tauri'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table'
@@ -27,7 +27,7 @@ function bucketTypeLabel(t: string): string {
   return t
 }
 
-export function Monitoring() {
+export function MonitoringPage() {
   const [data, setData] = useState<MonitoringData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)

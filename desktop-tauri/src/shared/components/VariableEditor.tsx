@@ -1,6 +1,6 @@
 import { Trash, Paperclip, Download } from 'lucide-react';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { uploadInstanceFile, downloadInstanceFile, type FileReference } from './lib/tauri';
+import { uploadInstanceFile, downloadInstanceFile, type FileReference } from '../lib/tauri';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -273,7 +273,7 @@ export function VariableEditor({
   return (
     <div className="space-y-4">
       <div className="border rounded-md overflow-hidden bg-background">
-        <Table>
+        <Table className="variables-table">
           <TableHeader className="bg-muted/40 hover:bg-muted/40">
             <TableRow>
               <TableHead className="w-[30%]">Name</TableHead>
@@ -292,7 +292,7 @@ export function VariableEditor({
                     onChange={(e: any) => handleChange(idx, 'name', e.target.value)}
                     placeholder="Variable name"
                     readOnly={readOnlyNames && !v.isNew}
-                    className={readOnlyNames && !v.isNew ? "bg-muted/50" : ""}
+                    className={`var-input ${readOnlyNames && !v.isNew ? "bg-muted/50" : ""}`}
                     autoCapitalize="off"
                     autoComplete="off"
                     spellCheck={false}

@@ -3,7 +3,7 @@ import { Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VariableEditor, serializeVariables } from './VariableEditor';
 import type { VariableRow } from './VariableEditor';
-import { correlateMessage } from './lib/tauri';
+import { correlateMessage } from '../lib/tauri';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
