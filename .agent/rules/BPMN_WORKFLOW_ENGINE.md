@@ -72,7 +72,20 @@ file_patterns: ["engine-core/**"]
 - `WaitingOnEventBasedGateway`
 
 **`NextAction` enum (14 variants):**
-- `Continue(Token), ContinueMultiple, WaitForUser, WaitForServiceTask, WaitForJoin, WaitForTimer, WaitForMessage, Complete, WaitForEventGroup, ErrorEnd, Terminate, WaitForCallActivity, MultiInstanceFork, MultiInstanceNext`, `ContinueMultiple(Vec<Token>)`, `WaitForUser(PendingUserTask)`, `WaitForServiceTask(PendingServiceTask)`, `WaitForJoin { gateway_id, token }`, `WaitForTimer(PendingTimer)`, `WaitForMessage(PendingMessageCatch)`, `Complete`
+- `Continue(Token)` — advance token to next node
+- `ContinueMultiple(Vec<Token>)` — fork into multiple tokens (inclusive gateway, multi-instance)
+- `WaitForUser(PendingUserTask)` — pause for human input
+- `WaitForServiceTask(PendingServiceTask)` — pause for external worker
+- `WaitForJoin { gateway_id, token }` — wait at gateway join point
+- `WaitForTimer(PendingTimer)` — pause for timer expiration
+- `WaitForMessage(PendingMessageCatch)` — pause for incoming message
+- `WaitForEventGroup` — pause at event-based gateway
+- `WaitForCallActivity` — pause for sub-process completion
+- `MultiInstanceFork` — fork for multi-instance execution
+- `MultiInstanceNext` — advance to next multi-instance iteration
+- `Complete` — instance finished successfully
+- `ErrorEnd { error_code }` — instance finished with BPMN error
+- `Terminate` — kill all active tokens immediately
 
 ### 3. External Tasks (`service_task.rs`)
 - `PendingServiceTask` — Camunda-style with `worker_id`, `lock_expiration`, `retries`, `error_message`

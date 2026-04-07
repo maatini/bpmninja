@@ -28,3 +28,8 @@ In-memory for tests, NATS persistence for production.
 | `agent-orchestrator` | External worker orchestration (stub) |
 
 Refer to specific rules based on the crate you are working in.
+
+## Model Guidelines
+- The architecture and conventions are designed to work with Claude Opus 4.6 and Gemini 3.1 Pro via Google Antigravity.
+- Always use the `/verify` workflow after Rust changes. Use `/verify-ui` after frontend changes.
+- Code comments in English. All other documentation in English.
