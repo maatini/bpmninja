@@ -658,12 +658,12 @@ Jeder State-Übergang wird als `HistoryEntry` gespeichert:
 | desktop-tauri (Rust Backend) | 10 | 623 |
 | **Projekt Gesamt** | **~108** | **~22.871** |
 
-### Test-Übersicht (163 Tests, alle ✅)
+### Test-Übersicht (167 Tests, alle ✅)
 
 | Crate | Unit | E2E | Gesamt |
 |---|---|---|---|
-| engine-core | 99 | — | 99 |
-| bpmn-parser | 26 | — | 26 |
+| engine-core | 102 | — | 102 |
+| bpmn-parser | 27 | — | 27 |
 | persistence-nats | 2 | — | 2 |
 | engine-server | — | 36 | 36 |
-| **Gesamt** | **127** | **36** | **163** |
+| **Gesamt** | **131** | **36** | **167** |

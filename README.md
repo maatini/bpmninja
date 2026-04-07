@@ -1,7 +1,7 @@
 # BPMNinja
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-163_passing-success?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-167_passing-success?style=flat-square)]()
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-93%25-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#lizenz)
 
@@ -352,24 +352,24 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 
 ## Test-Metriken
 
-> Ermittelt via `cargo test --workspace` am 06.04.2026 — **163 Tests, 0 Fehler**
+> Ermittelt via `cargo test --workspace` am 07.04.2026 — **167 Tests, 0 Fehler**
 
 ### Workspace-Übersicht
 
 | Crate | Unit | E2E | Gesamt |
 |-------|------|-----|--------|
-| **engine-core** | 99 | — | 99 |
-| **bpmn-parser** | 26 | — | 26 |
+| **engine-core** | 102 | — | 102 |
+| **bpmn-parser** | 27 | — | 27 |
 | **persistence-nats** | 2 | — | 2 |
 | **engine-server** | — | 36 | 36 |
-| **Gesamt** | **127** | **36** | **163** ✅ |
+| **Gesamt** | **131** | **36** | **167** ✅ |
 
-### engine-core Breakdown (99 Tests)
+### engine-core Breakdown (102 Tests)
 
 | Modul | Tests | Abdeckung |
 |-------|-------|-----------|
-| `engine::tests` | 56 | State Machine, Gateways, User/Service Tasks, Boundary Events, Call Activities, EventBasedGateway, Timers, Messages, Error Propagation, Mutation-Checks |
-| `engine::stress_tests` | 22 | Throughput (1000 Instanzen), Gateway-Korrektheit, Crash Recovery, Concurrency, Race Conditions, Memory (10k Instanzen), History Completeness |
+| `engine::tests` | 58 | State Machine, Gateways, User/Service Tasks, Boundary Events, Call Activities, EventBasedGateway, Timers, Messages, Error Propagation, Mutation-Checks |
+| `engine::stress_tests` | 23 | Throughput (1000 Instanzen), Gateway-Korrektheit, Crash Recovery, Concurrency, Race Conditions, Memory (10k Instanzen), History Completeness |
 | `model::tests` | 17 | ProcessDefinition Builder, Token-Serialisierung, SequenceFlow, Validation, FileReference, Gateway-Constraints, EventBasedGateway-Constraints |
 | `history::tests` | 4 | Diff-Berechnung, File-Upload-Erkennung, Human-Readable Text, Empty Diffs |
 
