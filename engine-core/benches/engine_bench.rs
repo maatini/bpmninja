@@ -78,7 +78,7 @@ pub fn bench_execution_throughput(c: &mut Criterion) {
 
                     assert_eq!(
                         engine.get_instance_state(inst_id).await.unwrap(),
-                        engine_core::engine::InstanceState::Completed
+                        engine_core::InstanceState::Completed
                     );
                 });
             },

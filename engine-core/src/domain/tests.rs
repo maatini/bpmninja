@@ -1,10 +1,5 @@
 use super::*;
-use serde_json::json;
 use uuid::Uuid;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn valid_definition_with_builder() {
@@ -292,4 +287,3 @@ mod tests {
         let just_a_str = serde_json::json!("file");
         assert!(FileReference::from_variable_value(&just_a_str).is_none());
     }
-}
