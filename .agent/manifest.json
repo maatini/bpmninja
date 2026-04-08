@@ -9,7 +9,7 @@
         "rules/BPMN_WORKFLOW_ENGINE.md"
       ],
       "skills": [
-        "skills/bpmninja-engine-core-evolver/SKILL.md"
+        "skills/bpmninja-engine/SKILL.md"
       ]
     },
     "parser": {
@@ -18,7 +18,7 @@
         "rules/BPMN_PARSER_AGENT.md"
       ],
       "skills": [
-        "skills/bpmninja-bpmn-parser-evolver/SKILL.md"
+        "skills/bpmninja-parser/SKILL.md"
       ]
     },
     "persistence": {
@@ -27,7 +27,7 @@
         "rules/NATS_MESSAGE_BROKER.md"
       ],
       "skills": [
-        "skills/bpmninja-persistence-nats-evolver/SKILL.md"
+        "skills/bpmninja-server/SKILL.md"
       ]
     },
     "server": {
@@ -36,7 +36,7 @@
         "rules/ENGINE_SERVER_AGENT.md"
       ],
       "skills": [
-        "skills/bpmninja-engine-server-evolver/SKILL.md"
+        "skills/bpmninja-server/SKILL.md"
       ]
     },
     "ui": {
@@ -46,7 +46,7 @@
         "rules/TAURI_BACKEND_AGENT.md"
       ],
       "skills": [
-        "skills/bpmninja-desktop-tauri-evolver/SKILL.md"
+        "skills/bpmninja-desktop/SKILL.md"
       ]
     },
     "orchestrator": {
@@ -55,7 +55,14 @@
         "rules/ORCHESTRATOR_AGENT.md"
       ],
       "skills": [
-        "skills/bpmninja-agent-orchestrator-evolver/SKILL.md"
+        "skills/bpmninja-server/SKILL.md"
+      ]
+    },
+    "quality": {
+      "path": ".",
+      "rules": [],
+      "skills": [
+        "skills/bpmninja-quality/SKILL.md"
       ]
     }
   }
