@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::engine::ProcessInstance;
+use crate::runtime::ProcessInstance;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActorType {
@@ -199,7 +199,7 @@ fn truncate_value_for_diff(v: &serde_json::Value) -> serde_json::Value {
 /// Avoids cloning audit_log, tokens, active_tokens, join_barriers.
 #[derive(Debug, Clone)]
 pub struct DiffSnapshot {
-    pub state: crate::engine::InstanceState,
+    pub state: crate::runtime::InstanceState,
     pub current_node: String,
     pub variables: HashMap<String, serde_json::Value>,
 }
@@ -319,7 +319,7 @@ pub fn calculate_diff_from_snapshot(old: &DiffSnapshot, new: &ProcessInstance) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::InstanceState;
+    use crate::runtime::InstanceState;
     use serde_json::json;
 
     #[test]

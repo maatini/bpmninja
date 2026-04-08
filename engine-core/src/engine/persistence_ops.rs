@@ -202,8 +202,8 @@ impl WorkflowEngine {
             (&self.persistence, self.instances.get(&instance_id).await)
         {
             let mut inst = inst_arc.write().await;
-            if inst.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
-                let overflow = inst.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+            if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
+                let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
                 inst.audit_log = inst.audit_log.split_off(overflow);
                 inst.audit_log.insert(
                     0,
@@ -215,19 +215,19 @@ impl WorkflowEngine {
             let estimated_size = serde_json::to_vec(&*inst)
                 .map(|v| v.len())
                 .unwrap_or(0);
-            if estimated_size > crate::engine::types::MAX_INSTANCE_PAYLOAD_BYTES {
+            if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
                 tracing::error!(
                     "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",
                     instance_id,
                     estimated_size,
-                    crate::engine::types::MAX_INSTANCE_PAYLOAD_BYTES
+                    crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
                 );
                 self.log_persistence_error(
                     &format!("save_instance({})", instance_id),
                     format!(
                         "Payload size {} exceeds limit {}",
                         estimated_size,
-                        crate::engine::types::MAX_INSTANCE_PAYLOAD_BYTES
+                        crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
                     ),
                 );
                 return;

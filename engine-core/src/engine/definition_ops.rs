@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::error::{EngineError, EngineResult};
-use crate::model::ProcessDefinition;
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::ProcessDefinition;
 
 use super::WorkflowEngine;
 

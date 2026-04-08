@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::engine::{
+use crate::runtime::{
     PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessInstance,
 };
-use crate::error::EngineResult;
+use crate::domain::EngineResult;
 use crate::history::HistoryEntry;
-use crate::model::{ProcessDefinition, Token};
+use crate::domain::{ProcessDefinition, Token};
 use crate::persistence::{
     BucketEntry, BucketEntryDetail, HistoryQuery, StorageInfo, WorkflowPersistence,
 };
@@ -173,7 +173,7 @@ impl WorkflowPersistence for InMemoryPersistence {
         let f = self.files.read().await;
         f.get(object_key)
             .cloned()
-            .ok_or_else(|| crate::error::EngineError::PersistenceError("File not found".into()))
+            .ok_or_else(|| crate::domain::EngineError::PersistenceError("File not found".into()))
     }
 
     async fn delete_file(&self, object_key: &str) -> EngineResult<()> {
@@ -191,7 +191,7 @@ impl WorkflowPersistence for InMemoryPersistence {
     async fn load_bpmn_xml(&self, definition_key: &str) -> EngineResult<String> {
         let b = self.bpmn_xmls.read().await;
         b.get(definition_key).cloned().ok_or_else(|| {
-            crate::error::EngineError::NoSuchDefinition(
+            crate::domain::EngineError::NoSuchDefinition(
                 uuid::Uuid::parse_str(definition_key).unwrap_or_default(),
             )
         })
@@ -334,7 +334,7 @@ impl WorkflowPersistence for InMemoryPersistence {
         limit: usize,
     ) -> EngineResult<Vec<BucketEntry>> {
         let _ = (bucket_name, offset, limit);
-        Err(crate::error::EngineError::PersistenceError(
+        Err(crate::domain::EngineError::PersistenceError(
             "Bucket browsing not implemented for in-memory persistence".into(),
         ))
     }
@@ -345,7 +345,7 @@ impl WorkflowPersistence for InMemoryPersistence {
         key: &str,
     ) -> EngineResult<BucketEntryDetail> {
         let _ = (bucket_name, key);
-        Err(crate::error::EngineError::PersistenceError(
+        Err(crate::domain::EngineError::PersistenceError(
             "Bucket detail browsing not implemented for in-memory persistence".into(),
         ))
     }

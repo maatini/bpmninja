@@ -2,12 +2,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::error::{EngineError, EngineResult};
-use crate::model::FileReference;
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::FileReference;
 
-use super::{
+use super::WorkflowEngine;
+use crate::runtime::{
     EngineStats, InstanceState, PendingServiceTask, PendingUserTask, ProcessInstance,
-    WorkflowEngine,
 };
 
 impl WorkflowEngine {

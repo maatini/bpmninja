@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::model::ProcessDefinition;
+use crate::domain::ProcessDefinition;
 
 /// Thread-safe registry for process definitions.
 #[derive(Clone, Default)]
@@ -21,7 +21,7 @@ impl DefinitionRegistry {
     }
 
     pub fn get(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.inner.get(key).map(|r| r.value().clone())
+        self.inner.get(key).map(|r: dashmap::mapref::one::Ref<'_, Uuid, Arc<ProcessDefinition>>| r.value().clone())
     }
 
     pub fn remove(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
@@ -44,7 +44,7 @@ impl DefinitionRegistry {
     pub fn list(&self) -> Vec<(Uuid, String, i32, usize)> {
         self.inner
             .iter()
-            .map(|r| {
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
                 (
                     *r.key(),
                     r.value().id.clone(),
@@ -59,15 +59,15 @@ impl DefinitionRegistry {
     pub fn find_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
             .iter()
-            .find(|r| r.value().id == bpmn_id)
-            .map(|r| (*r.key(), Arc::clone(r.value())))
+            .find(|r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().id == bpmn_id)
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| (*r.key(), Arc::clone(r.value())))
     }
 
     pub fn highest_version(&self, bpmn_id: &str) -> Option<i32> {
         self.inner
             .iter()
-            .filter(|r| r.value().id == bpmn_id)
-            .map(|r| r.value().version)
+            .filter(|r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().id == bpmn_id)
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().version)
             .max()
     }
 
@@ -75,9 +75,9 @@ impl DefinitionRegistry {
     pub fn find_latest_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
             .iter()
-            .filter(|r| r.value().id == bpmn_id)
-            .max_by_key(|r| r.value().version)
-            .map(|r| (*r.key(), Arc::clone(r.value())))
+            .filter(|r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().id == bpmn_id)
+            .max_by_key(|r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().version)
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| (*r.key(), Arc::clone(r.value())))
     }
 
     /// Returns all versions of a given BPMN process ID, sorted by version ascending.
@@ -85,8 +85,8 @@ impl DefinitionRegistry {
         let mut versions: Vec<_> = self
             .inner
             .iter()
-            .filter(|r| r.value().id == bpmn_id)
-            .map(|r| (*r.key(), Arc::clone(r.value())))
+            .filter(|r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| r.value().id == bpmn_id)
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| (*r.key(), Arc::clone(r.value())))
             .collect();
         versions.sort_by_key(|(_, def)| def.version);
         versions
@@ -95,7 +95,7 @@ impl DefinitionRegistry {
     pub fn all(&self) -> HashMap<Uuid, Arc<ProcessDefinition>> {
         self.inner
             .iter()
-            .map(|r| (*r.key(), r.value().clone()))
+            .map(|r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| (*r.key(), r.value().clone()))
             .collect()
     }
 }

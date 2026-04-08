@@ -1,116 +1,11 @@
-use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
+use crate::domain::{FileReference, Token};
+use crate::runtime::{PendingUserTask, PendingServiceTask, PendingTimer, PendingMessageCatch};
 
-use crate::model::{FileReference, Token};
-use crate::timer_definition::TimerDefinition;
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// Maximum number of audit log entries retained in-memory per instance.
-/// Older entries are available via the History API.
-pub const MAX_AUDIT_LOG_ENTRIES: usize = 200;
-
-/// Yield to the Tokio scheduler every N execution steps to prevent
-/// thread starvation on long-running or looping BPMN processes.
-pub const YIELD_EVERY_N_STEPS: u32 = 64;
-
-/// Hard limit on execution steps per `run_instance_batch` call.
-/// Prevents infinite BPMN loops from blocking the engine indefinitely.
-pub const MAX_EXECUTION_STEPS: u32 = 10_000;
-
-/// Maximum serialized size for a single ProcessInstance KV entry (900 KB).
-/// NATS default max_payload is 1 MB; we leave headroom for protocol overhead.
-pub const MAX_INSTANCE_PAYLOAD_BYTES: usize = 900 * 1024;
-
-// ---------------------------------------------------------------------------
-// Pending user task
-// ---------------------------------------------------------------------------
-
-/// A user task that is waiting for external completion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingUserTask {
-    pub task_id: Uuid,
-    pub instance_id: Uuid,
-    pub node_id: String,
-    pub assignee: String,
-    /// Reference to the token stored in ProcessInstance.tokens
-    pub token_id: Uuid,
-    pub created_at: DateTime<Utc>,
-}
-
-// ---------------------------------------------------------------------------
-// External task item (Camunda-style)
-// ---------------------------------------------------------------------------
-
-/// A service task that can be fetched and completed by remote workers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingServiceTask {
-    pub id: Uuid,
-    pub instance_id: Uuid,
-    pub definition_key: Uuid,
-    pub node_id: String,
-    pub topic: String,
-    /// Reference to the token stored in ProcessInstance.tokens
-    pub token_id: Uuid,
-    /// Snapshot of variables at task creation (for worker fetch-and-lock API).
-    /// This is a read-only copy; the authoritative variables live in instance.tokens.
-    pub variables_snapshot: HashMap<String, Value>,
-    pub created_at: DateTime<Utc>,
-    /// The worker that currently holds the lock (None = unlocked).
-    pub worker_id: Option<String>,
-    /// When the lock expires (None = not locked).
-    pub lock_expiration: Option<DateTime<Utc>>,
-    /// Remaining retries before an incident is created.
-    pub retries: i32,
-    /// Error message from the last failure.
-    pub error_message: Option<String>,
-    /// Detailed error information from the last failure.
-    pub error_details: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Pending Timers and Messages
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingTimer {
-    pub id: Uuid,
-    pub instance_id: Uuid,
-    pub node_id: String,
-    pub expires_at: DateTime<Utc>,
-    /// Reference to the token stored in ProcessInstance.tokens
-    pub token_id: Uuid,
-    /// Original timer definition — needed for recurring timers to
-    /// compute the next expiry after each trigger.
-    #[serde(default)]
-    pub timer_def: Option<TimerDefinition>,
-    /// Remaining repetitions for RepeatingInterval timers.
-    /// None = check timer_def, Some(0) = do not repeat.
-    #[serde(default)]
-    pub remaining_repetitions: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingMessageCatch {
-    pub id: Uuid,
-    pub instance_id: Uuid,
-    pub node_id: String,
-    pub message_name: String,
-    /// Reference to the token stored in ProcessInstance.tokens
-    pub token_id: Uuid,
-}
-
-// ---------------------------------------------------------------------------
-// Next action (execution result)
-// ---------------------------------------------------------------------------
-
-/// The result of executing a single step in the process.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NextAction {
     /// The token should continue to the next node.
@@ -266,8 +161,8 @@ impl ProcessInstance {
     /// Pushes an entry to the audit log, enforcing MAX_AUDIT_LOG_ENTRIES limit.
     pub fn push_audit_log(&mut self, entry: String) {
         self.audit_log.push(entry);
-        if self.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
-            let overflow = self.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+        if self.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
+            let overflow = self.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
             self.audit_log.drain(0..overflow);
         }
     }
@@ -275,28 +170,9 @@ impl ProcessInstance {
     /// Appends multiple entries to the audit log, enforcing MAX_AUDIT_LOG_ENTRIES limit.
     pub fn append_audit_log(&mut self, entries: &mut Vec<String>) {
         self.audit_log.append(entries);
-        if self.audit_log.len() > crate::engine::types::MAX_AUDIT_LOG_ENTRIES {
-            let overflow = self.audit_log.len() - crate::engine::types::MAX_AUDIT_LOG_ENTRIES;
+        if self.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
+            let overflow = self.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
             self.audit_log.drain(0..overflow);
         }
     }
-}
-
-/// Summary statistics for engine monitoring.
-#[derive(Debug, Clone, Serialize)]
-pub struct EngineStats {
-    pub definitions_count: usize,
-    pub instances_total: usize,
-    pub instances_running: usize,
-    pub instances_completed: usize,
-    pub instances_waiting_user: usize,
-    pub instances_waiting_service: usize,
-    pub pending_user_tasks: usize,
-    pub pending_service_tasks: usize,
-    pub pending_timers: usize,
-    pub pending_message_catches: usize,
-    /// Number of persistence write failures since engine start.
-    pub persistence_errors: u64,
-    /// Number of pending retry jobs in the background queue (0 = healthy).
-    pub pending_retry_jobs: usize,
 }

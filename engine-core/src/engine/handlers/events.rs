@@ -1,8 +1,8 @@
 use crate::engine::WorkflowEngine;
 use crate::engine::executor::resolve_next_target;
-use crate::engine::types::{NextAction, PendingMessageCatch, PendingTimer};
-use crate::error::{EngineError, EngineResult};
-use crate::model::{ProcessDefinition, Token};
+use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::{ProcessDefinition, Token};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -105,7 +105,7 @@ impl WorkflowEngine {
         instance_id: Uuid,
         token: &mut Token,
         current_id: &str,
-        timer_def: &crate::timer_definition::TimerDefinition,
+        timer_def: &crate::domain::TimerDefinition,
     ) -> EngineResult<NextAction> {
         let now = Utc::now();
         let expires_at = timer_def.next_expiry(now).unwrap_or(now);

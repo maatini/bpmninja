@@ -5,7 +5,7 @@
 //! re-reads the current in-memory state, and retries the persistence call
 //! with exponential backoff.
 
-use super::types::*;
+use super::super::runtime::*;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;

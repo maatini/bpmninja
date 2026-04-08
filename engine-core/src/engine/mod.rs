@@ -1,14 +1,15 @@
 use dashmap::DashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use crate::runtime::*;
 
 // Re-export model types used by test modules via `use super::*`
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::error::{EngineError, EngineResult};
+use crate::domain::{EngineError, EngineResult};
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::model::{BpmnElement, FileReference, ProcessDefinition, Token};
+use crate::domain::{BpmnElement, FileReference, ProcessDefinition, Token};
 #[cfg(test)]
 use serde_json::Value;
 #[cfg(test)]
@@ -33,10 +34,8 @@ pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
 mod timer_processor;
-pub mod types;
 mod user_task;
 
-pub use types::*;
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
@@ -81,7 +80,7 @@ impl WorkflowEngine {
 
     /// Creates a new engine equipped with the InMemoryPersistence backend.
     pub fn with_in_memory_persistence() -> Self {
-        let p = Arc::new(crate::persistence_in_memory::InMemoryPersistence::new());
+        let p = Arc::new(crate::adapter::InMemoryPersistence::new());
         Self::new().with_persistence(p)
     }
 
@@ -209,7 +208,7 @@ impl WorkflowEngine {
             def.nodes
                 .iter()
                 .filter_map(|(id, node)| {
-                    if let crate::model::BpmnElement::BoundaryTimerEvent { attached_to, .. } = node
+                    if let crate::domain::BpmnElement::BoundaryTimerEvent { attached_to, .. } = node
                     {
                         if attached_to == task_node_id {
                             Some(id.clone())
@@ -263,7 +262,7 @@ impl WorkflowEngine {
             def.nodes
                 .iter()
                 .filter_map(|(id, node)| {
-                    if let crate::model::BpmnElement::BoundaryMessageEvent { attached_to, .. } =
+                    if let crate::domain::BpmnElement::BoundaryMessageEvent { attached_to, .. } =
                         node
                     {
                         if attached_to == task_node_id {
@@ -381,12 +380,8 @@ impl Default for WorkflowEngine {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
-#[cfg(test)]
-mod stress_tests;

@@ -1,7 +1,7 @@
 use super::WorkflowEngine;
 use crate::InstanceState;
-use crate::error::{EngineError, EngineResult};
-use crate::model::BpmnElement;
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::BpmnElement;
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -100,7 +100,7 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
             let mut is_non_interrupting = false;
-            if let Some(crate::model::BpmnElement::BoundaryMessageEvent {
+            if let Some(crate::domain::BpmnElement::BoundaryMessageEvent {
                 cancel_activity: false,
                 ..
             }) = def.nodes.get(&catch.node_id)
@@ -132,7 +132,7 @@ impl WorkflowEngine {
                     original.id = uuid::Uuid::new_v4();
                     inst.tokens.insert(original.id, original.clone());
 
-                    let active = crate::engine::types::ActiveToken {
+                    let active = crate::runtime::ActiveToken {
                         token: original.clone(),
                         completed: false,
                         fork_id: Some(original.current_node.clone()),

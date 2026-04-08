@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
-use crate::engine::{PendingServiceTask, PendingUserTask, ProcessInstance};
-use crate::error::EngineResult;
-use crate::model::{ProcessDefinition, Token};
+use crate::runtime::{PendingServiceTask, PendingUserTask, ProcessInstance};
+use crate::domain::EngineResult;
+use crate::domain::{ProcessDefinition, Token};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HistoryQuery {
@@ -102,21 +102,21 @@ pub trait WorkflowPersistence: Send + Sync {
     async fn list_service_tasks(&self) -> EngineResult<Vec<PendingServiceTask>>;
 
     /// Persist a pending timer.
-    async fn save_timer(&self, timer: &crate::engine::PendingTimer) -> EngineResult<()>;
+    async fn save_timer(&self, timer: &crate::runtime::PendingTimer) -> EngineResult<()>;
     /// Delete a pending timer.
     async fn delete_timer(&self, timer_id: uuid::Uuid) -> EngineResult<()>;
     /// Load all persisted pending timers.
-    async fn list_timers(&self) -> EngineResult<Vec<crate::engine::PendingTimer>>;
+    async fn list_timers(&self) -> EngineResult<Vec<crate::runtime::PendingTimer>>;
 
     /// Persist a pending message catch.
     async fn save_message_catch(
         &self,
-        catch: &crate::engine::PendingMessageCatch,
+        catch: &crate::runtime::PendingMessageCatch,
     ) -> EngineResult<()>;
     /// Delete a pending message catch.
     async fn delete_message_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()>;
     /// Load all persisted pending message catches.
-    async fn list_message_catches(&self) -> EngineResult<Vec<crate::engine::PendingMessageCatch>>;
+    async fn list_message_catches(&self) -> EngineResult<Vec<crate::runtime::PendingMessageCatch>>;
 
     /// Store a file in the instance_files Object Store.
     async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()>;

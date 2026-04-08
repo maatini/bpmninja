@@ -1,6 +1,6 @@
 use super::WorkflowEngine;
 use crate::InstanceState;
-use crate::error::{EngineError, EngineResult};
+use crate::domain::{EngineError, EngineResult};
 
 impl WorkflowEngine {
     pub async fn process_timers(&self) -> EngineResult<usize> {
@@ -102,7 +102,7 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
             let mut is_non_interrupting = false;
-            if let Some(crate::model::BpmnElement::BoundaryTimerEvent {
+            if let Some(crate::domain::BpmnElement::BoundaryTimerEvent {
                 cancel_activity: false,
                 ..
             }) = def.nodes.get(&timer.node_id)
@@ -136,7 +136,7 @@ impl WorkflowEngine {
                     // Add cloned token as parallel token
                     inst.tokens.insert(original.id, original.clone());
 
-                    let active = crate::engine::types::ActiveToken {
+                    let active = crate::runtime::ActiveToken {
                         token: original.clone(),
                         completed: false,
                         fork_id: Some(original.current_node.clone()),
@@ -146,9 +146,9 @@ impl WorkflowEngine {
 
                     if !matches!(
                         inst.state,
-                        crate::engine::types::InstanceState::ParallelExecution { .. }
+                        crate::runtime::InstanceState::ParallelExecution { .. }
                     ) {
-                        inst.state = crate::engine::types::InstanceState::ParallelExecution {
+                        inst.state = crate::runtime::InstanceState::ParallelExecution {
                             active_token_count: inst.tokens.len(),
                         };
                     }
@@ -232,7 +232,7 @@ impl WorkflowEngine {
                     if let Some(next_expiry) = def.next_expiry(now) {
                         let new_remaining =
                             timer.remaining_repetitions.map(|r| r.saturating_sub(1));
-                        let new_pending = crate::engine::types::PendingTimer {
+                        let new_pending = crate::runtime::PendingTimer {
                             id: uuid::Uuid::new_v4(),
                             instance_id: timer.instance_id,
                             node_id: timer.node_id.clone(),

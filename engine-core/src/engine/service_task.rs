@@ -10,9 +10,10 @@ use chrono::{TimeDelta, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::error::{EngineError, EngineResult};
+use crate::domain::{EngineError, EngineResult};
 
-use super::{InstanceState, PendingServiceTask, WorkflowEngine};
+use super::WorkflowEngine;
+use crate::runtime::{InstanceState, PendingServiceTask};
 
 /// Verifies that the given worker holds the lock on an service task.
 ///
@@ -191,7 +192,7 @@ impl WorkflowEngine {
                 ..
             } = &mut *inst;
             let script_engine = crate::engine::create_script_engine();
-            crate::script_runner::run_end_scripts(
+            crate::scripting::run_end_scripts(
                 &script_engine,
                 instance_id,
                 &mut token,

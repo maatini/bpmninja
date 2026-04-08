@@ -4,10 +4,11 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::condition::evaluate_condition;
-use crate::engine::{WorkflowEngine, types::*};
-use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
-use crate::script_runner;
+use crate::engine::WorkflowEngine;
+use crate::runtime::*;
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
+use crate::scripting;
 
 // Helper function resolving next target
 pub(crate) fn resolve_next_target(
@@ -63,16 +64,16 @@ impl WorkflowEngine {
             step_count += 1;
 
             // Cooperative scheduling: yield to Tokio every N steps
-            if step_count.is_multiple_of(crate::engine::types::YIELD_EVERY_N_STEPS) {
+            if step_count.is_multiple_of(crate::runtime::YIELD_EVERY_N_STEPS) {
                 tokio::task::yield_now().await;
             }
 
             // Hard abort: prevent infinite BPMN loops
-            if step_count > crate::engine::types::MAX_EXECUTION_STEPS {
+            if step_count > crate::runtime::MAX_EXECUTION_STEPS {
                 tracing::error!(
                     "Instance {} exceeded {} execution steps — aborting (possible infinite loop)",
                     instance_id,
-                    crate::engine::types::MAX_EXECUTION_STEPS
+                    crate::runtime::MAX_EXECUTION_STEPS
                 );
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
@@ -81,14 +82,14 @@ impl WorkflowEngine {
                     };
                     inst.push_audit_log(format!(
                         "ABORTED: Exceeded {} execution steps",
-                        crate::engine::types::MAX_EXECUTION_STEPS
+                        crate::runtime::MAX_EXECUTION_STEPS
                     ));
                 }
                 self.persist_instance(instance_id).await;
                 return Err(EngineError::ExecutionLimitExceeded(format!(
                     "Instance {} exceeded execution step limit ({})",
                     instance_id,
-                    crate::engine::types::MAX_EXECUTION_STEPS
+                    crate::runtime::MAX_EXECUTION_STEPS
                 )));
             }
 
@@ -560,7 +561,7 @@ impl WorkflowEngine {
 
         let mut start_audits = Vec::new();
         let script_engine = crate::engine::create_script_engine();
-        script_runner::run_node_scripts(
+        scripting::run_node_scripts(
             &script_engine,
             instance_id,
             token,
@@ -709,18 +710,18 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    fn same_gateway_type(a: &crate::model::BpmnElement, b: &crate::model::BpmnElement) -> bool {
+    fn same_gateway_type(a: &crate::domain::BpmnElement, b: &crate::domain::BpmnElement) -> bool {
         matches!(
             (a, b),
             (
-                crate::model::BpmnElement::ExclusiveGateway { .. },
-                crate::model::BpmnElement::ExclusiveGateway { .. }
+                crate::domain::BpmnElement::ExclusiveGateway { .. },
+                crate::domain::BpmnElement::ExclusiveGateway { .. }
             ) | (
-                crate::model::BpmnElement::InclusiveGateway,
-                crate::model::BpmnElement::InclusiveGateway
+                crate::domain::BpmnElement::InclusiveGateway,
+                crate::domain::BpmnElement::InclusiveGateway
             ) | (
-                crate::model::BpmnElement::ParallelGateway,
-                crate::model::BpmnElement::ParallelGateway
+                crate::domain::BpmnElement::ParallelGateway,
+                crate::domain::BpmnElement::ParallelGateway
             )
         )
     }
@@ -967,7 +968,7 @@ impl WorkflowEngine {
             ..
         } = &mut *inst;
         let script_engine = crate::engine::create_script_engine();
-        crate::script_runner::run_end_scripts(
+        crate::scripting::run_end_scripts(
             &script_engine,
             instance_id,
             token,

@@ -1,7 +1,7 @@
 use crate::engine::WorkflowEngine;
-use crate::engine::types::{NextAction, PendingMessageCatch, PendingTimer};
-use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ProcessDefinition, Token};
+use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::{BpmnElement, ProcessDefinition, Token};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;

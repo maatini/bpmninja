@@ -1,8 +1,8 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::engine::types::PendingTimer;
-use crate::model::{BpmnElement, ProcessDefinition, Token};
+use crate::runtime::PendingTimer;
+use crate::domain::{BpmnElement, ProcessDefinition, Token};
 
 /// Scans the process definition for boundary events attached to the given `node_id`
 /// and creates the corresponding pending timers or other wait states.
@@ -13,7 +13,7 @@ pub(crate) fn setup_boundary_events(
     token: &Token,
 ) -> (
     Vec<PendingTimer>,
-    Vec<crate::engine::types::PendingMessageCatch>,
+    Vec<crate::runtime::PendingMessageCatch>,
 ) {
     let mut pending_timers = Vec::new();
     let mut pending_msgs = Vec::new();
@@ -61,7 +61,7 @@ pub(crate) fn setup_boundary_events(
     }
 
     for (node_id, message_name) in bounds_msgs {
-        let pending = crate::engine::types::PendingMessageCatch {
+        let pending = crate::runtime::PendingMessageCatch {
             id: Uuid::new_v4(),
             instance_id,
             node_id,

@@ -1,5 +1,5 @@
 use engine_core::engine::WorkflowEngine;
-use engine_core::model::*;
+use engine_core::domain::*;
 use std::collections::HashMap;
 
 fn create_engine() -> WorkflowEngine {
@@ -157,7 +157,7 @@ async fn compliance_parallel_gateway_sync() {
 
     let state = engine.get_instance_details(inst_id).await.unwrap().state;
     assert!(
-        matches!(state, engine_core::engine::types::InstanceState::Completed),
+        matches!(state, engine_core::runtime::InstanceState::Completed),
         "Compliance Violation: Parallel Gateway did not join and complete"
     );
 }

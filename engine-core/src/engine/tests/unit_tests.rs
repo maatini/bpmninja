@@ -3,10 +3,10 @@
 //! Extracted from `engine.rs` to keep the main module focused on production
 //! logic.
 
-use super::*;
+use super::super::*;
 use crate::condition::evaluate_condition;
-use crate::model::ListenerEvent;
-use crate::model::ProcessDefinitionBuilder;
+use crate::domain::ListenerEvent;
+use crate::domain::ProcessDefinitionBuilder;
 
 async fn complete_all_service_tasks(
     engine: &WorkflowEngine,
@@ -195,7 +195,7 @@ async fn timer_start_succeeds() {
     let def = ProcessDefinitionBuilder::new("timer_proc")
         .node(
             "ts",
-            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(dur)),
+            BpmnElement::TimerStartEvent(crate::domain::TimerDefinition::Duration(dur)),
         )
         .node("end", BpmnElement::EndEvent)
         .flow("ts", "end")
@@ -220,7 +220,7 @@ async fn timer_mismatch_gives_error() {
     let def = ProcessDefinitionBuilder::new("timer_proc")
         .node(
             "ts",
-            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerStartEvent(crate::domain::TimerDefinition::Duration(
                 Duration::from_secs(60),
             )),
         )
@@ -243,7 +243,7 @@ async fn plain_start_rejects_timer_def() {
     let def = ProcessDefinitionBuilder::new("timer_proc")
         .node(
             "ts",
-            BpmnElement::TimerStartEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerStartEvent(crate::domain::TimerDefinition::Duration(
                 Duration::from_secs(5),
             )),
         )
@@ -914,7 +914,7 @@ async fn test_delete_definition_cascade() {
     let err = engine.delete_definition(key, false).await.unwrap_err();
     assert!(matches!(
         err,
-        crate::error::EngineError::DefinitionHasInstances(2)
+        crate::domain::EngineError::DefinitionHasInstances(2)
     ));
 
     engine.delete_definition(key, true).await.unwrap();
@@ -1408,7 +1408,7 @@ async fn timer_catch_event_succeeds() {
         .node("start", BpmnElement::StartEvent)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
                 std::time::Duration::from_millis(50),
             )),
         )
@@ -1459,7 +1459,7 @@ async fn boundary_timer_event_cancels_task() {
             "bound_timer",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::timer_definition::TimerDefinition::Duration(
+                timer: crate::domain::TimerDefinition::Duration(
                     std::time::Duration::from_millis(50),
                 ),
                 cancel_activity: true,
@@ -1637,7 +1637,7 @@ async fn in_memory_simultaneous_timer_and_message_race() {
         .node("fork", BpmnElement::ParallelGateway)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
                 std::time::Duration::from_millis(50),
             )),
         )
@@ -1704,7 +1704,7 @@ async fn in_memory_script_robust_failure_handling() {
         .node("end", BpmnElement::EndEvent)
         .flow("start", "task")
         .flow("task", "end")
-        .listener("start", crate::model::ListenerEvent::Start, script)
+        .listener("start", crate::domain::ListenerEvent::Start, script)
         .build()
         .unwrap();
 
@@ -1747,7 +1747,7 @@ async fn in_memory_large_file_variables() {
         p.save_file("file:big_data", &large_payload).await.unwrap();
     }
 
-    let file_ref = crate::model::FileReference {
+    let file_ref = crate::domain::FileReference {
         object_key: "file:big_data".into(),
         filename: "big_data.bin".into(),
         mime_type: "application/octet-stream".into(),
@@ -1770,7 +1770,7 @@ async fn in_memory_large_file_variables() {
 
     // Validate we can download it back
     let v = inst.variables.get("my_file").unwrap();
-    let f_ref: crate::model::FileReference = serde_json::from_value(v.clone()).unwrap();
+    let f_ref: crate::domain::FileReference = serde_json::from_value(v.clone()).unwrap();
     if let Some(p) = &engine.persistence {
         let downloaded = p.load_file(&f_ref.object_key).await.unwrap();
         assert_eq!(downloaded.len(), 10 * 1024 * 1024);
@@ -2114,8 +2114,8 @@ async fn call_activity_unhandled_error_becomes_incident() {
 fn engine_is_send_and_sync() {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
-    assert_send::<super::WorkflowEngine>();
-    assert_sync::<super::WorkflowEngine>();
+    assert_send::<super::super::WorkflowEngine>();
+    assert_sync::<super::super::WorkflowEngine>();
 }
 
 #[tokio::test]
@@ -2126,7 +2126,7 @@ async fn event_based_gateway_timer_wins() {
         .node("gw", BpmnElement::EventBasedGateway)
         .node(
             "catch_timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
                 Duration::from_millis(50),
             )),
         )
@@ -2182,7 +2182,7 @@ async fn event_based_gateway_message_wins() {
         .node("gw", BpmnElement::EventBasedGateway)
         .node(
             "catch_timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
                 Duration::from_millis(5000),
             )),
         ) // Long timer
@@ -2237,7 +2237,7 @@ async fn test_non_interrupting_timer_boundary() {
             "timer_bnd",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::timer_definition::TimerDefinition::Duration(
+                timer: crate::domain::TimerDefinition::Duration(
                     std::time::Duration::from_secs(1),
                 ),
                 cancel_activity: false, // NON-INTERRUPTING
@@ -2301,7 +2301,7 @@ async fn test_non_interrupting_timer_boundary() {
         let inst = inst_lk.read().await;
         assert!(matches!(
             inst.state,
-            crate::engine::types::InstanceState::ParallelExecution {
+            crate::runtime::InstanceState::ParallelExecution {
                 active_token_count: 2
             }
         ));
@@ -2319,7 +2319,7 @@ async fn test_non_interrupting_timer_boundary() {
         let inst = inst_lk.read().await;
         assert!(!matches!(
             inst.state,
-            crate::engine::types::InstanceState::Completed
+            crate::runtime::InstanceState::Completed
         ));
     }
 
@@ -2335,7 +2335,7 @@ async fn test_non_interrupting_timer_boundary() {
         let inst = inst_lk.read().await;
         assert!(matches!(
             inst.state,
-            crate::engine::types::InstanceState::Completed
+            crate::runtime::InstanceState::Completed
         ));
     }
 }
@@ -2357,7 +2357,7 @@ async fn test_interrupting_timer_boundary_cleanup() {
             "timer_bnd",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::timer_definition::TimerDefinition::Duration(
+                timer: crate::domain::TimerDefinition::Duration(
                     std::time::Duration::from_secs(1),
                 ),
                 cancel_activity: true, // INTERRUPTING
@@ -2410,7 +2410,7 @@ async fn test_interrupting_timer_boundary_cleanup() {
     let inst = inst_lk.read().await;
     assert!(matches!(
         inst.state,
-        crate::engine::types::InstanceState::Completed
+        crate::runtime::InstanceState::Completed
     ));
 }
 
@@ -2463,7 +2463,7 @@ async fn test_non_interrupting_message_boundary() {
     let inst_lk = eng.instances.get(&inst_id).await.unwrap();
     assert!(!matches!(
         inst_lk.read().await.state,
-        crate::engine::types::InstanceState::Completed
+        crate::runtime::InstanceState::Completed
     ));
 
     eng.complete_user_task(tasks[0].task_id, Default::default())
@@ -2471,6 +2471,6 @@ async fn test_non_interrupting_message_boundary() {
         .unwrap();
     assert!(matches!(
         inst_lk.read().await.state,
-        crate::engine::types::InstanceState::Completed
+        crate::runtime::InstanceState::Completed
     ));
 }

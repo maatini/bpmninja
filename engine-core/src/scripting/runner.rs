@@ -9,8 +9,8 @@ use rhai::Dynamic;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::error::{EngineError, EngineResult};
-use crate::model::{ListenerEvent, ProcessDefinition, Token};
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::{ListenerEvent, ProcessDefinition, Token};
 
 /// Executes all scripts of a given `ListenerEvent` on the specified node.
 ///

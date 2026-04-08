@@ -1,6 +1,6 @@
 use super::WorkflowEngine;
 use crate::InstanceState;
-use crate::error::{EngineError, EngineResult};
+use crate::domain::{EngineError, EngineResult};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;

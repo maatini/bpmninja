@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::engine::types::{PendingMessageCatch, PendingTimer};
-use crate::error::{EngineError, EngineResult};
-use crate::model::{BpmnElement, ScopeEventListener, Token};
+use crate::runtime::{PendingMessageCatch, PendingTimer};
+use crate::domain::{EngineError, EngineResult};
+use crate::domain::{BpmnElement, ScopeEventListener, Token};
 use chrono::Utc;
 
-use super::{InstanceState, ProcessInstance, WorkflowEngine};
+use super::WorkflowEngine;
+use crate::runtime::{InstanceState, ProcessInstance};
 
 impl WorkflowEngine {
     /// Starts a new process instance from a deployed definition.
@@ -360,7 +361,7 @@ impl WorkflowEngine {
         match start_element {
             BpmnElement::TimerStartEvent(expected_timer) => {
                 let is_match = match expected_timer {
-                    crate::timer_definition::TimerDefinition::Duration(d) => {
+                    crate::domain::TimerDefinition::Duration(d) => {
                         *d == provided_duration
                     }
                     _ => false,
@@ -368,7 +369,7 @@ impl WorkflowEngine {
                 if !is_match {
                     return Err(EngineError::TimerMismatch {
                         expected: match expected_timer {
-                            crate::timer_definition::TimerDefinition::Duration(d) => d.as_secs(),
+                            crate::domain::TimerDefinition::Duration(d) => d.as_secs(),
                             _ => 0,
                         },
                         provided: provided_duration.as_secs(),

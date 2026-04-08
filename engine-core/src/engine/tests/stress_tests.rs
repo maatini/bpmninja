@@ -3,8 +3,8 @@
 //! This module contains rigorous mass-testing logic that validates the NFRs
 //! (Non-Functional Requirements) of the workflow engine according to the Massentest-Plan.
 
-use super::*;
-use crate::model::ProcessDefinitionBuilder;
+use super::super::*;
+use crate::domain::ProcessDefinitionBuilder;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
@@ -594,14 +594,14 @@ async fn persistence_error_counter_increments() {
 
     #[async_trait::async_trait]
     impl crate::persistence::WorkflowPersistence for FailingPersistence {
-        async fn save_token(&self, _: &crate::model::Token) -> EngineResult<()> {
+        async fn save_token(&self, _: &crate::domain::Token) -> EngineResult<()> {
             Ok(())
         }
-        async fn load_tokens(&self, _: &str) -> EngineResult<Vec<crate::model::Token>> {
+        async fn load_tokens(&self, _: &str) -> EngineResult<Vec<crate::domain::Token>> {
             Ok(vec![])
         }
         async fn save_instance(&self, _: &ProcessInstance) -> EngineResult<()> {
-            Err(crate::error::EngineError::PersistenceError(
+            Err(crate::domain::EngineError::PersistenceError(
                 "Injected failure".into(),
             ))
         }
@@ -611,48 +611,48 @@ async fn persistence_error_counter_increments() {
         async fn delete_instance(&self, _: &str) -> EngineResult<()> {
             Ok(())
         }
-        async fn save_definition(&self, _: &crate::model::ProcessDefinition) -> EngineResult<()> {
+        async fn save_definition(&self, _: &crate::domain::ProcessDefinition) -> EngineResult<()> {
             Ok(())
         }
-        async fn list_definitions(&self) -> EngineResult<Vec<crate::model::ProcessDefinition>> {
+        async fn list_definitions(&self) -> EngineResult<Vec<crate::domain::ProcessDefinition>> {
             Ok(vec![])
         }
         async fn delete_definition(&self, _: &str) -> EngineResult<()> {
             Ok(())
         }
-        async fn save_user_task(&self, _: &crate::engine::PendingUserTask) -> EngineResult<()> {
+        async fn save_user_task(&self, _: &crate::runtime::PendingUserTask) -> EngineResult<()> {
             Ok(())
         }
         async fn delete_user_task(&self, _: uuid::Uuid) -> EngineResult<()> {
             Ok(())
         }
-        async fn list_user_tasks(&self) -> EngineResult<Vec<crate::engine::PendingUserTask>> {
+        async fn list_user_tasks(&self) -> EngineResult<Vec<crate::runtime::PendingUserTask>> {
             Ok(vec![])
         }
         async fn save_service_task(
             &self,
-            _: &crate::engine::PendingServiceTask,
+            _: &crate::runtime::PendingServiceTask,
         ) -> EngineResult<()> {
             Ok(())
         }
         async fn delete_service_task(&self, _: uuid::Uuid) -> EngineResult<()> {
             Ok(())
         }
-        async fn list_service_tasks(&self) -> EngineResult<Vec<crate::engine::PendingServiceTask>> {
+        async fn list_service_tasks(&self) -> EngineResult<Vec<crate::runtime::PendingServiceTask>> {
             Ok(vec![])
         }
-        async fn save_timer(&self, _: &crate::engine::PendingTimer) -> EngineResult<()> {
+        async fn save_timer(&self, _: &crate::runtime::PendingTimer) -> EngineResult<()> {
             Ok(())
         }
         async fn delete_timer(&self, _: uuid::Uuid) -> EngineResult<()> {
             Ok(())
         }
-        async fn list_timers(&self) -> EngineResult<Vec<crate::engine::PendingTimer>> {
+        async fn list_timers(&self) -> EngineResult<Vec<crate::runtime::PendingTimer>> {
             Ok(vec![])
         }
         async fn save_message_catch(
             &self,
-            _: &crate::engine::PendingMessageCatch,
+            _: &crate::runtime::PendingMessageCatch,
         ) -> EngineResult<()> {
             Ok(())
         }
@@ -661,7 +661,7 @@ async fn persistence_error_counter_increments() {
         }
         async fn list_message_catches(
             &self,
-        ) -> EngineResult<Vec<crate::engine::PendingMessageCatch>> {
+        ) -> EngineResult<Vec<crate::runtime::PendingMessageCatch>> {
             Ok(vec![])
         }
         async fn save_file(&self, _: &str, _: &[u8]) -> EngineResult<()> {
@@ -707,7 +707,7 @@ async fn persistence_error_counter_increments() {
             _: &str,
             _: &str,
         ) -> EngineResult<crate::persistence::BucketEntryDetail> {
-            Err(crate::error::EngineError::PersistenceError("Mock".into()))
+            Err(crate::domain::EngineError::PersistenceError("Mock".into()))
         }
     }
 
@@ -765,7 +765,7 @@ async fn race_concurrent_complete_same_user_task() {
         let res = handle.await.unwrap();
         match res {
             Ok(_) => ok_count += 1,
-            Err(crate::error::EngineError::TaskNotPending { .. }) => err_count += 1,
+            Err(crate::domain::EngineError::TaskNotPending { .. }) => err_count += 1,
             _ => panic!("Unexpected result: {:?}", res),
         }
     }
@@ -884,7 +884,7 @@ async fn edge_timer_zero_duration() {
         .node("start", BpmnElement::StartEvent)
         .node(
             "timer",
-            BpmnElement::TimerCatchEvent(crate::timer_definition::TimerDefinition::Duration(
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
                 std::time::Duration::from_secs(0),
             )),
         )
@@ -911,7 +911,7 @@ async fn edge_rhai_infinite_loop() {
         .node("start", BpmnElement::StartEvent)
         .node("end", BpmnElement::EndEvent)
         .flow("start", "end")
-        .listener("start", crate::model::ListenerEvent::Start, "while true {}")
+        .listener("start", crate::domain::ListenerEvent::Start, "while true {}")
         .build()
         .unwrap();
 
@@ -920,7 +920,7 @@ async fn edge_rhai_infinite_loop() {
 
     assert!(matches!(
         res,
-        Err(crate::error::EngineError::ScriptError(_))
+        Err(crate::domain::EngineError::ScriptError(_))
     ));
 }
 
@@ -961,7 +961,7 @@ async fn edge_complete_task_on_completed_instance() {
         .await;
     assert!(matches!(
         res,
-        Err(crate::error::EngineError::TaskNotPending { .. })
+        Err(crate::domain::EngineError::TaskNotPending { .. })
     ));
 }
 
@@ -1102,7 +1102,7 @@ async fn infinite_loop_is_aborted() {
     assert!(result.is_err(), "Expected ExecutionLimitExceeded error");
     let err = result.unwrap_err();
     assert!(
-        matches!(err, crate::error::EngineError::ExecutionLimitExceeded(_)),
+        matches!(err, crate::domain::EngineError::ExecutionLimitExceeded(_)),
         "Expected ExecutionLimitExceeded, got: {:?}",
         err
     );
@@ -1127,7 +1127,7 @@ async fn oversized_instance_skips_persist() {
 
     // Inject an oversized variable (~1MB of data)
     let big_value =
-        serde_json::Value::String("x".repeat(crate::engine::types::MAX_INSTANCE_PAYLOAD_BYTES));
+        serde_json::Value::String("x".repeat(crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES));
     let mut vars = std::collections::HashMap::new();
     vars.insert("huge".to_string(), big_value);
     engine
