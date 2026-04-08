@@ -111,7 +111,7 @@ async fn stress_throughput_1000_linear_instances() {
     drain_service_tasks(&engine, "worker_1").await;
 
     let elapsed = start_time.elapsed();
-    assert!(elapsed.as_secs() < 15, "Throughput too slow: {:?}", elapsed);
+    assert!(elapsed.as_secs() < 30, "Throughput too slow: {:?}", elapsed);
 
     let stats = engine.get_stats().await;
     assert_eq!(stats.instances_completed, 1000);

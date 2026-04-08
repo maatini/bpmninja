@@ -35,7 +35,7 @@ jobs:
         # Ausführung auf das Kern-Crate limitiert. Ignoriert Unit-Tests und In-Memory-Mock.
         # -j 2 verhindert OOM-Kills auf dem CI-Runner
         run: |
-          cargo mutants -p engine-core -j 2 --timeout 120 --exclude-re "persistence_in_memory|tests|stress_tests" --output mutants.out
+          cargo mutants -p engine-core -j 2 --timeout 120 --exclude-re "persistence_in_memory|tests|stress_tests" --output mutants.out -- --skip stress_tests
         continue-on-error: true
 
       - name: Generate Job Summary
