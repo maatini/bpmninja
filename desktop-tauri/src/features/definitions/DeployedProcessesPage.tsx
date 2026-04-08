@@ -175,7 +175,7 @@ export function DeployedProcessesPage({ onView, onViewInstance }: { onView: (xml
             const instancesForProcess = instances.filter(i => versions.some(v => v.key === i.definition_key) && i.state !== 'Completed');
 
             return (
-              <Card key={bpmnId} className="overflow-hidden">
+              <Card key={bpmnId} className="process-group-card overflow-hidden">
                 <CardHeader className="bg-muted/40 py-4 flex flex-row items-center justify-between border-b">
                   <div className="flex items-center gap-2">
                     <FileCode2 className="h-5 w-5 text-primary" />
@@ -279,7 +279,7 @@ export function DeployedProcessesPage({ onView, onViewInstance }: { onView: (xml
                             {instancesForProcess.map(inst => {
                               const instDef = versions.find(v => v.key === inst.definition_key);
                               return (
-                                <div key={inst.id} className="flex items-center justify-between py-3 hover:bg-accent/50 px-2 rounded-md cursor-pointer transition-colors" onClick={() => onViewInstance?.(inst.id)}>
+                                <div key={inst.id} className="instance-list-item flex items-center justify-between py-3 hover:bg-accent/50 px-2 rounded-md cursor-pointer transition-colors" onClick={() => onViewInstance?.(inst.id)}>
                                   <div className="flex items-center gap-3">
                                     {inst.state === 'Running' ? <Activity className="h-4 w-4 text-green-500" /> : <Clock className="h-4 w-4 text-amber-500" />}
                                     <span className="font-semibold text-foreground">{inst.business_key || inst.id.substring(0, 8)}</span>

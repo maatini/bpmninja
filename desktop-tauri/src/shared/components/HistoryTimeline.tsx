@@ -84,7 +84,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="history-timeline-container flex flex-col gap-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 p-3 bg-muted/40 rounded-md border">
          <div className="flex items-center gap-2 text-muted-foreground">

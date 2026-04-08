@@ -9,15 +9,21 @@ import { useEffect, useRef } from 'react';
  */
 export function usePolling(fetchFn: () => Promise<void> | void, intervalMs: number, enabled: boolean = true) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchFnRef = useRef(fetchFn);
+
+  // Update ref to latest callback if it changes without triggering effect re-run
+  useEffect(() => {
+    fetchFnRef.current = fetchFn;
+  }, [fetchFn]);
 
   useEffect(() => {
     // Initial fetch
     if (enabled) {
-      fetchFn();
+      fetchFnRef.current();
     }
 
     if (enabled && intervalMs > 0) {
-      intervalRef.current = setInterval(fetchFn, intervalMs);
+      intervalRef.current = setInterval(() => fetchFnRef.current(), intervalMs);
     }
 
     return () => {
@@ -25,5 +31,5 @@ export function usePolling(fetchFn: () => Promise<void> | void, intervalMs: numb
         clearInterval(intervalRef.current);
       }
     };
-  }, [fetchFn, intervalMs, enabled]);
+  }, [intervalMs, enabled]);
 }

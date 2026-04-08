@@ -131,6 +131,9 @@ export function InstanceDetailDialog({
             <Button variant="destructive" size="sm" className="gap-2" onClick={() => selected && onDeleteRequest(selected.id)}>
               <Trash className="h-4 w-4" /> Delete
             </Button>
+            <Button variant="outline" size="sm" onClick={() => onClose()} data-testid="btn-close-details" className="gap-1 shadow-sm">
+              Close
+            </Button>
           </div>
         </DialogHeader>
 
