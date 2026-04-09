@@ -31,7 +31,7 @@
 
 ## Überblick
 
-bpmninja ist eine leichtgewichtige BPMN 2.0 Engine mit folgenden Kernfeatures:
+bpmninja ist eine BPMN 2.0 Engine mit folgenden Kernfeatures:
 
 - **Token-basierte Ausführung** — jeder Pfad wird als eigenständiger Token verfolgt
 - **18 BPMN-Elemente** — Start/End Events, User/Service Tasks, Gateways (XOR, AND, OR, Event-Based), Timer, Messages, Boundary Events, Call Activities, Sub-Processes
@@ -357,7 +357,7 @@ volumes:
 
 Die fertigen Apps findest du auf der [GitHub Releases Seite](https://github.com/maatini/bpmninja/releases).
 
-*   **macOS (.dmg):** Öffne die Datei und ziehe das Icon in deinen `Applications`/`Programme`-Ordner. _Hinweis:_ Da Open-Source Apps meist nicht kostenpflichtig signiert sind, kann eine Gatekeeper-Warnung auftreten. Mache einen **Rechtsklick** auf die App und wähle **"Öffnen"**.
+*   **macOS (.dmg):** Öffne die Datei und ziehe das Icon in deinen `Applications`/`Programme`-Ordner. _Hinweis:_ Da Open-Source Apps meist nicht signiert sind, meldet macOS beim Versuch des Öffnens unter Umständen, dass die App "beschädigt" sei und in den Papierkorb verschoben werden soll. Das ist ein bekanntes Gatekeeper-Schutzverhalten. Führe im Terminal `xattr -cr /Applications/bpmninja-desktop.app` aus, um das Quarantäne-Flag zu entfernen. Danach lässt sich die App normal öffnen.
 *   **Windows (.exe / .msi):** Führe den Installer per Doppelklick aus. Falls eine Microsoft SmartScreen-Warnung erscheint, klicke auf "Weitere Informationen" und dann auf "Trotzdem ausführen".
 *   **Linux (.AppImage / .deb):** Installiere das `.deb` Paket via `sudo dpkg -i package.deb`. Nutzt du das `.AppImage`, muss dieses ggf. mit `chmod +x app.AppImage` vorher ausführbar gemacht werden.
 
@@ -393,7 +393,7 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 
 ## Test-Metriken
 
-> Ermittelt via `cargo test --workspace` am 07.04.2026 — **175 Tests, 0 Fehler**
+> Ermittelt via `cargo test --workspace` am 09.04.2026 — **175 Tests, 0 Fehler**
 
 ### Workspace-Übersicht
 
@@ -411,7 +411,7 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 |-------|-------|-----------|
 | `engine::tests` | 56 | State Machine, Gateways, User/Service Tasks, Boundary Events, Call Activities, EventBasedGateway, Timers, Messages |
 | `engine::stress_tests` | 24 | Throughput, Gateway-Korrektheit, Crash Recovery, Concurrency, Race Conditions, Memory, Infinite Loops |
-| `model::tests` | 17 | ProcessDefinition Builder, Token-Serialisierung, Validation |
+| `domain::tests` | 17 | ProcessDefinition Builder, Token-Serialisierung, Validation |
 | `history::tests` | 5 | Diff-Berechnung, Human-Readable Text |
 | `condition::tests` | 3 | Bedingungsevaluierung anhand von Token-Variablen |
 | Integration Tests | 5 | BPMN-Compliance, Complex Gateways |
@@ -450,16 +450,16 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 
 | Bereich | Dateien | LoC |
 |---------|---------|-----|
-| engine-core (Lib) | 25 | 7.708 |
-| engine-core (Tests) | 2 | 3.628 |
+| engine-core (Lib) | 48 | 11.366 |
+| engine-core (Tests) | — | 380 |
 | bpmn-parser | 4 | 2.039 |
-| persistence-nats | 5 | 1.130 |
-| engine-server (Lib) | 12 | 1.548 |
+| persistence-nats | 5 | 1.149 |
+| engine-server (Lib) | 12 | 1.326 |
 | engine-server (E2E Tests) | 12 | 1.934 |
-| desktop-tauri (TypeScript + CSS) | 38 | 5.186 |
-| desktop-tauri (Rust Backend) | 10 | 623 |
-| **Rust Workspace** | **60** | **~18.610** |
-| **Projekt Gesamt** | **~108** | **~23.796** |
+| desktop-tauri (TypeScript + CSS) | 45 | 5.405 |
+| desktop-tauri (Rust Backend) | 10 | 624 |
+| **Rust Workspace** | **91** | **~18.818** |
+| **Projekt Gesamt** | **~136** | **~24.223** |
 
 ### Mutation Score (Stichprobe)
 Eine Stichprobe via [`cargo-mutants`](https://mutants.rs) auf geschäftskritischen Komponenten (`condition.rs`, `script_runner.rs`, `history.rs`) ergab einen initialen **Mutation Score von ~87%** (41 von 47 Mutanten durch Tests erkannt). Eine vollständige Evaluierung aller 945 Mutanten (Laufzeit ~3.5h) ist für spätere CI/CD-Phasen vorgesehen.
