@@ -1,7 +1,8 @@
 FROM rust:1.85 AS builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release -p engine-server
+ARG CARGO_JOBS=""
+RUN cargo build --release -p engine-server $CARGO_JOBS
 
 FROM debian:bookworm-slim
 WORKDIR /app
