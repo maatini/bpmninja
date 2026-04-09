@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ExternalTaskClient } from '../ExternalTaskClient.js';
 import { createMockLogger } from './helpers/mockLogger.js';
-import { createMockFetch, mockFetchResponse, setupGlobalFetchMock } from './helpers/mockFetch.js';
+import { mockFetchResponse, setupGlobalFetchMock } from './helpers/mockFetch.js';
 import { createMockTask } from './helpers/fixtures.js';
 
 async function stopClientAndFlush(client: any, advanceMs = 30000) {
@@ -290,7 +290,7 @@ describe('ExternalTaskClient', () => {
   describe('Handler-Execution mit Retry', () => {
     it('Handler erfolgreich -> kein failure() Aufruf', async () => {
       const client = new ExternalTaskClient({ logger: mockLogger });
-      client.subscribe('t', async (task, service) => {
+      client.subscribe('t', async (_task, service) => {
         service.failure = vi.fn(); // tracking
       });
 
@@ -512,7 +512,7 @@ describe('ExternalTaskClient', () => {
       client.subscribe('t', vi.fn());
 
       let fetchSignal: AbortSignal | undefined;
-      fetchMock.mockImplementationOnce(async (url, init) => {
+      fetchMock.mockImplementationOnce(async (_url, init) => {
         fetchSignal = init?.signal;
         // make it a slow request
         await new Promise(r => setTimeout(r, 10000));

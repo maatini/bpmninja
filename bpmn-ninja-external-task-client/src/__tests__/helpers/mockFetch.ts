@@ -8,7 +8,7 @@ export interface MockFetchResponse {
 }
 
 export const createMockFetch = () => {
-  return vi.fn().mockImplementation((url: string | URL | Request, init?: RequestInit) => {
+  return vi.fn().mockImplementation((_url: string | URL | Request, _init?: RequestInit) => {
     return Promise.resolve(new Response(null, { status: 404 }));
   });
 };

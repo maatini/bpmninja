@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TaskService } from '../TaskService.js';
 import { createMockLogger } from './helpers/mockLogger.js';
-import { createMockFetch, mockFetchResponse, setupGlobalFetchMock } from './helpers/mockFetch.js';
+import { mockFetchResponse, setupGlobalFetchMock } from './helpers/mockFetch.js';
 
 describe('TaskService', () => {
   const mockLogger = createMockLogger();
