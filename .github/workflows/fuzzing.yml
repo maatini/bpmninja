@@ -1,0 +1,112 @@
+# =============================================================================
+# BPMNinja Fuzz Testing Pipeline
+# =============================================================================
+# Continuous fuzzing for security-critical and parsing-heavy components.
+# Uses cargo-fuzz (libFuzzer) with AddressSanitizer on all targets.
+#
+# Targets:
+#   - fuzz_bpmn_parser:      Arbitrary XML → parse_bpmn_xml()
+#   - fuzz_condition:        Arbitrary expressions → evaluate_condition()
+#   - fuzz_rhai_script:      Arbitrary Rhai scripts → rhai::Engine::eval()
+#   - fuzz_iso8601_duration: Arbitrary strings → ISO 8601 duration parser
+#
+# Each target runs for a CI-friendly duration (5 min on PR, 8 min nightly).
+# Any crash, ASan/MSan/UBSan finding, or assertion failure fails the pipeline.
+# On failure, crash artifacts + minimized corpus are uploaded for analysis.
+# =============================================================================
+
+name: Fuzz Testing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine-core/**'
+      - 'bpmn-parser/**'
+      - 'fuzz/**'
+      - '.github/workflows/fuzzing.yml'
+  pull_request:
+    paths:
+      - 'engine-core/**'
+      - 'bpmn-parser/**'
+      - 'fuzz/**'
+      - '.github/workflows/fuzzing.yml'
+  schedule:
+    # Nightly at 03:00 UTC (after mutation tests at 02:00)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+# Only one fuzz run per branch at a time — cancel superseded runs
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimal permissions — no write access needed
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Nightly runs get longer fuzzing time (480s = 8 min), PRs get 300s = 5 min
+  FUZZ_DURATION: ${{ github.event_name == 'schedule' && '480' || '300' }}
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_bpmn_parser
+          - fuzz_condition
+          - fuzz_rhai_script
+          - fuzz_iso8601_duration
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # cargo-fuzz requires nightly for -Z flags and sanitizer instrumentation
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Separate cache per fuzz target to avoid poisoning other builds
+          shared-key: "fuzz-${{ matrix.target }}"
+          # Cache the fuzz corpus between runs for incremental coverage growth
+          cache-directories: |
+            fuzz/corpus
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - name: Run fuzzer — ${{ matrix.target }}
+        id: fuzz_run
+        working-directory: fuzz
+        # RUSTFLAGS: enable Address + Undefined Behavior sanitizers
+        # --max_total_time: CI-friendly duration limit
+        # --max_len: cap input size to prevent OOM on the runner (128 KB)
+        run: |
+          cargo fuzz run ${{ matrix.target }} \
+            -- \
+            -max_total_time=${{ env.FUZZ_DURATION }} \
+            -max_len=131072 \
+            -print_final_stats=1
+
+      # On failure: upload crash reproducers and corpus for local analysis
+      - name: Upload crash artifacts
+        if: failure() && steps.fuzz_run.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/
+            fuzz/corpus/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore

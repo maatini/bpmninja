@@ -1,0 +1,41 @@
+[package]
+name = "bpmninja-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Dependencies for fuzz targets
+[dependencies]
+libfuzzer-sys = "0.4"
+engine-core = { path = "../engine-core" }
+bpmn-parser = { path = "../bpmn-parser" }
+serde_json = "1.0"
+rhai = "1.24"
+arbitrary = { version = "1", features = ["derive"] }
+
+# Prevent this crate from interfering with the main workspace
+# cargo-fuzz manages its own build profile
+[[bin]]
+name = "fuzz_bpmn_parser"
+path = "fuzz_targets/fuzz_bpmn_parser.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_condition"
+path = "fuzz_targets/fuzz_condition.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_rhai_script"
+path = "fuzz_targets/fuzz_rhai_script.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_iso8601_duration"
+path = "fuzz_targets/fuzz_iso8601_duration.rs"
+doc = false
+
+[workspace]

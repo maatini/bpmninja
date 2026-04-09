@@ -61,9 +61,17 @@ pub fn evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> boo
 
 /// Parses a right-hand-side string into a `serde_json::Value`.
 fn parse_rhs(s: &str) -> Value {
-    // Strip surrounding quotes (single or double) for string comparison
+    // Strip surrounding quotes (single or double) for string comparison.
+    // Use char boundaries to avoid panics on multi-byte UTF-8 input.
     if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        return Value::String(s[1..s.len() - 1].to_string());
+        if s.len() >= 2 {
+            let start = s.char_indices().nth(1).map(|(i, _)| i).unwrap_or(1);
+            let end = s.char_indices().next_back().map(|(i, _)| i).unwrap_or(s.len());
+            if start <= end {
+                return Value::String(s[start..end].to_string());
+            }
+        }
+        return Value::String(String::new());
     }
     // Boolean literals
     if s == "true" {

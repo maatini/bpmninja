@@ -66,6 +66,9 @@ desktop-tauri/src-tauri/WixTools/
 # Test & Coverage Reports
 # ========================
 mutants.out*/
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/Cargo.lock
 tarpaulin-report/
 cobertura.xml
 *.profraw
