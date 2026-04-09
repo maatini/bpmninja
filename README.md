@@ -464,6 +464,17 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 ### Mutation Score (Stichprobe)
 Eine Stichprobe via [`cargo-mutants`](https://mutants.rs) auf geschäftskritischen Komponenten (`condition.rs`, `script_runner.rs`, `history.rs`) ergab einen initialen **Mutation Score von ~87%** (41 von 47 Mutanten durch Tests erkannt). Eine vollständige Evaluierung aller 945 Mutanten (Laufzeit ~3.5h) ist für spätere CI/CD-Phasen vorgesehen.
 
+### Continuous Fuzzing
+Zur Absicherung sicherheits- und stabilitätskritischer Parser- und Ausführungskomponenten läuft in der CI/CD-Pipeline täglich (sowie bei relevanten Pull Requests) ein paralleler **Fuzzing-Workflow** basierend auf `cargo-fuzz` (libFuzzer).
+
+Aktuell sind 4 dedizierte Fuzz-Targets implementiert:
+* **`fuzz_bpmn_parser`**: Füttert den `quick-xml` Parser mit beliebigen UTF-8 Strings.
+* **`fuzz_condition`**: Testet den `evaluate_condition` Parser mit wilden Expression-Variablen-Kombinationen.
+* **`fuzz_rhai_script`**: Prüft die Memory-Limits und das Sandboxing bei Ausführung manipulierter Skripte.
+* **`fuzz_iso8601_duration`**: Stresst die ISO 8601 Parsing-Logik für Timers.
+
+Sanitizer (AddressSanitizer) sind standardmäßig aktiv und führen bei *Memory Leaks*, *Panics* oder *Undefined Behavior* zum strukturierten Abbruch und Upload der Crash-Artefakte.
+
 ---
 
 ## Roadmap
