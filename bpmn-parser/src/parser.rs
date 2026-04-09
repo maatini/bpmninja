@@ -95,21 +95,29 @@ fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
         let val: u64 = current_num.parse().map_err(|_| {
             EngineError::InvalidDefinition(format!("Invalid number in duration '{}'", s))
         })?;
-        match (in_time_part, c) {
-            (false, 'Y') => total_secs += val * 365 * 86400, // approximate
-            (false, 'M') => total_secs += val * 30 * 86400,  // approximate
-            (false, 'W') => total_secs += val * 7 * 86400,
-            (false, 'D') => total_secs += val * 86400,
-            (true, 'H') => total_secs += val * 3600,
-            (true, 'M') => total_secs += val * 60,
-            (true, 'S') => total_secs += val,
+        let multiplier: u64 = match (in_time_part, c) {
+            (false, 'Y') => 365 * 86400, // approximate
+            (false, 'M') => 30 * 86400,  // approximate
+            (false, 'W') => 7 * 86400,
+            (false, 'D') => 86400,
+            (true, 'H') => 3600,
+            (true, 'M') => 60,
+            (true, 'S') => 1,
             _ => {
                 return Err(EngineError::InvalidDefinition(format!(
                     "Invalid ISO 8601 duration '{}': unknown unit '{}' (time_part={})",
                     s, c, in_time_part
                 )));
             }
-        }
+        };
+
+        let added_secs = val.checked_mul(multiplier).ok_or_else(|| {
+            EngineError::InvalidDefinition(format!("Duration segment '{}{}' overflows seconds", val, c))
+        })?;
+
+        total_secs = total_secs.checked_add(added_secs).ok_or_else(|| {
+            EngineError::InvalidDefinition(format!("Total duration '{}' overflows maximum allowed seconds", s))
+        })?;
         has_value = true;
         current_num.clear();
     }
