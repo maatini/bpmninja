@@ -15,6 +15,9 @@ bpmn-parser = { path = "../bpmn-parser" }
 serde_json = "1.0"
 rhai = "1.24"
 arbitrary = { version = "1", features = ["derive"] }
+croner = "3.0"
+chrono = "0.4"
+tokio = { version = "1", features = ["rt", "macros"] }
 
 # Prevent this crate from interfering with the main workspace
 # cargo-fuzz manages its own build profile
@@ -36,6 +39,21 @@ doc = false
 [[bin]]
 name = "fuzz_iso8601_duration"
 path = "fuzz_targets/fuzz_iso8601_duration.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_token_deserialize"
+path = "fuzz_targets/fuzz_token_deserialize.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cron_expression"
+path = "fuzz_targets/fuzz_cron_expression.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_deploy_roundtrip"
+path = "fuzz_targets/fuzz_deploy_roundtrip.rs"
 doc = false
 
 [workspace]

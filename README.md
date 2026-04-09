@@ -467,11 +467,14 @@ Eine Stichprobe via [`cargo-mutants`](https://mutants.rs) auf geschäftskritisch
 ### Continuous Fuzzing
 Zur Absicherung sicherheits- und stabilitätskritischer Parser- und Ausführungskomponenten läuft in der CI/CD-Pipeline täglich (sowie bei relevanten Pull Requests) ein paralleler **Fuzzing-Workflow** basierend auf `cargo-fuzz` (libFuzzer).
 
-Aktuell sind 4 dedizierte Fuzz-Targets implementiert:
+Aktuell sind 7 dedizierte Fuzz-Targets implementiert:
 * **`fuzz_bpmn_parser`**: Füttert den `quick-xml` Parser mit beliebigen UTF-8 Strings.
 * **`fuzz_condition`**: Testet den `evaluate_condition` Parser mit wilden Expression-Variablen-Kombinationen.
 * **`fuzz_rhai_script`**: Prüft die Memory-Limits und das Sandboxing bei Ausführung manipulierter Skripte.
 * **`fuzz_iso8601_duration`**: Stresst die ISO 8601 Parsing-Logik für Timers.
+* **`fuzz_token_deserialize`**: Deserialisiert beliebigen JSON als Token, ProcessInstance, HistoryEntry und FileReference.
+* **`fuzz_cron_expression`**: Parst beliebige Strings als Cron-Expressions via `croner`.
+* **`fuzz_deploy_roundtrip`**: End-to-End Pipeline: XML → Parse → Deploy → Start Instance.
 
 Sanitizer (AddressSanitizer) sind standardmäßig aktiv und führen bei *Memory Leaks*, *Panics* oder *Undefined Behavior* zum strukturierten Abbruch und Upload der Crash-Artefakte.
 

@@ -63,6 +63,9 @@ jobs:
           - fuzz_condition
           - fuzz_rhai_script
           - fuzz_iso8601_duration
+          - fuzz_token_deserialize
+          - fuzz_cron_expression
+          - fuzz_deploy_roundtrip
 
     steps:
       - name: Checkout repository

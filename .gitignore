@@ -90,4 +90,4 @@ nats-data/
 *.sqlite
 *.db
 .antigravity/
-.DS_Store
+.DS_Storefuzz/crash.bin
