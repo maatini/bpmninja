@@ -1,0 +1,46 @@
+{
+  "name": "@bpmninja/external-task-client",
+  "version": "1.0.0",
+  "description": "Production-ready External Task Worker Client for BPMNinja BPMN Engine",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "example": "tsx example/simple-worker.ts",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "bpmn",
+    "bpmninja",
+    "workflow",
+    "external-task",
+    "worker",
+    "service-task"
+  ],
+  "author": "BPMNinja",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.2"
+  }
+}
