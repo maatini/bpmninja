@@ -93,7 +93,7 @@ jobs:
         # --max_total_time: CI-friendly duration limit
         # --max_len: cap input size to prevent OOM on the runner (128 KB)
         run: |
-          cargo fuzz run ${{ matrix.target }} \
+          cargo fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu \
             -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \
             -max_len=131072 \
