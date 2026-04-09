@@ -25,10 +25,15 @@ jobs:
             name: windows
             target: x86_64-pc-windows-msvc
 
-          # macOS Apple Silicon (M1/M2/M3/M4) – aktueller Standard
+          # macOS Apple Silicon (M1/M2/M3/M4)
           - os: macos-latest
-            name: macos
+            name: macos-arm
             target: aarch64-apple-darwin
+
+          # macOS Intel (x86_64)
+          - os: macos-13
+            name: macos-intel
+            target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.os }}
 
@@ -68,4 +73,5 @@ jobs:
           releaseName: 'mini-bpm-desktop ${{ github.ref_name }}'
           releaseDraft: true          # Draft → du kannst noch prüfen & dann publishen
           prerelease: false
+          args: --target ${{ matrix.target }}
           

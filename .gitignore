@@ -86,3 +86,5 @@ data/
 nats-data/
 *.sqlite
 *.db
+.antigravity/
+.DS_Store

@@ -6,7 +6,16 @@ on:
 
 jobs:
   build-tauri:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+            name: intel
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: arm
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     env:
@@ -24,7 +33,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Install UI Dependencies
         working-directory: desktop-tauri
@@ -38,14 +47,17 @@ jobs:
           projectPath: desktop-tauri
           # Automatically creates a draft release containing the .dmg / .app
           tagName: app-v__VERSION__ 
-          releaseName: 'macOS Build v__VERSION__'
+          releaseName: 'macOS ${{ matrix.name }} Build v__VERSION__'
           releaseDraft: true
           prerelease: false
+          args: --target ${{ matrix.target }}
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: macos-binary
+          name: macos-binary-${{ matrix.name }}
           path: |
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
             desktop-tauri/src-tauri/target/release/bundle/dmg/*.dmg
             desktop-tauri/src-tauri/target/release/bundle/macos/*.app
