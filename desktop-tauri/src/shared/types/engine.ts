@@ -111,6 +111,12 @@ export interface BucketEntryDetail {
   data: string;
 }
 
+export interface MoveTokenRequest {
+  target_node_id: string;
+  variables?: Record<string, unknown>;
+  cancel_current?: boolean;
+}
+
 export interface FileReference {
   type: 'file';
   object_key: string;

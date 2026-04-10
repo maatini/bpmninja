@@ -148,6 +148,39 @@ pub(crate) async fn resume_instance(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub(crate) struct MoveTokenRequest {
+    pub target_node_id: String,
+    #[serde(default)]
+    pub variables: Option<HashMap<String, Value>>,
+    #[serde(default = "default_true")]
+    pub cancel_current: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub(crate) async fn move_token(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<MoveTokenRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let engine = &state.engine;
+    let instance_id = parse_uuid(&id)?;
+
+    engine
+        .move_token(
+            instance_id,
+            &payload.target_node_id,
+            payload.variables.unwrap_or_default(),
+            payload.cancel_current,
+        )
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(crate) async fn delete_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

@@ -32,6 +32,7 @@ pub enum HistoryEventType {
     CallActivityCompleted,
     InstanceSuspended,
     InstanceResumed,
+    TokenMoved,
 }
 
 impl HistoryEventType {
@@ -54,6 +55,7 @@ impl HistoryEventType {
             Self::CallActivityCompleted => "Call activity completed".into(),
             Self::InstanceSuspended => "Process instance was suspended".into(),
             Self::InstanceResumed => "Process instance was resumed".into(),
+            Self::TokenMoved => "Token was manually moved to a different node".into(),
         }
     }
 }

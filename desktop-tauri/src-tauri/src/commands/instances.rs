@@ -123,6 +123,27 @@ pub async fn resume_instance(
 }
 
 #[tauri::command]
+pub async fn move_token(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+    target_node_id: String,
+    variables: Option<HashMap<String, serde_json::Value>>,
+    cancel_current: Option<bool>,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "target_node_id": target_node_id,
+        "variables": variables.unwrap_or_default(),
+        "cancel_current": cancel_current.unwrap_or(true),
+    });
+    crate::api_helpers::api_post_no_body(
+        &state,
+        &format!("/api/instances/{}/move-token", instance_id),
+        &payload,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_instance(
     state: tauri::State<'_, AppState>,
     instance_id: String,

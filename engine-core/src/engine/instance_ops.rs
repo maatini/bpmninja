@@ -303,6 +303,204 @@ impl WorkflowEngine {
         Ok(())
     }
 
+    /// Moves the active token to a different node in the process definition.
+    ///
+    /// This is equivalent to Camunda's "Modify Process Instance" — one of the
+    /// most powerful admin/ops tools. It:
+    /// 1. Validates that the target node exists in the definition.
+    /// 2. Cancels all pending wait states (user tasks, service tasks, timers,
+    ///    message catches) for this instance.
+    /// 3. Creates a fresh token at the target node.
+    /// 4. Optionally merges additional variables.
+    /// 5. Starts execution from the target node via `run_instance_batch`.
+    pub async fn move_token(
+        &self,
+        instance_id: Uuid,
+        target_node_id: &str,
+        variables: HashMap<String, Value>,
+        cancel_current: bool,
+    ) -> EngineResult<()> {
+        // --- 1. Validate instance exists and is not completed ---
+        let (def_key, old_current_node) = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+
+            match &inst.state {
+                InstanceState::Completed | InstanceState::CompletedWithError { .. } => {
+                    return Err(EngineError::AlreadyCompleted);
+                }
+                InstanceState::Suspended { .. } => {
+                    return Err(EngineError::InstanceSuspended(instance_id));
+                }
+                _ => {}
+            }
+
+            (inst.definition_key, inst.current_node.clone())
+        };
+
+        // --- 2. Validate target node exists in definition ---
+        let def = self
+            .definitions
+            .get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?;
+
+        if !def.nodes.contains_key(target_node_id) {
+            return Err(EngineError::NoSuchNode(target_node_id.to_string()));
+        }
+
+        let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
+            Some(lk.read().await.clone())
+        } else {
+            None
+        };
+
+        // --- 3. Cancel all pending wait states if requested ---
+        if cancel_current {
+            // Remove pending user tasks
+            let user_task_ids: Vec<Uuid> = self
+                .pending_user_tasks
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.task_id)
+                .collect();
+            for tid in &user_task_ids {
+                self.pending_user_tasks.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_user_task(*tid).await;
+                }
+            }
+
+            // Remove pending service tasks
+            let service_task_ids: Vec<Uuid> = self
+                .pending_service_tasks
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.id)
+                .collect();
+            for tid in &service_task_ids {
+                self.pending_service_tasks.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_service_task(*tid).await;
+                }
+            }
+
+            // Remove pending timers
+            let timer_ids: Vec<Uuid> = self
+                .pending_timers
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.id)
+                .collect();
+            for tid in &timer_ids {
+                self.pending_timers.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_timer(*tid).await;
+                }
+            }
+
+            // Remove pending message catches
+            let msg_ids: Vec<Uuid> = self
+                .pending_message_catches
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.id)
+                .collect();
+            for tid in &msg_ids {
+                self.pending_message_catches.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_message_catch(*tid).await;
+                }
+            }
+        }
+
+        // --- 4. Create a fresh token at the target node ---
+        let mut token_vars = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+            inst.variables.clone()
+        };
+        // Merge provided variables
+        for (k, v) in variables {
+            if v.is_null() {
+                token_vars.remove(&k);
+            } else {
+                token_vars.insert(k, v);
+            }
+        }
+
+        let token = crate::domain::Token {
+            id: Uuid::new_v4(),
+            current_node: target_node_id.to_string(),
+            variables: token_vars.clone(),
+            is_merged: false,
+        };
+
+        // --- 5. Reset instance state ---
+        {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+
+            // Clear old tokens and active_tokens
+            inst.tokens.clear();
+            inst.active_tokens.clear();
+            inst.join_barriers.clear();
+            inst.multi_instance_state.clear();
+
+            // Insert the new token
+            inst.tokens.insert(token.id, token.clone());
+
+            // Update instance state
+            inst.state = InstanceState::Running;
+            inst.current_node = target_node_id.to_string();
+
+            // Sync variables to instance level
+            inst.variables = token_vars;
+
+            inst.push_audit_log(format!(
+                "🎯 Token moved: '{}' → '{}'",
+                old_current_node, target_node_id
+            ));
+        }
+
+        // --- 6. Record history ---
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::TokenMoved,
+            &format!(
+                "Token manually moved from '{}' to '{}'",
+                old_current_node, target_node_id
+            ),
+            crate::history::ActorType::User,
+            None,
+            old_state.as_ref(),
+        )
+        .await;
+
+        self.persist_instance(instance_id).await;
+
+        tracing::info!(
+            "Instance {}: token moved from '{}' to '{}'",
+            instance_id,
+            old_current_node,
+            target_node_id
+        );
+
+        // --- 7. Start execution from target node ---
+        self.run_instance_batch(instance_id, token).await
+    }
+
     /// Deletes a process instance and cleans up associated pending tasks.
     pub async fn delete_instance(&self, instance_id: Uuid) -> EngineResult<()> {
         let removed_inst_arc = self

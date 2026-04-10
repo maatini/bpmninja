@@ -69,6 +69,10 @@ pub fn build_app_with_engine(
             delete(deploy::delete_all_definitions),
         )
         .route(
+            "/api/instances/{id}/move-token",
+            post(instances::move_token),
+        )
+        .route(
             "/api/instances/{id}/suspend",
             post(instances::suspend_instance),
         )

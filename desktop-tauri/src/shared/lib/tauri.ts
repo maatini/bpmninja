@@ -9,7 +9,8 @@ import type {
   MonitoringData,
   BucketEntry,
   BucketEntryDetail,
-  FileReference
+  FileReference,
+  MoveTokenRequest
 } from '../types/engine';
 
 export * from '../types/engine';
@@ -92,6 +93,15 @@ export async function suspendInstance(instanceId: string): Promise<void> {
 
 export async function resumeInstance(instanceId: string): Promise<void> {
   return invoke('resume_instance', { instanceId });
+}
+
+export async function moveToken(instanceId: string, request: MoveTokenRequest): Promise<void> {
+  return invoke('move_token', {
+    instanceId,
+    targetNodeId: request.target_node_id,
+    variables: request.variables ?? null,
+    cancelCurrent: request.cancel_current ?? true,
+  });
 }
 
 export async function deleteInstance(instanceId: string): Promise<void> {

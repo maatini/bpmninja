@@ -35,6 +35,7 @@ fn main() {
             commands::instances::update_instance_variables,
             commands::instances::suspend_instance,
             commands::instances::resume_instance,
+            commands::instances::move_token,
             commands::instances::delete_instance,
             commands::tasks::get_pending_tasks,
             commands::tasks::complete_task,

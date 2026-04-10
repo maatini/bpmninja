@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Trash, RefreshCw, Clock, Pause, Play } from 'lucide-react';
+import { Trash, RefreshCw, Clock, Pause, Play, ArrowRightLeft } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo, type PendingUserTask, type PendingServiceTask } from '../../shared/types/engine';
 import { getInstanceDetails, getDefinitionXml, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, suspendInstance, resumeInstance } from '../../shared/lib/tauri';
 import { ErrorBoundary } from '../../shared/components/ErrorBoundary';
 import { InstanceViewer } from './InstanceViewer';
+import { TokenMoveDialog } from './TokenMoveDialog';
 import { HistoryTimeline } from '../../shared/components/HistoryTimeline';
 import { VariableEditor, type VariableRow, parseVariables, serializeVariables } from '../../shared/components/VariableEditor';
 import { stateBadgeClass, stateLabel } from './InstanceStateUtils';
@@ -37,6 +38,7 @@ export function InstanceDetailDialog({
 
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
   const [showNodeDetails, setShowNodeDetails] = useState(true);
+  const [tokenMoveOpen, setTokenMoveOpen] = useState(false);
 
   useEffect(() => {
     if (!instance) {
@@ -184,15 +186,26 @@ export function InstanceDetailDialog({
           <DialogTitle className="text-xl">Instance Details: {selected?.id.substring(0, 8) || instance?.id.substring(0, 8)}…</DialogTitle>
           <div className="flex gap-2 items-center !m-0">
             {selected && !isCompleted && (
-              <Button
-                variant={isSuspended ? "default" : "outline"}
-                size="sm"
-                className="gap-2"
-                onClick={handleSuspendResume}
-              >
-                {isSuspended ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                {isSuspended ? 'Resume' : 'Suspend'}
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setTokenMoveOpen(true)}
+                  disabled={isSuspended as boolean}
+                >
+                  <ArrowRightLeft className="h-4 w-4" /> Token Move
+                </Button>
+                <Button
+                  variant={isSuspended ? "default" : "outline"}
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleSuspendResume}
+                >
+                  {isSuspended ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                  {isSuspended ? 'Resume' : 'Suspend'}
+                </Button>
+              </>
             )}
             <Button variant="outline" size="sm" className="gap-2" onClick={refreshDetails}>
               <RefreshCw className="h-4 w-4" /> Refresh
@@ -357,6 +370,17 @@ export function InstanceDetailDialog({
           )}
         </div>
       </DialogContent>
+
+      <TokenMoveDialog
+        instance={selected}
+        xml={definitionXml}
+        open={tokenMoveOpen}
+        onClose={() => setTokenMoveOpen(false)}
+        onMoved={() => {
+          setTokenMoveOpen(false);
+          refreshDetails();
+        }}
+      />
     </Dialog>
   );
 }
