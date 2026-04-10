@@ -26,6 +26,16 @@ impl WorkflowEngine {
 
         let instance_id = pending.instance_id;
 
+        // Reject if instance is suspended
+        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let inst = inst_arc.read().await;
+            if matches!(inst.state, InstanceState::Suspended { .. }) {
+                // Re-insert the pending task so it isn't lost
+                self.pending_user_tasks.insert(task_id, pending);
+                return Err(EngineError::InstanceSuspended(instance_id));
+            }
+        }
+
         // Retrieve token from central store and merge additional variables
         let mut token = {
             let inst_arc = self

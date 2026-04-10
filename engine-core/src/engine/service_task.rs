@@ -108,6 +108,16 @@ impl WorkflowEngine {
 
         // Verify lock ownership
         verify_lock_ownership(task_id, &task_ref.worker_id, worker_id)?;
+
+        // Reject if instance is suspended
+        let instance_id = task_ref.instance_id;
+        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let inst = inst_arc.read().await;
+            if matches!(inst.state, crate::runtime::InstanceState::Suspended { .. }) {
+                drop(task_ref);
+                return Err(EngineError::InstanceSuspended(instance_id));
+            }
+        }
         drop(task_ref);
 
         let task = self
@@ -115,7 +125,6 @@ impl WorkflowEngine {
             .remove(&task_id)
             .map(|(_, v)| v)
             .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
-        let instance_id = task.instance_id;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
             Some(lk.read().await.clone())

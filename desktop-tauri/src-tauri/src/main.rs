@@ -33,6 +33,8 @@ fn main() {
             commands::instances::get_instance_details,
             commands::instances::get_instance_history,
             commands::instances::update_instance_variables,
+            commands::instances::suspend_instance,
+            commands::instances::resume_instance,
             commands::instances::delete_instance,
             commands::tasks::get_pending_tasks,
             commands::tasks::complete_task,

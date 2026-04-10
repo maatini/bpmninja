@@ -10,11 +10,12 @@ export interface ProcessInstance {
   id: string;
   definition_key: string;
   business_key: string | null;
-  state: 'Running' | 'Completed' 
-    | { WaitingOnUserTask: { task_id: string } } 
+  state: 'Running' | 'Completed'
+    | { WaitingOnUserTask: { task_id: string } }
     | { WaitingOnServiceTask: { task_id: string } }
     | { WaitingOnTimer: { timer_id: string } }
-    | { WaitingOnMessage: { message_name: string } };
+    | { WaitingOnMessage: { message_name: string } }
+    | { Suspended: { previous_state: ProcessInstance['state'] } };
   current_node: string;
   audit_log: string[];
   variables: Record<string, unknown>;

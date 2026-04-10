@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Trash, RefreshCw, Clock } from 'lucide-react';
+import { Trash, RefreshCw, Clock, Pause, Play } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo, type PendingUserTask, type PendingServiceTask } from '../../shared/types/engine';
-import { getInstanceDetails, getDefinitionXml, getPendingTasks, getPendingServiceTasks, updateInstanceVariables } from '../../shared/lib/tauri';
+import { getInstanceDetails, getDefinitionXml, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, suspendInstance, resumeInstance } from '../../shared/lib/tauri';
 import { ErrorBoundary } from '../../shared/components/ErrorBoundary';
 import { InstanceViewer } from './InstanceViewer';
 import { HistoryTimeline } from '../../shared/components/HistoryTimeline';
@@ -158,12 +158,42 @@ export function InstanceDetailDialog({
     }
   };
 
+  const isSuspended = selected && typeof selected.state === 'object' && 'Suspended' in selected.state;
+  const isCompleted = selected && (selected.state === 'Completed' || (typeof selected.state === 'object' && 'CompletedWithError' in selected.state));
+
+  const handleSuspendResume = async () => {
+    if (!selected) return;
+    try {
+      if (isSuspended) {
+        await resumeInstance(selected.id);
+        toast({ description: 'Instance resumed.' });
+      } else {
+        await suspendInstance(selected.id);
+        toast({ description: 'Instance suspended.' });
+      }
+      refreshDetails();
+    } catch (e: any) {
+      toast({ variant: 'destructive', description: String(e) });
+    }
+  };
+
   return (
     <Dialog open={!!instance} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="instance-detail max-w-[70vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden bg-background">
         <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between sticky top-0 bg-background/95 backdrop-blur z-10 shrink-0">
           <DialogTitle className="text-xl">Instance Details: {selected?.id.substring(0, 8) || instance?.id.substring(0, 8)}…</DialogTitle>
           <div className="flex gap-2 items-center !m-0">
+            {selected && !isCompleted && (
+              <Button
+                variant={isSuspended ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={handleSuspendResume}
+              >
+                {isSuspended ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                {isSuspended ? 'Resume' : 'Suspend'}
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="gap-2" onClick={refreshDetails}>
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>

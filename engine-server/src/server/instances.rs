@@ -128,6 +128,26 @@ pub(crate) async fn update_instance_variables(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub(crate) async fn suspend_instance(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let engine = &state.engine;
+    let instance_id = parse_uuid(&id)?;
+    engine.suspend_instance(instance_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) async fn resume_instance(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let engine = &state.engine;
+    let instance_id = parse_uuid(&id)?;
+    engine.resume_instance(instance_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(crate) async fn delete_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

@@ -195,6 +195,114 @@ impl WorkflowEngine {
         Ok(())
     }
 
+    /// Suspends a running process instance.
+    ///
+    /// While suspended, timers won't fire and task completions are rejected.
+    /// The previous state is stored inside the `Suspended` variant so that
+    /// `resume_instance` can restore it.
+    pub async fn suspend_instance(&self, instance_id: Uuid) -> EngineResult<()> {
+        let old_state = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+            Some(inst.clone())
+        };
+
+        {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+
+            // Cannot suspend an already-completed or already-suspended instance
+            match &inst.state {
+                InstanceState::Completed | InstanceState::CompletedWithError { .. } => {
+                    return Err(EngineError::AlreadyCompleted);
+                }
+                InstanceState::Suspended { .. } => {
+                    return Err(EngineError::InstanceSuspended(instance_id));
+                }
+                _ => {}
+            }
+
+            let previous = inst.state.clone();
+            inst.state = InstanceState::Suspended {
+                previous_state: Box::new(previous),
+            };
+            inst.push_audit_log("⏸ Instance suspended".to_string());
+        }
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::InstanceSuspended,
+            "Instance suspended",
+            crate::history::ActorType::User,
+            None,
+            old_state.as_ref(),
+        )
+        .await;
+
+        self.persist_instance(instance_id).await;
+
+        tracing::info!("Instance {instance_id}: suspended");
+        Ok(())
+    }
+
+    /// Resumes a previously suspended instance, restoring its prior state.
+    pub async fn resume_instance(&self, instance_id: Uuid) -> EngineResult<()> {
+        let old_state = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+            Some(inst.clone())
+        };
+
+        {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+
+            match inst.state.clone() {
+                InstanceState::Suspended { previous_state } => {
+                    inst.state = *previous_state;
+                }
+                _ => {
+                    return Err(EngineError::InvalidDefinition(
+                        "Instance is not suspended".into(),
+                    ));
+                }
+            }
+
+            inst.push_audit_log("▶ Instance resumed".to_string());
+        }
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::InstanceResumed,
+            "Instance resumed",
+            crate::history::ActorType::User,
+            None,
+            old_state.as_ref(),
+        )
+        .await;
+
+        self.persist_instance(instance_id).await;
+
+        tracing::info!("Instance {instance_id}: resumed");
+        Ok(())
+    }
+
     /// Deletes a process instance and cleans up associated pending tasks.
     pub async fn delete_instance(&self, instance_id: Uuid) -> EngineResult<()> {
         let removed_inst_arc = self

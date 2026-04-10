@@ -55,7 +55,7 @@ desktop-tauri/src-tauri/target/
 desktop-tauri/src-tauri/gen/
 desktop-tauri/src-tauri/bundle/
 desktop-tauri/src-tauri/WixTools/
-
+**/dist/
 # Rust backup files
 **/*.rs.bk
 

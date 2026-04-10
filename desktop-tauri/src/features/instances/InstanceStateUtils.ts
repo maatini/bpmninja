@@ -6,6 +6,7 @@ export function stateLabel(state: ProcessInstance['state']): string {
   if ((state as any) === 'Errored') return 'Errored';
   if ((state as any) === 'Cancelled') return 'Cancelled';
   if (typeof state === 'object') {
+    if ('Suspended' in state) return 'Suspended';
     if ('WaitingOnUserTask' in state) return 'Wait: User Task';
     if ('WaitingOnServiceTask' in state) return 'Wait: Service Task';
     if ('WaitingOnTimer' in state) return 'Wait: Timer';
@@ -21,6 +22,7 @@ export function stateBadgeClass(state: ProcessInstance['state']): string {
   if ((state as any) === 'Errored') return 'bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20 outline outline-1 outline-destructive';
   if ((state as any) === 'Cancelled') return 'bg-muted text-muted-foreground hover:bg-muted/80 outline outline-1 outline-muted';
   if (typeof state === 'object') {
+    if ('Suspended' in state) return 'bg-orange-500/20 text-orange-700 hover:bg-orange-500/30 border-orange-500/30 dark:text-orange-400';
     if ('WaitingOnUserTask' in state) return 'bg-amber-500/20 text-amber-700 hover:bg-amber-500/30 border-amber-500/30 dark:text-amber-400';
     if ('WaitingOnServiceTask' in state) return 'bg-purple-500/20 text-purple-700 hover:bg-purple-500/30 border-purple-500/30 dark:text-purple-400';
     if ('WaitingOnTimer' in state) return 'bg-cyan-500/20 text-cyan-700 hover:bg-cyan-500/30 border-cyan-500/30 dark:text-cyan-400';

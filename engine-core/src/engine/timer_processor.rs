@@ -9,6 +9,13 @@ impl WorkflowEngine {
 
         for timer in self.pending_timers.iter() {
             if timer.expires_at <= now {
+                // Skip timers for suspended instances
+                if let Some(inst_arc) = self.instances.get(&timer.instance_id).await {
+                    let inst = inst_arc.read().await;
+                    if matches!(inst.state, InstanceState::Suspended { .. }) {
+                        continue;
+                    }
+                }
                 expired.push(timer.id);
             }
         }

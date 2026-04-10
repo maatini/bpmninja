@@ -30,6 +30,8 @@ pub enum HistoryEventType {
     Error,            // something failed
     CallActivityStarted,
     CallActivityCompleted,
+    InstanceSuspended,
+    InstanceResumed,
 }
 
 impl HistoryEventType {
@@ -50,6 +52,8 @@ impl HistoryEventType {
             Self::Error => "An execution error occurred".into(),
             Self::CallActivityStarted => "Call activity started".into(),
             Self::CallActivityCompleted => "Call activity completed".into(),
+            Self::InstanceSuspended => "Process instance was suspended".into(),
+            Self::InstanceResumed => "Process instance was resumed".into(),
         }
     }
 }

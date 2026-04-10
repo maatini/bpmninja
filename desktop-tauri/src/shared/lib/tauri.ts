@@ -78,6 +78,14 @@ export async function getDefinitionXml(definitionId: string): Promise<string> {
   return invoke('get_definition_xml', { definitionId });
 }
 
+export async function suspendInstance(instanceId: string): Promise<void> {
+  return invoke('suspend_instance', { instanceId });
+}
+
+export async function resumeInstance(instanceId: string): Promise<void> {
+  return invoke('resume_instance', { instanceId });
+}
+
 export async function deleteInstance(instanceId: string): Promise<void> {
   return invoke('delete_instance', { instanceId });
 }

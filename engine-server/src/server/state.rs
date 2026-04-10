@@ -66,6 +66,10 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 format!("Cannot delete definition: {count} instances still exist"),
             ),
+            Self::Engine(EngineError::InstanceSuspended(id)) => (
+                StatusCode::CONFLICT,
+                format!("Instance '{id}' is suspended"),
+            ),
             Self::Engine(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
         };
 

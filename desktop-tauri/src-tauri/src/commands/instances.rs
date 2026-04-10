@@ -97,6 +97,32 @@ pub async fn update_instance_variables(
 }
 
 #[tauri::command]
+pub async fn suspend_instance(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+) -> Result<(), String> {
+    crate::api_helpers::api_post_no_body(
+        &state,
+        &format!("/api/instances/{}/suspend", instance_id),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn resume_instance(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+) -> Result<(), String> {
+    crate::api_helpers::api_post_no_body(
+        &state,
+        &format!("/api/instances/{}/resume", instance_id),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_instance(
     state: tauri::State<'_, AppState>,
     instance_id: String,

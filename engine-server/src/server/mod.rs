@@ -69,6 +69,14 @@ pub fn build_app_with_engine(
             delete(deploy::delete_all_definitions),
         )
         .route(
+            "/api/instances/{id}/suspend",
+            post(instances::suspend_instance),
+        )
+        .route(
+            "/api/instances/{id}/resume",
+            post(instances::resume_instance),
+        )
+        .route(
             "/api/instances/{id}/variables",
             put(instances::update_instance_variables),
         )

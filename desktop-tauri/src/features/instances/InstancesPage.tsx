@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers } from 'lucide-react';
+import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers, Pause } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo } from '../../shared/types/engine';
 import { listInstances, listDefinitions, deleteInstance } from '../../shared/lib/tauri';
 import { usePolling } from '../../shared/hooks/use-polling';
@@ -151,7 +151,8 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
                               )}>
                                 {inst.state === 'Running' && <Activity className="h-3 w-3" />}
                                 {inst.state === 'Completed' && <CheckCircle className="h-3 w-3" />}
-                                {typeof inst.state === 'object' && <Clock className="h-3 w-3" />}
+                                {typeof inst.state === 'object' && 'Suspended' in inst.state && <Pause className="h-3 w-3" />}
+                                {typeof inst.state === 'object' && !('Suspended' in inst.state) && <Clock className="h-3 w-3" />}
                                 {stateLabel(inst.state)}
                               </Badge>
                             </div>

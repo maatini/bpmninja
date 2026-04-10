@@ -67,6 +67,10 @@ pub enum EngineError {
     /// The execution step limit was exceeded (possible infinite loop).
     #[error("Execution limit exceeded: {0}")]
     ExecutionLimitExceeded(String),
+
+    /// The instance is suspended and cannot accept operations.
+    #[error("Instance '{0}' is suspended")]
+    InstanceSuspended(Uuid),
 }
 
 /// Convenience alias used throughout the engine.

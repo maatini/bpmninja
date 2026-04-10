@@ -51,8 +51,8 @@ function App() {
     // Auto-deploy the current modeler state
     const newDefId = await deployDefinition(xml, 'modeler-process')
 
-    // Detect timer start events and use the appropriate start method
-    const isTimerStart = xml.includes('timerEventDefinition')
+    // Detect timer start events: only if a <bpmn:startEvent> contains a timerEventDefinition
+    const isTimerStart = /<bpmn:startEvent[^>]*>[\s\S]*?<bpmn:timerEventDefinition[\s\S]*?<\/bpmn:startEvent>/i.test(xml)
     const id = isTimerStart
       ? await startTimerInstance(newDefId, variables)
       : await startInstance(newDefId, variables)

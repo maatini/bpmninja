@@ -84,6 +84,12 @@ pub enum InstanceState {
     CompletedWithError {
         error_code: String,
     },
+    /// Instance is suspended – no timers fire, no tasks can be completed.
+    /// Stores the state the instance was in before suspension so it can be
+    /// restored on resume.
+    Suspended {
+        previous_state: Box<InstanceState>,
+    },
 }
 
 // ---------------------------------------------------------------------------
