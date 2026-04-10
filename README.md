@@ -1,7 +1,7 @@
 # BPMNinja
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-243_passing-success?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-244_passing-success?style=flat-square)]()
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-~87%25-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#lizenz)
 
@@ -43,6 +43,8 @@ bpmninja ist eine BPMN 2.0 Engine mit folgenden Kernfeatures:
 - **Automatischer Timer-Scheduler** — Background-Task verarbeitet abgelaufene Timer (konfigurierbar via `TIMER_INTERVAL_MS`)
 - **Camunda-kompatible Service Tasks** — Fetch-and-Lock Pattern mit Long-Polling
 - **Rhai Script Engine** — Execution Listeners für dynamische Variablenmanipulation
+- **Suspend / Resume** — Instanzen pausieren und fortsetzen (Timer, Tasks blockiert)
+- **Incident Management** — Failed Service Tasks mit Retry/Resolve direkt aus der UI behandeln
 - **Desktop-UI** — Tauri-App mit bpmn-js Modeler und Live-Instanzverfolgung (inkl. plattformübergreifender GitHub Actions CI-Releases)
 
 ---
@@ -252,9 +254,12 @@ Der Server läuft auf `http://localhost:8081`.
 |---------|------|-------------|
 | `POST` | `/api/start` | Instanz starten (mit `definition_key`) |
 | `POST` | `/api/start/latest` | Instanz der neuesten Version starten (mit `bpmn_process_id`) |
+| `POST` | `/api/start/timer` | Timer-Start-Event-Instanz starten (Repeating Intervals) |
 | `GET` | `/api/instances` | Alle Instanzen auflisten |
 | `GET` | `/api/instances/:id` | Instanz-Details abrufen |
 | `DELETE` | `/api/instances/:id` | Instanz löschen |
+| `POST` | `/api/instances/:id/suspend` | Instanz suspendieren (Timer/Tasks pausiert) |
+| `POST` | `/api/instances/:id/resume` | Suspendierte Instanz fortsetzen |
 | `PUT` | `/api/instances/:id/variables` | Variablen aktualisieren |
 
 ### User Tasks
@@ -272,6 +277,8 @@ Der Server läuft auf `http://localhost:8081`.
 | `POST` | `/api/service-task/fetchAndLock` | Tasks abrufen und sperren (Long-Polling) |
 | `POST` | `/api/service-task/:id/complete` | Task erfolgreich abschließen |
 | `POST` | `/api/service-task/:id/failure` | Task als fehlgeschlagen markieren |
+| `POST` | `/api/service-task/:id/retry` | Incident erneut versuchen (Retries zurücksetzen) |
+| `POST` | `/api/service-task/:id/resolve` | Incident manuell auflösen (Task ohne Worker abschließen) |
 | `POST` | `/api/service-task/:id/extendLock` | Lock verlängern |
 | `POST` | `/api/service-task/:id/bpmnError` | BPMN-Fehler melden |
 
@@ -479,18 +486,18 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 
 ## Test-Metriken
 
-> Ermittelt via `cargo test --workspace` (Rust) und `npm run test` (TypeScript) am 09.04.2026 — **243 Tests, 0 Fehler**
+> Ermittelt via `cargo test --workspace` (Rust) und `npm run test` (TypeScript) am 10.04.2026 — **244 Tests, 0 Fehler**
 
 ### Workspace-Übersicht
 
 | Paket | Unit | E2E | Gesamt |
 |-------|------|-----|--------|
 | **engine-core** | 105 | 5 | 110 |
-| **bpmn-parser** | 27 | — | 27 |
+| **bpmn-parser** | 28 | — | 28 |
 | **persistence-nats** | 2 | — | 2 |
 | **engine-server** | — | 36 | 36 |
 | **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Gesamt** | **202** | **41** | **243** ✅ |
+| **Gesamt** | **203** | **41** | **244** ✅ |
 
 ### engine-core Breakdown (110 Tests)
 
@@ -503,7 +510,7 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 | `condition::tests` | 3 | Bedingungsevaluierung anhand von Token-Variablen |
 | Integration Tests | 5 | BPMN-Compliance, Complex Gateways |
 
-### bpmn-parser Tests (27 Tests)
+### bpmn-parser Tests (28 Tests)
 
 | Bereich | Tests | Abdeckung |
 |---------|-------|-----------|
@@ -511,7 +518,7 @@ Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
 | Gateways | 3 | Parallel, Inclusive, Event-Based |
 | Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, BoundaryTimer |
 | Boundary Events | 2 | BoundaryTimer, BoundaryError |
-| ISO 8601 Timer | 4 | TimeDate, CronCycle, RepeatingInterval, Duration-Reject |
+| ISO 8601 Timer | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
 | Task-Typen | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
 | Sub-Prozesse | 2 | EventSubProcess, RegularSubProcess |
 | Sonstiges | 1 | TerminateEndEvent |
@@ -586,6 +593,15 @@ Sanitizer (AddressSanitizer) sind standardmäßig aktiv und führen bei *Memory 
 | Embedded Subprozesse (BPMN Scopes) | ✅ Implementiert |
 | Event-Based Gateway | ✅ Implementiert |
 | Structured JSON Logging (`tracing-subscriber` + JSON) | ✅ Implementiert |
+| Camunda 7-kompatible Flow Conditions (Expression/Script) | ✅ Implementiert |
+| Timer-Start-Events mit Repeating Intervals (`R3/PT30S`) | ✅ Implementiert |
+| Suspend / Resume von Prozessinstanzen | ✅ Implementiert |
+| Erweitertes Incident-Handling (Retry / Resolve) | ✅ Implementiert |
+| Zentrale Timer / Message / Job-Übersicht | 🔲 Geplant |
+| Historische Instanzen + Suche | 🔲 Geplant |
+| Batch-Operationen auf Instanzen | 🔲 Geplant |
+| Process Instance Migration | 🔲 Geplant |
+| Token Move (Modify Process Instance) | 🔲 Geplant |
 | Multi-Node Cluster (NATS-basiertes Token-Locking) | 🔲 Geplant |
 | OIDC/OAuth2 Middleware | 🔲 Geplant |
 | Prometheus Metrics Endpoint | 🔲 Geplant |

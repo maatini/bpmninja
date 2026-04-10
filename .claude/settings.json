@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{sum += $4} END {print \"Total:\", sum}')",
+      "Bash(npm test:*)"
+    ]
+  }
+}

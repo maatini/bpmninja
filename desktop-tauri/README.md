@@ -84,4 +84,4 @@ Der BPMN-Modeler unterstützt Flow Conditions analog zum Camunda Modeler für Ca
   - **Script** – Script mit Rhai als Script-Sprache
 - **XML-Format:**
   - Expression: `<conditionExpression xsi:type="bpmn:tFormalExpression">${...}</conditionExpression>`
-  - Script: `<conditionExpression xsi:type="bpmn:tFormalExpression" language="groovy">...</conditionExpression>`
+  - Script: `<conditionExpression xsi:type="bpmn:tFormalExpression" language="rhai">...</conditionExpression>`

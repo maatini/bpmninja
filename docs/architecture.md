@@ -1,7 +1,7 @@
 # bpmninja — Architektur-Dokumentation
 
 > BPMN 2.0 Workflow Engine in Rust, token-basierte Execution
-> Stand: 2026-04-06
+> Stand: 2026-04-10
 
 ---
 
@@ -436,7 +436,7 @@ Dadurch entsteht kein State-Verlust nach einem transienten Netzwerkfehler.
 
 > Vollständige OpenAPI 3.0 Spezifikation: **[docs/openapi.yaml](openapi.yaml)**
 
-### 6.1 Route-Übersicht (32 Endpoints)
+### 6.1 Route-Übersicht (38 Endpoints)
 
 ```mermaid
 graph LR
@@ -451,10 +451,13 @@ graph LR
     subgraph "Process Instances"
         I1["POST /api/start"]
         I1b["POST /api/start/latest"]
+        I1c["POST /api/start/timer"]
         I2["GET /api/instances"]
         I3["GET /api/instances/:id"]
         I4["DELETE /api/instances/:id"]
         I5["PUT /api/instances/:id/variables"]
+        I6["POST /api/instances/:id/suspend"]
+        I7["POST /api/instances/:id/resume"]
     end
     
     subgraph "User Tasks"
@@ -469,6 +472,8 @@ graph LR
         S4["POST /api/service-task/:id/failure"]
         S5["POST /api/service-task/:id/extendLock"]
         S6["POST /api/service-task/:id/bpmnError"]
+        S7["POST /api/service-task/:id/retry"]
+        S8["POST /api/service-task/:id/resolve"]
     end
     
     subgraph "Files"
@@ -551,22 +556,24 @@ tokio::spawn(async move {
 
 | Datei | LoC | Zweck |
 |---|---|---|
-| `App.tsx` | 169 | Main Layout, Tab-Navigation (6 Tabs) |
-| `Modeler.tsx` | 311 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
-| `Instances.tsx` | 518 | Instanz-Liste (grouped by Definition), Detail-Overlay |
-| `InstanceViewer.tsx` | 108 | Read-only BPMN-Viewer mit aktiver Node-Markierung |
-| `HistoryTimeline.tsx` | 225 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
-| `DeployedProcesses.tsx` | 326 | Versions-Gruppierung, Accordion, Cascade Delete |
-| `VariableEditor.tsx` | 479 | Typed Editor (6 Typen inkl. File), Upload/Download |
-| `Monitoring.tsx` | 362 | Metric Cards, NATS Storage Breakdown, KV-Browser, Auto-Refresh (5s) |
-| `PendingTasks.tsx` | 286 | User & Service Task Listen mit Completion-Dialogen |
-| `Settings.tsx` | 161 | API URL Config + Connection Verify |
-| `ErrorBoundary.tsx` | 72 | React Error Boundary |
-| `MessageDialog.tsx` | 93 | Message-Korrelations-Dialog |
-| `IncidentsView.tsx` | 120 | Incident-List (Persistence Errors) |
-| `lib/tauri.ts` | 263 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
-| Custom Properties | ~337 | Condition, Script, Topic Extensions für bpmn-js |
-| `index.css` | 161 | TailwindCSS + HSL Design-Token-Variablen |
+| `App.tsx` | ~180 | Main Layout, Tab-Navigation (7 Tabs), Timer-Start-Detection |
+| `ModelerPage.tsx` | ~350 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
+| `InstancesPage.tsx` | ~245 | Instanz-Liste (grouped by Definition), Suspend-Icon |
+| `InstanceDetailDialog.tsx` | ~345 | Instanz-Details mit Suspend/Resume-Button, Timer-Cycle-Banner, Auto-Refresh |
+| `InstanceViewer.tsx` | ~125 | Read-only BPMN-Viewer mit aktiver Node-Markierung + Timer-Puls |
+| `HistoryTimeline.tsx` | ~225 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
+| `DeployedProcessesPage.tsx` | ~330 | Versions-Gruppierung, Accordion, Cascade Delete |
+| `VariableEditor.tsx` | ~480 | Typed Editor (6 Typen inkl. File), Upload/Download |
+| `MonitoringPage.tsx` | ~365 | Metric Cards, NATS Storage Breakdown, KV-Browser, Auto-Refresh |
+| `PendingTasksPage.tsx` | ~290 | User & Service Task Listen mit Completion-Dialogen |
+| `IncidentsPage.tsx` | ~165 | Incident-Cards mit Quick-Retry, Detail-Link, Auto-Refresh |
+| `IncidentDetailDialog.tsx` | ~160 | Retry (einstellbare Retries) + Resolve (mit VariableEditor) |
+| `SettingsPage.tsx` | ~165 | API URL Config + Connection Verify |
+| `ErrorBoundary.tsx` | ~72 | React Error Boundary |
+| `MessageDialog.tsx` | ~93 | Message-Korrelations-Dialog |
+| `lib/tauri.ts` | ~170 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
+| Custom Properties | ~290 | Condition, Script, Topic Extensions für bpmn-js |
+| `index.css` | ~165 | TailwindCSS + HSL Design-Token-Variablen |
 
 ### 7.2 Thin-Client Architektur
 
