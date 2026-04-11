@@ -1,22 +1,22 @@
-# bpmninja — Architektur-Dokumentation
+# bpmninja — Architecture Documentation
 
-> BPMN 2.0 Workflow Engine in Rust, token-basierte Execution
-> Stand: 2026-04-10
+> BPMN 2.0 workflow engine in Rust, token-based execution
+> As of: 2026-04-10
 
 ---
 
-## 1. Workspace-Überblick
+## 1. Workspace Overview
 
-Das Projekt ist ein Cargo-Workspace mit 6 Crates, einer Tauri Desktop-App und einem API-Spec:
+The project is a Cargo workspace with 6 crates, a Tauri desktop app and an API spec:
 
-| Crate | Lib LoC | Test LoC | Zweck |
+| Crate | Lib LoC | Test LoC | Purpose |
 |---|---|---|---|
-| **engine-core** | ~7.191 | ~3.545 | Reine State Machine, Token-Execution, Gateways, Scripting |
-| **bpmn-parser** | ~1.963 | (inline) | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
-| **persistence-nats** | ~1.149 | (inline) | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
-| **engine-server** | ~1.280 | ~1.934 | Axum REST API (HTTP-Adapter) + Background Timer Scheduler |
-| **desktop-tauri** | ~5.186 (TS) + ~623 (Rust) | — | Tauri + React + TailwindCSS + bpmn-js Modeler (Thin Client) |
-| **agent-orchestrator** | stub | — | External Worker Orchestrierung (geplant) |
+| **engine-core** | ~7,191 | ~3,545 | Pure state machine, token execution, gateways, scripting |
+| **bpmn-parser** | ~1,963 | (inline) | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
+| **persistence-nats** | ~1,149 | (inline) | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
+| **engine-server** | ~1,280 | ~1,934 | Axum REST API (HTTP adapter) + background timer scheduler |
+| **desktop-tauri** | ~5,186 (TS) + ~623 (Rust) | — | Tauri + React + TailwindCSS + bpmn-js modeler (thin client) |
+| **agent-orchestrator** | stub | — | External worker orchestration (planned) |
 
 ### Workspace Dependency Graph
 
@@ -49,9 +49,9 @@ graph TD
 
 ---
 
-## 2. engine-core — Kernarchitektur
+## 2. engine-core — Core Architecture
 
-### 2.1 Modul-Struktur
+### 2.1 Module Structure
 
 ```mermaid
 graph TB
@@ -122,13 +122,13 @@ graph TB
     style TYPES fill:#ff9f43,stroke:#333,color:#fff
 ```
 
-### 2.2 WorkflowEngine — Komponentenaufteilung (K2)
+### 2.2 WorkflowEngine — Component Breakdown (K2)
 
-Die Engine ist in fokussierte Komponenten aufgeteilt:
+The engine is split into focused components:
 
 ```rust
 pub struct WorkflowEngine {
-    // K2: Komponenten statt God-Object
+    // K2: components instead of a god object
     pub(crate) definitions:             DefinitionRegistry,                  // Immutable definition store
     pub(crate) instances:               InstanceStore,                       // Per-instance locking (K1)
     
@@ -145,17 +145,17 @@ pub struct WorkflowEngine {
 }
 ```
 
-| Komponente | Struct | Locking-Strategie |
+| Component | Struct | Locking Strategy |
 |---|---|---|
-| **DefinitionRegistry** | `Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Shared, immutable nach Deploy |
-| **InstanceStore** | `Arc<RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>>` | Per-Instance fine-grained (K1) |
-| **PendingTask-Queues** | `Arc<DashMap<Uuid, Pending*>>` | Lock-free Sharding, concurrent O(1) ops |
+| **DefinitionRegistry** | `Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Shared, immutable after deploy |
+| **InstanceStore** | `Arc<RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>>` | Per-instance fine-grained (K1) |
+| **PendingTask queues** | `Arc<DashMap<Uuid, Pending*>>` | Lock-free sharding, concurrent O(1) ops |
 
 ---
 
-## 3. Datenmodell
+## 3. Data Model
 
-### 3.1 ProcessInstance (nach K4-Refactoring)
+### 3.1 ProcessInstance (after K4 refactoring)
 
 ```mermaid
 classDiagram
@@ -220,10 +220,10 @@ classDiagram
     PendingUserTask ..> Token : references via token_id
     PendingServiceTask ..> Token : references via token_id
 
-    note for ProcessInstance "★ = K4 Refactoring: Tokens zentral gespeichert"
+    note for ProcessInstance "★ = K4 refactoring: tokens stored centrally"
 ```
 
-### 3.2 BPMN-Elementtypen
+### 3.2 BPMN Element Types
 
 ```rust
 pub enum BpmnElement {
@@ -254,11 +254,11 @@ pub enum BpmnElement {
 
 ---
 
-## 4. Execution-Architektur
+## 4. Execution Architecture
 
-### 4.1 Token-Lebenszyklus (K4)
+### 4.1 Token Lifecycle (K4)
 
-Tokens existieren an **genau einer Stelle** zu jedem Zeitpunkt:
+Tokens exist in **exactly one place** at any moment in time:
 
 ```mermaid
 flowchart TD
@@ -283,7 +283,7 @@ flowchart TD
     style START fill:#1e293b,stroke:#1e293b,color:#fff
 ```
 
-> **Central Store**: `instance.tokens: HashMap<Uuid, Token>` — PendingTasks halten nur `token_id: Uuid`.
+> **Central store**: `instance.tokens: HashMap<Uuid, Token>` — pending tasks only hold `token_id: Uuid`.
 
 ### 4.2 Execution Loop (run_instance_batch)
 
@@ -334,29 +334,29 @@ flowchart TD
     style DONE fill:#2ed573,color:#fff
 ```
 
-### 4.3 Gateway-Routing
+### 4.3 Gateway Routing
 
 ```mermaid
 flowchart LR
     subgraph "ExclusiveGateway (XOR)"
-        XOR_IN["Token eingehend"] --> XOR_EVAL["Conditions evaluieren<br/>(first match wins)"]
+        XOR_IN["Token incoming"] --> XOR_EVAL["Evaluate conditions<br/>(first match wins)"]
         XOR_EVAL -->|Match| XOR_OUT["1 Token → target"]
-        XOR_EVAL -->|Kein Match| XOR_DEF{"Default?"}
-        XOR_DEF -->|Ja| XOR_OUT2["1 Token → default"]
-        XOR_DEF -->|Nein| XOR_ERR["❌ NoMatchingCondition"]
+        XOR_EVAL -->|No match| XOR_DEF{"Default?"}
+        XOR_DEF -->|Yes| XOR_OUT2["1 Token → default"]
+        XOR_DEF -->|No| XOR_ERR["❌ NoMatchingCondition"]
     end
 
     subgraph "ParallelGateway (AND)"
-        AND_IN["Token eingehend"] --> AND_CHECK{"incoming ≥ 2<br/>und !is_merged?"}
-        AND_CHECK -->|Ja| AND_WAIT["WaitForJoin<br/>(JoinBarrier)"]
-        AND_CHECK -->|Nein| AND_FORK["Fork: N Tokens<br/>(eine pro Ausgang)"]
+        AND_IN["Token incoming"] --> AND_CHECK{"incoming ≥ 2<br/>and !is_merged?"}
+        AND_CHECK -->|Yes| AND_WAIT["WaitForJoin<br/>(JoinBarrier)"]
+        AND_CHECK -->|No| AND_FORK["Fork: N tokens<br/>(one per outgoing)"]
         AND_WAIT --> AND_MERGE["Merge variables<br/>is_merged = true"]
         AND_MERGE --> AND_FORK
     end
 
     subgraph "InclusiveGateway (OR)"
-        OR_IN["Token eingehend"] --> OR_EVAL["Alle Conditions evaluieren"]
-        OR_EVAL --> OR_FORK["N Tokens<br/>(pro Match eine)"]
+        OR_IN["Token incoming"] --> OR_EVAL["Evaluate all conditions"]
+        OR_EVAL --> OR_FORK["N tokens<br/>(one per match)"]
     end
 
     style XOR_ERR fill:#ff4757,color:#fff
@@ -365,7 +365,7 @@ flowchart LR
 
 ---
 
-## 5. Persistence-Architektur
+## 5. Persistence Architecture
 
 ### 5.1 WorkflowPersistence Trait
 
@@ -402,15 +402,15 @@ pub trait WorkflowPersistence: Send + Sync {
 }
 ```
 
-### 5.2 Implementierungen
+### 5.2 Implementations
 
 | Backend | Crate | Storage |
 |---|---|---|
-| `InMemoryPersistence` | `engine-core` | `HashMap` + `Vec` (Tests & Dev) |
+| `InMemoryPersistence` | `engine-core` | `HashMap` + `Vec` (tests & dev) |
 | `NatsPersistence` | `persistence-nats` | NATS JetStream KV + ObjectStore |
 
-**NATS KV-Stores:**
-| KV-Bucket | Inhalt | Key-Format |
+**NATS KV stores:**
+| KV bucket | Contents | Key format |
 |---|---|---|
 | `bpm_definitions` | `ProcessDefinition` (JSON) | `def-{uuid}` |
 | `bpm_instances` | `ProcessInstance` (JSON) | `inst-{uuid}` |
@@ -419,24 +419,24 @@ pub trait WorkflowPersistence: Send + Sync {
 | `bpm_timers` | `PendingTimer` (JSON) | `tmr-{uuid}` |
 | `bpm_msg_catches` | `PendingMessageCatch` (JSON) | `msg-{uuid}` |
 | `bpm_tokens` | `Token` (JSON) | `tok-{uuid}` |
-| `bpm_bpmn_xml` | BPMN 2.0 XML (String) | `xml-{uuid}` |
+| `bpm_bpmn_xml` | BPMN 2.0 XML (string) | `xml-{uuid}` |
 | `bpm_history` | `HistoryEntry` (JSON) | `hist-{uuid}` |
-| **ObjectStore** `instance_files` | Binärdateien | `file:{instance}-{var}-{filename}` |
+| **ObjectStore** `instance_files` | Binary files | `file:{instance}-{var}-{filename}` |
 
 ### 5.3 Fault-Tolerant Retry Queue (K6)
 
-Da NATS Ausfälle haben kann, verwendet die Engine einen zweistufigen Retry-Mechanismus für zustandsbehaltende I/O-Operationen:
-1. **Inline-Retry**: Kurzes Backoff (z.B. 50ms) beim direkten Aufruf. Bei Erfolg geht es sofort weiter.
-2. **Background Retry Queue**: Schlägt der Inline-Retry fehl (z.B. NATS ist offline), wird ein `RetryJob` an einen asynchronen Background-Worker übermittelt. Dieser Worker liest mit *exponentiellem Backoff* asynchron aus dem In-Memory-State den aktuellsten Stand aus und speist in NATS ein, sobald das System wieder online ist.
-Dadurch entsteht kein State-Verlust nach einem transienten Netzwerkfehler.
+Since NATS can experience outages, the engine uses a two-stage retry mechanism for stateful I/O operations:
+1. **Inline retry**: short backoff (e.g. 50ms) on the direct call. On success, execution continues immediately.
+2. **Background retry queue**: if the inline retry fails (e.g. NATS is offline), a `RetryJob` is dispatched to an asynchronous background worker. That worker reads the most recent state from the in-memory state with *exponential backoff* and feeds it into NATS as soon as the system is back online.
+This prevents state loss after a transient network failure.
 
 ---
 
 ## 6. REST API (engine-server)
 
-> Vollständige OpenAPI 3.0 Spezifikation: **[docs/openapi.yaml](openapi.yaml)**
+> Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](openapi.yaml)**
 
-### 6.1 Route-Übersicht (38 Endpoints)
+### 6.1 Route Overview (38 endpoints)
 
 ```mermaid
 graph LR
@@ -506,7 +506,7 @@ graph LR
     style M0b fill:#2ed573,color:#fff
 ```
 
-### 6.2 Server-Architektur
+### 6.2 Server Architecture
 
 ```rust
 struct AppState {
@@ -517,14 +517,14 @@ struct AppState {
 }
 ```
 
-> Der Server teilt die Engine lediglich über `Arc<WorkflowEngine>`. Da alle inneren Collections (`DashMap`, `RwLock<HashMap>`) Thread-Safe sind und Mutationen über `&self` ablaufen, gibt es keinen monolithischen Read/Write-Lock mehr für die gesamte Engine. Dies eliminiert Contention bei hohem HTTP-Traffic. Instanzen sind über **K1 (Per-Instance-Locking)** via `InstanceStore` isoliert.
+> The server shares the engine only via `Arc<WorkflowEngine>`. Because all inner collections (`DashMap`, `RwLock<HashMap>`) are thread-safe and mutations go through `&self`, there is no longer a monolithic read/write lock over the entire engine. This eliminates contention under heavy HTTP traffic. Instances are isolated via **K1 (per-instance locking)** through `InstanceStore`.
 
 ### 6.3 Background Timer Scheduler
 
-Der Server startet einen Tokio-Background-Task, der periodisch `engine.process_timers()` aufruft:
+The server spawns a Tokio background task that periodically calls `engine.process_timers()`:
 
 ```rust
-// main.rs — automatisches Timer-Polling (lock-free via Arc<WorkflowEngine>)
+// main.rs — automatic timer polling (lock-free via Arc<WorkflowEngine>)
 let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
     .ok().and_then(|v| v.parse().ok()).unwrap_or(1000);
 
@@ -539,45 +539,45 @@ tokio::spawn(async move {
 });
 ```
 
-> **Konfiguration**: `TIMER_INTERVAL_MS` (Default: 1000ms). Kein externer Cron nötig.
+> **Configuration**: `TIMER_INTERVAL_MS` (default: 1000ms). No external cron required.
 
 ### 6.4 Health & Readiness
 
-| Endpoint | Funktion | Prüfung |
-|----------|----------|---------|
-| `GET /api/health` | Liveness Probe | Immer `200 OK` wenn Server läuft |
-| `GET /api/ready` | Readiness Probe | Prüft NATS-Verbindung, `503` wenn disconnected |
+| Endpoint | Function | Check |
+|----------|----------|-------|
+| `GET /api/health` | Liveness probe | Always `200 OK` when the server is running |
+| `GET /api/ready` | Readiness probe | Checks NATS connection, `503` when disconnected |
 
 ---
 
-## 7. Desktop-App (Tauri)
+## 7. Desktop App (Tauri)
 
-### 7.1 Frontend-Komponenten
+### 7.1 Frontend Components
 
-| Datei | LoC | Zweck |
+| File | LoC | Purpose |
 |---|---|---|
-| `App.tsx` | ~180 | Main Layout, Tab-Navigation (7 Tabs), Timer-Start-Detection |
-| `ModelerPage.tsx` | ~350 | bpmn-js Modeler mit Deploy, Start & Variable-Dialog |
-| `InstancesPage.tsx` | ~245 | Instanz-Liste (grouped by Definition), Suspend-Icon |
-| `InstanceDetailDialog.tsx` | ~345 | Instanz-Details mit Suspend/Resume-Button, Timer-Cycle-Banner, Auto-Refresh |
-| `InstanceViewer.tsx` | ~125 | Read-only BPMN-Viewer mit aktiver Node-Markierung + Timer-Puls |
-| `HistoryTimeline.tsx` | ~225 | Event-Tabelle mit Filtern, Detail-Dialog, Diff-Anzeige |
-| `DeployedProcessesPage.tsx` | ~330 | Versions-Gruppierung, Accordion, Cascade Delete |
-| `VariableEditor.tsx` | ~480 | Typed Editor (6 Typen inkl. File), Upload/Download |
-| `MonitoringPage.tsx` | ~365 | Metric Cards, NATS Storage Breakdown, KV-Browser, Auto-Refresh |
-| `PendingTasksPage.tsx` | ~290 | User & Service Task Listen mit Completion-Dialogen |
-| `IncidentsPage.tsx` | ~165 | Incident-Cards mit Quick-Retry, Detail-Link, Auto-Refresh |
-| `IncidentDetailDialog.tsx` | ~160 | Retry (einstellbare Retries) + Resolve (mit VariableEditor) |
-| `SettingsPage.tsx` | ~165 | API URL Config + Connection Verify |
-| `ErrorBoundary.tsx` | ~72 | React Error Boundary |
-| `MessageDialog.tsx` | ~93 | Message-Korrelations-Dialog |
-| `lib/tauri.ts` | ~170 | Alle Tauri Command Wrappers (typisierte API-Schicht) |
-| Custom Properties | ~290 | Condition, Script, Topic Extensions für bpmn-js |
-| `index.css` | ~165 | TailwindCSS + HSL Design-Token-Variablen |
+| `App.tsx` | ~180 | Main layout, tab navigation (7 tabs), timer-start detection |
+| `ModelerPage.tsx` | ~350 | bpmn-js modeler with deploy, start & variable dialog |
+| `InstancesPage.tsx` | ~245 | Instance list (grouped by definition), suspend icon |
+| `InstanceDetailDialog.tsx` | ~345 | Instance details with suspend/resume button, timer cycle banner, auto-refresh |
+| `InstanceViewer.tsx` | ~125 | Read-only BPMN viewer with active node highlighting + timer pulse |
+| `HistoryTimeline.tsx` | ~225 | Event table with filters, detail dialog, diff display |
+| `DeployedProcessesPage.tsx` | ~330 | Version grouping, accordion, cascade delete |
+| `VariableEditor.tsx` | ~480 | Typed editor (6 types including file), upload/download |
+| `MonitoringPage.tsx` | ~365 | Metric cards, NATS storage breakdown, KV browser, auto-refresh |
+| `PendingTasksPage.tsx` | ~290 | User & service task lists with completion dialogs |
+| `IncidentsPage.tsx` | ~165 | Incident cards with quick retry, detail link, auto-refresh |
+| `IncidentDetailDialog.tsx` | ~160 | Retry (configurable retries) + resolve (with VariableEditor) |
+| `SettingsPage.tsx` | ~165 | API URL config + connection verify |
+| `ErrorBoundary.tsx` | ~72 | React error boundary |
+| `MessageDialog.tsx` | ~93 | Message correlation dialog |
+| `lib/tauri.ts` | ~170 | All Tauri command wrappers (typed API layer) |
+| Custom Properties | ~290 | Condition, script, topic extensions for bpmn-js |
+| `index.css` | ~165 | TailwindCSS + HSL design token variables |
 
-### 7.2 Thin-Client Architektur
+### 7.2 Thin-Client Architecture
 
-Die Desktop-App operiert als **Thin Client** — alle Workflow-Logik liegt im `engine-server`.
+The desktop app operates as a **thin client** — all workflow logic lives in `engine-server`.
 
 ```mermaid
 graph TD
@@ -593,33 +593,33 @@ graph TD
     style NATS fill:#2ed573,color:#fff
 ```
 
-> **Konfiguration**: `ENGINE_API_URL` Environment-Variable (Default: `http://localhost:8081`).
+> **Configuration**: `ENGINE_API_URL` environment variable (default: `http://localhost:8081`).
 
 ---
 
 ## 8. Concurrency & Locking (K1)
 
-### 8.1 Lock-Hierarchie
+### 8.1 Lock Hierarchy
 
 ```
 WorkflowEngine (Arc)
-├── DefinitionRegistry       → Arc<RwLock<HashMap>>          (1 globaler Lock)
-├── InstanceStore             → Arc<RwLock<HashMap>>          (1 globaler Lock für Map)
-│   └── ProcessInstance[i]   → Arc<RwLock<ProcessInstance>>  (per-Instance Lock!)
+├── DefinitionRegistry       → Arc<RwLock<HashMap>>          (1 global lock)
+├── InstanceStore             → Arc<RwLock<HashMap>>          (1 global lock for the map)
+│   └── ProcessInstance[i]   → Arc<RwLock<ProcessInstance>>  (per-instance lock!)
 ├── pending_user_tasks       → Arc<DashMap>                  (lock-free / sharded)
 ├── pending_service_tasks    → Arc<DashMap>                  (lock-free / sharded)
 ├── pending_timers           → Arc<DashMap>                  (lock-free / sharded)
 └── pending_message_catches  → Arc<DashMap>                  (lock-free / sharded)
 ```
 
-### 8.2 Deadlock-Prevention Pattern
+### 8.2 Deadlock Prevention Pattern
 
 ```rust
-// ❌ VERBOTEN: Lock über .await halten
+// ❌ FORBIDDEN: hold a lock across .await
 let inst = instance_arc.write().await;
 self.some_async_method().await;  // DEADLOCK!
 
-// ✅ KORREKT: Lock scoped vor .await
+// ✅ CORRECT: lock scoped before .await
 {
     let mut inst = instance_arc.write().await;
     inst.state = InstanceState::Running;
@@ -631,46 +631,46 @@ self.some_async_method().await;  // Safe!
 
 ## 9. History & Audit Trail
 
-Jeder State-Übergang wird als `HistoryEntry` gespeichert:
+Every state transition is stored as a `HistoryEntry`:
 
-| Feld | Typ | Beschreibung |
+| Field | Type | Description |
 |---|---|---|
 | `event_type` | `HistoryEventType` | InstanceStarted, TaskCompleted, TokenForked, ... |
-| `diff` | `Option<HistoryDiff>` | Automatisch berechneter Diff (variables, status, node) |
+| `diff` | `Option<HistoryDiff>` | Automatically computed diff (variables, status, node) |
 | `actor_type` | `ActorType` | Engine, User, ServiceWorker, Timer, Listener |
-| `full_state_snapshot` | `Option<Value>` | Snapshot alle 8 Audit-Einträge |
+| `full_state_snapshot` | `Option<Value>` | Snapshot every 8 audit entries |
 
-**Diff-Berechnung:** `calculate_diff(old: &ProcessInstance, new: &ProcessInstance) → HistoryDiff`
-- Variable-Diff: added, removed, changed (mit Wert-Truncation >1KB)
-- Status-Diff: "Running → Completed"
-- Node-Diff: "task1 → end"
-- File-Upload-Erkennung: "File 'report.pdf' uploaded (1.2 MB)"
+**Diff calculation:** `calculate_diff(old: &ProcessInstance, new: &ProcessInstance) → HistoryDiff`
+- Variable diff: added, removed, changed (with value truncation >1KB)
+- Status diff: "Running → Completed"
+- Node diff: "task1 → end"
+- File upload detection: "File 'report.pdf' uploaded (1.2 MB)"
 
 ---
 
-## 10. Code-Statistiken
+## 10. Code Statistics
 
-> Stand: 06.04.2026 — gemessen via `wc -l` und `cargo test --workspace`
+> As of: 2026-04-06 — measured via `wc -l` and `cargo test --workspace`
 
-| Bereich | Dateien | LOC |
+| Area | Files | LOC |
 |---|---|---|
-| engine-core (lib) | 25 | 7.191 |
-| engine-core (tests) | 2 | 3.545 |
-| bpmn-parser | 4 | 1.963 |
-| persistence-nats | 5 | 1.149 |
-| engine-server (lib + main) | 12 | 1.280 |
-| engine-server (E2E tests) | 12 | 1.934 |
-| **Rust Workspace Gesamt** | **60** | **~17.062** |
-| desktop-tauri (TypeScript + CSS) | 38 | 5.186 |
-| desktop-tauri (Rust Backend) | 10 | 623 |
-| **Projekt Gesamt** | **~108** | **~22.871** |
+| engine-core (lib) | 25 | 7,191 |
+| engine-core (tests) | 2 | 3,545 |
+| bpmn-parser | 4 | 1,963 |
+| persistence-nats | 5 | 1,149 |
+| engine-server (lib + main) | 12 | 1,280 |
+| engine-server (E2E tests) | 12 | 1,934 |
+| **Rust workspace total** | **60** | **~17,062** |
+| desktop-tauri (TypeScript + CSS) | 38 | 5,186 |
+| desktop-tauri (Rust backend) | 10 | 623 |
+| **Project total** | **~108** | **~22,871** |
 
-### Test-Übersicht (167 Tests, alle ✅)
+### Test Overview (167 tests, all ✅)
 
-| Crate | Unit | E2E | Gesamt |
+| Crate | Unit | E2E | Total |
 |---|---|---|---|
 | engine-core | 102 | — | 102 |
 | bpmn-parser | 27 | — | 27 |
 | persistence-nats | 2 | — | 2 |
 | engine-server | — | 36 | 36 |
-| **Gesamt** | **131** | **36** | **167** |
+| **Total** | **131** | **36** | **167** |

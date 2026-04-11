@@ -3,148 +3,148 @@
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-244_passing-success?style=flat-square)]()
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-~87%25-blue?style=flat-square)]()
-[![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#lizenz)
+[![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
 <div align="center">
   <img src="desktop-tauri/public/logo.png" alt="BPMNinja Logo" width="300" />
 </div>
 
-**Eine BPMN 2.0 Workflow-Engine in Rust** — token-basierte Ausführung, NATS-Persistenz, REST-API und Desktop-UI.
+**A BPMN 2.0 workflow engine written in Rust** — token-based execution, NATS persistence, REST API and desktop UI.
 
 ---
 
-## Inhaltsverzeichnis
+## Table of Contents
 
-- [Überblick](#überblick)
-- [Crates (Module)](#crates-module)
-- [Unterstützte BPMN-Elemente](#unterstützte-bpmn-elemente)
-- [Architektur](#architektur)
-- [Schnellstart](#schnellstart)
+- [Overview](#overview)
+- [Crates (Modules)](#crates-modules)
+- [Supported BPMN Elements](#supported-bpmn-elements)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
 - [REST API](#rest-api)
 - [External Task Client (TypeScript)](#external-task-client-typescript)
-- [Desktop-Anwendung (UI)](#desktop-anwendung-ui)
+- [Desktop Application (UI)](#desktop-application-ui)
 - [Docker Compose](#docker-compose)
-- [Test-Metriken](#test-metriken)
+- [Test Metrics](#test-metrics)
 - [Roadmap](#roadmap)
-- [Lizenz](#lizenz)
+- [License](#license)
 
 ---
 
-## Überblick
+## Overview
 
-bpmninja ist eine BPMN 2.0 Engine mit folgenden Kernfeatures:
+bpmninja is a BPMN 2.0 engine with the following core features:
 
-- **Token-basierte Ausführung** — jeder Pfad wird als eigenständiger Token verfolgt
-- **18 BPMN-Elemente** — Start/End Events, User/Service Tasks, Gateways (XOR, AND, OR, Event-Based), Timer, Messages, Boundary Events, Call Activities, Sub-Processes
-- **Vollständige ISO 8601 Timer** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
-- **Lock-Free Concurrency** — Multi-threaded Skalierung dank `DashMap` Wait-State Queues
-- **NATS JetStream Persistenz** — KV-Stores für Instanzen, Object Store für Dateien, Event-Streaming für History
-- **Fault-Tolerant Retry Queue** — 2-stufiges Retry-System mit Background-Worker gegen NATS-Ausfälle
-- **Automatischer Timer-Scheduler** — Background-Task verarbeitet abgelaufene Timer (konfigurierbar via `TIMER_INTERVAL_MS`)
-- **Camunda-kompatible Service Tasks** — Fetch-and-Lock Pattern mit Long-Polling
-- **Rhai Script Engine** — Execution Listeners für dynamische Variablenmanipulation
-- **Suspend / Resume** — Instanzen pausieren und fortsetzen (Timer, Tasks blockiert)
-- **Incident Management** — Failed Service Tasks mit Retry/Resolve direkt aus der UI behandeln
-- **Desktop-UI** — Tauri-App mit bpmn-js Modeler und Live-Instanzverfolgung (inkl. plattformübergreifender GitHub Actions CI-Releases)
-
----
-
-## Crates (Module)
-
-| Crate | Zweck |
-|-------|-------|
-| **`engine-core`** | Kernbibliothek — State Machine, Token-Registry, Gateway-Routing, Condition-Evaluator, Script-Engine |
-| **`bpmn-parser`** | Parst BPMN 2.0 XML (`quick-xml` + `serde`) zu internen `ProcessDefinition`-Structs |
-| **`persistence-nats`** | NATS JetStream-basierte `WorkflowPersistence`-Implementierung (KV, Object Store, Streams) |
-| **`engine-server`** | Axum HTTP REST-API mit typsicherem Error-Handling (`AppError` → HTTP-Statuscodes) |
-| **`desktop-tauri`** | Tauri Desktop-App (React + bpmn-js) mit Modeler, Instanzen-Dashboard und Event-Historie |
-| **`agent-orchestrator`** | Beispiel-Worker für externe Service-Task-Verarbeitung |
-| **`bpmn-ninja-external-task-client`** | TypeScript/Node Worker-Client (ESM) — Long-Polling, Retry, Lock-Extension, Graceful Shutdown |
+- **Token-based execution** — each path is tracked as an independent token
+- **18 BPMN elements** — start/end events, user/service tasks, gateways (XOR, AND, OR, event-based), timers, messages, boundary events, call activities, sub-processes
+- **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
+- **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues
+- **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
+- **Fault-tolerant retry queue** — two-stage retry system with a background worker to handle NATS outages
+- **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
+- **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
+- **Rhai script engine** — execution listeners for dynamic variable manipulation
+- **Suspend / resume** — pause and continue instances (timers and tasks blocked)
+- **Incident management** — handle failed service tasks with retry/resolve directly from the UI
+- **Desktop UI** — Tauri app with bpmn-js modeler and live instance tracking (including cross-platform GitHub Actions CI releases)
 
 ---
 
-## Unterstützte BPMN-Elemente
+## Crates (Modules)
 
-### Basis-Elemente
+| Crate | Purpose |
+|-------|---------|
+| **`engine-core`** | Core library — state machine, token registry, gateway routing, condition evaluator, script engine |
+| **`bpmn-parser`** | Parses BPMN 2.0 XML (`quick-xml` + `serde`) into internal `ProcessDefinition` structs |
+| **`persistence-nats`** | NATS JetStream-based `WorkflowPersistence` implementation (KV, Object Store, Streams) |
+| **`engine-server`** | Axum HTTP REST API with type-safe error handling (`AppError` → HTTP status codes) |
+| **`desktop-tauri`** | Tauri desktop app (React + bpmn-js) with modeler, instances dashboard and event history |
+| **`agent-orchestrator`** | Sample worker for external service task processing |
+| **`bpmn-ninja-external-task-client`** | TypeScript/Node worker client (ESM) — long polling, retry, lock extension, graceful shutdown |
 
-| BPMN | Element | Beschreibung |
+---
+
+## Supported BPMN Elements
+
+### Basic Elements
+
+| BPMN | Element | Description |
 |:---:|---|---|
-| <img src="readme-assets/bpmn-icons/start-event.svg" width="28"> | **StartEvent** | Einfacher Startpunkt — Prozess wird sofort gestartet. |
-| <img src="readme-assets/bpmn-icons/timer-start-event.svg" width="28"> | **TimerStartEvent** | Timer-gesteuerter Start — unterstützt ISO 8601 Duration (`PT30S`), AbsoluteDate, Cron-Cycle und Repeating Intervals. |
-| <img src="readme-assets/bpmn-icons/message-start-event.svg" width="28"> | **MessageStartEvent** | Prozess wird durch eingehende Nachricht (via `messageName`) gestartet. |
-| <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **EndEvent** | Endpunkt — Prozessinstanz wird als abgeschlossen markiert. |
-| <img src="readme-assets/bpmn-icons/terminate-end-event.svg" width="28"> | **TerminateEndEvent** | Endpunkt — Bricht alle aktiven Tokens sofort ab. |
-| <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminiert den Prozess mit einem BPMN-Fehlercode (`errorCode`). |
-| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Erstellt einen Pending-Task, der extern abgeschlossen werden muss. |
-| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | Externe Verarbeitung via Fetch-and-Lock Pattern (Camunda-kompatibel). |
-| <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Führt inline verankerte Scripte über die Rhai Engine aus. |
-| <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Versendet via Throw Event eine Message und läuft direkt weiter. |
+| <img src="readme-assets/bpmn-icons/start-event.svg" width="28"> | **StartEvent** | Simple starting point — process starts immediately. |
+| <img src="readme-assets/bpmn-icons/timer-start-event.svg" width="28"> | **TimerStartEvent** | Timer-triggered start — supports ISO 8601 Duration (`PT30S`), AbsoluteDate, cron cycle and repeating intervals. |
+| <img src="readme-assets/bpmn-icons/message-start-event.svg" width="28"> | **MessageStartEvent** | Process is started by an incoming message (via `messageName`). |
+| <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **EndEvent** | End point — process instance is marked as completed. |
+| <img src="readme-assets/bpmn-icons/terminate-end-event.svg" width="28"> | **TerminateEndEvent** | End point — immediately aborts all active tokens. |
+| <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminates the process with a BPMN error code (`errorCode`). |
+| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). |
+| <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Executes inline scripts via the Rhai engine. |
+| <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Sends a message via throw event and continues immediately. |
 
 ### Gateways
 
-| BPMN | Element | Beschreibung |
+| BPMN | Element | Description |
 |:---:|---|---|
-| <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Genau ein Pfad wird gewählt (Bedingungsauswertung). Optionaler Default-Flow. |
-| <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | Alle Pfade werden parallel verfolgt (Token-Fork). Join wartet auf alle Tokens (JoinBarrier). |
-| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Alle Pfade mit `true`-Bedingung werden parallel verfolgt. Join wartet auf erwartete Tokens. |
-| <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pausiert bis genau eines der Ziel-Catch-Events (Timer/Message) auslöst. |
+| <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Exactly one path is chosen (condition evaluation). Optional default flow. |
+| <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | All paths are followed in parallel (token fork). Join waits for all tokens (JoinBarrier). |
+| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | All paths with a `true` condition are followed in parallel. Join waits for the expected tokens. |
+| <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pauses until exactly one of the target catch events (timer/message) fires. |
 
 ### Intermediate Events
 
-| BPMN | Element | Beschreibung |
+| BPMN | Element | Description |
 |:---:|---|---|
-| <img src="readme-assets/bpmn-icons/timer-catch-event.svg" width="28"> | **TimerCatchEvent** | Pausiert den Prozess bis ein Timer abläuft. Unterstützt Duration, AbsoluteDate, Cron und Repeating Intervals. Wird automatisch vom Timer-Scheduler verarbeitet. |
-| <img src="readme-assets/bpmn-icons/message-catch-event.svg" width="28"> | **MessageCatchEvent** | Pausiert den Prozess bis eine passende Nachricht via `POST /api/message` korreliert wird. |
-| <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | An einen Task angeheftetes Timer-Event (interrupting/non-interrupting). Timer wird bei Task-Abschluss automatisch storniert. |
-| <img src="readme-assets/bpmn-icons/boundary-message-event.svg" width="28"> | **BoundaryMessageEvent** | An einen Task angeheftetes Message-Event (interrupting/non-interrupting). Wartet asynchron auf externe Nachrichten. |
-| <img src="readme-assets/bpmn-icons/boundary-error-event.svg" width="28"> | **BoundaryErrorEvent** | Fängt BPMN-Fehler (`errorCode`) eines ServiceTasks ab und leitet auf einen alternativen Pfad. |
+| <img src="readme-assets/bpmn-icons/timer-catch-event.svg" width="28"> | **TimerCatchEvent** | Pauses the process until a timer expires. Supports Duration, AbsoluteDate, cron and repeating intervals. Automatically processed by the timer scheduler. |
+| <img src="readme-assets/bpmn-icons/message-catch-event.svg" width="28"> | **MessageCatchEvent** | Pauses the process until a matching message is correlated via `POST /api/message`. |
+| <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | Timer event attached to a task (interrupting/non-interrupting). Timer is automatically cancelled when the task completes. |
+| <img src="readme-assets/bpmn-icons/boundary-message-event.svg" width="28"> | **BoundaryMessageEvent** | Message event attached to a task (interrupting/non-interrupting). Waits asynchronously for external messages. |
+| <img src="readme-assets/bpmn-icons/boundary-error-event.svg" width="28"> | **BoundaryErrorEvent** | Catches BPMN errors (`errorCode`) of a ServiceTask and routes onto an alternative path. |
 
-### Aktivitäten & Sub-Prozesse
+### Activities & Sub-Processes
 
-| BPMN | Element | Beschreibung |
+| BPMN | Element | Description |
 |:---:|---|---|
-| <img src="readme-assets/bpmn-icons/call-activity.svg" width="34"> | **CallActivity** | Ruft eine andere Prozessdefinition auf (`calledElement`). Variablen werden propagiert. |
-| <img src="readme-assets/bpmn-icons/embedded-subprocess.svg" width="34"> | **EmbeddedSubProcess** | Eingebetteter Sub-Prozess (wird in den Graph geflattened). |
-| <img src="readme-assets/bpmn-icons/subprocess-end-event.svg" width="28"> | **SubProcessEndEvent** | Internes End-Event eines Embedded-Sub-Process (generiert beim Flattening). |
+| <img src="readme-assets/bpmn-icons/call-activity.svg" width="34"> | **CallActivity** | Calls another process definition (`calledElement`). Variables are propagated. |
+| <img src="readme-assets/bpmn-icons/embedded-subprocess.svg" width="34"> | **EmbeddedSubProcess** | Embedded sub-process (flattened into the graph). |
+| <img src="readme-assets/bpmn-icons/subprocess-end-event.svg" width="28"> | **SubProcessEndEvent** | Internal end event of an embedded sub-process (generated during flattening). |
 
-### Zusätzliche Konzepte
+### Additional Concepts
 
-| Feature | Beschreibung |
+| Feature | Description |
 |---------|-------------|
-| **Conditional Flows** | Kanten mit Bedingungen (`amount > 100`, `status == 'approved'`). Operatoren: `==`, `!=`, `>`, `>=`, `<`, `<=`, Truthy-Checks. |
-| **Execution Listeners** | Start-/End-Scripts auf Nodes (Rhai). Können Variablen lesen und mutieren. |
-| **Scope Event Listeners** | Timer-/Message-/Error-Event-Sub-Prozesse auf Scope-Ebene (interrupting/non-interrupting). |
-| **Datei-Variablen** | Upload/Download von Dateien als Prozessvariablen via NATS Object Store. |
-| **Message Correlation** | Matching über `messageName` + optionalem `businessKey`. |
-| **BPMN Error Handling** | ServiceTasks melden Fehler via `bpmnError`. Routing an passendes `BoundaryErrorEvent`. |
-| **Detail-Historie** | Lückenloses Event-Log mit Diffs, Snapshots und Aktoren (`User`, `Engine`, `Timer`, `ServiceWorker`). |
-| **Persistente Wait-States** | Timer, Messages, User/Service Tasks überleben Server-Neustarts via NATS KV. |
-| **Structured JSON Logging** | Konfigurierbar via `tracing-subscriber` mit JSON-Feature und `RUST_LOG` Filter. |
+| **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`). Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, truthy checks. |
+| **Execution Listeners** | Start/end scripts on nodes (Rhai). Can read and mutate variables. |
+| **Scope Event Listeners** | Timer/message/error event sub-processes at scope level (interrupting/non-interrupting). |
+| **File Variables** | Upload/download of files as process variables via NATS Object Store. |
+| **Message Correlation** | Matching via `messageName` + optional `businessKey`. |
+| **BPMN Error Handling** | ServiceTasks report errors via `bpmnError`. Routing to the matching `BoundaryErrorEvent`. |
+| **Detailed History** | Gap-free event log with diffs, snapshots and actors (`User`, `Engine`, `Timer`, `ServiceWorker`). |
+| **Persistent Wait States** | Timers, messages, user/service tasks survive server restarts via NATS KV. |
+| **Structured JSON Logging** | Configurable via `tracing-subscriber` with the JSON feature and `RUST_LOG` filter. |
 
-### Abweichungen vom BPMN 2.0 Standard
+### Deviations from the BPMN 2.0 Standard
 
-Aus Performance- und Architekturgründen (Keep-It-Simple) weicht bpmninja in einigen Punkten vom strikten BPMN 2.0 Standard ab:
+For performance and architectural reasons (keep it simple), bpmninja deviates from the strict BPMN 2.0 standard in a few points:
 
-- **Service Tasks (External Task Pattern):** Anstatt synchron Code innerhalb der Engine auszuführen, pausieren `Service Tasks` die Ausführung. Sie stellen den Task asynchron in eine Fetch-And-Lock-Queue (ähnlich Camunda), von wo aus externe Worker den Task abrufen (`topic`-basiert) und via API den Abschluss melden.
-- **Embedded Sub-Processes (Flattening):** Eingebettete Sub-Prozesse werden direkt beim Parsen aufgelöst und tief in den Hauptgraphen eingefügt (**Flattening**). Es gibt zur Laufzeit keine komplex verschachtelten Instanz-Strukturen, sondern nur direkte Knotenfolgen. Rücksprünge aus dem Sub-Prozess erfolgen über simulierte `SubProcessEndEvent`s in demselben Variablen-Scope.
-- **Script Tasks:** Die Auswertung von Skripten erfolgt nicht per JavaScript oder Groovy, sondern nativ in Rust via **Rhai Engine**.
-- **Multi-Instance (Parallel):** Statt gekapselte Execution-Scopes pro Iteration zu öffnen, erzeugt das Engine-Forking simple parallele Tokens auf demselben Task-Objekt innerhalb der globalen Instanzvariablen.
+- **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
+- **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
+- **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
+- **Multi-Instance (Parallel):** Instead of opening encapsulated execution scopes per iteration, engine forking creates simple parallel tokens on the same task object within the global instance variables.
 
-### Aktuell nicht unterstützte BPMN-Elemente
+### Currently Unsupported BPMN Elements
 
-Die Engine orientiert sich an einem zweckmäßigen und performanten Kern-Feature-Set. Folgende BPMN-Elemente werden derzeit **nicht** unterstützt und führen beim Deployment zu Parser-Fehlern oder werden vollständig ignoriert:
+The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Weitere Task-Typen:** `BusinessRuleTask` (kein DMN-Support), `ManualTask`, `ReceiveTask`.
-- **Spezifische Intermediate/Boundary Events:** `SignalEvent`, `EscalationEvent`, `CompensationEvent`, `CancelEvent`, `LinkEvent`.
-- **Erweiterte Sub-Prozesse:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
-- **Spezialisierte Gateways:** `Complex Gateway`.
-- **Data Objects / Data Stores:** Visuelle Datenobjekte und Assoziationen (`Data Input/Output Association`) werden ignoriert. Der Datenaustausch erfolgt ausnahmslos über den JSON-Variablen-State (`HashMap<String, serde_json::Value>`).
+- **Other task types:** `BusinessRuleTask` (no DMN support), `ManualTask`, `ReceiveTask`.
+- **Specific intermediate/boundary events:** `SignalEvent`, `EscalationEvent`, `CompensationEvent`, `CancelEvent`, `LinkEvent`.
+- **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
+- **Specialized gateways:** `Complex Gateway`.
+- **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
 ---
 
-## Architektur
+## Architecture
 
-> Ausführliche Dokumentation mit 8 Mermaid-Diagrammen: **[docs/architecture.md](docs/architecture.md)**
+> Detailed documentation with 8 Mermaid diagrams: **[docs/architecture.md](docs/architecture.md)**
 
 ```mermaid
 flowchart TD
@@ -188,162 +188,162 @@ flowchart TD
 
 ---
 
-## Schnellstart
+## Quick Start
 
-### Voraussetzungen
+### Prerequisites
 
-**Variante A: Devbox** (empfohlen)
+**Option A: Devbox** (recommended)
 ```bash
-# Installiert automatisch Rust, Node.js und NATS
+# Automatically installs Rust, Node.js and NATS
 devbox shell
 ```
 
-**Variante B: Manuell**
+**Option B: Manual**
 - Rust (via `rustup`)
 - Node.js ≥ 18
 - Docker & Docker Compose
 
 ### Build, Test & Lint
 
-| Aktion | Devbox | Shell |
+| Action | Devbox | Shell |
 |--------|--------|-------|
 | **Build** | `devbox run build` | `cargo build --workspace` |
 | **Test** | `devbox run test` | `cargo test --workspace` |
 | **Lint** | `devbox run lint` | `cargo clippy --workspace -- -D warnings` |
 | **Format** | `devbox run fmt` | `cargo fmt --all --check` |
 
-### Engine-Server starten
+### Starting the Engine Server
 
 ```bash
-# 1. NATS starten
+# 1. Start NATS
 docker compose up -d nats
 
-# 2. Engine-Server starten
+# 2. Start the engine server
 cargo run -p engine-server
 ```
 
-Der Server läuft auf `http://localhost:8081`.
+The server runs at `http://localhost:8081`.
 
-#### Umgebungsvariablen
+#### Environment Variables
 
-| Variable | Default | Beschreibung |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `NATS_URL` | `nats://localhost:4222` | NATS Server URL |
-| `PORT` | `8081` | HTTP Server Port |
-| `TIMER_INTERVAL_MS` | `1000` | Timer-Scheduler Polling-Intervall (ms) |
+| `NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `PORT` | `8081` | HTTP server port |
+| `TIMER_INTERVAL_MS` | `1000` | Timer scheduler polling interval (ms) |
 
 ---
 
 ## REST API
 
-> Vollständige OpenAPI 3.0 Spezifikation: **[docs/openapi.yaml](docs/openapi.yaml)** | 🌐 **[API Portal (Redoc)](https://maatini.github.io/bpmninja/)** *(benötigt aktives GitHub Pages Deploy via /docs)*
+> Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](docs/openapi.yaml)** | 🌐 **[API Portal (Redoc)](https://maatini.github.io/bpmninja/)** *(requires an active GitHub Pages deploy via /docs)*
 
-### Definitionen
+### Definitions
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `POST` | `/api/deploy` | BPMN-Definition deployen (max. 10MB) |
-| `GET` | `/api/definitions` | Alle Definitionen auflisten |
-| `GET` | `/api/definitions/:id/xml` | BPMN-XML einer Definition abrufen |
-| `DELETE` | `/api/definitions/:id` | Definition löschen (`?cascade=true` für inkl. Instanzen) |
-| `DELETE` | `/api/definitions/bpmn/:bpmn_id` | Alle Versionen einer BPMN-ID löschen |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB) |
+| `GET` | `/api/definitions` | List all definitions |
+| `GET` | `/api/definitions/:id/xml` | Retrieve the BPMN XML of a definition |
+| `DELETE` | `/api/definitions/:id` | Delete a definition (`?cascade=true` to also delete instances) |
+| `DELETE` | `/api/definitions/bpmn/:bpmn_id` | Delete all versions of a BPMN ID |
 
-### Instanzen
+### Instances
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `POST` | `/api/start` | Instanz starten (mit `definition_key`) |
-| `POST` | `/api/start/latest` | Instanz der neuesten Version starten (mit `bpmn_process_id`) |
-| `POST` | `/api/start/timer` | Timer-Start-Event-Instanz starten (Repeating Intervals) |
-| `GET` | `/api/instances` | Alle Instanzen auflisten |
-| `GET` | `/api/instances/:id` | Instanz-Details abrufen |
-| `DELETE` | `/api/instances/:id` | Instanz löschen |
-| `POST` | `/api/instances/:id/suspend` | Instanz suspendieren (Timer/Tasks pausiert) |
-| `POST` | `/api/instances/:id/resume` | Suspendierte Instanz fortsetzen |
-| `PUT` | `/api/instances/:id/variables` | Variablen aktualisieren |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/start` | Start an instance (by `definition_key`) |
+| `POST` | `/api/start/latest` | Start an instance of the latest version (by `bpmn_process_id`) |
+| `POST` | `/api/start/timer` | Start a timer start event instance (repeating intervals) |
+| `GET` | `/api/instances` | List all instances |
+| `GET` | `/api/instances/:id` | Retrieve instance details |
+| `DELETE` | `/api/instances/:id` | Delete an instance |
+| `POST` | `/api/instances/:id/suspend` | Suspend an instance (timers/tasks paused) |
+| `POST` | `/api/instances/:id/resume` | Resume a suspended instance |
+| `PUT` | `/api/instances/:id/variables` | Update variables |
 
 ### User Tasks
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `GET` | `/api/tasks` | Alle pending User Tasks auflisten |
-| `POST` | `/api/complete/:id` | User Task abschließen |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/tasks` | List all pending user tasks |
+| `POST` | `/api/complete/:id` | Complete a user task |
 
-### Service Tasks (Camunda-kompatibel)
+### Service Tasks (Camunda-compatible)
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `GET` | `/api/service-tasks` | Alle Service Tasks auflisten |
-| `POST` | `/api/service-task/fetchAndLock` | Tasks abrufen und sperren (Long-Polling) |
-| `POST` | `/api/service-task/:id/complete` | Task erfolgreich abschließen |
-| `POST` | `/api/service-task/:id/failure` | Task als fehlgeschlagen markieren |
-| `POST` | `/api/service-task/:id/retry` | Incident erneut versuchen (Retries zurücksetzen) |
-| `POST` | `/api/service-task/:id/resolve` | Incident manuell auflösen (Task ohne Worker abschließen) |
-| `POST` | `/api/service-task/:id/extendLock` | Lock verlängern |
-| `POST` | `/api/service-task/:id/bpmnError` | BPMN-Fehler melden |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/service-tasks` | List all service tasks |
+| `POST` | `/api/service-task/fetchAndLock` | Fetch and lock tasks (long polling) |
+| `POST` | `/api/service-task/:id/complete` | Complete a task successfully |
+| `POST` | `/api/service-task/:id/failure` | Mark a task as failed |
+| `POST` | `/api/service-task/:id/retry` | Retry an incident (reset retries) |
+| `POST` | `/api/service-task/:id/resolve` | Resolve an incident manually (complete the task without a worker) |
+| `POST` | `/api/service-task/:id/extendLock` | Extend the lock |
+| `POST` | `/api/service-task/:id/bpmnError` | Report a BPMN error |
 
-### Dateien
+### Files
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `POST` | `/api/instances/:id/files/:var` | Datei hochladen (multipart) |
-| `GET` | `/api/instances/:id/files/:var` | Datei herunterladen |
-| `DELETE` | `/api/instances/:id/files/:var` | Dateivariable löschen |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/instances/:id/files/:var` | Upload a file (multipart) |
+| `GET` | `/api/instances/:id/files/:var` | Download a file |
+| `DELETE` | `/api/instances/:id/files/:var` | Delete a file variable |
 
 ### Events & Messages
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `POST` | `/api/message` | Nachricht korrelieren |
-| `POST` | `/api/timers/process` | Abgelaufene Timer manuell verarbeiten |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/message` | Correlate a message |
+| `POST` | `/api/timers/process` | Manually process expired timers |
 
 ### Monitoring & Health
 
-| Methode | Pfad | Beschreibung |
-|---------|------|-------------|
-| `GET` | `/api/health` | Liveness Check → `200 OK` |
-| `GET` | `/api/ready` | Readiness Check (prüft NATS-Verbindung) |
-| `GET` | `/api/info` | Backend-Informationen (Typ, NATS-URL, Status) |
-| `GET` | `/api/monitoring` | Engine-Statistiken (Instanzen, Tasks, Storage, Fehler) |
-| `GET` | `/api/monitoring/buckets/:bucket/entries` | KV-Bucket Einträge auflisten |
-| `GET` | `/api/monitoring/buckets/:bucket/entries/:key` | Einzelnen KV-Eintrag laden |
-| `GET` | `/api/instances/:id/history` | Event-Historie einer Instanz |
-| `GET` | `/api/instances/:id/history/:eid` | Einzelnes History-Event |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Liveness check → `200 OK` |
+| `GET` | `/api/ready` | Readiness check (checks NATS connection) |
+| `GET` | `/api/info` | Backend info (type, NATS URL, status) |
+| `GET` | `/api/monitoring` | Engine statistics (instances, tasks, storage, errors) |
+| `GET` | `/api/monitoring/buckets/:bucket/entries` | List KV bucket entries |
+| `GET` | `/api/monitoring/buckets/:bucket/entries/:key` | Load a single KV entry |
+| `GET` | `/api/instances/:id/history` | Event history of an instance |
+| `GET` | `/api/instances/:id/history/:eid` | A single history event |
 
-### Fehlerbehandlung
+### Error Handling
 
-Alle Fehler folgen einem einheitlichen JSON-Format:
+All errors follow a uniform JSON format:
 
 ```json
 { "error": "Human-readable error message" }
 ```
 
-| HTTP-Code | Bedeutung |
-|-----------|-----------|
-| `400` | Ungültige Anfrage (Bad XML, ungültige UUID, fehlende Felder) |
-| `404` | Ressource nicht gefunden (Definition, Instanz, Task, Node) |
-| `409` | Konflikt (Task nicht pending, bereits gesperrt, bereits abgeschlossen) |
-| `500` | Interner Serverfehler |
+| HTTP code | Meaning |
+|-----------|---------|
+| `400` | Bad request (bad XML, invalid UUID, missing fields) |
+| `404` | Resource not found (definition, instance, task, node) |
+| `409` | Conflict (task not pending, already locked, already completed) |
+| `500` | Internal server error |
 
 ---
 
 ## External Task Client (TypeScript)
 
-Das Paket **[`@bpmninja/external-task-client`](bpmn-ninja-external-task-client/README.md)** ist ein produktionsreifer Worker-Client für die BPMNinja Service-Task-API. Er ist analog zum [Camunda External Task Client](https://github.com/camunda/camunda-external-task-client-js) aufgebaut, spricht jedoch direkt die BPMNinja REST-Endpunkte unter `/api/service-task/*` an.
+The package **[`@bpmninja/external-task-client`](bpmn-ninja-external-task-client/README.md)** is a production-ready worker client for the BPMNinja service task API. It is modelled on the [Camunda External Task Client](https://github.com/camunda/camunda-external-task-client-js), but talks directly to the BPMNinja REST endpoints under `/api/service-task/*`.
 
 ### Features
 
-- **Long-Polling** — effizientes Fetch-and-Lock mit konfigurierbarem `asyncResponseTimeout`
-- **Multi-Topic Subscriptions** — mehrere Topics parallel mit individuellen Handlern
-- **Globaler Retry mit Exponential Backoff** — automatische Wiederholung bei Handler-Fehlern (`1s → 2s → 4s → …`, gedeckelt bei 30s)
-- **Automatische Lock-Extension** — verhindert Lock-Ablauf bei lang laufenden Tasks
-- **Incident Creation** — nach erschöpften Retries wird ein Incident am Prozess erzeugt (`failure` mit `retries: 0`)
-- **BPMN Error Throwing** — löst Boundary Error Events direkt aus dem Worker aus
-- **Graceful Shutdown** — wartet auf in-flight Handler, bricht Fetches per `AbortController` ab
-- **Strict TypeScript** — `strict: true`, ESM, natives `fetch()` (Node ≥ 18), keine HTTP-Abhängigkeiten
-- **Pino Logging** — strukturiertes Logging, deaktivierbar via `logger: false`
+- **Long polling** — efficient fetch-and-lock with configurable `asyncResponseTimeout`
+- **Multi-topic subscriptions** — multiple topics in parallel with individual handlers
+- **Global retry with exponential backoff** — automatic retry on handler errors (`1s → 2s → 4s → …`, capped at 30s)
+- **Automatic lock extension** — prevents lock expiration for long-running tasks
+- **Incident creation** — after retries are exhausted, an incident is created on the process (`failure` with `retries: 0`)
+- **BPMN error throwing** — triggers boundary error events directly from the worker
+- **Graceful shutdown** — waits for in-flight handlers, cancels fetches via `AbortController`
+- **Strict TypeScript** — `strict: true`, ESM, native `fetch()` (Node ≥ 18), no HTTP dependencies
+- **Pino logging** — structured logging, disable via `logger: false`
 
-### Schnellstart
+### Quick Start
 
 ```typescript
 import { ExternalTaskClient } from "@bpmninja/external-task-client";
@@ -369,7 +369,7 @@ client.subscribe("send-email", async (task, service) => {
   });
 });
 
-// BPMN Error aus dem Worker auslösen (Boundary Error Event)
+// Throw a BPMN error from the worker (Boundary Error Event)
 client.subscribe("validate-order", async (task, service) => {
   const { amount } = task.variables_snapshot as { amount: number };
   if (amount > 10_000) {
@@ -381,45 +381,45 @@ client.subscribe("validate-order", async (task, service) => {
 
 client.start();
 
-// Graceful Shutdown
+// Graceful shutdown
 process.on("SIGINT", async () => {
   await client.stop();
   process.exit(0);
 });
 ```
 
-### TaskService (pro Handler)
+### TaskService (per handler)
 
-| Methode | Beschreibung |
-|---------|--------------|
-| `complete(variables?)` | Task erfolgreich abschließen, optional mit Ausgabe-Variablen |
-| `failure(msg, details?, retries?)` | Fehler melden; `retries: 0` erzeugt einen Incident |
-| `extendLock(ms)` | Lock verlängern (ms, intern nach Sekunden konvertiert) |
-| `bpmnError(errorCode)` | BPMN Error Event am zugehörigen Boundary auslösen |
+| Method | Description |
+|--------|-------------|
+| `complete(variables?)` | Complete the task successfully, optionally with output variables |
+| `failure(msg, details?, retries?)` | Report a failure; `retries: 0` creates an incident |
+| `extendLock(ms)` | Extend the lock (ms, internally converted to seconds) |
+| `bpmnError(errorCode)` | Trigger a BPMN error event on the attached boundary |
 
-### Entwicklung & Tests
+### Development & Tests
 
 ```bash
 cd bpmn-ninja-external-task-client
 npm install
 npm run lint     # tsc --noEmit
-npm run test     # vitest run  (68 Tests)
+npm run test     # vitest run  (68 tests)
 npm run example  # tsx example/simple-worker.ts
 ```
 
-Das komplette Beispiel (`send-email`, `validate-order`, `flaky-task`, Shutdown) findet sich in [`bpmn-ninja-external-task-client/example/simple-worker.ts`](bpmn-ninja-external-task-client/example/simple-worker.ts). Eine vollständige API-Referenz steht in der [Paket-README](bpmn-ninja-external-task-client/README.md).
+The full example (`send-email`, `validate-order`, `flaky-task`, shutdown) is in [`bpmn-ninja-external-task-client/example/simple-worker.ts`](bpmn-ninja-external-task-client/example/simple-worker.ts). A complete API reference is available in the [package README](bpmn-ninja-external-task-client/README.md).
 
 ---
 
-## Desktop-Anwendung (UI)
+## Desktop Application (UI)
 
-Die Tauri-App verbindet sich über HTTP mit dem `engine-server`.
+The Tauri app connects to the `engine-server` via HTTP.
 
-> **Voraussetzung**: Ein laufendes Backend (NATS + Engine-Server). Standardmäßig erwartet die App das Backend auf `http://localhost:8081` (konfigurierbar via `ENGINE_API_URL`).
+> **Prerequisite**: a running backend (NATS + engine server). By default, the app expects the backend at `http://localhost:8081` (configurable via `ENGINE_API_URL`).
 
-### 1. Systemvoraussetzungen (Backend) ausführen
+### 1. Run the backend prerequisites
 
-Speichere folgende `docker-compose.yml` lokal auf deinem Rechner und starte sie via `docker compose up -d`. Das fertige Backend-Image wird dabei automatisch von der GitHub Container Registry bezogen:
+Save the following `docker-compose.yml` locally on your machine and start it via `docker compose up -d`. The ready-to-use backend image is pulled automatically from the GitHub Container Registry:
 
 ```yaml
 services:
@@ -446,23 +446,23 @@ volumes:
   nats-data:
 ```
 
-### 2. Binary-Release der Desktop-App installieren
+### 2. Install the desktop app binary release
 
-Die fertigen Apps findest du auf der [GitHub Releases Seite](https://github.com/maatini/bpmninja/releases).
+The ready-to-use apps are available on the [GitHub Releases page](https://github.com/maatini/bpmninja/releases).
 
-*   **macOS (.dmg):** Öffne die Datei und ziehe das Icon in deinen `Applications`/`Programme`-Ordner. _Hinweis:_ Da Open-Source Apps meist nicht signiert sind, meldet macOS beim Versuch des Öffnens unter Umständen, dass die App "beschädigt" sei und in den Papierkorb verschoben werden soll. Das ist ein bekanntes Gatekeeper-Schutzverhalten. Führe im Terminal `xattr -cr /Applications/bpmninja-desktop.app` aus, um das Quarantäne-Flag zu entfernen. Danach lässt sich die App normal öffnen.
-*   **Windows (.exe / .msi):** Führe den Installer per Doppelklick aus. Falls eine Microsoft SmartScreen-Warnung erscheint, klicke auf "Weitere Informationen" und dann auf "Trotzdem ausführen".
-*   **Linux (.AppImage / .deb):** Installiere das `.deb` Paket via `sudo dpkg -i package.deb`. Nutzt du das `.AppImage`, muss dieses ggf. mit `chmod +x app.AppImage` vorher ausführbar gemacht werden.
+*   **macOS (.dmg):** Open the file and drag the icon into your `Applications` folder. _Note:_ since open-source apps are usually not signed, macOS may report that the app is "damaged" and should be moved to the Trash when you try to open it. This is a known Gatekeeper protection behaviour. Run `xattr -cr /Applications/bpmninja-desktop.app` in the terminal to remove the quarantine flag. After that, the app can be opened normally.
+*   **Windows (.exe / .msi):** Run the installer by double-clicking it. If a Microsoft SmartScreen warning appears, click "More info" and then "Run anyway".
+*   **Linux (.AppImage / .deb):** Install the `.deb` package via `sudo dpkg -i package.deb`. If you use the `.AppImage`, you may need to make it executable first with `chmod +x app.AppImage`.
 
-### 3. Ausführung aus dem Quellcode (Für Entwickler)
+### 3. Running from source (for developers)
 
-Wer die UI direkt aus dem Source Repository ausführen möchte:
+If you want to run the UI directly from the source repository:
 
 ```bash
 # Devbox
 devbox run ui:dev
 
-# Oder manuell
+# Or manually
 cd desktop-tauri && npm install && npm run tauri dev
 ```
 
@@ -470,119 +470,119 @@ cd desktop-tauri && npm install && npm run tauri dev
 
 ## Docker Compose
 
-Startet NATS + Engine-Server als Container:
+Starts NATS + engine server as containers:
 
 ```bash
 # Devbox
 devbox run engine:docker
 
-# Oder manuell
+# Or manually
 docker compose up --build
 ```
 
-Services erreichbar unter `localhost:8081` (API) und `localhost:4222` (NATS).
+Services reachable at `localhost:8081` (API) and `localhost:4222` (NATS).
 
 ---
 
-## Test-Metriken
+## Test Metrics
 
-> Ermittelt via `cargo test --workspace` (Rust) und `npm run test` (TypeScript) am 10.04.2026 — **244 Tests, 0 Fehler**
+> Measured via `cargo test --workspace` (Rust) and `npm run test` (TypeScript) on 2026-04-10 — **244 tests, 0 failures**
 
-### Workspace-Übersicht
+### Workspace Overview
 
-| Paket | Unit | E2E | Gesamt |
-|-------|------|-----|--------|
+| Package | Unit | E2E | Total |
+|---------|------|-----|-------|
 | **engine-core** | 105 | 5 | 110 |
 | **bpmn-parser** | 28 | — | 28 |
 | **persistence-nats** | 2 | — | 2 |
 | **engine-server** | — | 36 | 36 |
 | **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Gesamt** | **203** | **41** | **244** ✅ |
+| **Total** | **203** | **41** | **244** ✅ |
 
-### engine-core Breakdown (110 Tests)
+### engine-core Breakdown (110 tests)
 
-| Modul | Tests | Abdeckung |
-|-------|-------|-----------|
-| `engine::tests` | 56 | State Machine, Gateways, User/Service Tasks, Boundary Events, Call Activities, EventBasedGateway, Timers, Messages |
-| `engine::stress_tests` | 24 | Throughput, Gateway-Korrektheit, Crash Recovery, Concurrency, Race Conditions, Memory, Infinite Loops |
-| `domain::tests` | 17 | ProcessDefinition Builder, Token-Serialisierung, Validation |
-| `history::tests` | 5 | Diff-Berechnung, Human-Readable Text |
-| `condition::tests` | 3 | Bedingungsevaluierung anhand von Token-Variablen |
-| Integration Tests | 5 | BPMN-Compliance, Complex Gateways |
+| Module | Tests | Coverage |
+|--------|-------|----------|
+| `engine::tests` | 56 | State machine, gateways, user/service tasks, boundary events, call activities, EventBasedGateway, timers, messages |
+| `engine::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
+| `domain::tests` | 17 | ProcessDefinition builder, token serialization, validation |
+| `history::tests` | 5 | Diff calculation, human-readable text |
+| `condition::tests` | 3 | Condition evaluation based on token variables |
+| Integration tests | 5 | BPMN compliance, complex gateways |
 
-### bpmn-parser Tests (28 Tests)
+### bpmn-parser Tests (28 tests)
 
-| Bereich | Tests | Abdeckung |
-|---------|-------|-----------|
-| Basis-Parsing | 6 | Simple BPMN, Conditional Flows, XOR Gateway, Timer Start, Interleaved Output, Execution Listeners |
-| Gateways | 3 | Parallel, Inclusive, Event-Based |
+| Area | Tests | Coverage |
+|------|-------|----------|
+| Basic parsing | 6 | Simple BPMN, conditional flows, XOR gateway, timer start, interleaved output, execution listeners |
+| Gateways | 3 | Parallel, inclusive, event-based |
 | Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, BoundaryTimer |
-| Boundary Events | 2 | BoundaryTimer, BoundaryError |
-| ISO 8601 Timer | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
-| Task-Typen | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
-| Sub-Prozesse | 2 | EventSubProcess, RegularSubProcess |
-| Sonstiges | 1 | TerminateEndEvent |
+| Boundary events | 2 | BoundaryTimer, BoundaryError |
+| ISO 8601 timers | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
+| Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
+| Sub-processes | 2 | EventSubProcess, RegularSubProcess |
+| Other | 1 | TerminateEndEvent |
 
-### engine-server E2E Tests (36 Tests, 12 Dateien)
+### engine-server E2E Tests (36 tests, 12 files)
 
-| Testdatei | Tests | Abdeckung |
-|-----------|-------|-----------|
-| `e2e_deploy.rs` | 3 | Deploy, Start, Parallel Gateway |
-| `e2e_file_variables.rs` | 3 | File Upload, Task Completion mit Files, Multi-File + Delete |
-| `e2e_files.rs` | 1 | Upload/Download/Delete Lifecycle |
-| `e2e_gateways.rs` | 1 | Parallel Gateway über HTTP |
-| `e2e_history.rs` | 1 | History-Generierung und -Abfrage |
-| `e2e_lifecycle.rs` | 6 | Instanz löschen, Definition löschen, Unbekannte Instanzen, Timer verarbeiten, Message korrelieren |
-| `e2e_monitoring.rs` | 4 | Health, Ready (verbunden/unverbunden), Info, Monitoring Stats |
-| `e2e_service_tasks.rs` | 7 | List Service Tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN-Error, Lock Conflict |
-| `e2e_start_errors.rs` | 4 | Invalid UUID, Unknown Definition, Unknown BPMN-ID, Timer-Start Rejection |
-| `e2e_stress.rs` | 2 | Concurrent Deployments, Concurrent Starts (multi-thread) |
-| `e2e_variables.rs` | 1 | Variable-Updates mid-execution |
-| `e2e_versioning.rs` | 3 | Version-Inkrement, Start-Latest, Instance-Isolation |
+| Test file | Tests | Coverage |
+|-----------|-------|----------|
+| `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
+| `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
+| `e2e_files.rs` | 1 | Upload/download/delete lifecycle |
+| `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
+| `e2e_history.rs` | 1 | History generation and querying |
+| `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
+| `e2e_monitoring.rs` | 4 | Health, ready (connected/disconnected), info, monitoring stats |
+| `e2e_service_tasks.rs` | 7 | List service tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN error, lock conflict |
+| `e2e_start_errors.rs` | 4 | Invalid UUID, unknown definition, unknown BPMN ID, timer-start rejection |
+| `e2e_stress.rs` | 2 | Concurrent deployments, concurrent starts (multi-thread) |
+| `e2e_variables.rs` | 1 | Variable updates mid-execution |
+| `e2e_versioning.rs` | 3 | Version increment, start-latest, instance isolation |
 
-### bpmn-ninja-external-task-client Tests (68 Tests, 3 Dateien)
+### bpmn-ninja-external-task-client Tests (68 tests, 3 files)
 
-| Testdatei | Tests | Abdeckung |
-|-----------|-------|-----------|
-| `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (Exponential Backoff, Retry-Erschöpfung) |
-| `TaskService.test.ts` | 20 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP-Kontrakt & Fehlerpfade) |
-| `ExternalTaskClient.test.ts` | 35 | Konstruktor, Lifecycle, Poll-Loop, Subscriptions, Handler-Dispatch, Retry, Lock-Extension, Graceful Shutdown |
+| Test file | Tests | Coverage |
+|-----------|-------|----------|
+| `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
+| `TaskService.test.ts` | 20 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
+| `ExternalTaskClient.test.ts` | 35 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
 
-Tests verwenden `vi.useFakeTimers()` und `vi.stubGlobal('fetch', …)` — keine echten HTTP-Calls, keine realen Timer.
+Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
 
-### Code-Statistiken
+### Code Statistics
 
-| Bereich | Dateien | LoC |
-|---------|---------|-----|
-| engine-core (Lib) | 48 | 11.366 |
-| engine-core (Tests) | — | 380 |
-| bpmn-parser | 4 | 2.039 |
-| persistence-nats | 5 | 1.149 |
-| engine-server (Lib) | 12 | 1.326 |
-| engine-server (E2E Tests) | 12 | 1.934 |
-| desktop-tauri (TypeScript + CSS) | 45 | 5.405 |
-| desktop-tauri (Rust Backend) | 10 | 624 |
-| external-task-client (Lib) | 5 | 1.031 |
-| external-task-client (Tests) | 6 | 966 |
-| **Rust Workspace** | **91** | **~18.818** |
-| **Projekt Gesamt** | **~147** | **~26.220** |
+| Area | Files | LoC |
+|------|-------|-----|
+| engine-core (lib) | 48 | 11,366 |
+| engine-core (tests) | — | 380 |
+| bpmn-parser | 4 | 2,039 |
+| persistence-nats | 5 | 1,149 |
+| engine-server (lib) | 12 | 1,326 |
+| engine-server (E2E tests) | 12 | 1,934 |
+| desktop-tauri (TypeScript + CSS) | 45 | 5,405 |
+| desktop-tauri (Rust backend) | 10 | 624 |
+| external-task-client (lib) | 5 | 1,031 |
+| external-task-client (tests) | 6 | 966 |
+| **Rust workspace** | **91** | **~18,818** |
+| **Project total** | **~147** | **~26,220** |
 
-### Mutation Score (Stichprobe)
-Eine Stichprobe via [`cargo-mutants`](https://mutants.rs) auf geschäftskritischen Komponenten (`condition.rs`, `script_runner.rs`, `history.rs`) ergab einen initialen **Mutation Score von ~87%** (41 von 47 Mutanten durch Tests erkannt). Eine vollständige Evaluierung aller 945 Mutanten (Laufzeit ~3.5h) ist für spätere CI/CD-Phasen vorgesehen.
+### Mutation Score (sample)
+A sample run via [`cargo-mutants`](https://mutants.rs) on business-critical components (`condition.rs`, `script_runner.rs`, `history.rs`) produced an initial **mutation score of ~87%** (41 of 47 mutants caught by tests). A full evaluation of all 945 mutants (runtime ~3.5h) is planned for later CI/CD phases.
 
 ### Continuous Fuzzing
-Zur Absicherung sicherheits- und stabilitätskritischer Parser- und Ausführungskomponenten läuft in der CI/CD-Pipeline täglich (sowie bei relevanten Pull Requests) ein paralleler **Fuzzing-Workflow** basierend auf `cargo-fuzz` (libFuzzer).
+To safeguard security- and stability-critical parser and execution components, a parallel **fuzzing workflow** based on `cargo-fuzz` (libFuzzer) runs daily in the CI/CD pipeline (and on relevant pull requests).
 
-Aktuell sind 7 dedizierte Fuzz-Targets implementiert:
-* **`fuzz_bpmn_parser`**: Füttert den `quick-xml` Parser mit beliebigen UTF-8 Strings.
-* **`fuzz_condition`**: Testet den `evaluate_condition` Parser mit wilden Expression-Variablen-Kombinationen.
-* **`fuzz_rhai_script`**: Prüft die Memory-Limits und das Sandboxing bei Ausführung manipulierter Skripte.
-* **`fuzz_iso8601_duration`**: Stresst die ISO 8601 Parsing-Logik für Timers.
-* **`fuzz_token_deserialize`**: Deserialisiert beliebigen JSON als Token, ProcessInstance, HistoryEntry und FileReference.
-* **`fuzz_cron_expression`**: Parst beliebige Strings als Cron-Expressions via `croner`.
-* **`fuzz_deploy_roundtrip`**: End-to-End Pipeline: XML → Parse → Deploy → Start Instance.
+Currently 7 dedicated fuzz targets are implemented:
+* **`fuzz_bpmn_parser`**: Feeds the `quick-xml` parser with arbitrary UTF-8 strings.
+* **`fuzz_condition`**: Tests the `evaluate_condition` parser with wild expression/variable combinations.
+* **`fuzz_rhai_script`**: Checks memory limits and sandboxing when executing manipulated scripts.
+* **`fuzz_iso8601_duration`**: Stresses the ISO 8601 parsing logic for timers.
+* **`fuzz_token_deserialize`**: Deserializes arbitrary JSON as Token, ProcessInstance, HistoryEntry and FileReference.
+* **`fuzz_cron_expression`**: Parses arbitrary strings as cron expressions via `croner`.
+* **`fuzz_deploy_roundtrip`**: End-to-end pipeline: XML → Parse → Deploy → Start Instance.
 
-Sanitizer (AddressSanitizer) sind standardmäßig aktiv und führen bei *Memory Leaks*, *Panics* oder *Undefined Behavior* zum strukturierten Abbruch und Upload der Crash-Artefakte.
+Sanitizers (AddressSanitizer) are enabled by default and will cause a structured abort and upload of crash artifacts on *memory leaks*, *panics* or *undefined behaviour*.
 
 ---
 
@@ -590,28 +590,27 @@ Sanitizer (AddressSanitizer) sind standardmäßig aktiv und führen bei *Memory 
 
 | Feature | Status |
 |---------|--------|
-| Embedded Subprozesse (BPMN Scopes) | ✅ Implementiert |
-| Event-Based Gateway | ✅ Implementiert |
-| Structured JSON Logging (`tracing-subscriber` + JSON) | ✅ Implementiert |
-| Camunda 7-kompatible Flow Conditions (Expression/Script) | ✅ Implementiert |
-| Timer-Start-Events mit Repeating Intervals (`R3/PT30S`) | ✅ Implementiert |
-| Suspend / Resume von Prozessinstanzen | ✅ Implementiert |
-| Erweitertes Incident-Handling (Retry / Resolve) | ✅ Implementiert |
-| Zentrale Timer / Message / Job-Übersicht | 🔲 Geplant |
-| Historische Instanzen + Suche | 🔲 Geplant |
-| Batch-Operationen auf Instanzen | 🔲 Geplant |
-| Process Instance Migration | 🔲 Geplant |
-| Token Move (Modify Process Instance) | 🔲 Geplant |
-| Multi-Node Cluster (NATS-basiertes Token-Locking) | 🔲 Geplant |
-| OIDC/OAuth2 Middleware | 🔲 Geplant |
-| Prometheus Metrics Endpoint | 🔲 Geplant |
+| Embedded sub-processes (BPMN scopes) | ✅ Implemented |
+| Event-based gateway | ✅ Implemented |
+| Structured JSON logging (`tracing-subscriber` + JSON) | ✅ Implemented |
+| Camunda 7-compatible flow conditions (expression/script) | ✅ Implemented |
+| Timer start events with repeating intervals (`R3/PT30S`) | ✅ Implemented |
+| Suspend / resume of process instances | ✅ Implemented |
+| Extended incident handling (retry / resolve) | ✅ Implemented |
+| Central timer / message / job overview | 🔲 Planned |
+| Historical instances + search | 🔲 Planned |
+| Batch operations on instances | 🔲 Planned |
+| Process instance migration | 🔲 Planned |
+| Token move (modify process instance) | 🔲 Planned |
+| Multi-node cluster (NATS-based token locking) | 🔲 Planned |
+| OIDC/OAuth2 middleware | 🔲 Planned |
+| Prometheus metrics endpoint | 🔲 Planned |
 
 ---
 
-## Lizenz
+## License
 
-Dieses Projekt ist unter einer der folgenden Lizenzen lizenziert, nach deiner Wahl:
+This project is licensed under either of the following licenses, at your option:
 
 - [MIT License](LICENSE-MIT)
 - [Apache License, Version 2.0](LICENSE-APACHE)
-

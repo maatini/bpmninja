@@ -4010,3 +4010,663 @@ async fn test_script_start_vs_end_listener_distinction() {
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(inst.variables.contains_key("end_ran"));
 }
+
+// -----------------------------------------------------------------------
+// Tests targeting specific MISSED mutations
+// -----------------------------------------------------------------------
+
+/// Catches: replace cancel_boundary_timers with ()
+/// Catches: == vs != and && vs || in cancel_boundary_timers filter/retain
+#[tokio::test]
+async fn test_cancel_boundary_timers_removes_timers_on_task_complete() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    let def = ProcessDefinitionBuilder::new("bt_cancel")
+        .node("start", BpmnElement::StartEvent)
+        .node("ut", BpmnElement::UserTask("alice".into()))
+        .node(
+            "bt",
+            BpmnElement::BoundaryTimerEvent {
+                attached_to: "ut".into(),
+                timer: crate::domain::TimerDefinition::Duration(Duration::from_secs(3600)),
+                cancel_activity: true,
+            },
+        )
+        .node("timeout_end", BpmnElement::EndEvent)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "ut")
+        .flow("ut", "end")
+        .flow("bt", "timeout_end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Boundary timer should be registered
+    let timer_count_before = engine
+        .pending_timers
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(timer_count_before, 1, "Boundary timer should be pending");
+
+    // Complete the user task → boundary timer must be cancelled
+    let task_id = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.instance_id == inst_id)
+        .map(|r| r.task_id)
+        .unwrap();
+    engine
+        .complete_user_task(task_id, HashMap::new())
+        .await
+        .unwrap();
+
+    let timer_count_after = engine
+        .pending_timers
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(
+        timer_count_after, 0,
+        "Boundary timer should be cancelled after task completion"
+    );
+}
+
+/// Catches: replace cancel_boundary_message_catches with ()
+/// Catches: == vs != and && vs || in cancel_boundary_message_catches filter/retain
+/// Catches: delete ! in cancel_boundary_message_catches retain predicate
+#[tokio::test]
+async fn test_cancel_boundary_message_catches_on_task_complete() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    let def = ProcessDefinitionBuilder::new("bm_cancel")
+        .node("start", BpmnElement::StartEvent)
+        .node("ut", BpmnElement::UserTask("alice".into()))
+        .node(
+            "bm",
+            BpmnElement::BoundaryMessageEvent {
+                attached_to: "ut".into(),
+                message_name: "cancel_msg".into(),
+                cancel_activity: true,
+            },
+        )
+        .node("msg_end", BpmnElement::EndEvent)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "ut")
+        .flow("ut", "end")
+        .flow("bm", "msg_end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Boundary message catch should be registered
+    let msg_count_before = engine
+        .pending_message_catches
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(msg_count_before, 1, "Boundary message catch should be pending");
+
+    // Complete the user task → boundary message must be cancelled
+    let task_id = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.instance_id == inst_id)
+        .map(|r| r.task_id)
+        .unwrap();
+    engine
+        .complete_user_task(task_id, HashMap::new())
+        .await
+        .unwrap();
+
+    let msg_count_after = engine
+        .pending_message_catches
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(
+        msg_count_after, 0,
+        "Boundary message catch should be cancelled after task completion"
+    );
+}
+
+/// Catches: && vs || in clear_wait_states_for_token filter
+/// Catches: replace clear_wait_states_for_token with ()
+#[tokio::test]
+async fn test_event_based_gateway_cancels_alternatives() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+
+    let def = ProcessDefinitionBuilder::new("ebg_cancel")
+        .node("start", BpmnElement::StartEvent)
+        .node("ebg", BpmnElement::EventBasedGateway)
+        .node(
+            "timer_catch",
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
+                Duration::from_secs(3600),
+            )),
+        )
+        .node(
+            "msg_catch",
+            BpmnElement::MessageCatchEvent {
+                message_name: "go".into(),
+            },
+        )
+        .node("timer_end", BpmnElement::EndEvent)
+        .node("msg_end", BpmnElement::EndEvent)
+        .flow("start", "ebg")
+        .flow("ebg", "timer_catch")
+        .flow("ebg", "msg_catch")
+        .flow("timer_catch", "timer_end")
+        .flow("msg_catch", "msg_end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Both a timer and a message catch should be pending
+    let timer_count = engine
+        .pending_timers
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    let msg_count = engine
+        .pending_message_catches
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(timer_count, 1, "Timer catch should be pending");
+    assert_eq!(msg_count, 1, "Message catch should be pending");
+
+    // Correlate the message → timer alternative should be cancelled
+    engine
+        .correlate_message("go".to_string(), None, HashMap::new())
+        .await
+        .unwrap();
+
+    let timer_after = engine
+        .pending_timers
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(
+        timer_after, 0,
+        "Timer catch should be cancelled when message fires"
+    );
+}
+
+/// Catches: replace restore_user_task with ()
+/// Catches: replace restore_service_task with ()
+#[tokio::test]
+async fn test_restore_user_and_service_tasks() {
+    let engine = WorkflowEngine::new();
+    let task_id = uuid::Uuid::new_v4();
+    let inst_id = uuid::Uuid::new_v4();
+
+    // Restore a user task
+    let pending_user = crate::runtime::PendingUserTask {
+        task_id,
+        instance_id: inst_id,
+        node_id: "ut".into(),
+        assignee: "alice".into(),
+        token_id: uuid::Uuid::new_v4(),
+        created_at: chrono::Utc::now(),
+    };
+    engine.restore_user_task(pending_user);
+    assert_eq!(engine.pending_user_tasks.len(), 1);
+    assert!(engine.pending_user_tasks.contains_key(&task_id));
+
+    // Restore a service task
+    let svc_id = uuid::Uuid::new_v4();
+    let pending_svc = crate::runtime::PendingServiceTask {
+        id: svc_id,
+        instance_id: inst_id,
+        definition_key: uuid::Uuid::new_v4(),
+        node_id: "svc".into(),
+        topic: "validate".into(),
+        token_id: uuid::Uuid::new_v4(),
+        variables_snapshot: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        worker_id: None,
+        lock_expiration: None,
+        retries: 3,
+        error_message: None,
+        error_details: None,
+    };
+    engine.restore_service_task(pending_svc);
+    assert_eq!(engine.pending_service_tasks.len(), 1);
+    assert!(engine.pending_service_tasks.contains_key(&svc_id));
+}
+
+/// Catches: replace restore_timer with ()
+/// Catches: replace restore_message_catch with ()
+#[tokio::test]
+async fn test_restore_timer_and_message_catch() {
+    let engine = WorkflowEngine::new();
+    let inst_id = uuid::Uuid::new_v4();
+
+    let timer_id = uuid::Uuid::new_v4();
+    let pending_timer = crate::runtime::PendingTimer {
+        id: timer_id,
+        instance_id: inst_id,
+        node_id: "timer".into(),
+        token_id: uuid::Uuid::new_v4(),
+        expires_at: chrono::Utc::now(),
+        timer_def: None,
+        remaining_repetitions: None,
+    };
+    engine.restore_timer(pending_timer);
+    assert_eq!(engine.pending_timers.len(), 1);
+    assert!(engine.pending_timers.contains_key(&timer_id));
+
+    let msg_id = uuid::Uuid::new_v4();
+    let pending_msg = crate::runtime::PendingMessageCatch {
+        id: msg_id,
+        instance_id: inst_id,
+        node_id: "msg".into(),
+        message_name: "order".into(),
+        token_id: uuid::Uuid::new_v4(),
+    };
+    engine.restore_message_catch(pending_msg);
+    assert_eq!(engine.pending_message_catches.len(), 1);
+    assert!(engine.pending_message_catches.contains_key(&msg_id));
+}
+
+/// Catches: replace shutdown with ()
+#[tokio::test]
+async fn test_shutdown_completes_without_panic() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    // Deploy and start something so the retry worker is active
+    let def = ProcessDefinitionBuilder::new("shutdown_test")
+        .node("start", BpmnElement::StartEvent)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let _ = engine.start_instance(key).await.unwrap();
+
+    // Shutdown should signal retry worker and wait
+    engine.shutdown().await;
+
+    // After shutdown, engine should still be usable (no panics)
+    assert!(engine.get_instance_details(uuid::Uuid::new_v4()).await.is_err());
+}
+
+/// Catches: replace set_persistence with ()
+#[tokio::test]
+async fn test_set_persistence_activates_retry_tx() {
+    let mut engine = WorkflowEngine::new();
+    assert!(engine.retry_tx.is_none(), "No retry_tx before set_persistence");
+
+    let persistence = std::sync::Arc::new(crate::adapter::InMemoryPersistence::new());
+    engine.set_persistence(persistence);
+
+    assert!(engine.retry_tx.is_some(), "retry_tx should be set after set_persistence");
+}
+
+/// Catches: find_downstream_join depth arithmetic (- vs /, + vs -, + vs *)
+/// Tests nested parallel gateways where depth tracking matters.
+#[tokio::test]
+async fn test_find_downstream_join_nested_parallel() {
+    let engine = WorkflowEngine::new();
+
+    // Build: start → split1 → (branch_a → split2 → (inner_a, inner_b) → join2 → merge_a, branch_b) → join1 → end
+    let def = ProcessDefinitionBuilder::new("nested_par")
+        .node("start", BpmnElement::StartEvent)
+        .node("split1", BpmnElement::ParallelGateway)
+        .node(
+            "task_a",
+            BpmnElement::ServiceTask {
+                topic: "a".into(),
+                multi_instance: None,
+            },
+        )
+        .node("split2", BpmnElement::ParallelGateway)
+        .node(
+            "inner_a",
+            BpmnElement::ServiceTask {
+                topic: "ia".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "inner_b",
+            BpmnElement::ServiceTask {
+                topic: "ib".into(),
+                multi_instance: None,
+            },
+        )
+        .node("join2", BpmnElement::ParallelGateway)
+        .node(
+            "task_b",
+            BpmnElement::ServiceTask {
+                topic: "b".into(),
+                multi_instance: None,
+            },
+        )
+        .node("join1", BpmnElement::ParallelGateway)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "split1")
+        // Branch A: split1 → task_a → split2 → inner_a/inner_b → join2 → join1
+        .flow("split1", "task_a")
+        .flow("task_a", "split2")
+        .flow("split2", "inner_a")
+        .flow("split2", "inner_b")
+        .flow("inner_a", "join2")
+        .flow("inner_b", "join2")
+        .flow("join2", "join1")
+        // Branch B: split1 → task_b → join1
+        .flow("split1", "task_b")
+        .flow("task_b", "join1")
+        .flow("join1", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+
+    // find_downstream_join from split1 should find join1 (not join2)
+    let def_ref = engine.definitions.get(&key).unwrap();
+    let join = engine.find_downstream_join(&def_ref, "split1");
+    assert_eq!(join.as_deref(), Some("join1"), "split1 should find join1");
+
+    // find_downstream_join from split2 should find join2
+    let join2 = engine.find_downstream_join(&def_ref, "split2");
+    assert_eq!(join2.as_deref(), Some("join2"), "split2 should find join2");
+}
+
+/// Catches: complete_branch_token == vs != in find predicate
+#[tokio::test]
+async fn test_complete_branch_token_marks_correct_token() {
+    let engine = WorkflowEngine::new();
+    // Parallel flow that forks into two branches
+    let def = ProcessDefinitionBuilder::new("branch_tok")
+        .node("start", BpmnElement::StartEvent)
+        .node("split", BpmnElement::ParallelGateway)
+        .node("ut_a", BpmnElement::UserTask("a".into()))
+        .node("ut_b", BpmnElement::UserTask("b".into()))
+        .node("join", BpmnElement::ParallelGateway)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "split")
+        .flow("split", "ut_a")
+        .flow("split", "ut_b")
+        .flow("ut_a", "join")
+        .flow("ut_b", "join")
+        .flow("join", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Two user tasks should exist
+    assert_eq!(engine.pending_user_tasks.len(), 2);
+
+    // Complete one task → only that branch token should be completed
+    let task_a_id = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.node_id == "ut_a")
+        .map(|r| r.task_id)
+        .unwrap();
+    engine
+        .complete_user_task(task_a_id, HashMap::new())
+        .await
+        .unwrap();
+
+    // Instance should still have pending tasks (ut_b not completed)
+    assert_eq!(engine.pending_user_tasks.len(), 1);
+    let remaining_task = engine
+        .pending_user_tasks
+        .iter()
+        .next()
+        .map(|r| r.node_id.clone())
+        .unwrap();
+    assert_eq!(remaining_task, "ut_b");
+
+    // Instance should NOT be completed yet
+    let inst = engine.get_instance_details(inst_id).await.unwrap();
+    assert!(
+        !matches!(inst.state, InstanceState::Completed),
+        "Instance should not be completed until all branches done"
+    );
+}
+
+/// Catches: replace restore_instance with () (the instance must be accessible)
+#[tokio::test]
+async fn test_restore_instance_makes_it_accessible() {
+    let engine = WorkflowEngine::new();
+    let inst_id = uuid::Uuid::new_v4();
+    let def_key = uuid::Uuid::new_v4();
+
+    let instance = crate::runtime::ProcessInstance {
+        id: inst_id,
+        definition_key: def_key,
+        business_key: "restored".into(),
+        parent_instance_id: None,
+        state: InstanceState::Running,
+        current_node: "start".into(),
+        audit_log: vec![],
+        variables: HashMap::new(),
+        tokens: HashMap::new(),
+        active_tokens: vec![],
+        join_barriers: HashMap::new(),
+        multi_instance_state: HashMap::new(),
+        compensation_log: Vec::new(),
+    };
+    engine.restore_instance(instance).await;
+
+    let details = engine.get_instance_details(inst_id).await.unwrap();
+    assert_eq!(details.business_key, "restored");
+}
+
+/// Catches: cancel_boundary_timers isolates instance — only timers for the
+/// specific instance+node are removed, not unrelated timers.
+#[tokio::test]
+async fn test_cancel_boundary_timers_isolates_instances() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    let def = ProcessDefinitionBuilder::new("bt_iso")
+        .node("start", BpmnElement::StartEvent)
+        .node("ut", BpmnElement::UserTask("alice".into()))
+        .node(
+            "bt",
+            BpmnElement::BoundaryTimerEvent {
+                attached_to: "ut".into(),
+                timer: crate::domain::TimerDefinition::Duration(Duration::from_secs(3600)),
+                cancel_activity: true,
+            },
+        )
+        .node("timeout_end", BpmnElement::EndEvent)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "ut")
+        .flow("ut", "end")
+        .flow("bt", "timeout_end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+
+    let inst_a = engine.start_instance(key).await.unwrap();
+    let inst_b = engine.start_instance(key).await.unwrap();
+
+    // Both instances should have boundary timers
+    assert_eq!(
+        engine.pending_timers.iter().filter(|r| r.instance_id == inst_a).count(),
+        1
+    );
+    assert_eq!(
+        engine.pending_timers.iter().filter(|r| r.instance_id == inst_b).count(),
+        1
+    );
+
+    // Complete inst_a user task → only inst_a boundary timer should be cancelled
+    let task_a = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.instance_id == inst_a)
+        .map(|r| r.task_id)
+        .unwrap();
+    engine
+        .complete_user_task(task_a, HashMap::new())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        engine.pending_timers.iter().filter(|r| r.instance_id == inst_a).count(),
+        0,
+        "inst_a timers should be cancelled"
+    );
+    assert_eq!(
+        engine.pending_timers.iter().filter(|r| r.instance_id == inst_b).count(),
+        1,
+        "inst_b timers should remain"
+    );
+}
+
+/// Catches: all_tokens_completed logic — empty tokens vs active_tokens checks
+#[tokio::test]
+async fn test_parallel_flow_completes_only_when_all_branches_done() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    let def = ProcessDefinitionBuilder::new("par_all")
+        .node("start", BpmnElement::StartEvent)
+        .node("split", BpmnElement::ParallelGateway)
+        .node("ut_a", BpmnElement::UserTask("a".into()))
+        .node("ut_b", BpmnElement::UserTask("b".into()))
+        .node("join", BpmnElement::ParallelGateway)
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "split")
+        .flow("split", "ut_a")
+        .flow("split", "ut_b")
+        .flow("ut_a", "join")
+        .flow("ut_b", "join")
+        .flow("join", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Complete first branch
+    let task_a = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.node_id == "ut_a")
+        .map(|r| r.task_id)
+        .unwrap();
+    engine.complete_user_task(task_a, HashMap::new()).await.unwrap();
+
+    // Not yet completed
+    let inst = engine.get_instance_details(inst_id).await.unwrap();
+    assert!(!matches!(inst.state, InstanceState::Completed));
+
+    // Complete second branch
+    let task_b = engine
+        .pending_user_tasks
+        .iter()
+        .find(|r| r.node_id == "ut_b")
+        .map(|r| r.task_id)
+        .unwrap();
+    engine.complete_user_task(task_b, HashMap::new()).await.unwrap();
+
+    // Now completed
+    let inst = engine.get_instance_details(inst_id).await.unwrap();
+    assert!(
+        matches!(inst.state, InstanceState::Completed),
+        "Instance should complete after both branches, got: {:?}",
+        inst.state
+    );
+}
+
+/// Catches: Terminate End Event retain predicates (== vs !=)
+#[tokio::test]
+async fn test_terminate_end_kills_all_pending() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+
+    // Parallel split: one branch goes to user task then end, other to terminate
+    let def = ProcessDefinitionBuilder::new("term_kill")
+        .node("start", BpmnElement::StartEvent)
+        .node("split", BpmnElement::ParallelGateway)
+        .node("ut", BpmnElement::UserTask("alice".into()))
+        .node("end", BpmnElement::EndEvent)
+        .node("term", BpmnElement::TerminateEndEvent)
+        .flow("start", "split")
+        .flow("split", "ut")
+        .flow("ut", "end")
+        .flow("split", "term")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // After terminate, no pending user tasks should remain for this instance
+    let remaining = engine
+        .pending_user_tasks
+        .iter()
+        .filter(|r| r.instance_id == inst_id)
+        .count();
+    assert_eq!(remaining, 0, "Terminate should kill all pending user tasks");
+
+    // Instance should be completed
+    let inst = engine.get_instance_details(inst_id).await.unwrap();
+    assert!(
+        matches!(inst.state, InstanceState::Completed),
+        "Terminate should set state to Completed, got: {:?}",
+        inst.state
+    );
+}
+
+/// Catches: resolve_next_target find(|f| ...) condition — unwrap_or(true) vs unwrap_or(false)
+#[tokio::test]
+async fn test_unconditional_flow_routes_without_condition() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("uncon_flow")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "svc",
+            BpmnElement::ServiceTask {
+                topic: "do_work".into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    // Should route to svc (unconditional flow → unwrap_or(true))
+    let inst = engine.get_instance_details(inst_id).await.unwrap();
+    assert!(
+        matches!(inst.state, InstanceState::WaitingOnServiceTask { .. }),
+        "Unconditional flow should reach service task, got: {:?}",
+        inst.state
+    );
+}
+
+/// Catches: run_instance_batch step_count > MAX_EXECUTION_STEPS
+/// Tests that an infinite loop in BPMN is caught and aborted.
+#[tokio::test]
+async fn test_execution_limit_prevents_infinite_loop() {
+    let engine = WorkflowEngine::new();
+    // Create a loop: start → script → script (loop back to itself), with an end event for validation
+    let def = ProcessDefinitionBuilder::new("inf_loop")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "script",
+            BpmnElement::ScriptTask {
+                script: r#"let x = 1;"#.into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "script")
+        .flow("script", "script") // self-loop (end is unreachable but satisfies validation)
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    let result = engine.start_instance(key).await;
+
+    // Should fail with ExecutionLimitExceeded
+    assert!(
+        matches!(result, Err(EngineError::ExecutionLimitExceeded(_))),
+        "Infinite loop should trigger execution limit, got: {:?}",
+        result
+    );
+}
