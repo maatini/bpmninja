@@ -272,3 +272,91 @@ async fn execute_job(
         PersistJob::Shutdown => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_persist_job_display() {
+        let id = Uuid::nil();
+        assert_eq!(
+            PersistJob::SaveInstance(id).to_string(),
+            "SaveInstance(00000000-0000-0000-0000-000000000000)"
+        );
+        assert_eq!(
+            PersistJob::DeleteServiceTask(id).to_string(),
+            "DeleteServiceTask(00000000-0000-0000-0000-000000000000)"
+        );
+        assert_eq!(PersistJob::Shutdown.to_string(), "Shutdown");
+    }
+
+    #[tokio::test]
+    async fn test_retry_worker_shutdown() {
+        let (tx, rx) = create_retry_queue();
+        let persistence = Arc::new(crate::adapter::in_memory::InMemoryPersistence::new());
+        let instances = crate::engine::instance_store::InstanceStore::new();
+        let definitions = crate::engine::registry::DefinitionRegistry::new();
+        let pending_user_tasks = Arc::new(DashMap::new());
+        let pending_service_tasks = Arc::new(DashMap::new());
+        let pending_timers = Arc::new(DashMap::new());
+        let pending_message_catches = Arc::new(DashMap::new());
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let handle = spawn_retry_worker(
+            rx,
+            persistence,
+            instances,
+            definitions,
+            pending_user_tasks,
+            pending_service_tasks,
+            pending_timers,
+            pending_message_catches,
+            error_counter,
+        );
+
+        tx.send(PersistJob::Shutdown).unwrap();
+        // Worker should exit cleanly
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("worker did not shut down in time")
+            .expect("worker panicked");
+    }
+
+    #[tokio::test]
+    async fn test_retry_worker_skips_missing_instance() {
+        let (tx, rx) = create_retry_queue();
+        let persistence = Arc::new(crate::adapter::in_memory::InMemoryPersistence::new());
+        let instances = crate::engine::instance_store::InstanceStore::new();
+        let definitions = crate::engine::registry::DefinitionRegistry::new();
+        let pending_user_tasks = Arc::new(DashMap::new());
+        let pending_service_tasks = Arc::new(DashMap::new());
+        let pending_timers = Arc::new(DashMap::new());
+        let pending_message_catches = Arc::new(DashMap::new());
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let handle = spawn_retry_worker(
+            rx,
+            persistence,
+            instances,
+            definitions,
+            pending_user_tasks,
+            pending_service_tasks,
+            pending_timers,
+            pending_message_catches,
+            error_counter.clone(),
+        );
+
+        // Send a SaveInstance for a non-existent ID — should succeed silently
+        tx.send(PersistJob::SaveInstance(Uuid::new_v4())).unwrap();
+        tx.send(PersistJob::Shutdown).unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("worker did not shut down in time")
+            .expect("worker panicked");
+
+        // No permanent failures should have been recorded
+        assert_eq!(error_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+}

@@ -1,8 +1,10 @@
+use crate::domain::{
+    BpmnElement, ExecutionListener, ListenerEvent, ScopeEventListener, SequenceFlow,
+};
+use crate::domain::{EngineError, EngineResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::domain::{EngineError, EngineResult};
-use crate::domain::{BpmnElement, SequenceFlow, ExecutionListener, ScopeEventListener, ListenerEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessDefinition {
@@ -129,7 +131,9 @@ impl ProcessDefinition {
             ) {
                 continue;
             }
-            let outgoing = flows.get(node_id).map_or(0, |v: &Vec<SequenceFlow>| v.len());
+            let outgoing = flows
+                .get(node_id)
+                .map_or(0, |v: &Vec<SequenceFlow>| v.len());
             if outgoing == 0 {
                 // SubProcess boundaries themselves need outgoing flows, but internal nodes act normally.
                 return Err(EngineError::InvalidDefinition(format!(
@@ -148,7 +152,9 @@ impl ProcessDefinition {
                     | BpmnElement::EventBasedGateway
                     | BpmnElement::ComplexGateway { .. }
             ) {
-                let outgoing = flows.get(node_id).map_or(0, |v: &Vec<SequenceFlow>| v.len());
+                let outgoing = flows
+                    .get(node_id)
+                    .map_or(0, |v: &Vec<SequenceFlow>| v.len());
                 let incoming = flows
                     .values()
                     .flat_map(|f: &Vec<SequenceFlow>| f.iter())
@@ -216,7 +222,9 @@ impl ProcessDefinition {
 
     /// Returns all outgoing sequence flows from the given node.
     pub fn next_nodes(&self, from_id: &str) -> &[SequenceFlow] {
-        self.flows.get(from_id).map_or(&[] as &[SequenceFlow], |v| v.as_slice())
+        self.flows
+            .get(from_id)
+            .map_or(&[] as &[SequenceFlow], |v| v.as_slice())
     }
 
     /// Backward-compatible helper: returns the single outgoing target for

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::domain::TimerDefinition;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ListenerEvent {
@@ -42,4 +42,3 @@ pub enum ScopeEventListener {
 // ---------------------------------------------------------------------------
 // Sequence flow (edge with optional condition)
 // ---------------------------------------------------------------------------
-

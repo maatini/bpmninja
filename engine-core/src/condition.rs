@@ -66,7 +66,11 @@ fn parse_rhs(s: &str) -> Value {
     if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         if s.len() >= 2 {
             let start = s.char_indices().nth(1).map(|(i, _)| i).unwrap_or(1);
-            let end = s.char_indices().next_back().map(|(i, _)| i).unwrap_or(s.len());
+            let end = s
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(s.len());
             if start <= end {
                 return Value::String(s[start..end].to_string());
             }

@@ -1,5 +1,5 @@
+use crate::domain::{MultiInstanceDef, TimerDefinition};
 use serde::{Deserialize, Serialize};
-use crate::domain::{TimerDefinition, MultiInstanceDef};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BpmnElement {
@@ -97,4 +97,3 @@ pub enum BpmnElement {
 // ---------------------------------------------------------------------------
 // Scope Event Listeners (Event Sub-Processes)
 // ---------------------------------------------------------------------------
-

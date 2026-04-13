@@ -1,9 +1,9 @@
-use crate::engine::WorkflowEngine;
-use crate::engine::executor::resolve_next_target;
-use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
 use crate::domain::{EngineError, EngineResult};
 use crate::domain::{ProcessDefinition, Token};
+use crate::engine::WorkflowEngine;
+use crate::engine::executor::resolve_next_target;
 use crate::runtime::CompensationRecord;
+use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -226,7 +226,10 @@ impl WorkflowEngine {
         self.record_history_event(
             instance_id,
             crate::history::HistoryEventType::EscalationThrown,
-            &format!("Escalation '{}' thrown at '{}'", escalation_code, current_id),
+            &format!(
+                "Escalation '{}' thrown at '{}'",
+                escalation_code, current_id
+            ),
             crate::history::ActorType::Engine,
             None,
             None,
@@ -235,13 +238,9 @@ impl WorkflowEngine {
 
         // Search for matching boundary escalation event (any attached_to)
         if let Some((boundary_id, _attached_to, cancel_activity)) =
-            crate::engine::executor::find_any_boundary_escalation_event(
-                def_clone,
-                escalation_code,
-            )
+            crate::engine::executor::find_any_boundary_escalation_event(def_clone, escalation_code)
         {
-            let handler_target =
-                resolve_next_target(def_clone, &boundary_id, &token.variables)?;
+            let handler_target = resolve_next_target(def_clone, &boundary_id, &token.variables)?;
 
             if cancel_activity {
                 // Interrupting: redirect token to boundary handler
@@ -262,7 +261,8 @@ impl WorkflowEngine {
                 Ok(NextAction::Continue(token.clone()))
             } else {
                 // Non-interrupting: spawn extra token, main token continues
-                let mut handler_token = Token::with_variables(&handler_target, token.variables.clone());
+                let mut handler_token =
+                    Token::with_variables(&handler_target, token.variables.clone());
                 handler_token.current_node = handler_target;
 
                 let next = resolve_next_target(def_clone, current_id, &token.variables)?;
@@ -376,8 +376,7 @@ impl WorkflowEngine {
         for record in &handlers {
             let handler_node = &record.handler_node_id;
             if def_clone.get_node(handler_node).is_some() {
-                let handler_token =
-                    Token::with_variables(handler_node, token.variables.clone());
+                let handler_token = Token::with_variables(handler_node, token.variables.clone());
                 tracing::info!(
                     "Instance {}: executing compensation handler '{}' for activity '{}'",
                     instance_id,

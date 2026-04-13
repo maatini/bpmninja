@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::runtime::{PendingMessageCatch, PendingTimer};
-use crate::domain::{EngineError, EngineResult};
 use crate::domain::{BpmnElement, ScopeEventListener, Token};
+use crate::domain::{EngineError, EngineResult};
+use crate::runtime::{PendingMessageCatch, PendingTimer};
 use chrono::Utc;
 
 use super::WorkflowEngine;
@@ -365,9 +365,7 @@ impl WorkflowEngine {
         match start_element {
             BpmnElement::TimerStartEvent(expected_timer) => {
                 let is_match = match expected_timer {
-                    crate::domain::TimerDefinition::Duration(d) => {
-                        *d == provided_duration
-                    }
+                    crate::domain::TimerDefinition::Duration(d) => *d == provided_duration,
                     _ => false,
                 };
                 if !is_match {
@@ -470,15 +468,23 @@ impl WorkflowEngine {
 
         // Determine total repetitions for metadata
         let (total, interval_secs) = match &timer_def {
-            crate::domain::TimerDefinition::RepeatingInterval { repetitions, interval } => {
-                (repetitions.unwrap_or(1), Some(interval.as_secs()))
-            }
+            crate::domain::TimerDefinition::RepeatingInterval {
+                repetitions,
+                interval,
+            } => (repetitions.unwrap_or(1), Some(interval.as_secs())),
             _ => (1, None),
         };
 
         // Start the first instance immediately
         let first_id = self
-            .spawn_timer_instance(definition_key, &start_id, &variables, 1, total, interval_secs)
+            .spawn_timer_instance(
+                definition_key,
+                &start_id,
+                &variables,
+                1,
+                total,
+                interval_secs,
+            )
             .await?;
 
         // For repeating intervals, schedule remaining repetitions in background
@@ -497,7 +503,14 @@ impl WorkflowEngine {
                         tokio::time::sleep(interval).await;
                         let iteration = i + 2; // first was #1
                         if let Err(e) = engine
-                            .spawn_timer_instance(definition_key, &sid, &vars, iteration, total, interval_secs)
+                            .spawn_timer_instance(
+                                definition_key,
+                                &sid,
+                                &vars,
+                                iteration,
+                                total,
+                                interval_secs,
+                            )
                             .await
                         {
                             tracing::error!(
@@ -542,7 +555,10 @@ impl WorkflowEngine {
         // Timer cycle metadata for UI display
         vars.insert("_timer_iteration".into(), Value::from(iteration));
         vars.insert("_timer_total".into(), Value::from(total));
-        vars.insert("_timer_start_node".into(), Value::String(start_id.to_string()));
+        vars.insert(
+            "_timer_start_node".into(),
+            Value::String(start_id.to_string()),
+        );
         if let Some(secs) = interval_secs {
             vars.insert("_timer_interval_secs".into(), Value::from(secs));
         }
@@ -566,9 +582,7 @@ impl WorkflowEngine {
             compensation_log: Vec::new(),
         };
 
-        tracing::info!(
-            "Timer instance #{iteration} {instance_id} of def key {definition_key}"
-        );
+        tracing::info!("Timer instance #{iteration} {instance_id} of def key {definition_key}");
 
         self.instances.insert(instance_id, instance).await;
 

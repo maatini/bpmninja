@@ -638,7 +638,9 @@ async fn persistence_error_counter_increments() {
         async fn delete_service_task(&self, _: uuid::Uuid) -> EngineResult<()> {
             Ok(())
         }
-        async fn list_service_tasks(&self) -> EngineResult<Vec<crate::runtime::PendingServiceTask>> {
+        async fn list_service_tasks(
+            &self,
+        ) -> EngineResult<Vec<crate::runtime::PendingServiceTask>> {
             Ok(vec![])
         }
         async fn save_timer(&self, _: &crate::runtime::PendingTimer) -> EngineResult<()> {
@@ -911,7 +913,11 @@ async fn edge_rhai_infinite_loop() {
         .node("start", BpmnElement::StartEvent)
         .node("end", BpmnElement::EndEvent)
         .flow("start", "end")
-        .listener("start", crate::domain::ListenerEvent::Start, "while true {}")
+        .listener(
+            "start",
+            crate::domain::ListenerEvent::Start,
+            "while true {}",
+        )
         .build()
         .unwrap();
 

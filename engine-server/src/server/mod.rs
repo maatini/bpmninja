@@ -15,9 +15,9 @@ use axum::{
     middleware,
     routing::{delete, get, post, put},
 };
-use metrics_exporter_prometheus::PrometheusHandle;
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
+use metrics_exporter_prometheus::PrometheusHandle;
 use state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -133,11 +133,16 @@ pub fn build_app_with_engine(
             "/api/service-task/{id}/resolve",
             post(tasks::resolve_incident),
         )
-        .route("/api/service-task/{id}/extendLock", post(tasks::extend_lock))
+        .route(
+            "/api/service-task/{id}/extendLock",
+            post(tasks::extend_lock),
+        )
         .route("/api/service-task/{id}/bpmnError", post(tasks::bpmn_error))
         .route("/api/health", get(|| async { axum::http::StatusCode::OK }))
         .route("/api/ready", get(monitoring::ready_endpoint))
-        .layer(middleware::from_fn(crate::observability::http_metrics_middleware))
+        .layer(middleware::from_fn(
+            crate::observability::http_metrics_middleware,
+        ))
         .layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024))
         .layer(cors)
         .with_state(state);

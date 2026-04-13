@@ -112,11 +112,17 @@ fn parse_iso8601_duration(s: &str) -> EngineResult<Duration> {
         };
 
         let added_secs = val.checked_mul(multiplier).ok_or_else(|| {
-            EngineError::InvalidDefinition(format!("Duration segment '{}{}' overflows seconds", val, c))
+            EngineError::InvalidDefinition(format!(
+                "Duration segment '{}{}' overflows seconds",
+                val, c
+            ))
         })?;
 
         total_secs = total_secs.checked_add(added_secs).ok_or_else(|| {
-            EngineError::InvalidDefinition(format!("Total duration '{}' overflows maximum allowed seconds", s))
+            EngineError::InvalidDefinition(format!(
+                "Total duration '{}' overflows maximum allowed seconds",
+                s
+            ))
         })?;
         has_value = true;
         current_num.clear();

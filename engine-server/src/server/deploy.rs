@@ -39,9 +39,10 @@ pub(crate) async fn deploy_definition(
     let key_str = key.to_string();
 
     if let Some(persistence) = &state.persistence
-        && let Err(e) = persistence.save_bpmn_xml(&key_str, &payload.xml).await {
-            tracing::error!("Failed to save BPMN XML to persistence layer: {:?}", e);
-        }
+        && let Err(e) = persistence.save_bpmn_xml(&key_str, &payload.xml).await
+    {
+        tracing::error!("Failed to save BPMN XML to persistence layer: {:?}", e);
+    }
     state
         .deployed_xml
         .write()
@@ -107,9 +108,10 @@ pub(crate) async fn get_definition_xml(
     }
 
     if let Some(persistence) = &state.persistence
-        && let Ok(xml) = persistence.load_bpmn_xml(&id).await {
-            return Ok(xml);
-        }
+        && let Ok(xml) = persistence.load_bpmn_xml(&id).await
+    {
+        return Ok(xml);
+    }
 
     Err(AppError::BadRequest(format!(
         "No XML found for definition '{id}'"

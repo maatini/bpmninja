@@ -1,15 +1,15 @@
+use crate::runtime::*;
 use dashmap::DashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-use crate::runtime::*;
 
 // Re-export model types used by test modules via `use super::*`
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::domain::{EngineError, EngineResult};
+use crate::domain::{BpmnElement, FileReference, ProcessDefinition, Token};
 #[cfg(test)]
 #[allow(unused_imports)]
-use crate::domain::{BpmnElement, FileReference, ProcessDefinition, Token};
+use crate::domain::{EngineError, EngineResult};
 #[cfg(test)]
 use serde_json::Value;
 #[cfg(test)]
@@ -36,7 +36,6 @@ mod service_task;
 mod timer_processor;
 mod user_task;
 
-
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
     pub(crate) definitions: registry::DefinitionRegistry,
@@ -52,7 +51,6 @@ pub struct WorkflowEngine {
     /// Hardened Rhai script execution configuration.
     pub(crate) script_config: crate::scripting::ScriptConfig,
 }
-
 
 impl WorkflowEngine {
     /// Creates a new, empty engine with script config read from env.
@@ -263,8 +261,9 @@ impl WorkflowEngine {
             def.nodes
                 .iter()
                 .filter_map(|(id, node)| {
-                    if let crate::domain::BpmnElement::BoundaryMessageEvent { attached_to, .. } =
-                        node
+                    if let crate::domain::BpmnElement::BoundaryMessageEvent {
+                        attached_to, ..
+                    } = node
                     {
                         if attached_to == task_node_id {
                             Some(id.clone())
@@ -381,8 +380,5 @@ impl Default for WorkflowEngine {
     }
 }
 
-
-
 #[cfg(test)]
 pub(crate) mod tests;
-

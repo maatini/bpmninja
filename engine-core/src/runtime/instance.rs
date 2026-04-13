@@ -1,10 +1,9 @@
-
+use crate::domain::{FileReference, Token};
+use crate::runtime::{PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::domain::{FileReference, Token};
-use crate::runtime::{PendingUserTask, PendingServiceTask, PendingTimer, PendingMessageCatch};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NextAction {
@@ -31,10 +30,7 @@ pub enum NextAction {
     /// Ends the current path with an escalation code (non-fatal, propagates to parent).
     EscalationEnd { escalation_code: String },
     /// Spawns extra tokens (e.g. non-interrupting escalation handler) while the main token continues.
-    SpawnAndContinue {
-        main: Token,
-        spawned: Vec<Token>,
-    },
+    SpawnAndContinue { main: Token, spawned: Vec<Token> },
     /// Terminate End Event: kill all active tokens and complete the instance immediately.
     Terminate,
     /// The engine must pause — a call activity (sub-process) is pending.

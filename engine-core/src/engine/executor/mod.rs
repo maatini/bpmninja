@@ -4,10 +4,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::condition::evaluate_condition;
+use crate::domain::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
+use crate::domain::{EngineError, EngineResult};
 use crate::engine::WorkflowEngine;
 use crate::runtime::*;
-use crate::domain::{EngineError, EngineResult};
-use crate::domain::{BpmnElement, ListenerEvent, ProcessDefinition, Token};
 use crate::scripting;
 
 // Helper function resolving next target

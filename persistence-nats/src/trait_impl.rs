@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use std::collections::HashMap;
 
-use engine_core::{PendingServiceTask, PendingUserTask, ProcessInstance};
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::model::{ProcessDefinition, Token};
 use engine_core::persistence::WorkflowPersistence;
+use engine_core::{PendingServiceTask, PendingUserTask, ProcessInstance};
 
 use crate::client::NatsPersistence;
 
@@ -55,9 +55,10 @@ impl WorkflowPersistence for NatsPersistence {
             tokio::time::timeout(std::time::Duration::from_millis(500), messages.next()).await
         {
             if let Ok(msg) = msg
-                && let Ok(token) = serde_json::from_slice::<Token>(&msg.payload) {
-                    token_map.insert(token.id, token);
-                }
+                && let Ok(token) = serde_json::from_slice::<Token>(&msg.payload)
+            {
+                token_map.insert(token.id, token);
+            }
         }
 
         Ok(token_map.into_values().collect())
@@ -278,9 +279,7 @@ impl WorkflowPersistence for NatsPersistence {
         Ok(())
     }
 
-    async fn list_message_catches(
-        &self,
-    ) -> EngineResult<Vec<engine_core::PendingMessageCatch>> {
+    async fn list_message_catches(&self) -> EngineResult<Vec<engine_core::PendingMessageCatch>> {
         self.list_kv_entries("messages", "message catch").await
     }
 
@@ -561,33 +560,38 @@ impl WorkflowPersistence for NatsPersistence {
             if let Ok(msg) = msg
                 && let Ok(entry) =
                     serde_json::from_slice::<engine_core::history::HistoryEntry>(&msg.payload)
+            {
+                let mut matched = true;
+                if let Some(types) = &query.event_types
+                    && !types.contains(&entry.event_type)
                 {
-                    let mut matched = true;
-                    if let Some(types) = &query.event_types
-                        && !types.contains(&entry.event_type) {
-                            matched = false;
-                        }
-                    if let Some(nid) = &query.node_id
-                        && entry.node_id.as_deref() != Some(nid) {
-                            matched = false;
-                        }
-                    if let Some(aty) = &query.actor_type
-                        && &entry.actor_type != aty {
-                            matched = false;
-                        }
-                    if let Some(f) = query.from
-                        && entry.timestamp < f {
-                            matched = false;
-                        }
-                    if let Some(t) = query.to
-                        && entry.timestamp > t {
-                            matched = false;
-                        }
-
-                    if matched {
-                        entries.push(entry);
-                    }
+                    matched = false;
                 }
+                if let Some(nid) = &query.node_id
+                    && entry.node_id.as_deref() != Some(nid)
+                {
+                    matched = false;
+                }
+                if let Some(aty) = &query.actor_type
+                    && &entry.actor_type != aty
+                {
+                    matched = false;
+                }
+                if let Some(f) = query.from
+                    && entry.timestamp < f
+                {
+                    matched = false;
+                }
+                if let Some(t) = query.to
+                    && entry.timestamp > t
+                {
+                    matched = false;
+                }
+
+                if matched {
+                    entries.push(entry);
+                }
+            }
         }
 
         // Ensure chronological order

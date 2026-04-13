@@ -1,9 +1,9 @@
+use crate::domain::TimerDefinition;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::domain::TimerDefinition;
 
 /// A user task that is waiting for external completion.
 #[derive(Debug, Clone, Serialize, Deserialize)]

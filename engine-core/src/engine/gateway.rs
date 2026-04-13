@@ -1,7 +1,7 @@
 use crate::condition::evaluate_condition;
-use crate::runtime::NextAction;
 use crate::domain::{EngineError, EngineResult};
 use crate::domain::{ProcessDefinition, Token};
+use crate::runtime::NextAction;
 
 pub(crate) fn execute_parallel_gateway(
     def: &ProcessDefinition,

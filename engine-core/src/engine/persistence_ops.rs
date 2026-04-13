@@ -212,9 +212,7 @@ impl WorkflowEngine {
             }
 
             // Size guard: check serialized payload before NATS write
-            let estimated_size = serde_json::to_vec(&*inst)
-                .map(|v| v.len())
-                .unwrap_or(0);
+            let estimated_size = serde_json::to_vec(&*inst).map(|v| v.len()).unwrap_or(0);
             if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
                 tracing::error!(
                     "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",

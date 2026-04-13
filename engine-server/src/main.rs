@@ -208,7 +208,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Server starting on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    
+
     let axum_shutdown = shutdown_signal();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {

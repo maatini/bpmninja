@@ -18,11 +18,7 @@
 //! | `http_request_duration_seconds`         | Histogram | HTTP request latency (method, path)           |
 
 use axum::{
-    body::Body,
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::IntoResponse,
+    body::Body, extract::Request, http::StatusCode, middleware::Next, response::IntoResponse,
 };
 use metrics_exporter_prometheus::PrometheusHandle;
 use std::time::Instant;
@@ -57,14 +53,8 @@ pub fn install_prometheus_recorder() -> PrometheusHandle {
         "bpmn_tasks_completed_total",
         "Total number of user/service tasks completed"
     );
-    metrics::describe_counter!(
-        "bpmn_timer_fired_total",
-        "Total number of timers processed"
-    );
-    metrics::describe_counter!(
-        "bpmn_errors_total",
-        "Total number of script/engine errors"
-    );
+    metrics::describe_counter!("bpmn_timer_fired_total", "Total number of timers processed");
+    metrics::describe_counter!("bpmn_errors_total", "Total number of script/engine errors");
     metrics::describe_histogram!(
         "bpmn_script_execution_duration_seconds",
         "Duration of Rhai script executions in seconds"
@@ -73,10 +63,7 @@ pub fn install_prometheus_recorder() -> PrometheusHandle {
         "bpmn_active_instances",
         "Number of currently active (non-completed) instances"
     );
-    metrics::describe_counter!(
-        "http_requests_total",
-        "Total HTTP requests handled"
-    );
+    metrics::describe_counter!("http_requests_total", "Total HTTP requests handled");
     metrics::describe_histogram!(
         "http_request_duration_seconds",
         "HTTP request duration in seconds"
@@ -141,10 +128,10 @@ pub async fn http_metrics_middleware(req: Request<Body>, next: Next) -> impl Int
 fn normalize_path(path: &str) -> String {
     path.split('/')
         .map(|seg| {
-            if seg.len() == 36 && seg.chars().filter(|c| *c == '-').count() == 4 {
-                "{id}" // UUID
-            } else if !seg.is_empty() && seg.chars().all(|c| c.is_ascii_digit()) {
-                "{id}" // numeric
+            if (seg.len() == 36 && seg.chars().filter(|c| *c == '-').count() == 4)
+                || (!seg.is_empty() && seg.chars().all(|c| c.is_ascii_digit()))
+            {
+                "{id}" // UUID or numeric
             } else {
                 seg
             }
@@ -165,7 +152,9 @@ mod tests {
         );
         assert_eq!(normalize_path("/api/complete/42"), "/api/complete/{id}");
         assert_eq!(normalize_path("/api/health"), "/api/health");
-        assert_eq!(normalize_path("/api/service-task/550e8400-e29b-41d4-a716-446655440000/complete"),
-            "/api/service-task/{id}/complete");
+        assert_eq!(
+            normalize_path("/api/service-task/550e8400-e29b-41d4-a716-446655440000/complete"),
+            "/api/service-task/{id}/complete"
+        );
     }
 }

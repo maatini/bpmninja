@@ -857,9 +857,12 @@ fn test_parse_complex_gateway() {
     "#;
     let def = parse_bpmn_xml(xml).unwrap();
     let node = def.get_node("Complex_1").unwrap();
-    
+
     match node {
-        BpmnElement::ComplexGateway { default, join_condition } => {
+        BpmnElement::ComplexGateway {
+            default,
+            join_condition,
+        } => {
             assert_eq!(default.as_deref(), Some("EndEvent_2")); // Flow_3 points to EndEvent_2
             assert_eq!(join_condition.as_deref(), Some("token_count >= 2"));
         }
@@ -915,7 +918,10 @@ fn parse_escalation_events() {
     }
 
     // Check boundary escalation event
-    let boundary = def.nodes.get("boundary_esc").expect("boundary_esc should exist");
+    let boundary = def
+        .nodes
+        .get("boundary_esc")
+        .expect("boundary_esc should exist");
     match boundary {
         BpmnElement::BoundaryEscalationEvent {
             attached_to,
@@ -960,7 +966,10 @@ fn parse_compensation_events() {
     let def = parse_bpmn_xml(xml).unwrap();
 
     // Check compensation boundary event
-    let boundary = def.nodes.get("boundary_comp").expect("boundary_comp should exist");
+    let boundary = def
+        .nodes
+        .get("boundary_comp")
+        .expect("boundary_comp should exist");
     match boundary {
         BpmnElement::BoundaryCompensationEvent { attached_to } => {
             assert_eq!(attached_to, "task1");
@@ -969,7 +978,10 @@ fn parse_compensation_events() {
     }
 
     // Check compensation throw event
-    let throw = def.nodes.get("comp_throw").expect("comp_throw should exist");
+    let throw = def
+        .nodes
+        .get("comp_throw")
+        .expect("comp_throw should exist");
     match throw {
         BpmnElement::CompensationThrowEvent { activity_ref } => {
             assert_eq!(activity_ref.as_deref(), Some("task1"));

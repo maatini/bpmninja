@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::runtime::{
-    PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessInstance,
-};
 use crate::domain::EngineResult;
-use crate::history::HistoryEntry;
 use crate::domain::{ProcessDefinition, Token};
+use crate::history::HistoryEntry;
 use crate::persistence::{
     BucketEntry, BucketEntryDetail, HistoryQuery, StorageInfo, WorkflowPersistence,
+};
+use crate::runtime::{
+    PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessInstance,
 };
 
 #[derive(Default, Clone)]
@@ -565,7 +565,11 @@ mod tests {
         assert_eq!(info.memory_bytes, 2 * 1024 + 1 * 512);
 
         // Buckets should have correct entry counts
-        let files_bucket = info.buckets.iter().find(|b| b.name == "instance_files").unwrap();
+        let files_bucket = info
+            .buckets
+            .iter()
+            .find(|b| b.name == "instance_files")
+            .unwrap();
         assert_eq!(files_bucket.entries, 2);
         let inst_bucket = info.buckets.iter().find(|b| b.name == "instances").unwrap();
         assert_eq!(inst_bucket.entries, 1);

@@ -101,30 +101,39 @@ impl WorkflowEngine {
         worker_id: &str,
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
-        let task_ref = self
+        // Atomically verify lock ownership and remove the task in one shard-lock
+        // window to prevent TOCTOU race conditions between concurrent workers.
+        let task = self
             .pending_service_tasks
-            .get(&task_id)
-            .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
+            .remove_if(&task_id, |_, t| t.worker_id.as_deref() == Some(worker_id));
 
-        // Verify lock ownership
-        verify_lock_ownership(task_id, &task_ref.worker_id, worker_id)?;
+        let task = match task {
+            Some((_, task)) => task,
+            None => {
+                // Distinguish "not locked", "wrong worker", and "not found"
+                if let Some(task_ref) = self.pending_service_tasks.get(&task_id) {
+                    return match &task_ref.worker_id {
+                        None => Err(EngineError::ServiceTaskNotLocked(task_id)),
+                        Some(locked_by) => Err(EngineError::ServiceTaskLocked {
+                            task_id,
+                            worker_id: locked_by.clone(),
+                        }),
+                    };
+                }
+                return Err(EngineError::ServiceTaskNotFound(task_id));
+            }
+        };
 
-        // Reject if instance is suspended
-        let instance_id = task_ref.instance_id;
+        let instance_id = task.instance_id;
+
+        // Reject if instance is suspended — reinsert the task on rejection
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             if matches!(inst.state, crate::runtime::InstanceState::Suspended { .. }) {
-                drop(task_ref);
+                self.pending_service_tasks.insert(task.id, task);
                 return Err(EngineError::InstanceSuspended(instance_id));
             }
         }
-        drop(task_ref);
-
-        let task = self
-            .pending_service_tasks
-            .remove(&task_id)
-            .map(|(_, v)| v)
-            .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
             Some(lk.read().await.clone())
@@ -345,9 +354,7 @@ impl WorkflowEngine {
             let instance_id = task.instance_id;
             let node_id = task.node_id.clone();
 
-            tracing::info!(
-                "Service task {task_id}: incident retried with {retries} retries"
-            );
+            tracing::info!("Service task {task_id}: incident retried with {retries} retries");
 
             // Update audit log on the instance
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -386,26 +393,22 @@ impl WorkflowEngine {
         task_id: Uuid,
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
-        // Validate the task exists and is an incident
-        {
-            let task_ref = self
-                .pending_service_tasks
-                .get(&task_id)
-                .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
-
-            if task_ref.retries > 0 {
-                return Err(EngineError::InvalidDefinition(
-                    "Task is not an incident (retries > 0)".into(),
-                ));
-            }
-        }
-
-        // Remove the task from pending
+        // Atomically verify incident state (retries <= 0) and remove to prevent TOCTOU
         let task = self
             .pending_service_tasks
-            .remove(&task_id)
-            .map(|(_, v)| v)
-            .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
+            .remove_if(&task_id, |_, t| t.retries <= 0);
+
+        let task = match task {
+            Some((_, task)) => task,
+            None => {
+                if self.pending_service_tasks.contains_key(&task_id) {
+                    return Err(EngineError::InvalidDefinition(
+                        "Task is not an incident (retries > 0)".into(),
+                    ));
+                }
+                return Err(EngineError::ServiceTaskNotFound(task_id));
+            }
+        };
         let instance_id = task.instance_id;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
@@ -493,7 +496,10 @@ impl WorkflowEngine {
         self.record_history_event(
             instance_id,
             crate::history::HistoryEventType::TaskCompleted,
-            &format!("Incident on service task '{}' resolved manually", task.node_id),
+            &format!(
+                "Incident on service task '{}' resolved manually",
+                task.node_id
+            ),
             crate::history::ActorType::User,
             None,
             old_state.as_ref(),
@@ -541,19 +547,26 @@ impl WorkflowEngine {
         worker_id: &str,
         error_code: &str,
     ) -> EngineResult<()> {
-        let task_ref = self
-            .pending_service_tasks
-            .get(&task_id)
-            .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
-
-        verify_lock_ownership(task_id, &task_ref.worker_id, worker_id)?;
-        drop(task_ref);
-
+        // Atomically verify lock ownership and remove to prevent TOCTOU
         let task = self
             .pending_service_tasks
-            .remove(&task_id)
-            .map(|(_, v)| v)
-            .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
+            .remove_if(&task_id, |_, t| t.worker_id.as_deref() == Some(worker_id));
+
+        let task = match task {
+            Some((_, task)) => task,
+            None => {
+                if let Some(task_ref) = self.pending_service_tasks.get(&task_id) {
+                    return match &task_ref.worker_id {
+                        None => Err(EngineError::ServiceTaskNotLocked(task_id)),
+                        Some(locked_by) => Err(EngineError::ServiceTaskLocked {
+                            task_id,
+                            worker_id: locked_by.clone(),
+                        }),
+                    };
+                }
+                return Err(EngineError::ServiceTaskNotFound(task_id));
+            }
+        };
         let instance_id = task.instance_id;
 
         let def_key = {

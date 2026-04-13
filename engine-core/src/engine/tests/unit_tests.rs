@@ -1382,9 +1382,9 @@ async fn boundary_timer_event_cancels_task() {
             "bound_timer",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::domain::TimerDefinition::Duration(
-                    std::time::Duration::from_millis(50),
-                ),
+                timer: crate::domain::TimerDefinition::Duration(std::time::Duration::from_millis(
+                    50,
+                )),
                 cancel_activity: true,
             },
         )
@@ -2160,9 +2160,7 @@ async fn test_non_interrupting_timer_boundary() {
             "timer_bnd",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::domain::TimerDefinition::Duration(
-                    std::time::Duration::from_secs(1),
-                ),
+                timer: crate::domain::TimerDefinition::Duration(std::time::Duration::from_secs(1)),
                 cancel_activity: false, // NON-INTERRUPTING
             },
         )
@@ -2280,9 +2278,7 @@ async fn test_interrupting_timer_boundary_cleanup() {
             "timer_bnd",
             BpmnElement::BoundaryTimerEvent {
                 attached_to: "task".into(),
-                timer: crate::domain::TimerDefinition::Duration(
-                    std::time::Duration::from_secs(1),
-                ),
+                timer: crate::domain::TimerDefinition::Duration(std::time::Duration::from_secs(1)),
                 cancel_activity: true, // INTERRUPTING
             },
         )
@@ -2449,10 +2445,11 @@ async fn test_escalation_throw_no_handler_continues() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("no handler found")));
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("no handler found"))
+    );
 }
 
 #[tokio::test]
@@ -2496,10 +2493,7 @@ async fn test_escalation_throw_with_interrupting_boundary() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("interrupting")));
+    assert!(inst.audit_log.iter().any(|l| l.contains("interrupting")));
 }
 
 #[tokio::test]
@@ -2543,10 +2537,11 @@ async fn test_escalation_throw_with_non_interrupting_boundary() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("non-interrupting")));
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("non-interrupting"))
+    );
 }
 
 #[tokio::test]
@@ -2590,10 +2585,11 @@ async fn test_escalation_wildcard_boundary_catches_any() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("caught") && l.contains("interrupting")));
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("caught") && l.contains("interrupting"))
+    );
 }
 
 // ============================================================================
@@ -2645,14 +2641,16 @@ async fn test_compensation_registers_and_executes_handler() {
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
     // Compensation handler should have been registered and executed
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("Registered compensation")));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("Compensation triggered")));
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("Registered compensation"))
+    );
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("Compensation triggered"))
+    );
     // After compensation, step1 should be "undone"
     assert_eq!(
         inst.variables.get("step1").and_then(|v| v.as_str()),
@@ -2703,10 +2701,7 @@ async fn test_compensation_end_event() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert_eq!(
-        inst.variables.get("x").and_then(|v| v.as_i64()),
-        Some(0)
-    );
+    assert_eq!(inst.variables.get("x").and_then(|v| v.as_i64()), Some(0));
 }
 
 #[tokio::test]
@@ -2781,14 +2776,8 @@ async fn test_compensation_specific_activity() {
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
     // Only script1's handler ran, so a=-1, but b stays at 2
-    assert_eq!(
-        inst.variables.get("a").and_then(|v| v.as_i64()),
-        Some(-1)
-    );
-    assert_eq!(
-        inst.variables.get("b").and_then(|v| v.as_i64()),
-        Some(2)
-    );
+    assert_eq!(inst.variables.get("a").and_then(|v| v.as_i64()), Some(-1));
+    assert_eq!(inst.variables.get("b").and_then(|v| v.as_i64()), Some(2));
 }
 
 #[tokio::test]
@@ -2812,10 +2801,11 @@ async fn test_compensation_no_handlers_still_completes() {
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(matches!(inst.state, InstanceState::Completed));
-    assert!(inst
-        .audit_log
-        .iter()
-        .any(|l| l.contains("0 handler(s) to execute")));
+    assert!(
+        inst.audit_log
+            .iter()
+            .any(|l| l.contains("0 handler(s) to execute"))
+    );
 }
 
 // ============================================================================
@@ -2878,7 +2868,10 @@ async fn test_suspend_and_resume_instance() {
     let result = engine.resume_instance(inst_id).await;
     assert!(result.is_ok());
     let inst = engine.get_instance_details(inst_id).await.unwrap();
-    assert!(matches!(inst.state, InstanceState::WaitingOnUserTask { .. }));
+    assert!(matches!(
+        inst.state,
+        InstanceState::WaitingOnUserTask { .. }
+    ));
 
     // Double resume should fail
     let result = engine.resume_instance(inst_id).await;
@@ -3027,7 +3020,9 @@ async fn test_move_token_to_valid_node() {
     assert_eq!(inst.current_node, "ut1");
 
     // Move to ut2
-    let result = engine.move_token(inst_id, "ut2", HashMap::new(), false).await;
+    let result = engine
+        .move_token(inst_id, "ut2", HashMap::new(), false)
+        .await;
     assert!(result.is_ok());
 
     let inst = engine.get_instance_details(inst_id).await.unwrap();
@@ -3049,7 +3044,9 @@ async fn test_move_token_invalid_node_fails() {
     let inst_id = engine.start_instance(key).await.unwrap();
 
     // Move to non-existent node
-    let result = engine.move_token(inst_id, "nonexistent", HashMap::new(), false).await;
+    let result = engine
+        .move_token(inst_id, "nonexistent", HashMap::new(), false)
+        .await;
     assert!(result.is_err());
 }
 
@@ -3100,8 +3097,20 @@ async fn test_inclusive_gateway_multiple_paths() {
     let def = ProcessDefinitionBuilder::new("incl")
         .node("start", BpmnElement::StartEvent)
         .node("gw", BpmnElement::InclusiveGateway)
-        .node("a", BpmnElement::ScriptTask { script: "let r = 1;".into(), multi_instance: None })
-        .node("b", BpmnElement::ScriptTask { script: "let s = 2;".into(), multi_instance: None })
+        .node(
+            "a",
+            BpmnElement::ScriptTask {
+                script: "let r = 1;".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "b",
+            BpmnElement::ScriptTask {
+                script: "let s = 2;".into(),
+                multi_instance: None,
+            },
+        )
         .node("join", BpmnElement::InclusiveGateway)
         .node("end", BpmnElement::EndEvent)
         .flow("start", "gw")
@@ -3136,13 +3145,52 @@ async fn test_compensation_specific_activity_only_targets_one() {
     let engine = WorkflowEngine::new();
     let def = ProcessDefinitionBuilder::new("comp_filter")
         .node("start", BpmnElement::StartEvent)
-        .node("script1", BpmnElement::ScriptTask { script: r#"let a = 10;"#.into(), multi_instance: None })
-        .node("boundary_comp1", BpmnElement::BoundaryCompensationEvent { attached_to: "script1".into() })
-        .node("comp_handler1", BpmnElement::ScriptTask { script: r#"a = 0;"#.into(), multi_instance: None })
-        .node("script2", BpmnElement::ScriptTask { script: r#"let b = 20;"#.into(), multi_instance: None })
-        .node("boundary_comp2", BpmnElement::BoundaryCompensationEvent { attached_to: "script2".into() })
-        .node("comp_handler2", BpmnElement::ScriptTask { script: r#"b = 0;"#.into(), multi_instance: None })
-        .node("comp_throw", BpmnElement::CompensationThrowEvent { activity_ref: Some("script2".into()) })
+        .node(
+            "script1",
+            BpmnElement::ScriptTask {
+                script: r#"let a = 10;"#.into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "boundary_comp1",
+            BpmnElement::BoundaryCompensationEvent {
+                attached_to: "script1".into(),
+            },
+        )
+        .node(
+            "comp_handler1",
+            BpmnElement::ScriptTask {
+                script: r#"a = 0;"#.into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "script2",
+            BpmnElement::ScriptTask {
+                script: r#"let b = 20;"#.into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "boundary_comp2",
+            BpmnElement::BoundaryCompensationEvent {
+                attached_to: "script2".into(),
+            },
+        )
+        .node(
+            "comp_handler2",
+            BpmnElement::ScriptTask {
+                script: r#"b = 0;"#.into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "comp_throw",
+            BpmnElement::CompensationThrowEvent {
+                activity_ref: Some("script2".into()),
+            },
+        )
         .node("end", BpmnElement::EndEvent)
         .node("handler_end1", BpmnElement::EndEvent)
         .node("handler_end2", BpmnElement::EndEvent)
@@ -3277,7 +3325,8 @@ async fn test_update_instance_variables_counts_added_modified_deleted() {
 
     let log1 = engine.get_audit_log(inst_id).await.unwrap();
     assert!(
-        log1.iter().any(|l| l.contains("+2") && l.contains("~0") && l.contains("-0")),
+        log1.iter()
+            .any(|l| l.contains("+2") && l.contains("~0") && l.contains("-0")),
         "Expected +2 ~0 -0 but got: {log1:?}"
     );
 
@@ -3292,7 +3341,8 @@ async fn test_update_instance_variables_counts_added_modified_deleted() {
 
     let log2 = engine.get_audit_log(inst_id).await.unwrap();
     assert!(
-        log2.iter().any(|l| l.contains("+1") && l.contains("~1") && l.contains("-0")),
+        log2.iter()
+            .any(|l| l.contains("+1") && l.contains("~1") && l.contains("-0")),
         "Expected +1 ~1 -0 but got: {log2:?}"
     );
 
@@ -3306,7 +3356,8 @@ async fn test_update_instance_variables_counts_added_modified_deleted() {
 
     let log3 = engine.get_audit_log(inst_id).await.unwrap();
     assert!(
-        log3.iter().any(|l| l.contains("+0") && l.contains("~0") && l.contains("-1")),
+        log3.iter()
+            .any(|l| l.contains("+0") && l.contains("~0") && l.contains("-1")),
         "Expected +0 ~0 -1 but got: {log3:?}"
     );
 
@@ -3586,10 +3637,7 @@ async fn test_service_task_not_locked_error() {
     let res = engine
         .complete_service_task(task_id, "any_worker", HashMap::new())
         .await;
-    assert!(matches!(
-        res,
-        Err(EngineError::ServiceTaskNotLocked(_))
-    ));
+    assert!(matches!(res, Err(EngineError::ServiceTaskNotLocked(_))));
 }
 
 /// Catches: InstanceStore is_empty, clear
@@ -3676,10 +3724,7 @@ async fn test_correlate_message_with_business_key_filter() {
         .correlate_message("ORDER".into(), Some("BK-WRONG".into()), HashMap::new())
         .await
         .unwrap();
-    assert!(
-        affected.is_empty(),
-        "Wrong business_key should not match"
-    );
+    assert!(affected.is_empty(), "Wrong business_key should not match");
 
     // Correlate with correct business_key → should match
     let affected = engine
@@ -4105,7 +4150,10 @@ async fn test_cancel_boundary_message_catches_on_task_complete() {
         .iter()
         .filter(|r| r.instance_id == inst_id)
         .count();
-    assert_eq!(msg_count_before, 1, "Boundary message catch should be pending");
+    assert_eq!(
+        msg_count_before, 1,
+        "Boundary message catch should be pending"
+    );
 
     // Complete the user task → boundary message must be cancelled
     let task_id = engine
@@ -4289,19 +4337,30 @@ async fn test_shutdown_completes_without_panic() {
     engine.shutdown().await;
 
     // After shutdown, engine should still be usable (no panics)
-    assert!(engine.get_instance_details(uuid::Uuid::new_v4()).await.is_err());
+    assert!(
+        engine
+            .get_instance_details(uuid::Uuid::new_v4())
+            .await
+            .is_err()
+    );
 }
 
 /// Catches: replace set_persistence with ()
 #[tokio::test]
 async fn test_set_persistence_activates_retry_tx() {
     let mut engine = WorkflowEngine::new();
-    assert!(engine.retry_tx.is_none(), "No retry_tx before set_persistence");
+    assert!(
+        engine.retry_tx.is_none(),
+        "No retry_tx before set_persistence"
+    );
 
     let persistence = std::sync::Arc::new(crate::adapter::InMemoryPersistence::new());
     engine.set_persistence(persistence);
 
-    assert!(engine.retry_tx.is_some(), "retry_tx should be set after set_persistence");
+    assert!(
+        engine.retry_tx.is_some(),
+        "retry_tx should be set after set_persistence"
+    );
 }
 
 /// Catches: find_downstream_join depth arithmetic (- vs /, + vs -, + vs *)
@@ -4487,11 +4546,19 @@ async fn test_cancel_boundary_timers_isolates_instances() {
 
     // Both instances should have boundary timers
     assert_eq!(
-        engine.pending_timers.iter().filter(|r| r.instance_id == inst_a).count(),
+        engine
+            .pending_timers
+            .iter()
+            .filter(|r| r.instance_id == inst_a)
+            .count(),
         1
     );
     assert_eq!(
-        engine.pending_timers.iter().filter(|r| r.instance_id == inst_b).count(),
+        engine
+            .pending_timers
+            .iter()
+            .filter(|r| r.instance_id == inst_b)
+            .count(),
         1
     );
 
@@ -4508,12 +4575,20 @@ async fn test_cancel_boundary_timers_isolates_instances() {
         .unwrap();
 
     assert_eq!(
-        engine.pending_timers.iter().filter(|r| r.instance_id == inst_a).count(),
+        engine
+            .pending_timers
+            .iter()
+            .filter(|r| r.instance_id == inst_a)
+            .count(),
         0,
         "inst_a timers should be cancelled"
     );
     assert_eq!(
-        engine.pending_timers.iter().filter(|r| r.instance_id == inst_b).count(),
+        engine
+            .pending_timers
+            .iter()
+            .filter(|r| r.instance_id == inst_b)
+            .count(),
         1,
         "inst_b timers should remain"
     );
@@ -4548,7 +4623,10 @@ async fn test_parallel_flow_completes_only_when_all_branches_done() {
         .find(|r| r.node_id == "ut_a")
         .map(|r| r.task_id)
         .unwrap();
-    engine.complete_user_task(task_a, HashMap::new()).await.unwrap();
+    engine
+        .complete_user_task(task_a, HashMap::new())
+        .await
+        .unwrap();
 
     // Not yet completed
     let inst = engine.get_instance_details(inst_id).await.unwrap();
@@ -4561,7 +4639,10 @@ async fn test_parallel_flow_completes_only_when_all_branches_done() {
         .find(|r| r.node_id == "ut_b")
         .map(|r| r.task_id)
         .unwrap();
-    engine.complete_user_task(task_b, HashMap::new()).await.unwrap();
+    engine
+        .complete_user_task(task_b, HashMap::new())
+        .await
+        .unwrap();
 
     // Now completed
     let inst = engine.get_instance_details(inst_id).await.unwrap();
@@ -4668,5 +4749,109 @@ async fn test_execution_limit_prevents_infinite_loop() {
         matches!(result, Err(EngineError::ExecutionLimitExceeded(_))),
         "Infinite loop should trigger execution limit, got: {:?}",
         result
+    );
+}
+
+/// Tests that correlate_message with a MessageStartEvent starts a new instance.
+#[tokio::test]
+async fn test_correlate_message_starts_new_instance() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("msg_start_corr")
+        .node(
+            "start",
+            BpmnElement::MessageStartEvent {
+                message_name: "order_created".into(),
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "end")
+        .build()
+        .unwrap();
+
+    let _ = engine.deploy_definition(def).await;
+
+    // No instances before message
+    assert!(engine.list_instances().await.is_empty());
+
+    let mut vars = HashMap::new();
+    vars.insert("orderId".into(), serde_json::Value::from(42));
+
+    let affected = engine
+        .correlate_message("order_created".into(), None, vars)
+        .await
+        .unwrap();
+    assert_eq!(affected.len(), 1);
+
+    // Instance should have been created and completed (start → end)
+    let inst = engine.get_instance_details(affected[0]).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert_eq!(
+        inst.variables.get("orderId"),
+        Some(&serde_json::Value::from(42))
+    );
+}
+
+/// Tests that verify_lock_ownership returns correct errors for all three cases.
+#[tokio::test]
+async fn test_complete_service_task_lock_ownership_variants() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("lock_variants")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "svc",
+            BpmnElement::ServiceTask {
+                topic: "lock_test".into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def).await;
+    engine.start_instance(key).await.unwrap();
+
+    let task_id = engine.get_pending_service_tasks()[0].id;
+
+    // Case 1: Not locked — should return ServiceTaskNotLocked
+    let res = engine
+        .complete_service_task(task_id, "any", HashMap::new())
+        .await;
+    assert!(
+        matches!(res, Err(EngineError::ServiceTaskNotLocked(_))),
+        "Expected ServiceTaskNotLocked, got: {:?}",
+        res
+    );
+
+    // Lock it with worker "alpha"
+    engine
+        .fetch_and_lock_service_tasks("alpha", 1, &["lock_test".into()], 60000)
+        .await;
+
+    // Case 2: Wrong worker — should return ServiceTaskLocked
+    let res = engine
+        .complete_service_task(task_id, "beta", HashMap::new())
+        .await;
+    assert!(
+        matches!(res, Err(EngineError::ServiceTaskLocked { .. })),
+        "Expected ServiceTaskLocked, got: {:?}",
+        res
+    );
+
+    // Case 3: Correct worker — should succeed
+    let res = engine
+        .complete_service_task(task_id, "alpha", HashMap::new())
+        .await;
+    assert!(res.is_ok(), "Expected Ok, got: {:?}", res);
+
+    // Case 4: Already removed — should return ServiceTaskNotFound
+    let res = engine
+        .complete_service_task(task_id, "alpha", HashMap::new())
+        .await;
+    assert!(
+        matches!(res, Err(EngineError::ServiceTaskNotFound(_))),
+        "Expected ServiceTaskNotFound, got: {:?}",
+        res
     );
 }

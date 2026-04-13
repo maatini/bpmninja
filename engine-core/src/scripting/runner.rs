@@ -34,7 +34,7 @@ impl Default for ScriptConfig {
         Self {
             max_operations: 50_000,
             max_memory: 2 * 1024 * 1024, // 2 MiB
-            timeout_ms: 1_000,            // 1 second
+            timeout_ms: 1_000,           // 1 second
         }
     }
 }
@@ -49,20 +49,20 @@ impl ScriptConfig {
     /// | `RHAI_TIMEOUT_MS`           | 1000     |
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Ok(v) = std::env::var("RHAI_MAX_OPERATIONS") {
-            if let Ok(n) = v.parse() {
-                cfg.max_operations = n;
-            }
+        if let Ok(v) = std::env::var("RHAI_MAX_OPERATIONS")
+            && let Ok(n) = v.parse()
+        {
+            cfg.max_operations = n;
         }
-        if let Ok(v) = std::env::var("RHAI_MAX_MEMORY_BYTES") {
-            if let Ok(n) = v.parse() {
-                cfg.max_memory = n;
-            }
+        if let Ok(v) = std::env::var("RHAI_MAX_MEMORY_BYTES")
+            && let Ok(n) = v.parse()
+        {
+            cfg.max_memory = n;
         }
-        if let Ok(v) = std::env::var("RHAI_TIMEOUT_MS") {
-            if let Ok(n) = v.parse() {
-                cfg.timeout_ms = n;
-            }
+        if let Ok(v) = std::env::var("RHAI_TIMEOUT_MS")
+            && let Ok(n) = v.parse()
+        {
+            cfg.timeout_ms = n;
         }
         cfg
     }
