@@ -18,7 +18,7 @@ rhai = { version = "1.19.0", features = ["serde", "sync"] }
 croner = "3"
 metrics = "0.24"
 [dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [[bench]]
