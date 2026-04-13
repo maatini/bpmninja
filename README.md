@@ -1,7 +1,7 @@
 # BPMNinja
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-244_passing-success?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-282_passing-success?style=flat-square)]()
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-~87%25-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
@@ -37,7 +37,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Token-based execution** — each path is tracked as an independent token
 - **18 BPMN elements** — start/end events, user/service tasks, gateways (XOR, AND, OR, event-based), timers, messages, boundary events, call activities, sub-processes
 - **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
-- **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues
+- **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry system with a background worker to handle NATS outages
 - **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
@@ -486,42 +486,46 @@ Services reachable at `localhost:8081` (API) and `localhost:4222` (NATS).
 
 ## Test Metrics
 
-> Measured via `cargo test --workspace` (Rust) and `npm run test` (TypeScript) on 2026-04-10 — **244 tests, 0 failures**
+> Measured via `cargo test --workspace` (Rust) and `npm run test` (TypeScript) on 2026-04-13 — **282 tests, 0 failures**
 
 ### Workspace Overview
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
-| **engine-core** | 105 | 5 | 110 |
-| **bpmn-parser** | 28 | — | 28 |
+| **engine-core** | 243 | 5 | 248 |
+| **bpmn-parser** | 30 | — | 30 |
 | **persistence-nats** | 2 | — | 2 |
 | **engine-server** | — | 36 | 36 |
 | **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Total** | **203** | **41** | **244** ✅ |
+| **Total** | **241** | **41** | **282** ✅ |
 
-### engine-core Breakdown (110 tests)
+### engine-core Breakdown (248 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `engine::tests` | 56 | State machine, gateways, user/service tasks, boundary events, call activities, EventBasedGateway, timers, messages |
+| `engine::unit_tests` | 80 | State machine, gateways, user/service tasks, boundary events, call activities, EventBasedGateway, timers, messages, lock ownership, message correlation |
 | `engine::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
-| `domain::tests` | 17 | ProcessDefinition builder, token serialization, validation |
-| `history::tests` | 5 | Diff calculation, human-readable text |
-| `condition::tests` | 3 | Condition evaluation based on token variables |
+| `domain::tests` | 28 | ProcessDefinition builder, token serialization, validation, timer definitions |
+| `history::tests` | 20 | Diff calculation, human-readable text, truncation, snapshots |
+| `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
+| `runtime::instance::tests` | 11 | Audit log limits, file variables, file references |
+| `adapter::in_memory::tests` | 2 | Storage info, history query filters |
+| `retry_queue::tests` | 3 | Display, shutdown, skip missing entities |
+| `boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
 | Integration tests | 5 | BPMN compliance, complex gateways |
 
-### bpmn-parser Tests (28 tests)
+### bpmn-parser Tests (30 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
 | Basic parsing | 6 | Simple BPMN, conditional flows, XOR gateway, timer start, interleaved output, execution listeners |
-| Gateways | 3 | Parallel, inclusive, event-based |
+| Gateways | 4 | Parallel, inclusive, event-based, complex |
 | Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, BoundaryTimer |
 | Boundary events | 2 | BoundaryTimer, BoundaryError |
 | ISO 8601 timers | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
 | Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
 | Sub-processes | 2 | EventSubProcess, RegularSubProcess |
-| Other | 1 | TerminateEndEvent |
+| Advanced | 3 | TerminateEndEvent, CompensationEvents, EscalationEvents |
 
 ### engine-server E2E Tests (36 tests, 12 files)
 
