@@ -40,6 +40,8 @@ interface MockState {
     created_at: string;
   }>;
   pendingServiceTasks: any[];
+  pendingTimers: any[];
+  pendingMessageCatches: any[];
   completedTasks: string[];
   processInstances: Array<{
     id: string;
@@ -51,6 +53,26 @@ interface MockState {
     history?: any[];
     variables: Record<string, unknown>;
   }>;
+  /** Archived (completed) instances, queried via query_completed_instances */
+  completedInstances: Array<{
+    id: string;
+    definition_key: string;
+    business_key: string;
+    state: string | { CompletedWithError: { error_code: string } };
+    current_node: string;
+    audit_log: string[];
+    variables: Record<string, unknown>;
+    started_at?: string | null;
+    completed_at?: string | null;
+  }>;
+  /** Rich definitions for dropdowns (key, bpmn_id, version, is_latest, node_count) */
+  definitions: Array<{
+    key: string;
+    bpmn_id: string;
+    version: number;
+    node_count: number;
+    is_latest: boolean;
+  }>;
 }
 
 const DEFAULT_MOCK_STATE: MockState = {
@@ -60,8 +82,12 @@ const DEFAULT_MOCK_STATE: MockState = {
   openFileXml: null,
   pendingTasks: [],
   pendingServiceTasks: [],
+  pendingTimers: [],
+  pendingMessageCatches: [],
   completedTasks: [],
   processInstances: [],
+  completedInstances: [],
+  definitions: [],
 };
 
 /**
@@ -240,8 +266,55 @@ async function injectTauriMock(
             }
 
             case 'list_definitions': {
-              // Return a definition info entry per deployed def
-              resolve(mockState.deployedDefs.map(id => ({ key: id, bpmn_id: id, node_count: 3 })));
+              // Prefer rich pre-seeded definitions if provided; fall back to deployedDefs
+              if (mockState.definitions.length > 0) {
+                resolve(mockState.definitions);
+              } else {
+                resolve(mockState.deployedDefs.map(id => ({
+                  key: id, bpmn_id: id, version: 1, node_count: 3, is_latest: true,
+                })));
+              }
+              break;
+            }
+
+            case 'query_completed_instances': {
+              let results = mockState.completedInstances.slice();
+              if (args.definitionKey) {
+                results = results.filter((i: any) => i.definition_key === args.definitionKey);
+              }
+              if (args.businessKey) {
+                results = results.filter((i: any) =>
+                  (i.business_key || '').includes(args.businessKey as string)
+                );
+              }
+              if (args.stateFilter === 'completed') {
+                results = results.filter((i: any) => i.state === 'Completed');
+              } else if (args.stateFilter === 'error') {
+                results = results.filter((i: any) =>
+                  typeof i.state === 'object' && ('CompletedWithError' in i.state || 'ErrorEnd' in i.state)
+                );
+              }
+              const offset = (args.offset as number) ?? 0;
+              const limit = (args.limit as number) ?? 50;
+              resolve(results.slice(offset, offset + limit));
+              break;
+            }
+
+            case 'get_completed_instance': {
+              const instId = args.instanceId as string;
+              const found = mockState.completedInstances.find((i: any) => i.id === instId);
+              if (found) resolve(found);
+              else reject('No such completed instance: ' + instId);
+              break;
+            }
+
+            case 'get_pending_timers': {
+              resolve(mockState.pendingTimers);
+              break;
+            }
+
+            case 'get_pending_message_catches': {
+              resolve(mockState.pendingMessageCatches);
               break;
             }
 
@@ -805,14 +878,15 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await page.goto('/');
 
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
-    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.process-group-card').first()).toBeVisible({ timeout: 5_000 });
 
-    // Click Download – should complete without crashing.
+    // Click Download icon – should complete without crashing.
     // In E2E (non-Tauri), the dialog mock resolves null so the
     // writeTextFile silently succeeds or is skipped.
-    await page.locator('button', { hasText: 'Download' }).click();
-    // After click, button should return to normal state (not stuck in "Downloading...")
-    await expect(page.locator('button', { hasText: 'Download' })).toBeVisible({ timeout: 5_000 });
+    const downloadBtn = page.locator('.process-group-card button[title="Download BPMN"]').first();
+    await downloadBtn.click();
+    // After click, button should return to normal state
+    await expect(downloadBtn).toBeVisible({ timeout: 5_000 });
   });
 
   // ---- 15. Deploy then view in Deployed Processes -------------------------
@@ -862,10 +936,10 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // Navigate to Deployed Processes tab
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
-    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.process-group-card').first()).toBeVisible({ timeout: 5_000 });
 
-    // Click "View in Modeler" button
-    await page.locator('button', { hasText: 'View BPMN' }).click();
+    // Click "View BPMN" icon button
+    await page.locator('.process-group-card button[title="View BPMN"]').first().click();
 
     // Should switch back to Modeler tab and show the bpmn-js container
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
@@ -900,8 +974,8 @@ test.describe('bpmninja Desktop App – E2E', () => {
 
     // Step 1: View a deployed definition in the Modeler
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
-    await expect(page.locator('.card')).toBeVisible({ timeout: 5_000 });
-    await page.locator('button', { hasText: 'View BPMN' }).click();
+    await expect(page.locator('.process-group-card').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.process-group-card button[title="View BPMN"]').first().click();
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // Step 2: Click "New Diagram" to reset
@@ -1151,7 +1225,8 @@ test.describe('bpmninja Desktop App – E2E', () => {
     // 1. "Lade das oben beschriebene BPMN-XML"
     // We achieve this in the UI by viewing the pre-injected def:
     await page.locator('.nav-item', { hasText: 'Deployed Processes' }).click();
-    await page.locator('button', { hasText: 'View BPMN' }).click();
+    await expect(page.locator('.process-group-card').first()).toBeVisible({ timeout: 5_000 });
+    await page.locator('.process-group-card button[title="View BPMN"]').first().click();
     await expect(page.locator('.bjs-container')).toBeVisible({ timeout: 10_000 });
 
     // 2. Klicke "Deploy Process"
@@ -1626,5 +1701,245 @@ test.describe('bpmninja Desktop App – E2E', () => {
     const xml = await page.evaluate(() => localStorage.getItem('minibpm_last_workflow') || '');
     expect(xml).toContain('language="rhai"');
     expect(xml).toContain('amount > 100');
+  });
+
+  // =====================================================================
+  // HistoryPage — archived (completed) instances
+  // =====================================================================
+
+  test.describe('HistoryPage', () => {
+    /** Build N synthetic completed instances for pagination tests */
+    const makeCompleted = (n: number, defKey = 'def-hist-1') =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `hist-inst-${String(i).padStart(3, '0')}`,
+        definition_key: defKey,
+        business_key: `bk-${i}`,
+        state: 'Completed',
+        current_node: 'end',
+        audit_log: [],
+        variables: {},
+        started_at: '2026-04-10T10:00:00Z',
+        completed_at: '2026-04-10T10:00:05Z',
+      }));
+
+    test('shows empty state when no historical instances exist', async ({ page }) => {
+      await injectTauriMock(page);
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+
+      await expect(page.getByText('No Historical Instances')).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('button', { hasText: 'Refresh' })).toBeVisible();
+    });
+
+    test('displays archived instances in the table with columns and status badges', async ({ page }) => {
+      await injectTauriMock(page, {
+        definitions: [
+          { key: 'def-hist-1', bpmn_id: 'OrderProcess', version: 1, node_count: 5, is_latest: true },
+        ],
+        completedInstances: [
+          {
+            id: 'hist-abcdef12',
+            definition_key: 'def-hist-1',
+            business_key: 'bk-order-777',
+            state: 'Completed',
+            current_node: 'end',
+            audit_log: [],
+            variables: {},
+            started_at: '2026-04-10T10:00:00Z',
+            completed_at: '2026-04-10T10:00:03Z',
+          },
+          {
+            id: 'hist-badfeed11',
+            definition_key: 'def-hist-1',
+            business_key: 'bk-failure',
+            state: { CompletedWithError: { error_code: 'E_TIMEOUT' } },
+            current_node: 'errorEnd',
+            audit_log: [],
+            variables: {},
+            started_at: '2026-04-10T11:00:00Z',
+            completed_at: '2026-04-10T11:00:10Z',
+          },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+
+      const rows = page.locator('table tbody tr');
+      await expect(rows).toHaveCount(2, { timeout: 5_000 });
+
+      // First row: Completed badge + business key + truncated instance id
+      const firstRow = rows.first();
+      await expect(firstRow.getByText('hist-abc')).toBeVisible();
+      await expect(firstRow.getByText('bk-order-777')).toBeVisible();
+      await expect(firstRow.getByText('Completed', { exact: true })).toBeVisible();
+
+      // Second row: Error badge
+      await expect(rows.nth(1).getByText('Error', { exact: true })).toBeVisible();
+    });
+
+    test('filters by business key substring when pressing Enter', async ({ page }) => {
+      await injectTauriMock(page, {
+        completedInstances: [
+          {
+            id: 'hist-alpha-001', definition_key: 'd1', business_key: 'alpha-42',
+            state: 'Completed', current_node: 'end', audit_log: [], variables: {},
+            started_at: '2026-04-10T10:00:00Z', completed_at: '2026-04-10T10:00:01Z',
+          },
+          {
+            id: 'hist-beta-002', definition_key: 'd1', business_key: 'beta-99',
+            state: 'Completed', current_node: 'end', audit_log: [], variables: {},
+            started_at: '2026-04-10T10:00:00Z', completed_at: '2026-04-10T10:00:01Z',
+          },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+
+      await expect(page.locator('table tbody tr')).toHaveCount(2, { timeout: 5_000 });
+
+      // Type filter and press Enter
+      const bkInput = page.locator('input[placeholder="Search..."]');
+      await bkInput.fill('alpha');
+      await bkInput.press('Enter');
+
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 5_000 });
+      await expect(page.getByText('alpha-42')).toBeVisible();
+      await expect(page.getByText('beta-99')).not.toBeVisible();
+    });
+
+    test('filters by status (error only)', async ({ page }) => {
+      await injectTauriMock(page, {
+        completedInstances: [
+          {
+            id: 'hist-ok-1', definition_key: 'd1', business_key: 'ok',
+            state: 'Completed', current_node: 'end', audit_log: [], variables: {},
+            started_at: '2026-04-10T10:00:00Z', completed_at: '2026-04-10T10:00:01Z',
+          },
+          {
+            id: 'hist-err-1', definition_key: 'd1', business_key: 'err',
+            state: { CompletedWithError: { error_code: 'E1' } },
+            current_node: 'errorEnd', audit_log: [], variables: {},
+            started_at: '2026-04-10T10:00:00Z', completed_at: '2026-04-10T10:00:01Z',
+          },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+      await expect(page.locator('table tbody tr')).toHaveCount(2, { timeout: 5_000 });
+
+      // Status dropdown is the 2nd <select> on the filter bar (1st = Definition)
+      const statusSelect = page.locator('select').nth(1);
+      await statusSelect.selectOption('error');
+      await page.locator('button', { hasText: 'Search' }).click();
+
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 5_000 });
+      await expect(page.locator('table').getByText('Error', { exact: true })).toBeVisible();
+    });
+
+    test('paginates via Next / Previous buttons (PAGE_SIZE=50)', async ({ page }) => {
+      // Seed exactly 55 instances so page 1 = 50 rows (hasMore=true), page 2 = 5 rows
+      await injectTauriMock(page, {
+        completedInstances: makeCompleted(55),
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+
+      await expect(page.locator('table tbody tr')).toHaveCount(50, { timeout: 5_000 });
+      await expect(page.getByText(/Showing 1[–-]50/)).toBeVisible();
+
+      // Previous should be disabled on page 1, Next enabled
+      const prev = page.locator('button', { hasText: 'Previous' });
+      const next = page.locator('button', { hasText: 'Next' });
+      await expect(prev).toBeDisabled();
+      await expect(next).toBeEnabled();
+
+      await next.click();
+      await expect(page.locator('table tbody tr')).toHaveCount(5, { timeout: 5_000 });
+      await expect(page.getByText(/Showing 51[–-]55/)).toBeVisible();
+
+      // Now Next should be disabled, Previous enabled
+      await expect(next).toBeDisabled();
+      await expect(prev).toBeEnabled();
+
+      await prev.click();
+      await expect(page.locator('table tbody tr')).toHaveCount(50, { timeout: 5_000 });
+    });
+
+    test('clicking a row navigates to the Instances tab', async ({ page }) => {
+      await injectTauriMock(page, {
+        completedInstances: [
+          {
+            id: 'hist-click-1', definition_key: 'd1', business_key: 'clickme',
+            state: 'Completed', current_node: 'end', audit_log: [], variables: {},
+            started_at: '2026-04-10T10:00:00Z', completed_at: '2026-04-10T10:00:01Z',
+          },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 5_000 });
+
+      await page.locator('table tbody tr').first().click();
+
+      // App.tsx wires onViewInstance → setActiveTab('instances')
+      await expect(page.locator('.nav-item.active')).toHaveText('Instances', { timeout: 5_000 });
+    });
+
+    test('populates Definition dropdown from latest definitions only', async ({ page }) => {
+      await injectTauriMock(page, {
+        definitions: [
+          { key: 'def-v1', bpmn_id: 'Order', version: 1, node_count: 3, is_latest: false },
+          { key: 'def-v2', bpmn_id: 'Order', version: 2, node_count: 4, is_latest: true },
+          { key: 'def-invoice', bpmn_id: 'Invoice', version: 1, node_count: 5, is_latest: true },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'History' }).click();
+
+      // First <select> on the filter bar is "Definition"
+      const defSelect = page.locator('select').first();
+      const optionTexts = await defSelect.locator('option').allTextContents();
+      // "All" + two latest definitions (v1 is_latest=false → excluded)
+      expect(optionTexts.length).toBe(3);
+      expect(optionTexts.some(t => t.includes('Order (v2)'))).toBe(true);
+      expect(optionTexts.some(t => t.includes('Invoice (v1)'))).toBe(true);
+      expect(optionTexts.some(t => t.includes('(v1)') && t.includes('Order'))).toBe(false);
+    });
+  });
+
+  // =====================================================================
+  // OverviewPage — pending timers / messages / jobs
+  // =====================================================================
+
+  test.describe('OverviewPage', () => {
+    test('shows empty states across all three tabs when nothing is pending', async ({ page }) => {
+      await injectTauriMock(page);
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Overview' }).click();
+
+      // Default tab shows timers empty state — be lenient on exact copy,
+      // but the "Overview" page header must be visible.
+      await expect(page.locator('h1, h2', { hasText: 'Overview' }).first()).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('button', { hasText: 'Refresh' })).toBeVisible();
+    });
+
+    test('displays pending timers when seeded', async ({ page }) => {
+      await injectTauriMock(page, {
+        pendingTimers: [
+          {
+            timer_id: 'timer-1',
+            instance_id: 'inst-timer-001',
+            node_id: 'Timer_Event_1',
+            fire_at: '2026-05-01T12:00:00Z',
+            timer_def: { Date: '2026-05-01T12:00:00Z' },
+          },
+        ],
+      });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Overview' }).click();
+
+      // Expect the timer node id to surface somewhere in the rendered overview
+      await expect(page.getByText('Timer_Event_1')).toBeVisible({ timeout: 5_000 });
+    });
   });
 });

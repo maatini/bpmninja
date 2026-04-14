@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   queryCompletedInstances,
   listDefinitions,
@@ -14,13 +14,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -95,6 +88,13 @@ export function HistoryPage({ onViewInstance }: { onViewInstance?: (id: string) 
 
   usePolling(fetchData, 10000);
 
+  // Refetch whenever the offset changes (pagination), after the initial mount.
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) { didMountRef.current = true; return; }
+    fetchData();
+  }, [offset]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSearch = () => {
     setOffset(0);
     setLoading(true);
@@ -130,33 +130,31 @@ export function HistoryPage({ onViewInstance }: { onViewInstance?: (id: string) 
 
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">Definition</label>
-          <Select value={definitionKey} onValueChange={setDefinitionKey}>
-            <SelectTrigger className="w-[200px] h-9">
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All</SelectItem>
-              {definitions.filter(d => d.is_latest).map(d => (
-                <SelectItem key={d.key} value={d.key}>
-                  {d.bpmn_id} (v{d.version})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <select
+            value={definitionKey}
+            onChange={e => setDefinitionKey(e.target.value)}
+            className="w-[200px] h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="">All</option>
+            {definitions.filter(d => d.is_latest).map(d => (
+              <option key={d.key} value={d.key}>
+                {d.bpmn_id} (v{d.version})
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">Status</label>
-          <Select value={stateFilter} onValueChange={setStateFilter}>
-            <SelectTrigger className="w-[140px] h-9">
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="error">Error</SelectItem>
-            </SelectContent>
-          </Select>
+          <select
+            value={stateFilter}
+            onChange={e => setStateFilter(e.target.value)}
+            className="w-[140px] h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="">All</option>
+            <option value="completed">Completed</option>
+            <option value="error">Error</option>
+          </select>
         </div>
 
         <Button onClick={handleSearch} size="sm" className="gap-2 h-9">

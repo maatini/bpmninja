@@ -181,11 +181,12 @@ async fn test_completed_instance_appears_in_history_instances() {
     let def_key = deploy_body["definition_key"].as_str().unwrap().to_string();
 
     // Start instance (completes immediately since Start→End)
+    // Note: business_key is set via the `variables` map (the engine extracts it from there).
     let start_res = client
         .post(format!("{}/api/start", base))
         .json(&serde_json::json!({
             "definition_key": def_key,
-            "business_key": "order-42"
+            "variables": { "business_key": "order-42" }
         }))
         .send()
         .await
@@ -253,12 +254,13 @@ async fn test_history_instances_filter_by_business_key() {
     let def_key = deploy_body["definition_key"].as_str().unwrap().to_string();
 
     // Start two instances with different business keys
+    // business_key is set via the `variables` map (extracted by the engine).
     for bk in ["alpha-123", "beta-456"] {
         client
             .post(format!("{}/api/start", base))
             .json(&serde_json::json!({
                 "definition_key": def_key,
-                "business_key": bk
+                "variables": { "business_key": bk }
             }))
             .send()
             .await

@@ -86,6 +86,9 @@ export function StartInstanceDialog({ open, onOpenChange, onStartConfigured }: S
               value={businessKey}
               onChange={(e: any) => setBusinessKey(e.target.value)}
               placeholder="e.g. ORDER-1000"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
           </div>
           

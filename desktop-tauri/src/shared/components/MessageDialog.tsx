@@ -55,11 +55,14 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
         <div className="grid gap-4 py-4">
           <div className="space-y-2">
             <Label htmlFor="messageName">Message Name *</Label>
-            <Input 
+            <Input
               id="messageName"
-              value={messageName} 
-              onChange={(e) => setMessageName(e.target.value)} 
+              value={messageName}
+              onChange={(e) => setMessageName(e.target.value)}
               placeholder="e.g. PaymentReceivedMessage"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
           </div>
 

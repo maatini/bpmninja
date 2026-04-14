@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast'
 import { IncidentsPage } from './features/incidents/IncidentsPage'
 import { OverviewPage } from './features/overview/OverviewPage'
 import { HistoryPage } from './features/history/HistoryPage'
+import { ProcessDefinitionPage } from './features/definitions/ProcessDefinitionPage'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 
@@ -37,6 +38,7 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('definitions')
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
+  const [selectedDefinitionKey, setSelectedDefinitionKey] = useState<string | null>(null)
   const [viewXml, setViewXml] = useState<string | null>(null)
   const [showMessageDialog, setShowMessageDialog] = useState(false)
 
@@ -103,7 +105,10 @@ function App() {
         <div className="p-5 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="BPMNinja Logo" className="h-16 w-16 object-contain drop-shadow-md rounded" />
-            <span className="text-2xl font-bold tracking-tight">BPMNinja</span>
+            <div className="flex flex-col">
+              <span className="text-2xl font-bold tracking-tight leading-none">BPMNinja</span>
+              <span className="text-xs text-blue-200 mt-1 font-mono">v{__APP_VERSION__}</span>
+            </div>
           </div>
           <span className="text-xs text-blue-200 mt-1 block">Workflow Engine</span>
         </div>
@@ -147,10 +152,19 @@ function App() {
           <ModelerPage onDeploy={handleDeploy} onStart={handleStart} onNewDiagram={handleNewDiagram} onOpenFile={handleOpenFile} initialXml={viewXml} />
         </div>
 
-        {activeTab === 'definitions' && (
-          <DeployedProcessesPage 
-            onView={handleViewDefinition} 
+        {activeTab === 'definitions' && !selectedDefinitionKey && (
+          <DeployedProcessesPage
+            onView={handleViewDefinition}
             onViewInstance={(id: string) => { setSelectedInstanceId(id); setActiveTab('instances'); }}
+            onViewDefinition={(key: string) => setSelectedDefinitionKey(key)}
+          />
+        )}
+
+        {activeTab === 'definitions' && selectedDefinitionKey && (
+          <ProcessDefinitionPage
+            definitionKey={selectedDefinitionKey}
+            onBack={() => setSelectedDefinitionKey(null)}
+            onViewInstance={(id: string) => { setSelectedInstanceId(id); setSelectedDefinitionKey(null); setActiveTab('instances'); }}
           />
         )}
 
