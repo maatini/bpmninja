@@ -194,8 +194,11 @@ fn format_file_human_text(_key: &str, value: &serde_json::Value) -> Option<Strin
 fn truncate_value_for_diff(v: &serde_json::Value) -> serde_json::Value {
     match v {
         serde_json::Value::String(s) if s.len() > 1024 => {
-            // Use floor_char_boundary to avoid panicking on multi-byte UTF-8 chars
-            let boundary = s.floor_char_boundary(1024);
+            // Find the largest char boundary <= 1024 to avoid panicking on multi-byte UTF-8 chars
+            let mut boundary = 1024;
+            while boundary > 0 && !s.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
             serde_json::Value::String(format!(
                 "{}... <truncated {} chars>",
                 &s[..boundary],
