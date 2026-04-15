@@ -2,6 +2,7 @@ use axum::{Json, http::StatusCode, response::IntoResponse};
 use engine_core::WorkflowEngine;
 use engine_core::error::EngineError;
 use engine_core::persistence::WorkflowPersistence;
+use crate::log_buffer::LogBuffer;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -87,5 +88,6 @@ pub struct AppState {
     pub(crate) engine: Arc<WorkflowEngine>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,
-    pub(crate) nats_url: String, // Store URL for /api/info
+    pub(crate) nats_url: String,
+    pub(crate) log_buffer: Arc<LogBuffer>,
 }

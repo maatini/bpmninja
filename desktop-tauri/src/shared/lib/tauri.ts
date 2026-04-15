@@ -13,7 +13,8 @@ import type {
   MoveTokenRequest,
   PendingTimer,
   PendingMessageCatch,
-  CompletedInstanceQuery
+  CompletedInstanceQuery,
+  LogEntry,
 } from '../types/engine';
 
 export * from '../types/engine';
@@ -219,4 +220,12 @@ export async function queryCompletedInstances(query: CompletedInstanceQuery = {}
 
 export async function getCompletedInstance(instanceId: string): Promise<ProcessInstance> {
   return invoke('get_completed_instance', { instanceId });
+}
+
+export async function getLogEntries(
+  level?: string,
+  search?: string,
+  limit?: number
+): Promise<LogEntry[]> {
+  return invoke('get_log_entries', { level: level ?? null, search: search ?? null, limit: limit ?? null });
 }

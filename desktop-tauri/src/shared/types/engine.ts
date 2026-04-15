@@ -166,3 +166,10 @@ export interface PendingMessageCatch {
   message_name: string;
   token_id: string;
 }
+
+export interface LogEntry {
+  timestamp: string;
+  level: "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE";
+  target: string;
+  message: string;
+}

@@ -57,6 +57,7 @@ fn main() {
             commands::monitoring::get_monitoring_data,
             commands::monitoring::get_bucket_entries,
             commands::monitoring::get_bucket_entry_detail,
+            commands::monitoring::get_log_entries,
             commands::monitoring::read_bpmn_file,
             commands::messages::correlate_message
         ])

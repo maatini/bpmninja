@@ -31,6 +31,29 @@ pub async fn get_monitoring_data(
 }
 
 #[tauri::command]
+pub async fn get_log_entries(
+    state: tauri::State<'_, AppState>,
+    level: Option<String>,
+    search: Option<String>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let base = crate::state::get_base_url(&state)?;
+    let url = format!("{}/api/logs", base);
+    let mut req = state.client.get(&url);
+    if let Some(l) = &level { req = req.query(&[("level", l.as_str())]); }
+    if let Some(s) = &search { req = req.query(&[("search", s.as_str())]); }
+    if let Some(n) = limit { req = req.query(&[("limit", n.to_string().as_str())]); }
+
+    match req.send().await {
+        Ok(res) if res.status().is_success() => {
+            res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+        }
+        Ok(res) => Err(format!("Status {}", res.status())),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
 pub async fn read_bpmn_file(path: String) -> Result<String, String> {
     let xml = std::fs::read_to_string(&path)
         .map_err(|e| format!("Could not read file '{}': {}", path, e))?;

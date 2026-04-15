@@ -3,6 +3,7 @@ pub(crate) mod deploy;
 pub(crate) mod files;
 pub(crate) mod history;
 pub(crate) mod instances;
+pub(crate) mod logs;
 pub(crate) mod messages;
 pub(crate) mod monitoring;
 pub(crate) mod state;
@@ -15,6 +16,7 @@ use axum::{
     middleware,
     routing::{delete, get, post, put},
 };
+use crate::log_buffer::LogBuffer;
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
 use metrics_exporter_prometheus::PrometheusHandle;
@@ -28,7 +30,7 @@ use tower_http::cors::{Any, CorsLayer};
 /// Exposed as `pub` so integration tests can create the app without
 /// starting a full server binary.
 pub fn build_app() -> Router {
-    build_app_with_engine(Arc::new(WorkflowEngine::new()), None, HashMap::new(), None)
+    build_app_with_engine(Arc::new(WorkflowEngine::new()), None, HashMap::new(), None, Arc::new(LogBuffer::new()))
 }
 
 pub fn build_app_with_engine(
@@ -36,6 +38,7 @@ pub fn build_app_with_engine(
     persistence: Option<Arc<dyn WorkflowPersistence>>,
     xml_cache: HashMap<String, String>,
     prometheus_handle: Option<PrometheusHandle>,
+    log_buffer: Arc<LogBuffer>,
 ) -> Router {
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -45,6 +48,7 @@ pub fn build_app_with_engine(
         persistence,
         deployed_xml: Arc::new(RwLock::new(xml_cache)),
         nats_url,
+        log_buffer,
     });
 
     let cors = CorsLayer::new()
@@ -149,6 +153,7 @@ pub fn build_app_with_engine(
             post(tasks::extend_lock),
         )
         .route("/api/service-task/{id}/bpmnError", post(tasks::bpmn_error))
+        .route("/api/logs", get(logs::get_logs))
         .route("/api/health", get(|| async { axum::http::StatusCode::OK }))
         .route("/api/ready", get(monitoring::ready_endpoint))
         .layer(middleware::from_fn(

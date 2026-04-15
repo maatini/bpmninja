@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
-use engine_server::build_app_with_engine;
+use engine_server::{LogBuffer, build_app_with_engine};
 use persistence_nats::NatsPersistence;
+use tracing_subscriber::prelude::*;
 
 async fn restore_from_nats(
     nats: &NatsPersistence,
@@ -121,18 +122,24 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Setup tracing
+    // Setup tracing — fmt-Layer für Konsole + LogBuffer-Layer für /api/logs
     let format = env::var("LOG_FORMAT").unwrap_or_else(|_| "text".to_string());
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
+    let log_buffer = Arc::new(LogBuffer::new());
+    let buffer_layer = (*log_buffer).clone();
+
     if format.to_lowercase() == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().json().with_filter(filter))
+            .with(buffer_layer)
             .init();
     } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_filter(filter))
+            .with(buffer_layer)
+            .init();
     }
 
     tracing::info!("Starting bpmninja engine-server...");
@@ -170,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         nats_persistence,
         xml_cache,
         Some(prometheus_handle),
+        log_buffer,
     );
 
     // Background timer scheduler — processes expired timers automatically

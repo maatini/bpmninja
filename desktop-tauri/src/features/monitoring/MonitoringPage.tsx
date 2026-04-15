@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Server, Settings2, Database, List, ExternalLink } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { LogStream } from './LogStream'
 
 /**
  * Formats bytes into a human-readable string (B, KB, MB, GB).
@@ -269,6 +270,18 @@ export function MonitoringPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Log Stream */}
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-3 border-b bg-muted/20 py-4">
+              <CardTitle className="text-lg flex items-center gap-2">
+                Log Stream
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 h-[420px] flex flex-col">
+              <LogStream />
+            </CardContent>
+          </Card>
 
         </div>
       </ScrollArea>

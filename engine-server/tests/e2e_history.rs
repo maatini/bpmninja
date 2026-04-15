@@ -35,6 +35,7 @@ async fn start_server_with_nats() -> Option<String> {
         Some(persistence),
         std::collections::HashMap::new(),
         None,
+        Arc::new(engine_server::LogBuffer::new()),
     );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
