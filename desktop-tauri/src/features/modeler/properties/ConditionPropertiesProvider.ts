@@ -341,6 +341,17 @@ export class CustomPropertiesProvider {
         generalGroup.shouldOpen = true;
       }
 
+      // Message-Gruppe bei IntermediateCatchEvent mit MessageEventDefinition aufklappen
+      const isMessageCatchEvent =
+        is(element, 'bpmn:IntermediateCatchEvent') &&
+        element.businessObject.eventDefinitions?.some((d: any) => is(d, 'bpmn:MessageEventDefinition'));
+      if (isMessageCatchEvent) {
+        const messageGroup = groups.find((g: any) => g.id === 'message');
+        if (messageGroup) {
+          messageGroup.shouldOpen = true;
+        }
+      }
+
       const conditionGroup = CustomConditionGroup(element, this.translate);
       if (conditionGroup) {
         groups.push(conditionGroup);

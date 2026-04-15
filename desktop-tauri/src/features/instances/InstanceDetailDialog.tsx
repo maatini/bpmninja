@@ -29,12 +29,16 @@ export function InstanceDetailDialog({
   const { toast } = useToast();
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState<ProcessInstance | null>(null);
-  
+
   const [pendingTasks, setPendingTasks] = useState<PendingUserTask[]>([]);
   const [pendingServiceTasks, setPendingServiceTasks] = useState<PendingServiceTask[]>([]);
   const [variables, setVariables] = useState<VariableRow[]>([]);
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
   const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
+
+  // Live state for auto-refresh — only Variables and Workflow tokens update periodically.
+  // `selected` stays stable to avoid re-rendering the entire dialog.
+  const [liveTokens, setLiveTokens] = useState<ProcessInstance['tokens']>(undefined);
 
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
   const [showNodeDetails, setShowNodeDetails] = useState(true);
@@ -56,13 +60,32 @@ export function InstanceDetailDialog({
     }
   }, [instance]);
 
-  // Auto-refresh instance details every 3 seconds while dialog is open
+  // Lightweight auto-refresh: only Variables and Workflow tokens update periodically.
+  const liveRefresh = useCallback(async () => {
+    if (!selected) return;
+    try {
+      const details = await getInstanceDetails(selected.id);
+      setVariables(parseVariables(details.variables));
+      setLiveTokens(details.tokens);
+    } catch {
+      // Silently ignore refresh errors
+    }
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const interval = setInterval(liveRefresh, 3000);
+    return () => clearInterval(interval);
+  }, [selected?.id, liveRefresh]);
+
+  // Full refresh: re-fetches everything including state, pending tasks, and history.
   const refreshDetails = useCallback(async () => {
     if (!selected) return;
     try {
       const details = await getInstanceDetails(selected.id);
       setSelected(details);
       setVariables(parseVariables(details.variables));
+      setLiveTokens(details.tokens);
       if (typeof details.state === 'object') {
         if ('WaitingOnUserTask' in details.state) {
           const tasks = await getPendingTasks();
@@ -86,12 +109,6 @@ export function InstanceDetailDialog({
     }
   }, [selected?.id]);
 
-  useEffect(() => {
-    if (!selected) return;
-    const interval = setInterval(refreshDetails, 3000);
-    return () => clearInterval(interval);
-  }, [selected?.id, refreshDetails]);
-
   const loadInstanceDetails = async (inst: ProcessInstance) => {
     setDetailLoading(true);
     setDefinitionXml(null);
@@ -101,7 +118,8 @@ export function InstanceDetailDialog({
     try {
       const details = await getInstanceDetails(inst.id);
       setSelected(details);
-      
+      setLiveTokens(details.tokens);
+
       try {
         const xml = await getDefinitionXml(details.definition_key);
         setDefinitionXml(xml);
@@ -164,17 +182,17 @@ export function InstanceDetailDialog({
   const isCompleted = selected && (selected.state === 'Completed' || (typeof selected.state === 'object' && 'CompletedWithError' in selected.state));
 
   const activeNodeIds = useMemo(() => {
-    if (!selected) return [];
-    if (selected.tokens && Object.keys(selected.tokens).length > 0) {
+    const tokens = liveTokens ?? selected?.tokens;
+    if (tokens && Object.keys(tokens).length > 0) {
       return [...new Set(
-        Object.values(selected.tokens)
+        Object.values(tokens)
           .filter(t => !t.is_merged)
           .map(t => t.current_node)
           .filter(Boolean)
       )];
     }
-    return [selected.current_node].filter(Boolean);
-  }, [selected]);
+    return [selected?.current_node].filter(Boolean) as string[];
+  }, [liveTokens, selected?.current_node, selected?.tokens]);
 
   const handleSuspendResume = async () => {
     if (!selected) return;
@@ -194,7 +212,7 @@ export function InstanceDetailDialog({
 
   return (
     <Dialog open={!!instance} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="instance-detail max-w-[70vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden bg-background">
+      <DialogContent className="instance-detail max-w-[70vw] w-full h-[90vh] flex flex-col p-0 overflow-hidden bg-background">
         <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between sticky top-0 bg-background/95 backdrop-blur z-10 shrink-0">
           <DialogTitle className="text-xl">Instance Details: {selected?.id.substring(0, 8) || instance?.id.substring(0, 8)}…</DialogTitle>
           <div className="flex gap-2 items-center !m-0">
