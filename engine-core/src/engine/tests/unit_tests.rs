@@ -1283,12 +1283,11 @@ async fn mutation_find_downstream_join() {
     let _ = engine.deploy_definition(def.clone()).await;
 
     // Testing the logic explicitly via direct call (internal visibility allows this within engine module)
-    let engine_local = WorkflowEngine::new();
-    let found = engine_local.find_downstream_join(&def, "gw_split");
+    let found = crate::engine::executor::helpers::find_downstream_join(&def, "gw_split");
     assert_eq!(found, Some("gw_join".to_string()));
 
     // Find with depth limit (though internal recursion only decreases by 1, testing the > 100 limit protection is hard, but we can just test if the logic iterates correctly).
-    let found_from_start = engine_local.find_downstream_join(&def, "start");
+    let found_from_start = crate::engine::executor::helpers::find_downstream_join(&def, "start");
     assert_eq!(found_from_start, None);
     // It actually returns None because it exceeds max recursion or doesn't find gateway.
 }
@@ -4430,11 +4429,11 @@ async fn test_find_downstream_join_nested_parallel() {
 
     // find_downstream_join from split1 should find join1 (not join2)
     let def_ref = engine.definitions.get(&key).unwrap();
-    let join = engine.find_downstream_join(&def_ref, "split1");
+    let join = crate::engine::executor::helpers::find_downstream_join(&def_ref, "split1");
     assert_eq!(join.as_deref(), Some("join1"), "split1 should find join1");
 
     // find_downstream_join from split2 should find join2
-    let join2 = engine.find_downstream_join(&def_ref, "split2");
+    let join2 = crate::engine::executor::helpers::find_downstream_join(&def_ref, "split2");
     assert_eq!(join2.as_deref(), Some("join2"), "split2 should find join2");
 }
 
