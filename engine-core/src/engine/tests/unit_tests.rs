@@ -4284,6 +4284,7 @@ async fn test_restore_user_and_service_tasks() {
         retries: 3,
         error_message: None,
         error_details: None,
+        business_key: None,
     };
     engine.restore_service_task(pending_svc);
     assert_eq!(engine.pending_service_tasks.len(), 1);

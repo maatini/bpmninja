@@ -70,7 +70,7 @@ jobs:
         with:
           projectPath: desktop-tauri
           tagName: ${{ github.ref_name }}
-          releaseName: 'mini-bpm-desktop ${{ github.ref_name }}'
+          releaseName: 'bpmninja-desktop ${{ github.ref_name }}'
           releaseDraft: true          # Draft → du kannst noch prüfen & dann publishen
           prerelease: false
           args: --target ${{ matrix.target }}

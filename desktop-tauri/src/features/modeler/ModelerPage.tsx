@@ -22,12 +22,14 @@ import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import { CustomPropertiesProvider } from './properties/ConditionPropertiesProvider';
 import { ScriptPropertiesProvider } from './properties/ScriptPropertiesProvider';
 import { TopicPropertiesProvider } from './properties/TopicPropertiesProvider';
+import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'calledElementPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
-  topicPropertiesProvider: ['type', TopicPropertiesProvider]
+  topicPropertiesProvider: ['type', TopicPropertiesProvider],
+  calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
 };
 
 interface ModelerPageProps {

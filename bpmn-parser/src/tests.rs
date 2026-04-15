@@ -998,3 +998,63 @@ fn parse_compensation_events() {
         _ => panic!("Expected CompensationEndEvent, got {:?}", end),
     }
 }
+
+#[test]
+fn test_camunda_namespace_script_parsed() {
+    // bpmn-js/Camunda Modeler export BPMN with camunda: namespace prefix on
+    // executionListener and script elements. Verify these are parsed correctly.
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+             id="Definitions_1">
+  <process id="TestProcess" isExecutable="true">
+    <startEvent id="start"/>
+    <serviceTask id="task1">
+      <extensionElements>
+        <camunda:executionListener event="end">
+          <camunda:script scriptFormat="rhai">let result = 42;</camunda:script>
+        </camunda:executionListener>
+      </extensionElements>
+    </serviceTask>
+    <endEvent id="end"/>
+    <sequenceFlow id="f1" sourceRef="start" targetRef="task1"/>
+    <sequenceFlow id="f2" sourceRef="task1" targetRef="end"/>
+  </process>
+</definitions>"#;
+
+    let def = parse_bpmn_xml(xml).expect("Should parse BPMN with camunda: namespace");
+    let listeners = def.listeners.get("task1").cloned().unwrap_or_default();
+    // camunda:executionListener must be recognized (namespace prefix stripped by quick-xml)
+    assert_eq!(
+        listeners.len(),
+        1,
+        "camunda:executionListener should be parsed; got listeners: {:?}",
+        listeners
+    );
+    assert!(matches!(listeners[0].event, ListenerEvent::End));
+    assert_eq!(listeners[0].script, "let result = 42;");
+}
+
+#[test]
+fn test_call_activity_parsed() {
+    // Verify that <callActivity calledElement="..."> is correctly parsed.
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1">
+  <process id="ParentProcess" isExecutable="true">
+    <startEvent id="start"/>
+    <callActivity id="call1" calledElement="ChildProcess"/>
+    <endEvent id="end"/>
+    <sequenceFlow id="f1" sourceRef="start" targetRef="call1"/>
+    <sequenceFlow id="f2" sourceRef="call1" targetRef="end"/>
+  </process>
+</definitions>"#;
+
+    let def = parse_bpmn_xml(xml).expect("Should parse BPMN with callActivity");
+    let node = def.nodes.get("call1").expect("call1 should exist");
+    match node {
+        BpmnElement::CallActivity { called_element } => {
+            assert_eq!(called_element, "ChildProcess");
+        }
+        _ => panic!("Expected CallActivity, got {:?}", node),
+    }
+}

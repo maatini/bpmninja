@@ -7,6 +7,7 @@ mod api_helpers;
 mod commands;
 mod state;
 
+
 fn main() {
     let initial_state = state::AppState {
         client: reqwest::Client::new(),

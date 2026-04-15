@@ -18,7 +18,9 @@ interface InstanceViewerProps {
 export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeIds, onNodeClick, timerStartNodeId }: InstanceViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
+  const importAbortRef = useRef<boolean>(false);
 
+  // Create viewer once on mount, destroy on unmount
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -28,27 +30,35 @@ export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeIds,
     viewerRef.current = viewer;
 
     return () => {
+      importAbortRef.current = true;
       viewer.destroy();
       viewerRef.current = null;
     };
   }, []);
 
+  // Re-import XML whenever it or the active nodes change
   useEffect(() => {
-    if (!viewerRef.current || !xml) return;
+    const viewer = viewerRef.current;
+    if (!viewer || !xml) return;
 
-    let isMounted = true;
+    importAbortRef.current = false;
+    let cancelled = false;
+
     (async () => {
       try {
-        await viewerRef.current.importXML(xml);
-        
-        if (!isMounted) return;
+        // Clear existing diagram before re-importing to avoid "element already exists"
+        try { viewer.clear(); } catch (_) { /* ignore if not yet initialized */ }
 
-        const canvas = viewerRef.current.get('canvas');
-        const elementRegistry = viewerRef.current.get('elementRegistry');
-        const eventBus = viewerRef.current.get('eventBus');
+        await viewer.importXML(xml);
+
+        if (cancelled || importAbortRef.current) return;
+
+        const canvas = viewer.get('canvas');
+        const elementRegistry = viewer.get('elementRegistry');
+        const eventBus = viewer.get('eventBus');
 
         // Zoom to fit
-        canvas.zoom('fit-viewport', 'auto');
+        try { canvas.zoom('fit-viewport', 'auto'); } catch (_) { /* ignore */ }
 
         // Highlight all active nodes (supports parallel execution)
         for (const nodeId of activeNodeIds) {
@@ -62,7 +72,8 @@ export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeIds,
           canvas.addMarker(timerStartNodeId, 'highlight-timer-active');
         }
 
-        // Add click listener
+        // Add click listener — re-register each time to use fresh activeNodeIds closure
+        eventBus.off('element.click');
         eventBus.on('element.click', (e: any) => {
           if (activeNodeIds.includes(e.element.id)) {
             onNodeClick(e.element.id);
@@ -70,18 +81,20 @@ export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeIds,
         });
 
       } catch (err) {
-        console.error('Failed to import BPMN XML for instance viewer', err);
+        if (!cancelled && !importAbortRef.current) {
+          console.error('Failed to import BPMN XML for instance viewer', err);
+        }
       }
     })();
 
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
   }, [xml, activeNodeIds, onNodeClick, timerStartNodeId]);
 
   const handleCenter = () => {
     if (viewerRef.current) {
-      viewerRef.current.get('canvas').zoom('fit-viewport', 'auto');
+      try { viewerRef.current.get('canvas').zoom('fit-viewport', 'auto'); } catch (_) { /* ignore */ }
     }
   };
 
@@ -107,11 +120,11 @@ export const InstanceViewer = memo(function InstanceViewer({ xml, activeNodeIds,
         `}
       </style>
       <div className="relative w-full h-full min-h-[300px] border border-border rounded-md bg-muted/20">
-        <div 
-          ref={containerRef} 
+        <div
+          ref={containerRef}
           className="w-full h-full flex-1 min-h-[300px] bg-background"
         />
-        <Button 
+        <Button
           variant="outline"
           size="icon"
           onClick={handleCenter}

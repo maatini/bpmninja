@@ -290,8 +290,29 @@ impl WorkflowEngine {
                 .get(&def_key)
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
-            self.run_end_scripts(parent_id, &mut token, &def, &called_node_id)
-                .await?;
+            // End-Scripts der Call-Activity ausführen. Bei Fehler: Eltern-Instanz als
+            // fehlerhaft markieren, damit sie nicht in `Running`-Zustand ohne Token
+            // hängen bleibt.
+            if let Err(e) = self
+                .run_end_scripts(parent_id, &mut token, &def, &called_node_id)
+                .await
+            {
+                tracing::error!(
+                    "Instanz {parent_id}: End-Script der Call Activity '{}' fehlgeschlagen: {e} — markiere als fehlerhaft",
+                    called_node_id
+                );
+                if let Some(parent_arc) = self.instances.get(&parent_id).await {
+                    let mut parent_inst = parent_arc.write().await;
+                    parent_inst.state = InstanceState::CompletedWithError {
+                        error_code: format!("SCRIPT_ERROR:{called_node_id}"),
+                    };
+                    parent_inst.push_audit_log(format!(
+                        "💥 Script-Fehler im End-Listener der Call Activity '{called_node_id}': {e}"
+                    ));
+                }
+                self.persist_instance(parent_id).await;
+                return Err(e);
+            }
 
             // Check for BPMN Error handling first
             let mut handle_as_incident = false;

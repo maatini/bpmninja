@@ -63,7 +63,7 @@ async fn test_file_upload_download_delete() {
         .to_string();
 
     // 3. Upload a file
-    let file_content = b"Hello Mini-BPM File System!";
+    let file_content = b"Hello bpmninja File System!";
     let part = multipart::Part::bytes(file_content.to_vec())
         .file_name("hello.txt")
         .mime_str("text/plain")

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers, Pause } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo } from '../../shared/types/engine';
 import { listInstances, listDefinitions, deleteInstance } from '../../shared/lib/tauri';
@@ -44,14 +44,16 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
 
   usePolling(fetchData, 3000, !selected);
 
-  // Initial selection if driven from outside (e.g. Incidents list)
-  if (selectedInstanceId && instances.length > 0 && (!selected || selected.id !== selectedInstanceId)) {
+  // Initial selection if driven from outside (e.g. Incidents list) — must be in useEffect, not render body
+  useEffect(() => {
+    if (!selectedInstanceId || instances.length === 0) return;
+    if (selected && selected.id === selectedInstanceId) return;
     const inst = instances.find(i => i.id === selectedInstanceId);
     if (inst) {
       setSelected(inst);
       if (onClearSelection) onClearSelection();
     }
-  }
+  }, [selectedInstanceId, instances]);
 
   const handleDeleteRequest = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();

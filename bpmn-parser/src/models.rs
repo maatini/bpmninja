@@ -168,7 +168,7 @@ pub(crate) struct BpmnProcess {
     #[serde(rename = "businessRuleTask", default)]
     pub business_rule_tasks: Vec<BpmnGenericTask>,
     #[serde(rename = "callActivity", default)]
-    pub call_activities: Vec<BpmnGenericTask>,
+    pub call_activities: Vec<BpmnCallActivity>,
 
     /// Gateways — mapped to proper BpmnElement variants.
     #[serde(rename = "exclusiveGateway", default)]
@@ -362,6 +362,16 @@ pub(crate) struct BpmnGenericTask {
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct BpmnCallActivity {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@calledElement", default)]
+    pub called_element: Option<String>,
+    #[serde(rename = "extensionElements")]
+    pub extension_elements: Option<BpmnExtensionElements>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct BpmnExclusiveGateway {
     #[serde(rename = "@id")]
     pub id: String,
@@ -467,7 +477,7 @@ pub(crate) struct BpmnSubProcess {
     #[serde(rename = "businessRuleTask", default)]
     pub business_rule_tasks: Vec<BpmnGenericTask>,
     #[serde(rename = "callActivity", default)]
-    pub call_activities: Vec<BpmnGenericTask>,
+    pub call_activities: Vec<BpmnCallActivity>,
 
     #[serde(rename = "exclusiveGateway", default)]
     pub exclusive_gateways: Vec<BpmnExclusiveGateway>,

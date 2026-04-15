@@ -89,12 +89,12 @@ impl WorkflowEngine {
         let tasks = self.get_pending_user_tasks();
         let mut result = Vec::with_capacity(tasks.len());
         for mut task in tasks {
-            if task.business_key.is_none() {
-                if let Some(arc) = self.instances.get(&task.instance_id).await {
-                    let inst = arc.read().await;
-                    if !inst.business_key.is_empty() {
-                        task.business_key = Some(inst.business_key.clone());
-                    }
+            if task.business_key.is_none()
+                && let Some(arc) = self.instances.get(&task.instance_id).await
+            {
+                let inst = arc.read().await;
+                if !inst.business_key.is_empty() {
+                    task.business_key = Some(inst.business_key.clone());
                 }
             }
             result.push(task);
@@ -108,12 +108,12 @@ impl WorkflowEngine {
         let tasks = self.get_pending_service_tasks();
         let mut result = Vec::with_capacity(tasks.len());
         for mut task in tasks {
-            if task.business_key.is_none() {
-                if let Some(arc) = self.instances.get(&task.instance_id).await {
-                    let inst = arc.read().await;
-                    if !inst.business_key.is_empty() {
-                        task.business_key = Some(inst.business_key.clone());
-                    }
+            if task.business_key.is_none()
+                && let Some(arc) = self.instances.get(&task.instance_id).await
+            {
+                let inst = arc.read().await;
+                if !inst.business_key.is_empty() {
+                    task.business_key = Some(inst.business_key.clone());
                 }
             }
             result.push(task);

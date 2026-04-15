@@ -427,14 +427,13 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
-    // 5c. Generic tasks (remaining: receive, manual, businessRule, callActivity)
+    // 5c. Generic tasks (remaining: receive, manual, businessRule)
     let all_generic_tasks = process
         .generic_tasks
         .into_iter()
         .chain(process.receive_tasks)
         .chain(process.manual_tasks)
-        .chain(process.business_rule_tasks)
-        .chain(process.call_activities);
+        .chain(process.business_rule_tasks);
 
     for task in all_generic_tasks {
         let node_id = task.id.clone();
@@ -446,6 +445,17 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 topic,
                 multi_instance,
             },
+        );
+        builder = add_listeners(builder, &node_id, task.extension_elements);
+    }
+
+    // 5d. Call Activities — mapped to BpmnElement::CallActivity with calledElement
+    for task in process.call_activities {
+        let node_id = task.id.clone();
+        let called_element = task.called_element.unwrap_or_else(|| task.id.clone());
+        builder = builder.node(
+            task.id,
+            BpmnElement::CallActivity { called_element },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
@@ -759,8 +769,7 @@ fn flatten_subprocess(
         .into_iter()
         .chain(sp.receive_tasks)
         .chain(sp.manual_tasks)
-        .chain(sp.business_rule_tasks)
-        .chain(sp.call_activities);
+        .chain(sp.business_rule_tasks);
     for task in all_generic_tasks {
         let topic = task.name.unwrap_or_else(|| task.id.clone());
         let multi_instance = parse_multi_instance(task.multi_instance);
@@ -770,6 +779,14 @@ fn flatten_subprocess(
                 topic,
                 multi_instance,
             },
+        );
+    }
+
+    for task in sp.call_activities {
+        let called_element = task.called_element.unwrap_or_else(|| task.id.clone());
+        builder = builder.node(
+            task.id,
+            engine_core::model::BpmnElement::CallActivity { called_element },
         );
     }
 

@@ -94,9 +94,24 @@ impl WorkflowEngine {
             .definitions
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
-        // Current node's end scripts
-        self.run_end_scripts(instance_id, &mut token, &def, &pending.node_id)
-            .await?;
+        // Current node's end scripts — on failure, rollback task to pending so it isn't lost
+        if let Err(e) = self
+            .run_end_scripts(instance_id, &mut token, &def, &pending.node_id)
+            .await
+        {
+            tracing::error!(
+                "Instance {instance_id}: end script failed for user task '{}': {e} — re-inserting task",
+                pending.node_id
+            );
+            // Restore token into instance so the task is completable again
+            if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                let mut inst = inst_arc.write().await;
+                inst.state = InstanceState::WaitingOnUserTask { task_id };
+                inst.tokens.insert(token.id, token);
+            }
+            self.pending_user_tasks.insert(task_id, pending);
+            return Err(e);
+        }
 
         // Register compensation handler if this activity has a BoundaryCompensationEvent
         self.register_compensation_handler(instance_id, &pending.node_id, &def)

@@ -90,4 +90,12 @@ nats-data/
 *.sqlite
 *.db
 .antigravity/
-.DS_Storefuzz/crash.bin
+.DS_Store
+fuzz/crash.bin
+
+# ========================
+# Temporäre Output-Dateien
+# ========================
+test-output.txt
+lint_output.txt
+*-output.txt

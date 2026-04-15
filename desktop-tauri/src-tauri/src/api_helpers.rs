@@ -12,7 +12,13 @@ pub async fn api_get(state: &AppState, path: &str) -> Result<Value, String> {
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("Request failed: {} {}", res.status(), path));
+        let status = res.status();
+        let body_text = res.text().await.unwrap_or_default();
+        let message = serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+            .unwrap_or(body_text);
+        return Err(format!("Request failed: {} {}: {}", status, path, message));
     }
     res.json().await.map_err(|e| e.to_string())
 }
@@ -48,7 +54,14 @@ pub async fn api_post_no_body(state: &AppState, path: &str, body: &Value) -> Res
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("Request failed: {} {}", res.status(), path));
+        let status = res.status();
+        let body_text = res.text().await.unwrap_or_default();
+        // Extract "error" field from JSON if present
+        let message = serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+            .unwrap_or(body_text);
+        return Err(format!("Request failed: {} {}: {}", status, path, message));
     }
     Ok(())
 }
@@ -65,7 +78,13 @@ pub async fn api_put(state: &AppState, path: &str, body: &Value) -> Result<(), S
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("Request failed: {} {}", res.status(), path));
+        let status = res.status();
+        let body_text = res.text().await.unwrap_or_default();
+        let message = serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+            .unwrap_or(body_text);
+        return Err(format!("Request failed: {} {}: {}", status, path, message));
     }
     Ok(())
 }
@@ -81,7 +100,13 @@ pub async fn api_delete(state: &AppState, path: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("Request failed: {} {}", res.status(), path));
+        let status = res.status();
+        let body_text = res.text().await.unwrap_or_default();
+        let message = serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+            .unwrap_or(body_text);
+        return Err(format!("Request failed: {} {}: {}", status, path, message));
     }
     Ok(())
 }
