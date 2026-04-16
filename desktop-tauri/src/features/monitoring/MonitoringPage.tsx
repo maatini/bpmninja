@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Server, Settings2, Database, List, ExternalLink } from 'lucide-react'
+import { Server, Settings2, Database, List, ExternalLink, Cloud, HardDrive } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LogStream } from './LogStream'
 import { DataViewer } from '@/shared/components/DataViewer'
@@ -95,7 +95,22 @@ export function MonitoringPage() {
     <div className="flex flex-col h-full bg-background">
       <div className="flex items-center justify-between px-6 py-4 border-b bg-background">
         <h2 className="text-2xl font-bold tracking-tight">Monitoring</h2>
-        <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md">Push-Updates aktiv</span>
+        <div className="flex items-center gap-2">
+          {data != null && (
+            data.storage_info != null ? (
+              <Badge className="gap-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-100/80 dark:bg-emerald-900/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                <Cloud className="h-3 w-3" />
+                NATS
+              </Badge>
+            ) : (
+              <Badge className="gap-1 bg-amber-100 text-amber-700 hover:bg-amber-100/80 dark:bg-amber-900/40 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                <HardDrive className="h-3 w-3" />
+                In-Memory
+              </Badge>
+            )
+          )}
+          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md">Push-Updates aktiv</span>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">

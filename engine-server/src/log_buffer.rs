@@ -170,7 +170,7 @@ impl LogBuffer {
             .iter()
             .filter(|e| {
                 let entry_level = parse_level(&e.level).unwrap_or(Level::TRACE);
-                entry_level >= min_level
+                entry_level <= min_level
             })
             .filter(|e| {
                 if let Some(ref q) = search_lower {

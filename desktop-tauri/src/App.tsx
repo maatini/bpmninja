@@ -7,7 +7,7 @@ import { SettingsPage } from './features/settings/SettingsPage'
 import { MonitoringPage } from './features/monitoring/MonitoringPage'
 import { PendingTasksPage } from './features/tasks/PendingTasksPage'
 import { MessageDialog } from './shared/components/MessageDialog'
-import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle, Eye, History, Wifi, WifiOff, Loader2 } from 'lucide-react'
+import { PenTool, Database, ListTodo, Layers, BarChart2, Settings as SettingsIcon, Mail, AlertTriangle, Eye, History, Wifi, WifiOff, Loader2, HardDrive, Cloud } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { IncidentsPage } from './features/incidents/IncidentsPage'
 import { OverviewPage } from './features/overview/OverviewPage'
@@ -19,7 +19,7 @@ import { EngineOfflineBanner } from './shared/components/EngineOfflineBanner'
 
 function App() {
   const { toast } = useToast()
-  const { status: engineStatus, refresh: refreshEngine } = useEngineStatus(10_000)
+  const { status: engineStatus, storageMode, refresh: refreshEngine } = useEngineStatus(10_000)
 
   useEffect(() => {
     const saved = localStorage.getItem('theme')
@@ -157,30 +157,47 @@ function App() {
         </nav>
 
         {/* Engine-Status-Anzeige */}
-        <div className="p-3 border-t bg-background/50 flex items-center gap-2">
-          {engineStatus === 'checking' && (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
-              <span className="text-xs text-muted-foreground">Verbinde...</span>
-            </>
-          )}
-          {engineStatus === 'online' && (
-            <>
-              <Wifi className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
-              <span className="text-xs text-green-600 dark:text-green-500 font-medium">Engine Online</span>
-            </>
-          )}
-          {engineStatus === 'offline' && (
-            <>
-              <WifiOff className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
-              <span className="text-xs text-destructive font-medium">Engine Offline</span>
-              <button
-                onClick={() => setActiveTab('settings')}
-                className="ml-auto text-xs text-destructive underline underline-offset-2 hover:no-underline whitespace-nowrap"
-              >
-                Prüfen →
-              </button>
-            </>
+        <div className="p-3 border-t bg-background/50 flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            {engineStatus === 'checking' && (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
+                <span className="text-xs text-muted-foreground">Verbinde...</span>
+              </>
+            )}
+            {engineStatus === 'online' && (
+              <>
+                <Wifi className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                <span className="text-xs text-green-600 dark:text-green-500 font-medium">Engine Online</span>
+              </>
+            )}
+            {engineStatus === 'offline' && (
+              <>
+                <WifiOff className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                <span className="text-xs text-destructive font-medium">Engine Offline</span>
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className="ml-auto text-xs text-destructive underline underline-offset-2 hover:no-underline whitespace-nowrap"
+                >
+                  Prüfen →
+                </button>
+              </>
+            )}
+          </div>
+          {engineStatus === 'online' && storageMode != null && (
+            <div className="flex items-center gap-1.5">
+              {storageMode === 'nats' ? (
+                <>
+                  <Cloud className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">NATS</span>
+                </>
+              ) : (
+                <>
+                  <HardDrive className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">In-Memory</span>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
