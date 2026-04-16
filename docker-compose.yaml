@@ -21,5 +21,15 @@ services:
     depends_on:
       - nats
 
+  cobra-nats:
+    image: ghcr.io/maatini/cobra-nats:0.5.2
+    ports:
+      - "3000:3000" # Dashboard erreichbar unter http://localhost:3000
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - nats
+    # restart: unless-stopped        # optional, aber empfehlenswert
+
 volumes:
   nats-data:
