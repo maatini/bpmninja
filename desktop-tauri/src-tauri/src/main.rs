@@ -47,6 +47,7 @@ fn main() {
             commands::instances::suspend_instance,
             commands::instances::resume_instance,
             commands::instances::move_token,
+            commands::instances::migrate_instance,
             commands::instances::delete_instance,
             commands::instances::query_completed_instances,
             commands::instances::get_completed_instance,

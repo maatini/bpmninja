@@ -99,3 +99,4 @@ fuzz/crash.bin
 test-output.txt
 lint_output.txt
 *-output.txt
+graphify-out/cache

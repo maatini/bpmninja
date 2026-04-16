@@ -35,6 +35,7 @@ pub enum HistoryEventType {
     TokenMoved,
     EscalationThrown,
     CompensationTriggered,
+    InstanceMigrated,
 }
 
 impl HistoryEventType {
@@ -60,6 +61,7 @@ impl HistoryEventType {
             Self::TokenMoved => "Token was manually moved to a different node".into(),
             Self::EscalationThrown => "An escalation was thrown".into(),
             Self::CompensationTriggered => "Compensation was triggered".into(),
+            Self::InstanceMigrated => "Process instance was migrated to a new definition".into(),
         }
     }
 }

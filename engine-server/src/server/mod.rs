@@ -81,6 +81,10 @@ pub fn build_app_with_engine(
             post(instances::move_token),
         )
         .route(
+            "/api/instances/{id}/migrate",
+            post(instances::migrate_instance),
+        )
+        .route(
             "/api/instances/{id}/suspend",
             post(instances::suspend_instance),
         )

@@ -144,6 +144,25 @@ pub async fn move_token(
 }
 
 #[tauri::command]
+pub async fn migrate_instance(
+    state: tauri::State<'_, AppState>,
+    instance_id: String,
+    target_definition_key: String,
+    node_mapping: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "target_definition_key": target_definition_key,
+        "node_mapping": node_mapping.unwrap_or_default(),
+    });
+    crate::api_helpers::api_post_no_body(
+        &state,
+        &format!("/api/instances/{instance_id}/migrate"),
+        &payload,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_instance(
     state: tauri::State<'_, AppState>,
     instance_id: String,

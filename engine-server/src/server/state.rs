@@ -71,6 +71,10 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 format!("Instance '{id}' is suspended"),
             ),
+            Self::Engine(EngineError::OrphanedToken(node)) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Orphaned token: node '{node}' not found in target definition — provide a mapping"),
+            ),
             Self::Engine(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
         };
 

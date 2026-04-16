@@ -108,6 +108,18 @@ export async function moveToken(instanceId: string, request: MoveTokenRequest): 
   });
 }
 
+export async function migrateInstance(
+  instanceId: string,
+  targetDefinitionKey: string,
+  nodeMapping?: Record<string, string>
+): Promise<void> {
+  return invoke('migrate_instance', {
+    instanceId,
+    targetDefinitionKey,
+    nodeMapping: nodeMapping ?? null,
+  });
+}
+
 export async function deleteInstance(instanceId: string): Promise<void> {
   return invoke('delete_instance', { instanceId });
 }

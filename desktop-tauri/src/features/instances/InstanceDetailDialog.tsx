@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useEngineEvents } from '../../shared/hooks/use-engine-events';
-import { Trash, RefreshCw, Clock, Pause, Play, ArrowRightLeft } from 'lucide-react';
+import { Trash, RefreshCw, Clock, Pause, Play, ArrowRightLeft, GitBranch } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo, type PendingUserTask, type PendingServiceTask } from '../../shared/types/engine';
 import { getInstanceDetails, getDefinitionXml, getPendingTasks, getPendingServiceTasks, updateInstanceVariables, suspendInstance, resumeInstance } from '../../shared/lib/tauri';
 import { ErrorBoundary } from '../../shared/components/ErrorBoundary';
 import { InstanceViewer } from './InstanceViewer';
 import { TokenMoveDialog } from './TokenMoveDialog';
+import { MigrationDialog } from './MigrationDialog';
 import { HistoryTimeline } from '../../shared/components/HistoryTimeline';
 import { VariableEditor, type VariableRow, parseVariables, serializeVariables } from '../../shared/components/VariableEditor';
 import { stateBadgeClass, stateLabel } from './InstanceStateUtils';
@@ -44,6 +45,7 @@ export function InstanceDetailDialog({
   const [definitionXml, setDefinitionXml] = useState<string | null>(null);
   const [showNodeDetails, setShowNodeDetails] = useState(true);
   const [tokenMoveOpen, setTokenMoveOpen] = useState(false);
+  const [migrationOpen, setMigrationOpen] = useState(false);
 
   useEffect(() => {
     if (!instance) {
@@ -230,6 +232,15 @@ export function InstanceDetailDialog({
                   <ArrowRightLeft className="h-4 w-4" /> Token Move
                 </Button>
                 <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setMigrationOpen(true)}
+                  disabled={isSuspended as boolean}
+                >
+                  <GitBranch className="h-4 w-4" /> Migrate
+                </Button>
+                <Button
                   variant={isSuspended ? "default" : "outline"}
                   size="sm"
                   className="gap-2"
@@ -413,6 +424,17 @@ export function InstanceDetailDialog({
         onClose={() => setTokenMoveOpen(false)}
         onMoved={() => {
           setTokenMoveOpen(false);
+          refreshDetails();
+        }}
+      />
+
+      <MigrationDialog
+        instance={selected}
+        definitions={[...defMap.values()]}
+        open={migrationOpen}
+        onClose={() => setMigrationOpen(false)}
+        onMigrated={() => {
+          setMigrationOpen(false);
           refreshDetails();
         }}
       />

@@ -76,6 +76,13 @@ model MoveTokenRequest {
   target_node_id: string;
 }
 
+model MigrateInstanceRequest {
+  /** UUID of the target ProcessDefinition. */
+  target_definition_key: string;
+  /** Optional mapping of old BPMN node IDs to new BPMN node IDs. Required for nodes that were renamed between versions. */
+  node_mapping?: Record<string>;
+}
+
 model PendingUserTask {
   id: string;
   instance_id: string;
@@ -272,6 +279,10 @@ namespace Api {
 
   @post @route("/instances/{id}/move-token")
   op moveToken(@path id: string, @body request: MoveTokenRequest): { @statusCode statusCode: 204 } | AppError;
+
+  /** Migrate a running instance to a different process definition version. */
+  @post @route("/instances/{id}/migrate")
+  op migrateInstance(@path id: string, @body request: MigrateInstanceRequest): { @statusCode statusCode: 204 } | AppError;
 
   // ---- Files (variable-attached) ----
 

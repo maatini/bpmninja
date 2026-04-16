@@ -581,6 +581,197 @@ impl WorkflowEngine {
         self.run_instance_batch(instance_id, token).await
     }
 
+    /// Migrates an active process instance to a different process definition.
+    ///
+    /// Tokens are remapped via `node_mapping` (old node ID → new node ID).
+    /// If a token sits on a node that is absent in the target definition and
+    /// no mapping entry covers it, the call fails with `EngineError::OrphanedToken`
+    /// — nothing is written.
+    ///
+    /// Only instances in `Running`, `WaitingOn*`, or `ParallelExecution` states
+    /// may be migrated; `Completed`, `CompletedWithError`, and `Suspended` are rejected.
+    pub async fn migrate_instance(
+        &self,
+        instance_id: Uuid,
+        target_definition_key: Uuid,
+        node_mapping: HashMap<String, String>,
+    ) -> EngineResult<()> {
+        // --- 1. Validate target definition exists ---
+        let (target_id, target_version) = {
+            let def = self
+                .definitions
+                .get(&target_definition_key)
+                .ok_or(EngineError::NoSuchDefinition(target_definition_key))?;
+            (def.id.clone(), def.version)
+        };
+
+        // --- 2. Capture old state for history diff ---
+        let old_state = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            inst_arc.read().await.clone()
+        };
+
+        // --- 3. Guard: reject terminal / suspended states ---
+        match &old_state.state {
+            crate::runtime::InstanceState::Completed
+            | crate::runtime::InstanceState::CompletedWithError { .. } => {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            crate::runtime::InstanceState::Suspended { .. } => {
+                return Err(EngineError::InstanceSuspended(instance_id));
+            }
+            _ => {}
+        }
+
+        // --- 4. Pre-validate: every token node must exist in target definition
+        //        (either directly or via mapping) — validate BEFORE writing ---
+        {
+            let def = self
+                .definitions
+                .get(&target_definition_key)
+                .ok_or(EngineError::NoSuchDefinition(target_definition_key))?;
+
+            // Validate instance.current_node
+            let resolved = node_mapping
+                .get(&old_state.current_node)
+                .map(String::as_str)
+                .unwrap_or(old_state.current_node.as_str());
+            if !def.nodes.contains_key(resolved) {
+                return Err(EngineError::OrphanedToken(resolved.to_string()));
+            }
+
+            // Validate every token
+            for token in old_state.tokens.values() {
+                let resolved = node_mapping
+                    .get(&token.current_node)
+                    .map(String::as_str)
+                    .unwrap_or(token.current_node.as_str());
+                if !def.nodes.contains_key(resolved) {
+                    return Err(EngineError::OrphanedToken(resolved.to_string()));
+                }
+            }
+            // Validate active_tokens (they may differ from tokens in edge cases)
+            for at in &old_state.active_tokens {
+                let resolved = node_mapping
+                    .get(&at.token.current_node)
+                    .map(String::as_str)
+                    .unwrap_or(at.token.current_node.as_str());
+                if !def.nodes.contains_key(resolved) {
+                    return Err(EngineError::OrphanedToken(resolved.to_string()));
+                }
+            }
+        }
+
+        // --- 5. Apply migration (write) ---
+        {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+
+            // Remap definition key
+            inst.definition_key = target_definition_key;
+
+            // Remap instance.current_node
+            if let Some(new_node) = node_mapping.get(&inst.current_node) {
+                inst.current_node = new_node.clone();
+            }
+
+            // Remap all tokens
+            for token in inst.tokens.values_mut() {
+                if let Some(new_node) = node_mapping.get(&token.current_node) {
+                    token.current_node = new_node.clone();
+                }
+            }
+
+            // Remap active_tokens
+            for at in &mut inst.active_tokens {
+                if let Some(new_node) = node_mapping.get(&at.token.current_node) {
+                    at.token.current_node = new_node.clone();
+                }
+            }
+
+            // Remap join_barriers keys (gateway_node_id → new)
+            let remapped_barriers: HashMap<String, crate::runtime::JoinBarrier> = inst
+                .join_barriers
+                .drain()
+                .map(|(k, v)| (node_mapping.get(&k).cloned().unwrap_or(k), v))
+                .collect();
+            inst.join_barriers = remapped_barriers;
+
+            // Remap multi_instance_state keys
+            let remapped_mi: HashMap<String, crate::runtime::MultiInstanceProgress> = inst
+                .multi_instance_state
+                .drain()
+                .map(|(k, v)| (node_mapping.get(&k).cloned().unwrap_or(k), v))
+                .collect();
+            inst.multi_instance_state = remapped_mi;
+
+            inst.push_audit_log(format!(
+                "🔧 Migriert zu Definition {target_id} (v{target_version})"
+            ));
+        }
+
+        // --- 6. Remap pending tasks that belong to this instance ---
+        for mut entry in self.pending_user_tasks.iter_mut() {
+            if entry.instance_id == instance_id
+                && let Some(new_node) = node_mapping.get(&entry.node_id)
+            {
+                entry.node_id = new_node.clone();
+            }
+        }
+        for mut entry in self.pending_service_tasks.iter_mut() {
+            if entry.instance_id == instance_id {
+                if let Some(new_node) = node_mapping.get(&entry.node_id) {
+                    entry.node_id = new_node.clone();
+                }
+                entry.definition_key = target_definition_key;
+            }
+        }
+        for mut entry in self.pending_timers.iter_mut() {
+            if entry.instance_id == instance_id
+                && let Some(new_node) = node_mapping.get(&entry.node_id)
+            {
+                entry.node_id = new_node.clone();
+            }
+        }
+        for mut entry in self.pending_message_catches.iter_mut() {
+            if entry.instance_id == instance_id
+                && let Some(new_node) = node_mapping.get(&entry.node_id)
+            {
+                entry.node_id = new_node.clone();
+            }
+        }
+
+        // --- 7. Record history ---
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::InstanceMigrated,
+            &format!(
+                "Instanz zu Definition '{target_id}' (v{target_version}) migriert"
+            ),
+            crate::history::ActorType::User,
+            None,
+            Some(&old_state),
+        )
+        .await;
+
+        // --- 8. Persist updated instance ---
+        self.persist_instance(instance_id).await;
+
+        tracing::info!(
+            "Instance {instance_id}: migriert zu Definition '{target_id}' (v{target_version})"
+        );
+
+        Ok(())
+    }
+
     /// Deletes a process instance and cleans up associated pending tasks.
     pub async fn delete_instance(&self, instance_id: Uuid) -> EngineResult<()> {
         let removed_inst_arc = self

@@ -57,6 +57,11 @@ pub enum EngineError {
     #[error("Cannot delete definition: {0} instances still exist")]
     DefinitionHasInstances(usize),
 
+    /// A token references a node that does not exist in the target definition,
+    /// and no mapping entry was provided to redirect it.
+    #[error("Orphaned token: node '{0}' has no entry in the target definition and no mapping")]
+    OrphanedToken(String),
+
     #[error("Persistence error: {0}")]
     PersistenceError(String),
 

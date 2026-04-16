@@ -181,6 +181,29 @@ pub(crate) async fn move_token(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub(crate) struct MigrateInstanceRequest {
+    pub target_definition_key: String,
+    #[serde(default)]
+    pub node_mapping: HashMap<String, String>,
+}
+
+pub(crate) async fn migrate_instance(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<MigrateInstanceRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let engine = &state.engine;
+    let instance_id = parse_uuid(&id)?;
+    let target_key = parse_uuid(&payload.target_definition_key)?;
+
+    engine
+        .migrate_instance(instance_id, target_key, payload.node_mapping)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(crate) async fn delete_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
