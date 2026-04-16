@@ -45,6 +45,15 @@ pub struct BucketEntry {
 pub struct BucketEntryDetail {
     pub key: String,
     pub data: String, // String representation (JSON or text) or Base64 if binary
+    /// Transport encoding of `data`: `"utf8"` for plain text/JSON/XML, `"base64"` for binary files.
+    #[serde(default = "BucketEntryDetail::default_encoding")]
+    pub encoding: String,
+}
+
+impl BucketEntryDetail {
+    fn default_encoding() -> String {
+        "utf8".to_string()
+    }
 }
 
 /// Per-bucket storage details for monitoring dashboards.

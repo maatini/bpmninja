@@ -779,6 +779,7 @@ impl WorkflowPersistence for NatsPersistence {
                 return Ok(BucketEntryDetail {
                     key: key.to_string(),
                     data,
+                    encoding: "utf8".to_string(),
                 });
             } else {
                 return Err(EngineError::PersistenceError(format!(
@@ -808,6 +809,7 @@ impl WorkflowPersistence for NatsPersistence {
                         Ok(BucketEntryDetail {
                             key: key.to_string(),
                             data: xml,
+                            encoding: "utf8".to_string(),
                         })
                     } else {
                         // Return Base64 for raw files
@@ -816,6 +818,7 @@ impl WorkflowPersistence for NatsPersistence {
                         Ok(BucketEntryDetail {
                             key: key.to_string(),
                             data: b64,
+                            encoding: "base64".to_string(),
                         })
                     }
                 }
@@ -845,6 +848,7 @@ impl WorkflowPersistence for NatsPersistence {
                     Ok(BucketEntryDetail {
                         key: key.to_string(),
                         data,
+                        encoding: "utf8".to_string(),
                     })
                 }
                 Err(e) => Err(EngineError::PersistenceError(format!(

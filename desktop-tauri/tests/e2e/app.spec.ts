@@ -73,6 +73,12 @@ interface MockState {
     node_count: number;
     is_latest: boolean;
   }>;
+  /** Optional StorageInfo for get_monitoring_data mock */
+  storageInfo?: any;
+  /** Bucket entries indexed by bucket name: { [bucket]: BucketEntry[] } */
+  bucketEntries?: Record<string, any[]>;
+  /** Bucket entry details indexed by "bucket::key": BucketEntryDetail */
+  bucketEntryDetails?: Record<string, any>;
 }
 
 const DEFAULT_MOCK_STATE: MockState = {
@@ -403,6 +409,77 @@ async function injectTauriMock(
             case 'delete_instance_file': {
                resolve(null);
                break;
+            }
+
+            case 'suspend_instance': {
+              const instId = args.instanceId as string;
+              const inst = mockState.processInstances.find((i: any) => i.id === instId);
+              if (inst) {
+                inst.state = { Suspended: { previous_state: inst.state } };
+                resolve(null);
+              } else {
+                reject('Instance not found: ' + instId);
+              }
+              break;
+            }
+
+            case 'resume_instance': {
+              const instId = args.instanceId as string;
+              const inst = mockState.processInstances.find((i: any) => i.id === instId);
+              if (inst && typeof inst.state === 'object' && 'Suspended' in inst.state) {
+                inst.state = (inst.state as any).Suspended.previous_state ?? 'Running';
+                resolve(null);
+              } else {
+                reject('Instance not suspended: ' + instId);
+              }
+              break;
+            }
+
+            case 'migrate_instance': {
+              const instId = args.instanceId as string;
+              const targetKey = args.targetDefinitionKey as string;
+              const inst = mockState.processInstances.find((i: any) => i.id === instId);
+              if (inst) {
+                inst.definition_key = targetKey;
+                resolve(null);
+              } else {
+                reject('Instance not found: ' + instId);
+              }
+              break;
+            }
+
+            case 'get_monitoring_data': {
+              resolve({
+                definitions_count: mockState.definitions.length,
+                instances_total: mockState.processInstances.length,
+                instances_running: mockState.processInstances.filter((i: any) => i.state === 'Running').length,
+                instances_completed: 0,
+                pending_user_tasks: mockState.pendingTasks.length,
+                pending_service_tasks: mockState.pendingServiceTasks.length,
+                pending_timers: mockState.pendingTimers.length,
+                pending_message_catches: mockState.pendingMessageCatches.length,
+                storage_info: (mockState as any).storageInfo ?? null,
+              });
+              break;
+            }
+
+            case 'get_bucket_entries': {
+              const bucket = args.bucket as string;
+              const entries = ((mockState as any).bucketEntries ?? {})[bucket] ?? [];
+              resolve(entries);
+              break;
+            }
+
+            case 'get_bucket_entry_detail': {
+              const bucket = args.bucket as string;
+              const key = args.key as string;
+              const detail = ((mockState as any).bucketEntryDetails ?? {})[`${bucket}::${key}`];
+              if (detail) {
+                resolve(detail);
+              } else {
+                reject(`Entry not found: ${bucket}/${key}`);
+              }
+              break;
             }
 
             // Tauri built-in dialog/save
@@ -1904,6 +1981,256 @@ test.describe('bpmninja Desktop App – E2E', () => {
       expect(optionTexts.some(t => t.includes('Order (v2)'))).toBe(true);
       expect(optionTexts.some(t => t.includes('Invoice (v1)'))).toBe(true);
       expect(optionTexts.some(t => t.includes('(v1)') && t.includes('Order'))).toBe(false);
+    });
+  });
+
+  // =====================================================================
+  // Instance Lifecycle — Suspend / Resume
+  // =====================================================================
+
+  test.describe('Instanz Suspend/Resume', () => {
+    test('zeigt Suspend-Button und setzt Instanz auf Suspended', async ({ page }) => {
+      const inst = {
+        id: 'inst-sr-1',
+        definition_key: 'def-1',
+        business_key: 'bk-sr',
+        state: 'Running',
+        current_node: 'task_a',
+        audit_log: ['Process started'],
+        variables: {},
+      };
+      await injectTauriMock(page, { processInstances: [inst] });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Instances' }).click();
+
+      // Instanz-Zeile anklicken → Detail-Dialog öffnet sich
+      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 5_000 });
+      await page.locator('table tbody tr').first().click();
+
+      // Suspend-Button muss sichtbar sein
+      const suspendBtn = page.locator('button', { hasText: 'Suspend' });
+      await expect(suspendBtn).toBeVisible({ timeout: 5_000 });
+
+      // Klick → Instanz wird suspended
+      await suspendBtn.click();
+
+      // Toast-Bestätigung
+      await expect(page.locator('[role="status"], [role="alert"]').first()).toBeVisible({ timeout: 3_000 });
+    });
+
+    test('zeigt Resume-Button für suspendierte Instanz', async ({ page }) => {
+      const inst = {
+        id: 'inst-sr-2',
+        definition_key: 'def-1',
+        business_key: 'bk-sr-2',
+        state: { Suspended: { previous_state: 'Running' } },
+        current_node: 'task_a',
+        audit_log: [],
+        variables: {},
+      };
+      await injectTauriMock(page, { processInstances: [inst] });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Instances' }).click();
+
+      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 5_000 });
+      await page.locator('table tbody tr').first().click();
+
+      // Bei einer suspendierten Instanz zeigt der Button "Resume"
+      const resumeBtn = page.locator('button', { hasText: 'Resume' });
+      await expect(resumeBtn).toBeVisible({ timeout: 5_000 });
+
+      await resumeBtn.click();
+      await expect(page.locator('[role="status"], [role="alert"]').first()).toBeVisible({ timeout: 3_000 });
+    });
+  });
+
+  // =====================================================================
+  // Instance Migration Dialog
+  // =====================================================================
+
+  test.describe('Instanz-Migrationsdialog', () => {
+    test('Migrate-Button ist deaktiviert wenn keine andere Version vorhanden', async ({ page }) => {
+      const def = { key: 'def-only', bpmn_id: 'OrderProcess', version: 1, node_count: 3, is_latest: true };
+      const inst = {
+        id: 'inst-mig-1',
+        definition_key: 'def-only',
+        business_key: 'bk-mig',
+        state: 'Running',
+        current_node: 'approve',
+        audit_log: [],
+        variables: {},
+      };
+      await injectTauriMock(page, { definitions: [def], processInstances: [inst] });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Instances' }).click();
+
+      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 5_000 });
+      await page.locator('table tbody tr').first().click();
+
+      // Migrate-Button öffnet den Dialog
+      const migrateBtn = page.locator('button', { hasText: 'Migrate' });
+      await expect(migrateBtn).toBeVisible({ timeout: 5_000 });
+      await migrateBtn.click();
+
+      // Dialog erscheint — weil keine andere Version existiert, soll ein Hinweis erscheinen
+      await expect(page.getByText(/keine anderen Versionen/i)).toBeVisible({ timeout: 5_000 });
+    });
+
+    test('Migrationsdialog zeigt Versions-Dropdown wenn Kandidaten vorhanden', async ({ page }) => {
+      const defs = [
+        { key: 'def-v1', bpmn_id: 'OrderProcess', version: 1, node_count: 3, is_latest: false },
+        { key: 'def-v2', bpmn_id: 'OrderProcess', version: 2, node_count: 4, is_latest: true },
+      ];
+      const inst = {
+        id: 'inst-mig-2',
+        definition_key: 'def-v1',
+        business_key: 'bk-mig2',
+        state: 'Running',
+        current_node: 'approve',
+        audit_log: [],
+        variables: {},
+      };
+      await injectTauriMock(page, { definitions: defs, processInstances: [inst] });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Instances' }).click();
+
+      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 5_000 });
+      await page.locator('table tbody tr').first().click();
+
+      const migrateBtn = page.locator('button', { hasText: 'Migrate' });
+      await expect(migrateBtn).toBeVisible({ timeout: 5_000 });
+      await migrateBtn.click();
+
+      // Version v2 muss als Option erscheinen
+      await expect(page.getByText(/v2/)).toBeVisible({ timeout: 5_000 });
+
+      // Dialog kann geschlossen werden
+      await page.locator('button', { hasText: 'Schließen' }).click();
+      await expect(page.getByText(/v2/)).not.toBeVisible();
+    });
+
+    test('Migrate-Button im Dialog bleibt deaktiviert ohne Zielauswahl', async ({ page }) => {
+      const defs = [
+        { key: 'def-v1', bpmn_id: 'OrderProcess', version: 1, node_count: 3, is_latest: false },
+        { key: 'def-v2', bpmn_id: 'OrderProcess', version: 2, node_count: 4, is_latest: true },
+      ];
+      const inst = {
+        id: 'inst-mig-3',
+        definition_key: 'def-v1',
+        business_key: 'bk-mig3',
+        state: 'Running',
+        current_node: 'approve',
+        audit_log: [],
+        variables: {},
+      };
+      await injectTauriMock(page, { definitions: defs, processInstances: [inst] });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Instances' }).click();
+
+      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 5_000 });
+      await page.locator('table tbody tr').first().click();
+
+      const migrateBtn = page.locator('button', { hasText: 'Migrate' });
+      await migrateBtn.click();
+
+      // "Migrieren…"-Button im Dialog ist disabled, solange keine Version gewählt
+      const dialogMigrateBtn = page.locator('button', { hasText: 'Migrieren…' });
+      await expect(dialogMigrateBtn).toBeVisible({ timeout: 5_000 });
+      await expect(dialogMigrateBtn).toBeDisabled();
+    });
+  });
+
+  // =====================================================================
+  // Monitoring — Base64-Dekodierung im DataViewer
+  // =====================================================================
+
+  test.describe('Monitoring Base64-Anzeige', () => {
+    // Minimalste gültige 1×1-Pixel PNG als Base64
+    const TINY_PNG_B64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    test('rendert base64-PNG-Eintrag als <img>-Element', async ({ page }) => {
+      const storageInfo = {
+        backend_name: 'NATS',
+        version: '2.x',
+        host: 'localhost',
+        port: 4222,
+        memory_bytes: 0,
+        storage_bytes: 1024,
+        streams: 1,
+        consumers: 0,
+        buckets: [
+          { name: 'instance_files', bucket_type: 'object_store', entries: 1, size_bytes: 1024 },
+        ],
+      };
+      const bucketEntries = {
+        instance_files: [
+          { key: 'inst-123/avatar.png', size_bytes: 772, created_at: '2026-01-01T00:00:00Z' },
+        ],
+      };
+      const bucketEntryDetails: Record<string, any> = {
+        'instance_files::inst-123/avatar.png': {
+          key: 'inst-123/avatar.png',
+          data: TINY_PNG_B64,
+          encoding: 'base64',
+        },
+      };
+
+      await injectTauriMock(page, { storageInfo, bucketEntries, bucketEntryDetails });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Monitoring' }).click();
+
+      // Warte auf Monitoring-Seite
+      await expect(page.locator('h1, h2', { hasText: 'Monitoring' }).first()).toBeVisible({ timeout: 5_000 });
+
+      // Storage-Tabelle: Bucket-Zeile anklicken
+      await expect(page.getByText('instance_files')).toBeVisible({ timeout: 5_000 });
+      await page.getByText('instance_files').click();
+
+      // Eintrags-Dialog: Datei-Zeile anklicken
+      await expect(page.getByText('avatar.png')).toBeVisible({ timeout: 5_000 });
+      await page.getByText('avatar.png').click();
+
+      // DataViewer soll ein <img>-Tag rendern, kein Monaco-Editor
+      await expect(page.locator('img[src^="data:image/png;base64,"]')).toBeVisible({ timeout: 5_000 });
+    });
+
+    test('rendert base64-JSON-Eintrag als Monaco-Editor (Text-Dekodierung)', async ({ page }) => {
+      const jsonPayload = JSON.stringify({ order_id: 42, status: 'pending' });
+      const jsonB64 = btoa(jsonPayload);
+
+      const storageInfo = {
+        backend_name: 'NATS', version: '2.x', host: 'localhost', port: 4222,
+        memory_bytes: 0, storage_bytes: 512, streams: 1, consumers: 0,
+        buckets: [
+          { name: 'instance_files', bucket_type: 'object_store', entries: 1, size_bytes: 512 },
+        ],
+      };
+      const bucketEntries = {
+        instance_files: [
+          { key: 'inst-456/payload.json', size_bytes: 48, created_at: '2026-01-01T00:00:00Z' },
+        ],
+      };
+      const bucketEntryDetails: Record<string, any> = {
+        'instance_files::inst-456/payload.json': {
+          key: 'inst-456/payload.json',
+          data: jsonB64,
+          encoding: 'base64',
+        },
+      };
+
+      await injectTauriMock(page, { storageInfo, bucketEntries, bucketEntryDetails });
+      await page.goto('/');
+      await page.locator('.nav-item', { hasText: 'Monitoring' }).click();
+
+      await expect(page.locator('h1, h2', { hasText: 'Monitoring' }).first()).toBeVisible({ timeout: 5_000 });
+      await page.getByText('instance_files').click();
+      await expect(page.getByText('payload.json')).toBeVisible({ timeout: 5_000 });
+      await page.getByText('payload.json').click();
+
+      // Monaco-Editor soll erscheinen (kein img), Badge zeigt "JSON"
+      await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 8_000 });
+      await expect(page.locator('[class*="badge"]', { hasText: 'JSON' }).first()).toBeVisible();
     });
   });
 

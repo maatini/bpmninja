@@ -357,6 +357,7 @@ export function MonitoringPage() {
               <DataViewer
                 content={entryDetail.data}
                 filename={entryDetail.key}
+                encoding={entryDetail.encoding}
                 height="500px"
               />
             ) : null}

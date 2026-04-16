@@ -132,6 +132,8 @@ export interface BucketEntry {
 export interface BucketEntryDetail {
   key: string;
   data: string;
+  /** Transport-Enkodierung: "utf8" (Standard) oder "base64" für Binärdateien. */
+  encoding?: string;
 }
 
 export interface MoveTokenRequest {
