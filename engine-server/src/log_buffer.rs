@@ -1,9 +1,14 @@
 //! Rollender Log-Buffer für den Engine-Server.
 //!
 //! Hält bis zu `MAX_ENTRIES` (5 000) Einträge im Speicher.
-//! Optional: Datei-Persistenz via `LogBuffer::new_with_persistence(path)`.
 //!
-//! **Persistenz-Strategie**
+//! **Persistenz-Strategie (Priorität)**
+//! 1. NATS JetStream (`ENGINE_LOGS` Stream) — aktiv wenn `enable_nats()` aufgerufen wurde.
+//!    Beim Start werden die letzten Einträge via `populate()` aus NATS geladen.
+//! 2. Datei-Fallback via `LogBuffer::new_with_persistence(path)` — wird automatisch
+//!    deaktiviert, sobald NATS verfügbar ist.
+//!
+//! **Datei-Persistenz-Details**
 //! - Jeder neue Eintrag wird als JSON-Zeile an die Log-Datei angehängt.
 //! - Nach `COMPACT_AFTER` Schreibvorgängen wird die Datei auf die letzten
 //!   `MAX_ENTRIES` Zeilen kompaktiert (Temp-Datei + atomisches Rename).
@@ -14,6 +19,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use tokio::sync::mpsc;
 
 use chrono::Utc;
 use serde::Serialize;
@@ -57,6 +64,8 @@ struct PersistState {
 struct InnerBuffer {
     entries: VecDeque<LogEntry>,
     persist: Option<PersistState>,
+    /// NATS-Sender — wenn gesetzt, werden neue Einträge dort publiziert statt in die Datei.
+    nats_tx: Option<mpsc::UnboundedSender<LogEntry>>,
 }
 
 impl Default for InnerBuffer {
@@ -64,6 +73,7 @@ impl Default for InnerBuffer {
         Self {
             entries: VecDeque::with_capacity(MAX_ENTRIES),
             persist: None,
+            nats_tx: None,
         }
     }
 }
@@ -94,15 +104,17 @@ impl LogBuffer {
             inner: Arc::new(Mutex::new(InnerBuffer {
                 entries: VecDeque::with_capacity(MAX_ENTRIES),
                 persist: None,
+                nats_tx: None,
             })),
         }
     }
 
-    /// Buffer mit Datei-Persistenz.
+    /// Buffer mit Datei-Persistenz (Fallback wenn NATS nicht verfügbar).
     ///
     /// Beim Erstellen werden vorhandene Einträge aus `path` geladen.
     /// Jeder neue Eintrag wird an die Datei angehängt; periodisch wird
-    /// kompaktiert.
+    /// kompaktiert.  Sobald `enable_nats()` aufgerufen wird, wird die
+    /// Datei-Persistenz automatisch deaktiviert.
     pub fn new_with_persistence(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let entries = load_entries_from_file(&path);
@@ -113,7 +125,31 @@ impl LogBuffer {
                     path,
                     written_since_compact: 0,
                 }),
+                nats_tx: None,
             })),
+        }
+    }
+
+    /// Aktiviert NATS-Persistenz und deaktiviert die Datei-Persistenz.
+    ///
+    /// Neue Log-Einträge werden über `tx` an den Hintergrund-Task (→ NATS) gesendet.
+    /// Die Datei-Persistenz wird entfernt, damit kein doppeltes Schreiben stattfindet.
+    pub fn enable_nats(&self, tx: mpsc::UnboundedSender<LogEntry>) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.persist = None; // Datei-Persistenz deaktivieren
+        guard.nats_tx = Some(tx);
+    }
+
+    /// Füllt den In-Memory-Buffer mit den übergebenen Einträgen (z. B. beim
+    /// Server-Start aus NATS geladen).  Bestehende Einträge werden ersetzt.
+    pub fn populate(&self, entries: Vec<LogEntry>) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.entries.clear();
+        for entry in entries {
+            if guard.entries.len() >= MAX_ENTRIES {
+                guard.entries.pop_front();
+            }
+            guard.entries.push_back(entry);
         }
     }
 
@@ -161,16 +197,21 @@ impl LogBuffer {
         }
         inner.entries.push_back(entry.clone());
 
+        // Datei-Persistenz nur wenn kein NATS-Sender aktiv ist
         let compact_info: Option<(PathBuf, Vec<LogEntry>)> =
-            if let Some(ref mut persist) = inner.persist {
-                append_entry_to_file(&persist.path, &entry);
-                persist.written_since_compact += 1;
+            if inner.nats_tx.is_none() {
+                if let Some(ref mut persist) = inner.persist {
+                    append_entry_to_file(&persist.path, &entry);
+                    persist.written_since_compact += 1;
 
-                if persist.written_since_compact >= COMPACT_AFTER {
-                    persist.written_since_compact = 0;
-                    // Felder-Split: inner.persist (mut) + inner.entries (immut) — OK
-                    let snapshot: Vec<LogEntry> = inner.entries.iter().cloned().collect();
-                    Some((persist.path.clone(), snapshot))
+                    if persist.written_since_compact >= COMPACT_AFTER {
+                        persist.written_since_compact = 0;
+                        // Felder-Split: inner.persist (mut) + inner.entries (immut) — OK
+                        let snapshot: Vec<LogEntry> = inner.entries.iter().cloned().collect();
+                        Some((persist.path.clone(), snapshot))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -178,10 +219,19 @@ impl LogBuffer {
                 None
             };
 
-        // Kompaktierung außerhalb des gemischten Borrows (Guard bereits released)
+        // NATS-Sender klonen, bevor der Lock freigegeben wird
+        let nats_tx = inner.nats_tx.clone();
+
+        // Kompaktierung und NATS-Send außerhalb des Locks
         drop(guard);
+
         if let Some((path, snapshot)) = compact_info {
             compact_file(&path, &snapshot);
+        }
+
+        if let Some(tx) = nats_tx {
+            // Fehler ignorieren — geschlossener Channel = Shutdown läuft
+            let _ = tx.send(entry);
         }
     }
 }

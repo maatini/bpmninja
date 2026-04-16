@@ -792,10 +792,12 @@ name = "engine-server"
 version = "0.7.17"
 dependencies = [
  "anyhow",
+ "async-nats",
  "axum",
  "bpmn-parser",
  "chrono",
  "engine-core",
+ "futures",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",

@@ -126,6 +126,11 @@ impl NatsPersistence {
         })
     }
 
+    /// Gibt einen Klon des JetStream-Kontexts zurück, z. B. für den Log-Sink.
+    pub fn jetstream(&self) -> async_nats::jetstream::context::Context {
+        self.js.clone()
+    }
+
     pub(crate) async fn list_kv_entries<T: serde::de::DeserializeOwned>(
         &self,
         bucket: &str,

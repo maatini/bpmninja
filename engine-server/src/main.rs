@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
-use engine_server::{LogBuffer, build_app_with_engine};
+use engine_server::{LogBuffer, NatsLogSink, build_app_with_engine};
 use persistence_nats::NatsPersistence;
 use tracing_subscriber::prelude::*;
 
@@ -170,6 +170,28 @@ async fn main() -> anyhow::Result<()> {
             let p_arc = Arc::new(p);
             engine.set_persistence(p_arc.clone() as Arc<dyn WorkflowPersistence>);
             restore_from_nats(&p_arc, &mut engine, &mut xml_cache).await;
+
+            // Log-Persistenz in NATS einrichten
+            let log_sink = NatsLogSink::new(p_arc.jetstream()).await;
+
+            // Letzte 5 000 Einträge aus NATS in den In-Memory-Buffer laden
+            let recent = log_sink.load_recent(5_000).await;
+            let restored = recent.len();
+            log_buffer.populate(recent);
+
+            // NATS-Sender im Buffer registrieren (deaktiviert Datei-Persistenz)
+            let (nats_tx, mut nats_rx) = tokio::sync::mpsc::unbounded_channel();
+            log_buffer.enable_nats(nats_tx);
+
+            // Hintergrund-Task: Einträge aus dem Channel an NATS publizieren
+            tokio::spawn(async move {
+                while let Some(entry) = nats_rx.recv().await {
+                    log_sink.publish(&entry).await;
+                }
+            });
+
+            tracing::info!("Log-Persistenz: {} Einträge aus NATS geladen.", restored);
+
             Some(p_arc as Arc<dyn WorkflowPersistence>)
         }
         Err(e) => {
