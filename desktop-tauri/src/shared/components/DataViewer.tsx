@@ -64,8 +64,25 @@ function getRenderMode(mimeType: string): RenderMode {
 
 /** Base64 → UTF-8-String (korrekte Mehrbyte-Behandlung). */
 function decodeBase64Text(b64: string): string {
-  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-  return new TextDecoder('utf-8').decode(bytes)
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+    return new TextDecoder('utf-8').decode(bytes)
+  } catch {
+    return b64 // Fallback: Rohinhalt zurückgeben wenn atob fehlschlägt
+  }
+}
+
+/**
+ * Heuristik: Sieht der String wie Base64 aus?
+ * Greift als Fallback wenn der Server `encoding` nicht sendet.
+ * - Nur gültige Base64-Zeichen (kein Leerzeichen, kein '{', '<')
+ * - Mindestlänge 32 Zeichen (kurze Strings sind oft echte IDs/Tokens)
+ */
+function looksLikeBase64(s: string): boolean {
+  if (s.length < 32) return false
+  // Ersten 512 Zeichen prüfen — echte JSON/XML/Text enthalten Leerzeichen oder Sonderzeichen
+  const sample = s.slice(0, 512)
+  return /^[A-Za-z0-9+/]+=*$/.test(sample)
 }
 
 // ── Textformat-Erkennung (unverändert) ──────────────────────────────────────
@@ -145,13 +162,20 @@ const MONACO_LANG: Record<Exclude<DataFormat, 'auto'>, string> = {
 export function DataViewer({ content, filename, format = 'auto', height = '400px', className, encoding }: DataViewerProps) {
   const [copied, setCopied] = useState(false)
 
-  // Ermittle Render-Modus und ggf. dekodierten Text für base64-Inhalte
+  // Ermittle Render-Modus und ggf. dekodierten Text für base64-Inhalte.
+  // `encoding === "base64"` ist der explizite Pfad (neuer Server).
+  // Fallback: Heuristik wenn encoding fehlt, aber Inhalt eindeutig Base64 ist.
   const { renderMode, mimeType, decodedContent } = useMemo(() => {
-    if (encoding !== 'base64') {
-      return { renderMode: 'text' as RenderMode, mimeType: 'text/plain', decodedContent: content }
-    }
     const fname = filename ?? ''
     const mime = detectMimeType(fname)
+    const isBase64 =
+      encoding === 'base64' ||
+      (encoding == null && mime !== 'text/plain' && looksLikeBase64(content))
+
+    if (!isBase64) {
+      return { renderMode: 'text' as RenderMode, mimeType: mime, decodedContent: content }
+    }
+
     const mode = getRenderMode(mime)
     const decoded = mode === 'text' ? decodeBase64Text(content) : content
     return { renderMode: mode, mimeType: mime, decodedContent: decoded }
