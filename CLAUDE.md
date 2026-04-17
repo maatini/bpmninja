@@ -62,7 +62,7 @@ Danach mit `claude mcp list` prüfen.
 
 ## Claude Workflow (unbedingt einhalten)
 
-1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen aus `/graphify-out` aktualisieren und einlesen. Bei größeren Code-Umbauten oder Erstellen/Löschen von Dateien: Den Graph zwingend aktualisieren und erneut lesen.
+1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `/graphify-out/` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
 2. **Immer mit Plan Mode starten** (`/plan` oder Shift+Tab)
 3. Plan von mir prüfen lassen → erst dann implementieren
 4. Nach jeder großen Task: `/clear` oder neue Session

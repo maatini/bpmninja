@@ -6,7 +6,9 @@
     "rust-analyzer@latest",
     "nats-server@latest",
     "natscli@latest",
-    "nodejs@latest"
+    "nodejs@latest",
+    "python3@latest",
+    "pipx@latest"
   ],
   "env": {
     "NATS_URL": "nats://localhost:4222",
@@ -63,6 +65,13 @@
       ],
       "test:compliance": [
         "cargo test --test bpmn_compliance"
+      ],
+      "graphify:install": [
+        "pipx install graphifyy",
+        "graphify install"
+      ],
+      "graphify": [
+        "graphify ."
       ]
     }
   }
