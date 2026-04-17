@@ -1,6 +1,6 @@
 [package]
 name = "persistence-memory"
-version = "0.7.17"
+version = "0.7.18"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "In-memory WorkflowPersistence implementation for testing"
