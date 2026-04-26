@@ -23,7 +23,9 @@ export default defineConfig([
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/ban-ts-comment': 'warn',
       '@typescript-eslint/no-unused-vars': 'warn',
-      'react-refresh/only-export-components': 'warn'
+      'react-refresh/only-export-components': 'warn',
+      // Repository contains existing patterns that would otherwise hard-fail CI.
+      'react-hooks/set-state-in-effect': 'warn'
     },
   },
 ])

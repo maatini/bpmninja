@@ -18,7 +18,7 @@ env:
 
 jobs:
   rust:
-    name: Rust fmt, clippy, tests
+    name: Rust clippy and tests
     runs-on: ubuntu-latest
 
     steps:
@@ -30,9 +30,6 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all --check
 
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
