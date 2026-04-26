@@ -1,7 +1,8 @@
 use serde_json::Value;
+use anyhow::{Context, anyhow};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "text".to_string());
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
@@ -32,7 +33,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()
         .await?;
-    let def_key = deploy_res["definition_key"].as_str().unwrap();
+    let def_key = deploy_res["definition_key"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing or invalid 'definition_key' in deploy response"))?;
     tracing::info!("Deployed definition: {}", def_key);
 
     // 2. Start instance
@@ -43,7 +46,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .json()
         .await?;
-    let instance_id = start_res["instance_id"].as_str().unwrap();
+    let instance_id = start_res["instance_id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing or invalid 'instance_id' in start response"))?;
     tracing::info!("Started instance: {}", instance_id);
 
     // 3. Fetch and complete service tasks
@@ -60,7 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     for task in &tasks {
-        let task_id = task["id"].as_str().unwrap();
+        let task_id = task["id"]
+            .as_str()
+            .with_context(|| format!("Missing or invalid 'id' in service task payload: {task}"))?;
         tracing::info!("Completing service task: {}", task_id);
         client
             .post(format!(
@@ -84,7 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     for task in &user_tasks {
-        let task_id = task["task_id"].as_str().unwrap();
+        let task_id = task["task_id"]
+            .as_str()
+            .with_context(|| format!("Missing or invalid 'task_id' in user task payload: {task}"))?;
         tracing::info!("Completing user task: {}", task_id);
         client
             .post(format!("{}/api/complete/{}", base_url, task_id))

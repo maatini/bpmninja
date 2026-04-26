@@ -1,7 +1,7 @@
 # BPMNinja
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-376_passing-success?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-CI_required-blue?style=flat-square)](.github/workflows/ci.yml)
 [![Mutation Score](https://img.shields.io/badge/Mutation_Score-72.4%25-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
@@ -17,6 +17,7 @@
 
 - [Overview](#overview)
 - [Crates (Modules)](#crates-modules)
+- [Workspace Scope](#workspace-scope)
 - [Supported BPMN Elements](#supported-bpmn-elements)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
@@ -67,6 +68,26 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 | **`desktop-tauri`** | Tauri desktop app (React + bpmn-js) with modeler, instances dashboard, event history and historical instance search |
 | **`agent-orchestrator`** | Sample worker for external service task processing |
 | **`bpmn-ninja-external-task-client`** | TypeScript/Node worker client (ESM) — long polling, retry, lock extension, graceful shutdown |
+
+---
+
+## Workspace Scope
+
+The Rust root workspace (`Cargo.toml`) currently includes:
+
+- `engine-core`
+- `bpmn-parser`
+- `persistence-nats`
+- `persistence-memory`
+- `engine-server`
+- `agent-orchestrator`
+
+Separately managed modules:
+
+- `desktop-tauri/src-tauri` (own Cargo project, built via `desktop-tauri`)
+- `fuzz` (separate `cargo-fuzz` workspace)
+
+For full local verification, run the root checks plus module-specific checks from `desktop-tauri` and `fuzz`.
 
 ---
 
@@ -527,7 +548,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 ## Test Metrics
 
-> Measured via `cargo test --workspace` (Rust), `npm run test` and Playwright E2E on 2026-04-17 — **424 tests, 0 failures**
+> Snapshot from 2026-04-17. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 ### Workspace Overview
 

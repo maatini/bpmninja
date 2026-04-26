@@ -1,87 +1,50 @@
-# React + TypeScript + Vite
+# BPMNinja Desktop (Tauri + React + bpmn-js)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Desktop-Anwendung für BPMNinja mit BPMN-Modeler, Live-Instanzansichten und Monitoring.
 
-Currently, two official plugins are available:
+## Voraussetzungen
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js >= 18
+- Rust Toolchain (für Tauri)
+- Laufender Backend-Stack (`engine-server` + NATS), standardmäßig unter `http://localhost:8081`
 
-## React Compiler
+## Entwicklung
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd desktop-tauri
+npm install
+npm run tauri dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Alternativ im Repository-Root:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+devbox run ui:dev
 ```
 
-## Flow Conditions – Camunda 7 Kompatibilität
+## Qualitätssicherung
 
-Der BPMN-Modeler unterstützt Flow Conditions analog zum Camunda Modeler für Camunda 7:
+```bash
+cd desktop-tauri
+npm run lint
+npm run build
+npm run test:e2e
+```
 
-- **Bedingte Gateways:** Die Condition-Gruppe im Properties Panel erscheint nur bei Sequence Flows, deren Quelle ein Exclusive Gateway oder Inclusive Gateway ist.
-- **Default Flows:** Flows, die als Default-Pfad markiert sind, zeigen keine Condition-Gruppe an.
-- **Condition Type:** Dropdown mit drei Optionen:
-  - **None** – keine Bedingung
-  - **Expression** – JUEL/FEEL-kompatible Expression (z.B. `${amount > 100}`)
-  - **Script** – Script mit Rhai als Script-Sprache
-- **XML-Format:**
+## Zentrale Features
+
+- BPMN-Modeler auf Basis von `bpmn-js` inkl. Properties Panel
+- Live-Updates über SSE-Events des Backends
+- Instanz- und Definitionsansichten mit Token/Task-Kontext
+- Monitoring-Ansichten inkl. Logs, Storage-Status und Engine-Metriken
+
+## Flow Conditions (Camunda-7-kompatibel)
+
+Der Modeler unterstützt Flow Conditions analog zum Camunda Modeler:
+
+- Condition-Gruppe nur bei Sequence Flows von Exclusive/Inclusive Gateways
+- Keine Condition-Eingabe bei als Default markierten Flows
+- Condition Type: `None`, `Expression`, `Script`
+- XML-Ausgabe:
   - Expression: `<conditionExpression xsi:type="bpmn:tFormalExpression">${...}</conditionExpression>`
   - Script: `<conditionExpression xsi:type="bpmn:tFormalExpression" language="rhai">...</conditionExpression>`

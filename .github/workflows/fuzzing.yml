@@ -5,10 +5,15 @@
 # Uses cargo-fuzz (libFuzzer) with AddressSanitizer on all targets.
 #
 # Targets:
-#   - fuzz_bpmn_parser:      Arbitrary XML → parse_bpmn_xml()
-#   - fuzz_condition:        Arbitrary expressions → evaluate_condition()
-#   - fuzz_rhai_script:      Arbitrary Rhai scripts → rhai::Engine::eval()
-#   - fuzz_iso8601_duration: Arbitrary strings → ISO 8601 duration parser
+#   - fuzz_bpmn_parser:      Arbitrary XML -> parse_bpmn_xml()
+#   - fuzz_condition:        Arbitrary expressions -> evaluate_condition()
+#   - fuzz_rhai_script:      Arbitrary Rhai scripts -> rhai::Engine::eval()
+#   - fuzz_iso8601_duration: Arbitrary strings -> ISO 8601 duration parser
+#   - fuzz_token_deserialize: Arbitrary JSON -> token deserialization paths
+#   - fuzz_cron_expression:  Arbitrary cron expressions -> parser/scheduler
+#   - fuzz_deploy_roundtrip: Deploy payloads -> parse/serialize roundtrip
+#   - fuzz_history_diff:     History snapshots -> diff/reconciliation
+#   - fuzz_server_payloads:  API payloads -> validation and decode paths
 #
 # Each target runs for a CI-friendly duration (5 min on PR, 8 min nightly).
 # Any crash, ASan/MSan/UBSan finding, or assertion failure fails the pipeline.
@@ -66,6 +71,8 @@ jobs:
           - fuzz_token_deserialize
           - fuzz_cron_expression
           - fuzz_deploy_roundtrip
+          - fuzz_history_diff
+          - fuzz_server_payloads
 
     steps:
       - name: Checkout repository

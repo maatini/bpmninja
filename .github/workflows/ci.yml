@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust fmt, clippy, tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  external-task-client:
+    name: External task client tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bpmn-ninja-external-task-client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: bpmn-ninja-external-task-client
+        run: npm ci
+
+      - name: Run TypeScript lint
+        working-directory: bpmn-ninja-external-task-client
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: bpmn-ninja-external-task-client
+        run: npm test
+
+  desktop-frontend:
+    name: Desktop frontend lint and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-tauri/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop-tauri
+        run: npm ci
+
+      - name: Run lint
+        working-directory: desktop-tauri
+        run: npm run lint
+
+      - name: Build frontend bundle
+        working-directory: desktop-tauri
+        run: npm run build
