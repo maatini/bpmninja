@@ -2,7 +2,60 @@
   "permissions": {
     "allow": [
       "Bash(awk '{sum += $4} END {print \"Total:\", sum}')",
-      "Bash(npm test:*)"
+      "Bash(awk '{print $NF}')",
+      "Bash(npm test:*)",
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo generate-lockfile:*)",
+      "Bash(devbox run *)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(gh run:*)",
+      "Bash(pkill -f \"cargo-mutants\")",
+      "Bash(pkill -f \"cargo.mutants\")",
+      "Bash(pkill -9 -f \"cargo.mutants\")",
+      "Bash(pkill -9 -f \"mutants\")",
+      "Bash(du -sh /var/folders/*/cargo-mutants-*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Prüfe ob .agent/manifest.json und graphify-out/GRAPH_REPORT.md existieren. Wenn ja, erinnere an den Graph-First-Workflow: 1) GRAPH_REPORT.md lesen, 2) Relevante Communities identifizieren, 3) Graph MCP Tools zur Navigation nutzen, 4) Erst dann Code lesen. Bei regelwidrigen God Nodes oder isolierten Nodes: Issue vorschlagen."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "prompt",
+            "if": "Bash(git commit*)",
+            "prompt": "Prüfe den letzten Bash-Befehl. Wenn es ein git commit war: Erinnere daran, dass laut .agent/rules/03_GRAPH_MAINTENANCE.md nach jedem Commit 'devbox run graphify' laufen muss. Frag den User, ob du das jetzt anstoßen sollst."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Prüfe den Dateipfad der letzten Schreiboperation. Wenn die Datei in engine-core/ liegt, lies .agent/rules/RUST_ENGINE_AGENT.md. Wenn in bpmn-parser/: .agent/rules/BPMN_PARSER_AGENT.md. Wenn in engine-server/: .agent/rules/ENGINE_SERVER_AGENT.md. Wenn in desktop-tauri/: .agent/rules/TAURI_REACT_UI_AGENT.md. Wenn in persistence-nats/: .agent/rules/NATS_MESSAGE_BROKER.md. Bei Rust-Dateien workspace-weit: .agent/rules/RUST_AGENT_RULES.md. Gib die relevanten Regeln als additionalContext zurück."
+          }
+        ]
+      }
     ]
   }
 }

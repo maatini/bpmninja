@@ -1,6 +1,18 @@
 # Global Agent Directives & Workflow
 
-1. **Plan & Wait:** Immer erst einen Plan vorschlagen via `implementation_plan.md` -> Auf `GO` warten.
+## Priorität bei Regelkonflikten
+
+1. System-/Sicherheitsvorgaben
+2. Workspace-Regeln (`CLAUDE.md`, diese Datei)
+3. User-Anweisungen im aktuellen Chat
+4. Dateispezifische Agent-Regeln (`file_match`)
+
+Bei Konflikten gilt immer die höher priorisierte Regel.
+
+## Workflow
+
+1. **Plan nur bei Bedarf:** Plan verpflichtend bei unklaren Anforderungen, Architekturentscheidungen oder Multi-Crate-Änderungen. Bei klaren, kleinen Tasks direkte Umsetzung.
+2. **GO-Gate nur für Plan-Tasks:** Wenn ein Plan erstellt wurde, vor Implementierung auf `GO` warten.
 2. **Sprache:** Kommunikation, Commits und Dokumentation erfolgen auf Deutsch. API-Bezeichner und Code bleiben auf Englisch.
 3. **No Temp Files:** Niemals `tmp/`, `temp/` oder den Desktop nutzen. Code muss in gut benannten Ziel-Modulen oder In-Memory getestet/geschrieben werden.
 4. **Architektur & Handoff-Order:** Dependencies zwingend immer zuerst bauen!

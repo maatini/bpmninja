@@ -234,6 +234,127 @@
         }
       }
     },
+    "pipx@latest": {
+      "last_modified": "2026-04-23T13:07:47Z",
+      "resolved": "github:NixOS/nixpkgs/01fbdeef22b76df85ea168fbfe1bfd9e63681b30#pipx",
+      "source": "devbox-search",
+      "version": "1.8.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/2hwhldf05chmdvmp8rihbb3ygnxg2kja-python3.13-pipx-1.8.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/1k1pggkqynj5b0dzcrdpv33nqnacflmm-python3.13-pipx-1.8.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/2hwhldf05chmdvmp8rihbb3ygnxg2kja-python3.13-pipx-1.8.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/q06qqjfnpp9lqhhqx3gcgy8ayg772gp9-python3.13-pipx-1.8.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/d8jddwrf72ny02gvxiagj2s431slbali-python3.13-pipx-1.8.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/q06qqjfnpp9lqhhqx3gcgy8ayg772gp9-python3.13-pipx-1.8.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/g40palcb87y76iv1cdn7knbfva5imdqb-python3.13-pipx-1.8.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/7l58qnbpixbj8lnm3cgvbf5w53frb96i-python3.13-pipx-1.8.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/g40palcb87y76iv1cdn7knbfva5imdqb-python3.13-pipx-1.8.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/xi8d79jz4vyz3m87rkngyrw569wvghxc-python3.13-pipx-1.8.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/2qc993ba674zgwadyl3x8xz6mz13fk5a-python3.13-pipx-1.8.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/xi8d79jz4vyz3m87rkngyrw569wvghxc-python3.13-pipx-1.8.0"
+        }
+      }
+    },
+    "python3@latest": {
+      "last_modified": "2025-01-06T03:40:18Z",
+      "plugin_version": "0.0.4",
+      "resolved": "github:NixOS/nixpkgs/3df3c47c19dc90fec35359e89ffb52b34d2b0e94#python3",
+      "source": "devbox-search",
+      "version": "3.12.8",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8zc3wcplydp8gsxms24scpzdca438dk5-python3-3.12.8",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/8zc3wcplydp8gsxms24scpzdca438dk5-python3-3.12.8"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/66pn6ysmvx675061xaq2vz93s9vdc5p4-python3-3.12.8",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/brcg3a34fi45ffky63g5pqd22sksvq13-python3-3.12.8-debug"
+            }
+          ],
+          "store_path": "/nix/store/66pn6ysmvx675061xaq2vz93s9vdc5p4-python3-3.12.8"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/fpmkmdzgd1q7kqadc7czcjdhjj7bsc0i-python3-3.12.8",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/fpmkmdzgd1q7kqadc7czcjdhjj7bsc0i-python3-3.12.8"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/c9m6yd8fg1flz2j5r4bif1ib5j20a0cy-python3-3.12.8",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/cicfrcjr8pky8qd0gxw0x84ynyviy6b5-python3-3.12.8-debug"
+            }
+          ],
+          "store_path": "/nix/store/c9m6yd8fg1flz2j5r4bif1ib5j20a0cy-python3-3.12.8"
+        }
+      }
+    },
     "rust-analyzer@latest": {
       "last_modified": "2026-03-11T04:01:32Z",
       "resolved": "github:NixOS/nixpkgs/b6067cc0127d4db9c26c79e4de0513e58d0c40c9#rust-analyzer",

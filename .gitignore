@@ -36,6 +36,11 @@ lerna-debug.log*
 .env.*.local
 
 # ========================
+# Claude Code (lokal)
+# ========================
+.claude/settings.local.json
+
+# ========================
 # Editoren & OS
 # ========================
 .vscode/*

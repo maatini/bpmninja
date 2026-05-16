@@ -60,13 +60,36 @@ claude mcp add nats -e NATS_URL="nats://localhost:4222" -- npx -y @daanrongen/na
 
 Danach mit `claude mcp list` prüfen.
 
+## Agenten-System
+
+Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
+
+```
+.agent/
+├── manifest.json              # 7 Agents (engine, parser, persistence, server, ui, orchestrator, quality)
+├── rules/                     # 14 Regeldateien, teils mit file_match-Triggern
+│   ├── 01_GLOBAL_DIRECTIVES.md    # Workflow, Prioritäten, Sprache
+│   ├── 02_GRAPH_FIRST_NAVIGATION.md  # Graph-First-Protokoll (vor jedem Code-Lesen!)
+│   ├── 03_GRAPH_MAINTENANCE.md    # Wann graphify ausführen, Metriken prüfen
+│   ├── 04_TASK_MEMORY_PROTOCOL.md # Task-Memory bei Multi-Crate-Änderungen
+│   ├── RUST_AGENT_RULES.md        # Workspace-weite Rust-Regeln (file_match: **/*.rs)
+│   ├── RUST_ENGINE_AGENT.md       # Engine-spezifisch (file_match: engine-core/**)
+│   ├── BPMN_WORKFLOW_ENGINE.md    # Vollständige BPMN-Element-Spezifikation
+│   ├── DEPENDENCY_MANAGEMENT.md   # Workspace-Dependency-Regeln
+│   └── ...                        # Weitere Crate-spezifische Agenten
+├── skills/                    # 6 Skills mit oracle.sh-Prüfungen
+└── workflows/                 # 9 Workflows (build, lint, test, verify, etc.)
+```
+
+**Wichtig:** Die Regeln in `.agent/rules/` werden über Hooks in `.claude/settings.json` bei Datei-Änderungen automatisch aktiviert.
+
 ## Claude Workflow (unbedingt einhalten)
 
-1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `/graphify-out/` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
-2. **Immer mit Plan Mode starten** (`/plan` oder Shift+Tab)
-3. Plan von mir prüfen lassen → erst dann implementieren
+1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `graphify-out/GRAPH_REPORT.md` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
+2. **Plan nur bei Bedarf:** Plan verpflichtend bei unklaren Anforderungen, Architekturentscheidungen oder Multi-Crate-Änderungen. Bei klaren, kleinen Tasks direkte Umsetzung. Wenn ein Plan erstellt wurde: Vor Implementierung auf `GO` warten.
+3. **Task Memory anlegen:** Bei Aufgaben die ≥2 Crates oder ≥3 Dateien berühren → `TASK_MEMORY.md` im Projekt-Root anlegen (siehe `.agent/rules/04_TASK_MEMORY_PROTOCOL.md`).
 4. Nach jeder großen Task: `/clear` oder neue Session
-5. Bei Kontext-Problemen: `/compact`
+5. Bei Kontext-Problemen: `/compact` (vorher TASK_MEMORY.md aktualisieren!)
 6. Claude soll **nie** selbst `git push --force` oder READMEs ohne Auftrag ändern
 
 ## KI-Verhaltensrichtlinien (Behavioral Guidelines)
@@ -98,10 +121,24 @@ Danach mit `claude mcp list` prüfen.
 ## Wichtige Befehle
 
 ```bash
+# Workspace-weit
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
+
+# Einzelne Crates
+cargo build -p engine-core
+cargo test -p engine-core
+cargo test -p engine-core <test_name>        # einzelnen Test ausführen
+cargo test -p engine-core -- --nocapture     # mit println-Ausgabe
+
+# Devbox-Workflows (empfohlen)
+devbox run graphify                          # Knowledge-Graph aktualisieren
+devbox run lint                              # Clippy + fmt check
+devbox run test                              # cargo test --workspace
+devbox run check                             # cargo check --workspace
+devbox run verify-all                        # Komplett-Pipeline (build, lint, test)
 
 # Desktop
 cd desktop-tauri && npm install && npm run tauri dev
