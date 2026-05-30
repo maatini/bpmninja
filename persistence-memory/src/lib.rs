@@ -366,33 +366,31 @@ impl WorkflowPersistence for InMemoryPersistence {
                 {
                     return false;
                 }
-                if let Some(ref sf) = query.state_filter {
-                    match sf.as_str() {
-                        "completed" => {
-                            if !matches!(
-                                inst.state,
-                                engine_core::runtime::InstanceState::Completed
-                            ) {
-                                return false;
-                            }
+                match query.state_filter.as_deref() {
+                    Some("completed") => {
+                        if !matches!(
+                            inst.state,
+                            engine_core::runtime::InstanceState::Completed
+                        ) {
+                            return false;
                         }
-                        "error" => {
-                            if !matches!(
-                                inst.state,
-                                engine_core::runtime::InstanceState::CompletedWithError { .. }
-                            ) {
-                                return false;
-                            }
-                        }
-                        _ => {}
                     }
+                    Some("error") => {
+                        if !matches!(
+                            inst.state,
+                            engine_core::runtime::InstanceState::CompletedWithError { .. }
+                        ) {
+                            return false;
+                        }
+                    }
+                    _ => {}
                 }
                 true
             })
             .cloned()
             .collect();
 
-        results.sort_by(|a, b| b.completed_at.cmp(&a.completed_at));
+        results.sort_by_key(|a| std::cmp::Reverse(a.completed_at));
 
         if let Some(offset) = query.offset {
             results = results.into_iter().skip(offset).collect();
