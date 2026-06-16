@@ -551,7 +551,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 > Snapshot from 2026-04-17. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
-- Letztes Update (UTC): `2026-06-16T08:49:57.234097+00:00`
+- Letztes Update (UTC): `2026-06-16T10:16:12.852192+00:00`
 - Mutation Score: **0.0%** (caught: 0, missed: 0, timeout: 0)
 - Fuzzing: **9/9 targets** (ok)
 <!-- QUALITY_METRICS:END -->
