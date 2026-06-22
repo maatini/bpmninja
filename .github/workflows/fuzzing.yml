@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # cargo-fuzz requires nightly for -Z flags and sanitizer instrumentation
       - name: Install Rust nightly toolchain
