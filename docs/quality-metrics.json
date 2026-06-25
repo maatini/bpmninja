@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-06-25T06:50:39.739352+00:00",
+  "updated_at": "2026-06-25T09:02:37.893402+00:00",
   "mutation": {
     "source": "core-mutation-tests",
-    "generated_at": "2026-06-24T08:57:45.382101+00:00",
+    "generated_at": "2026-06-25T09:02:26.409229+00:00",
     "status": "no-data",
     "mutation_score": 0.0,
     "caught": 0,
