@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@bpmn-io/properties-panel": "^3.44.1",
+    "@bpmn-io/properties-panel": "^3.47.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-accordion": "^1.2.13",
