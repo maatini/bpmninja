@@ -4015,6 +4015,57 @@ async fn test_script_config_defaults_and_build() {
     let rhai_engine = cfg.build_engine();
     let result = rhai_engine.eval::<i64>("40 + 2");
     assert_eq!(result.unwrap(), 42);
+
+    // Default 2 MiB budget must yield the historical collection caps.
+    let (s, a, m) = crate::scripting::ScriptConfig::default().derived_collection_limits();
+    assert_eq!(s, 64 * 1024);
+    assert_eq!(a, 10_000);
+    assert_eq!(m, 10_000);
+}
+
+/// max_memory must actually constrain allocations via derived collection limits.
+#[tokio::test]
+async fn test_script_max_memory_rejects_large_array() {
+    let cfg = crate::scripting::ScriptConfig {
+        max_operations: 50_000,
+        max_memory: 4 * 1024, // 4 KiB budget → tiny array cap
+        timeout_ms: 1_000,
+    };
+    let (_, max_array, _) = cfg.derived_collection_limits();
+    assert!(max_array < 100, "tiny budget should yield small array cap, got {max_array}");
+
+    let engine = cfg.build_engine();
+    // Grow an array past the derived cap.
+    let script = format!("let a = []; for i in 0..{} {{ a.push(i); }}", max_array + 50);
+    let err = engine
+        .eval::<()>(&script)
+        .expect_err("oversized array must fail under max_memory-derived cap");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("array") || msg.contains("limit") || msg.contains("exceed") || msg.contains("size"),
+        "unexpected error for memory limit: {msg}"
+    );
+}
+
+/// execute_script_safe surfaces memory-limit failures as ScriptError.
+#[tokio::test]
+async fn test_execute_script_safe_respects_max_memory() {
+    let cfg = crate::scripting::ScriptConfig {
+        max_operations: 50_000,
+        max_memory: 4 * 1024,
+        timeout_ms: 1_000,
+    };
+    let (_, max_array, _) = cfg.derived_collection_limits();
+    let script = format!("let a = []; for i in 0..{} {{ a.push(i); }}", max_array + 50);
+    let vars = std::collections::HashMap::new();
+    let result = crate::scripting::execute_script_safe(&cfg, &script, &vars).await;
+    assert!(result.is_err(), "expected ScriptError for oversize array");
+    match result {
+        Err(crate::domain::EngineError::ScriptError(msg)) => {
+            assert!(!msg.is_empty());
+        }
+        other => panic!("expected ScriptError, got {other:?}"),
+    }
 }
 
 /// Catches: run_node_scripts == vs != für Listener-Event-Matching

@@ -45,10 +45,10 @@ All 29 variants must be handled. When adding a new element:
 
 Rhai scripts are sandboxed with limits:
 - `max_operations: 50,000` (default) — configurable via `RHAI_MAX_OPERATIONS`
-- `max_memory: 2 MiB` (default) — configurable via `RHAI_MAX_MEMORY_BYTES`
+- `max_memory: 2 MiB` (default) — configurable via `RHAI_MAX_MEMORY_BYTES`; Rhai has no total-heap API, so this budget derives `set_max_string_size` / `set_max_array_size` / `set_max_map_size`
 - `timeout_ms: 1,000` (default) — configurable via `RHAI_TIMEOUT_MS`
 
-Heavy scripts will be killed by timeout. The error is recoverable — just means the script didn't complete.
+Heavy scripts will be killed by timeout or collection-size limits. The error is recoverable — just means the script didn't complete.
 
 ### ⚠️ History snapshots
 
@@ -58,9 +58,9 @@ Snapshots are taken every 8 audit entries. The `calculate_diff` function compare
 
 `WorkflowEngine.persistence` is `Option<Arc<dyn WorkflowPersistence>>`. The engine runs fine without persistence (in-memory mode). Server code in `engine-server/main.rs` creates this either from `NatsPersistence::connect()` (success) or `WorkflowEngine::new()` (NATS unavailable).
 
-### ⚠️ Retry queue shutdown
+### ⚠️ Retry queue is bounded
 
-Call `engine.shutdown()` before dropping the engine. This signals the background retry worker to flush and exit. The server's `main.rs` does this on graceful shutdown.
+Failed persistence ops are enqueued on a bounded channel (default capacity 10 000, `PERSISTENCE_RETRY_QUEUE_CAPACITY`). When full, jobs are **dropped** and counted (`bpmn_persistence_retry_dropped_total`) instead of growing memory unboundedly. Call `engine.shutdown()` before dropping the engine so the worker can flush remaining jobs.
 
 ### ⚠️ Event channel capacity
 

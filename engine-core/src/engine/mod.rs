@@ -62,8 +62,9 @@ impl WorkflowEngine {
     pub fn new() -> Self {
         let script_config = crate::scripting::ScriptConfig::from_env();
         tracing::info!(
-            "WorkflowEngine initialized (script limits: ops={}, timeout={}ms)",
+            "WorkflowEngine initialized (script limits: ops={}, memory={}B, timeout={}ms)",
             script_config.max_operations,
+            script_config.max_memory,
             script_config.timeout_ms
         );
 
@@ -129,7 +130,15 @@ impl WorkflowEngine {
     /// and waits for it to complete.
     pub async fn shutdown(&self) {
         if let Some(tx) = &self.retry_tx {
-            let _ = tx.send(retry_queue::PersistJob::Shutdown);
+            // Async send waits for capacity so Shutdown is not lost when the
+            // bounded queue is still draining residual jobs.
+            if tx
+                .send(retry_queue::PersistJob::Shutdown)
+                .await
+                .is_err()
+            {
+                tracing::warn!("Retry queue closed before Shutdown could be sent");
+            }
         }
 
         let mut handle_opt = self.retry_worker_handle.lock().await;

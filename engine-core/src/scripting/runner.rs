@@ -2,7 +2,8 @@
 //!
 //! Uses the Rhai scripting engine with configurable hardening:
 //! - `max_operations` limits CPU-bound loops
-//! - `max_memory` limits heap allocations inside Rhai
+//! - `max_memory` approximates heap budget via string/array/map size caps
+//!   (Rhai has no `set_max_memory` API; limits are derived from the budget)
 //! - `timeout` aborts runaway scripts via `spawn_blocking` + `tokio::time::timeout`
 
 use std::collections::HashMap;
@@ -23,7 +24,10 @@ use crate::domain::{ListenerEvent, ProcessDefinition, Token};
 pub struct ScriptConfig {
     /// Maximum number of Rhai operations per evaluation (default: 50 000).
     pub max_operations: u64,
-    /// Maximum heap memory in bytes Rhai may allocate (default: 2 MiB).
+    /// Approximate heap budget in bytes (default: 2 MiB).
+    ///
+    /// Rhai exposes no total-heap limit; this value drives
+    /// `set_max_string_size` / `set_max_array_size` / `set_max_map_size`.
     pub max_memory: usize,
     /// Hard wall-clock timeout in milliseconds (default: 1 000).
     pub timeout_ms: u64,
@@ -68,13 +72,44 @@ impl ScriptConfig {
     }
 
     /// Creates a Rhai engine configured with the resource limits from this config.
+    ///
+    /// `max_memory` is mapped onto Rhai's collection size caps (there is no
+    /// native heap-budget API). At the default 2 MiB budget this yields the
+    /// historical caps (64 KiB strings, 10 000 array/map entries).
     pub fn build_engine(&self) -> rhai::Engine {
         let mut engine = rhai::Engine::new();
         engine.set_max_operations(self.max_operations);
-        engine.set_max_string_size(64 * 1024); // 64 KiB per string
-        engine.set_max_array_size(10_000);
-        engine.set_max_map_size(10_000);
+
+        let (max_string, max_array, max_map) = self.derived_collection_limits();
+        engine.set_max_string_size(max_string);
+        engine.set_max_array_size(max_array);
+        engine.set_max_map_size(max_map);
         engine
+    }
+
+    /// Derives string/array/map size caps from `max_memory`.
+    ///
+    /// Scaling is linear against the 2 MiB default so that lowering
+    /// `RHAI_MAX_MEMORY_BYTES` actually hardens the sandbox.
+    pub fn derived_collection_limits(&self) -> (usize, usize, usize) {
+        const DEFAULT_MEMORY: usize = 2 * 1024 * 1024;
+        const DEFAULT_STRING: usize = 64 * 1024;
+        const DEFAULT_ARRAY: usize = 10_000;
+        const DEFAULT_MAP: usize = 10_000;
+
+        let budget = self.max_memory.max(1);
+        // Scale relative to the documented 2 MiB default; never exceed defaults.
+        let scale = (budget as f64 / DEFAULT_MEMORY as f64).min(1.0);
+
+        let max_string = ((DEFAULT_STRING as f64) * scale).round() as usize;
+        let max_array = ((DEFAULT_ARRAY as f64) * scale).round() as usize;
+        let max_map = ((DEFAULT_MAP as f64) * scale).round() as usize;
+
+        (
+            max_string.clamp(1, DEFAULT_STRING),
+            max_array.clamp(1, DEFAULT_ARRAY),
+            max_map.clamp(1, DEFAULT_MAP),
+        )
     }
 }
 
