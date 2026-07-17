@@ -9,7 +9,7 @@
 5. **@tag:startup-restore** — `StartupCoordinator` restores all state from NATS persistence on server start: definitions, instances, user tasks, service tasks, timers, message catches.
 6. **@tag:log-buffer** — Rolling in-memory log buffer (5,000 entries) captured via custom `tracing` layer, with optional NATS JetStream persistence (`ENGINE_LOGS` stream, 50,000 entries) and file fallback (`engine_logs.jsonl`).
 7. **@tag:prometheus-metrics** — `/metrics` endpoint exposing engine counters and gauges via `metrics-exporter-prometheus`.
-8. **@tag:health-endpoints** — `/api/health` (liveness) and `/api/ready` (readiness via NATS connection check).
+8. **@tag:health-endpoints** — `/api/health` (liveness, always 200) and `/api/ready` (readiness: required durability + live NATS storage check).
 9. **@tag:cors** — CORS middleware allowing all origins (development-friendly; configure for production).
 10. **@tag:request-size-limit** — 5 MB body limit via `DefaultBodyLimit` middleware (for BPMN XML deployment).
 

@@ -4,7 +4,7 @@ The heart of BPMNinja — a **pure state machine** with no network or I/O code. 
 
 **Crate path:** `engine-core/`  
 **Source:** `engine-core/src/` (25+ lib files, ~7,000 LoC)  
-**Tests:** `engine-core/src/` (219 tests: 80 unit, 24 stress, 28 domain, 24 history, etc.)
+**Tests:** ~217 lib tests + 5 integration (BPMN compliance / complex gateways); includes Rhai memory + bounded retry tests
 
 - [responsibility.md](responsibility.md) — What engine-core owns, invariants, entry points
 - [dependencies.md](dependencies.md) — Inbound/outbound dependencies, trait relationships
@@ -21,7 +21,7 @@ The heart of BPMNinja — a **pure state machine** with no network or I/O code. 
 | `engine/handlers/` | `src/engine/handlers/` | Per-BpmnElement-variant logic (tasks, events, gateways, sub-processes) |
 | `port/` | `src/port/` | `WorkflowPersistence` trait (hexagonal port) |
 | `history/` | `src/history/` | Audit trail, diff calculation, `HistoryEntry`, `HistoryDiff` |
-| `scripting/` | `src/scripting/` | Rhai script execution with resource limits |
+| `scripting/` | `src/scripting/` | Rhai sandbox: ops / memory budget (collection caps) / timeout |
 | `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `PendingUserTask`, `PendingServiceTask`, `NextAction` |
 | `adapter/` | `src/adapter/` | In-memory persistence implementation for testing |
 | `condition.rs` | `src/condition.rs` | Expression evaluator for gateway conditions |

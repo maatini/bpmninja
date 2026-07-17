@@ -4,7 +4,7 @@ Axum-based HTTP REST API server for BPMNinja. Provides 38 endpoints for process 
 
 **Crate path:** `engine-server/`  
 **Source:** `engine-server/src/` (18 files: main.rs, startup.rs, server/ with 12 route modules, log_buffer.rs, log_nats.rs, observability.rs)  
-**Tests:** 55 E2E tests in `engine-server/tests/` (15 files)
+**Tests:** ~56 E2E tests in `engine-server/tests/` (15 files), including upload size limit and `REQUIRE_NATS` readiness
 
 - [responsibility.md](responsibility.md)
 - [dependencies.md](dependencies.md)

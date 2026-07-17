@@ -19,6 +19,9 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:graceful-shutdown` | Clean shutdown with queue flush |
 | `@tag:health-endpoints` | /api/health (liveness) and /api/ready (readiness) |
 | `@tag:hexagonal-architecture` | WorkflowPersistence trait as port; NATS + in-memory as adapters |
+| `@tag:fault-tolerant-retry` | Inline + bounded background persistence retry queue |
+| `@tag:fail-closed-durability` | REQUIRE_NATS fail-fast + readiness mirrors persistence |
+| `@tag:rhai-sandbox` | Rhai ops/memory-budget/timeout limits on scripts |
 | `@tag:history-audit` | Audit trail: HistoryEntry, HistoryDiff, snapshots |
 | `@tag:http-error-mapping` | EngineError → HTTP status code mapping in AppError |
 | `@tag:incident-creation` | Creating incidents when retries exhausted |

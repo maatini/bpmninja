@@ -2,7 +2,15 @@
 
 ### ⚠️ NATS requires JetStream enabled
 
-The NATS server must be started with `--js` flag: `nats-server --js`. Without JetStream, KV stores and Object Stores are unavailable. The engine falls back to in-memory mode with a warning.
+The NATS server must be started with `--js` flag: `nats-server --js` (docker-compose uses `nats:alpine` with `--js`). Without JetStream, KV stores and Object Stores are unavailable.
+
+### ⚠️ In-memory fallback is opt-in (dev only)
+
+If NATS is unreachable, `engine-server` behavior depends on **`REQUIRE_NATS`**:
+- `false` (default local): start with no persistence + error log (data lost on restart)
+- `true` (docker-compose / production): **refuse to start**
+
+`/api/ready` returns **503** when `require_nats` is set but no persistence is attached, or when the backend storage check fails.
 
 ### ⚠️ KV bucket names cannot change after creation
 
@@ -28,9 +36,14 @@ File object keys follow: `file:{instance_id}-{var_name}-{filename}`. The separat
 
 History is stored as a KV bucket (not a stream, despite the `WORKFLOW_EVENTS` stream name). Each entry is a separate KV key. Querying history scans all entries for the instance.
 
-### ⚠️ NATS connection failure is handled with retry
+### ⚠️ Transient NATS failures use a bounded retry queue
 
-The engine's `retry_queue` handles transient NATS failures. Not the persistence layer itself. If NATS is down, persistence operations queue in the background worker and retry with exponential backoff.
+The engine's `retry_queue` (not the adapter) handles transient write failures:
+1. Inline: 2 attempts with ~50ms backoff
+2. Background: bounded channel (default 10 000 jobs); exponential backoff up to 60s, max 50 retries
+3. If the queue is **full**, new jobs are **dropped** and counted (`bpmn_persistence_retry_dropped_total`) — prevents OOM under prolonged outage
+
+Integration tests in `persistence-nats/src/tests.rs` cover token, history, definition/instance restore, and user-task roundtrips (skip if NATS is not reachable).
 
 ### ⚠️ BPMN XML is stored separately from definitions
 

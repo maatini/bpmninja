@@ -143,20 +143,47 @@ sequenceDiagram
     participant Parser as bpmn-parser
 
     Main->>NATS: NatsPersistence::connect(nats_url)
-    NATS-->>Main: NatsPersistence instance
-    Main->>SC: StartupCoordinator::new(nats)
-    SC->>SC: restore_definitions(engine, xml_cache)
-    loop Each definition key
-        SC->>NATS: load_bpmn_xml(key)
-        SC->>Parser: parse_bpmn_xml(xml)
-        Parser-->>SC: ProcessDefinition
-        SC->>Engine: deploy_definition(def)
+    alt Connect OK
+        NATS-->>Main: NatsPersistence instance
+        Main->>SC: StartupCoordinator::new(nats)
+        SC->>SC: restore_definitions(engine, xml_cache)
+        loop Each definition key
+            SC->>NATS: load_bpmn_xml(key)
+            SC->>Parser: parse_bpmn_xml(xml)
+            Parser-->>SC: ProcessDefinition
+            SC->>Engine: deploy_definition(def)
+        end
+        SC->>SC: restore_instances(engine)
+        SC->>SC: restore_user_tasks(engine)
+        SC->>SC: restore_service_tasks(engine)
+        SC->>SC: restore_timers(engine)
+        SC->>SC: restore_message_catches(engine)
+    else Connect fail + REQUIRE_NATS=true
+        Main-->>Main: exit (fail-fast)
+    else Connect fail + REQUIRE_NATS=false
+        Main-->>Main: in-memory engine (dev only)
     end
-    SC->>SC: restore_instances(engine)
-    SC->>SC: restore_user_tasks(engine)
-    SC->>SC: restore_service_tasks(engine)
-    SC->>SC: restore_timers(engine)
-    SC->>SC: restore_message_catches(engine)
+```
+
+## 7. Health vs Readiness
+
+```mermaid
+sequenceDiagram
+    participant LB as Load balancer / K8s
+    participant API as engine-server
+
+    LB->>API: GET /api/health
+    API-->>LB: 200 (process up)
+
+    LB->>API: GET /api/ready
+    alt require_nats and no persistence
+        API-->>LB: 503 Persistence required
+    else persistence present but storage check fails
+        API-->>LB: 503 NATS disconnected
+    else
+        API-->>LB: 200 Ready
+    end
+```
     SC-->>Main: RestoreStats (counts)
 ```
 

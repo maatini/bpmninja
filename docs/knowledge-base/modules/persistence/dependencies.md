@@ -14,7 +14,7 @@
 
 | Caller | How | Backend | For |
 |--------|-----|---------|-----|
-| engine-server (main.rs) | Direct import | Both | NATS for production, fallback to in-memory |
+| engine-server (main.rs) | Direct import | NATS (+ optional in-memory) | NATS required when `REQUIRE_NATS=true`; else soft-fallback |
 | engine-core (WorkflowEngine) | Trait impl | Both | `Some(Arc<dyn WorkflowPersistence>)` |
 | engine-core (retry_queue) | Trait impl | Both | Retry worker calls save/delete methods |
 | engine-core (StartupCoordinator) | Direct import | NATS | `NatsPersistence::connect()` → restore state |

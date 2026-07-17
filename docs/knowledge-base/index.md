@@ -25,8 +25,8 @@
 |--------|-------------|-----------------|
 | [engine-core](modules/engine-core/) | State machine, token execution, gateways, scripting, history | `WorkflowEngine::deploy_definition`, `start_instance`, `process_timers` |
 | [bpmn-parser](modules/bpmn-parser/) | BPMN 2.0 XML → `ProcessDefinition` | `parse_bpmn_xml(xml: &str)` |
-| [engine-server](modules/engine-server/) | Axum REST API, SSE events, log buffer, timer scheduler | `build_app_with_engine`, route handlers in `server/` |
-| [persistence](modules/persistence/) | NATS JetStream + in-memory storage via `WorkflowPersistence` trait | `NatsPersistence::connect`, `InMemoryPersistence::new` |
+| [engine-server](modules/engine-server/) | Axum REST API, SSE, log buffer, timer scheduler, durability gates | `build_app_with_engine` / `AppBuildConfig`, routes in `server/` |
+| [persistence](modules/persistence/) | NATS JetStream (prod) + in-memory (tests/dev) via `WorkflowPersistence` | `NatsPersistence::connect`, `InMemoryPersistence::new` |
 | [desktop-tauri](modules/desktop-tauri/) | Tauri + React + bpmn-js desktop app (thin client) | `App.tsx`, Tauri commands in `src-tauri/` |
 | [external-task-client](modules/external-task-client/) | TypeScript Camunda-compatible worker client | `ExternalTaskClient`, `TaskService` |
 | [agent-orchestrator](modules/agent-orchestrator/) | Example Rust external task worker (stub) | `main.rs` |

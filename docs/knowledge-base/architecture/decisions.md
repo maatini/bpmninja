@@ -105,5 +105,27 @@
 
 **Consequences:**
 - Not compatible with Camunda JavaScript/Groovy scripts
-- `ScriptConfig` is configurable via environment variables (`RHAI_MAX_OPERATIONS`, `RHAI_TIMEOUT_MS`)
-- Heavy scripts may be killed by timeout
+- `ScriptConfig` is configurable via environment variables (`RHAI_MAX_OPERATIONS`, `RHAI_MAX_MEMORY_BYTES`, `RHAI_TIMEOUT_MS`)
+- Rhai has no total-heap limit API; `max_memory` derives string/array/map size caps
+- Heavy scripts may be killed by timeout or collection-size limits
+
+## ADR-009: Fail-closed durability (`REQUIRE_NATS`)
+
+**Decision:** Production deployments set `REQUIRE_NATS=true` (docker-compose default). The server exits on NATS connect failure instead of silently running without persistence. `/api/ready` returns 503 when required persistence is missing or unreachable. Local/dev keeps `REQUIRE_NATS=false` for convenience.
+
+**Rationale:** Silent in-memory fallback looks healthy to operators but loses all state on restart.
+
+**Consequences:**
+- Compose stacks fail loudly if NATS is misconfigured
+- K8s readiness can gate traffic on durability
+- Tests use `AppBuildConfig` to set flags without mutating process-wide env
+
+## ADR-010: Bounded persistence retry queue
+
+**Decision:** Background persistence retries use a bounded `mpsc` channel (default capacity 10 000, env `PERSISTENCE_RETRY_QUEUE_CAPACITY`). On overflow, jobs are dropped and counted via Prometheus metrics instead of growing unbounded.
+
+**Rationale:** An unbounded queue under prolonged NATS outage + high write load can OOM the process.
+
+**Consequences:**
+- Extreme backlog can lose retry jobs (metrics: `bpmn_persistence_retry_dropped_total`)
+- Operators must monitor drop/exhausted counters and NATS health

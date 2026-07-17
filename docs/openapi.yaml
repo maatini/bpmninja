@@ -412,6 +412,9 @@ paths:
     post:
       tags: [Files]
       summary: Upload a file as a process variable
+      description: |
+        Upload a binary file as an instance variable (multipart field `file`).
+        Size is limited by server config `MAX_UPLOAD_BYTES` (default 5 MiB); larger payloads return 413.
       parameters:
         - $ref: '#/components/parameters/ResourceId'
         - name: var_name
@@ -433,7 +436,9 @@ paths:
         '201':
           description: File uploaded
         '400':
-          description: No file provided
+          description: No file provided or invalid request
+        '413':
+          description: Upload exceeds MAX_UPLOAD_BYTES
     get:
       tags: [Files]
       summary: Download a file variable

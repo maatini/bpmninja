@@ -123,6 +123,25 @@ pub enum EngineEvent {
 }
 ```
 
+### Scripting (`scripting/`)
+
+| Type / Function | Purpose |
+|-----------------|---------|
+| `ScriptConfig` | `max_operations`, `max_memory` (budget), `timeout_ms`; `from_env()`, `build_engine()`, `derived_collection_limits()` |
+| `execute_script_safe(config, script, vars)` | Hardened entry: `spawn_blocking` + wall-clock timeout + Rhai limits |
+| Env | `RHAI_MAX_OPERATIONS` (50 000), `RHAI_MAX_MEMORY_BYTES` (2 MiB), `RHAI_TIMEOUT_MS` (1000) |
+
+`max_memory` does **not** call a Rhai heap API (none exists). It scales `set_max_string_size` / `set_max_array_size` / `set_max_map_size` relative to the 2 MiB default.
+
+### Retry queue (internal)
+
+| Item | Detail |
+|------|--------|
+| Channel | Bounded `mpsc` (default 10 000; `PERSISTENCE_RETRY_QUEUE_CAPACITY`) |
+| Enqueue | Non-blocking `try_send`; on `Full` → drop + `bpmn_persistence_retry_dropped_total` |
+| Exhausted | After 50 background retries → `bpmn_persistence_retry_exhausted_total` |
+| Shutdown | Async `send(Shutdown)` then await worker join |
+
 ### Public Functions
 
 | Function | Location | Purpose |

@@ -7,10 +7,10 @@
 3. **@tag:token-execution** — Token-based execution loop: `run_instance_batch`, `execute_step`, `NextAction` dispatch logic.
 4. **@tag:gateway-routing** — XOR, AND, OR, EventBased, and Complex gateway evaluation and token fork/join.
 5. **@tag:element-handlers** — Per-`BpmnElement` execution: tasks (User, Service, Script, Send), events (Start, End, Timer, Message, Error, Escalation, Compensation), boundaries, call activities, sub-processes.
-6. **@tag:rhai-scripting** — Sandboxed Rhai script execution for execution listeners and ScriptTasks, with configurable resource limits.
+6. **@tag:rhai-scripting** / **@tag:rhai-sandbox** — Sandboxed Rhai script execution for execution listeners and ScriptTasks. Limits: max operations, max_memory budget (derives string/array/map caps; Rhai has no heap API), wall-clock timeout.
 7. **@tag:history-audit** — Audit trail generation with automatic diff calculation, snapshots every 8 entries, actor tracking.
 8. **@tag:persistence-port** — `WorkflowPersistence` trait defining the persistence contract.
-9. **@tag:retry-queue** — Fault-tolerant persistence retry mechanism (inline + background worker).
+9. **@tag:retry-queue** / **@tag:fault-tolerant-retry** — Two-stage persistence retry: inline (2× ~50ms) + **bounded** background worker (`mpsc::channel`, default 10 000; drop + `bpmn_persistence_retry_dropped_total` when full; max 50 retries with exponential backoff).
 10. **@tag:engine-events** — Broadcast channel for state-change events (`EngineEvent` enum).
 
 ## Invariants (Must Always Be True)
@@ -70,9 +70,9 @@
 | `persistence_ops.rs` | `src/engine/persistence_ops.rs` | Save/restore orchestrator (dispatches PersistJobs) |
 | `registry.rs` | `src/engine/registry.rs` | `DefinitionRegistry` — immutable definition store (`Arc<RwLock<HashMap>>`) |
 | `instance_store.rs` | `src/engine/instance_store.rs` | `InstanceStore` — per-instance locking (`Arc<RwLock<HashMap>>`) |
-| `retry_queue.rs` | `src/engine/retry_queue.rs` | Retry mechanism: `PersistJob` enum, inline retries, background worker |
+| `retry_queue.rs` | `src/engine/retry_queue.rs` | Bounded retry: `PersistJob`, `create_retry_queue_with_capacity`, background worker, drop metrics |
 | `events.rs` | `src/engine/events.rs` | `EngineEvent` enum + broadcast sender |
 | `history/mod.rs` | `src/history/mod.rs` | `HistoryEntry`, `HistoryDiff`, `VariableDiff`, `calculate_diff`, `calculate_diff_from_snapshot` |
-| `scripting/` | `src/scripting/` | `ScriptConfig`, `execute_listener_script`, Rhai engine setup, resource limits |
+| `scripting/` | `src/scripting/` | `ScriptConfig`, `build_engine`, `derived_collection_limits`, `execute_script_safe` / listeners |
 | `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `NextAction`, pending types, `ActiveToken`, `JoinBarrier` |
 | `condition.rs` | `src/condition.rs` | Gateway condition evaluation: `evaluate_condition(expr, vars) -> bool` |

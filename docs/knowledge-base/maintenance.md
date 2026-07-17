@@ -1,5 +1,9 @@
 # Maintenance
 
+## Last bulk sync
+
+**2026-07-17 — Production hardening (improvements Phase 0 + partial Phase 1):** Rhai memory budget, upload limits, `REQUIRE_NATS` / readiness, bounded retry queue, NATS restore tests, mutation-metrics parser. Updated `overview.md`, engine-core/server/persistence modules, architecture ADRs/data-flows/components, cross-cutting patterns/tags, `docs/architecture.md`, OpenAPI, README.
+
 ## When to Update This Knowledge Base
 
 Update the relevant file(s) when:

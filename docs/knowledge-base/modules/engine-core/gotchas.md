@@ -54,9 +54,12 @@ Heavy scripts will be killed by timeout or collection-size limits. The error is 
 
 Snapshots are taken every 8 audit entries. The `calculate_diff` function compares previous and current `ProcessInstance` state. For large variable maps, values > 1KB are truncated in the diff.
 
-### ⚠️ Persistence is optional
+### ⚠️ Persistence is optional in the engine; required in production server
 
-`WorkflowEngine.persistence` is `Option<Arc<dyn WorkflowPersistence>>`. The engine runs fine without persistence (in-memory mode). Server code in `engine-server/main.rs` creates this either from `NatsPersistence::connect()` (success) or `WorkflowEngine::new()` (NATS unavailable).
+`WorkflowEngine.persistence` is `Option<Arc<dyn WorkflowPersistence>>`. The engine runs fine without persistence (in-memory / unit tests). Server code in `engine-server/main.rs`:
+- NATS connect OK → attach `NatsPersistence` + restore
+- NATS fail + `REQUIRE_NATS=false` → in-memory with error log (dev only)
+- NATS fail + `REQUIRE_NATS=true` → **process exits** (docker-compose default)
 
 ### ⚠️ Retry queue is bounded
 

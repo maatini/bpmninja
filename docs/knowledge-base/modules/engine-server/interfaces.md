@@ -9,6 +9,8 @@ pub struct AppState {
     pub deployed_xml: Arc<RwLock<HashMap<String, String>>>,  // uuid → BPMN XML
     pub nats_url: String,
     pub log_buffer: Arc<LogBuffer>,
+    pub require_nats: bool,           // REQUIRE_NATS → readiness / durability
+    pub max_upload_bytes: usize,      // MAX_UPLOAD_BYTES (default 5 MiB)
 }
 ```
 
@@ -19,6 +21,7 @@ pub struct AppState {
 | `InvalidDefinition(msg)` | 400 | Bad XML, missing fields |
 | `NoMatchingCondition(msg)` | 400 | Gateway condition mismatch |
 | `AppError::BadRequest(msg)` | 400 | Invalid UUID, bad JSON |
+| `AppError::PayloadTooLarge(msg)` | 413 | Multipart upload exceeds `max_upload_bytes` |
 | `NoSuchDefinition(id)` | 404 | Definition not found |
 | `NoSuchInstance(id)` | 404 | Instance not found |
 | `NoSuchNode(id)` | 404 | Node not found |
@@ -65,11 +68,27 @@ GET /api/logs?level=info&search=error&limit=500
 
 Returns JSON array of log entries with `timestamp`, `level`, `target`, `message`, `fields`.
 
+## Health vs Readiness
+
+| Endpoint | Semantics |
+|----------|-----------|
+| `GET /api/health` | Liveness — always `200` if process accepts HTTP |
+| `GET /api/ready` | Readiness — `503` if `require_nats && persistence.is_none()`, or if configured persistence fails `get_storage_info()`; else `200` |
+
 ## Builder Functions
 
 ```rust
 // Public API for tests and server binary
+pub struct AppBuildConfig {
+    pub require_nats: Option<bool>,      // None → env REQUIRE_NATS
+    pub max_upload_bytes: Option<usize>, // None → env MAX_UPLOAD_BYTES
+}
+
 pub fn build_app() -> Router
+// Test-friendly: require_nats = false (avoids env races under parallel tests)
+
+pub fn build_app_with_options(config: AppBuildConfig) -> Router
+
 pub fn build_app_with_engine(
     engine: Arc<WorkflowEngine>,
     persistence: Option<Arc<dyn WorkflowPersistence>>,
@@ -77,6 +96,9 @@ pub fn build_app_with_engine(
     prometheus_handle: Option<PrometheusHandle>,
     log_buffer: Arc<LogBuffer>,
 ) -> Router
+// Uses AppBuildConfig::default() → env for require_nats / max_upload_bytes
+
+pub fn build_app_with_config(..., config: AppBuildConfig) -> Router
 
 // Public exports
 pub struct StartupCoordinator { ... }

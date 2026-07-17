@@ -28,7 +28,7 @@ flowchart TD
         Boundary["Boundary Events<br>timer, message, error, escalation, compensation"]
         Rhai["Script Runner<br>Rhai sandboxed eval"]
         History["History<br>diff calculation, snapshots"]
-        Retry["Retry Queue<br>background persistence worker"]
+        Retry["Retry Queue<br>bounded background worker"]
         Events["Engine Events<br>broadcast channel"]
     end
 
@@ -86,18 +86,18 @@ flowchart TD
 **Key files:** `tasks.rs`, `events.rs`, `gateways.rs`, `sub_processes.rs`
 
 ### Script Runner (engine-core/src/scripting/)
-**Owns:** Rhai script execution with configurable resource limits (max operations, memory, timeout).
-**Entry point:** `execute_listener_script()`
+**Owns:** Rhai script execution with configurable resource limits (max operations, memory budget → collection caps, timeout).
+**Entry points:** `ScriptConfig::build_engine()`, `execute_script_safe()`, listener helpers.
 
 ### History (engine-core/src/history/)
 **Owns:** Audit trail generation, diff calculation, actor tracking, snapshots.
 
 ### Retry Queue (engine-core/src/engine/retry_queue.rs)
-**Owns:** Fault-tolerant persistence retry mechanism — inline retries + background worker.
+**Owns:** Fault-tolerant persistence retry — inline retries + **bounded** background worker (drop + metrics when full).
 
 ### engine-server
-**Owns:** HTTP API surface (Axum routes), SSE broadcast bridge, timer scheduler, startup state restore, log buffer.
-**Invariants:** Never holds an engine lock across `.await` in route handlers.
+**Owns:** HTTP API surface (Axum routes), SSE broadcast bridge, timer scheduler, startup state restore, log buffer, durability gates (`REQUIRE_NATS`, upload limits).
+**Invariants:** Never holds an engine lock across `.await` in route handlers. `/api/health` ≠ `/api/ready`.
 
 ### bpmn-parser
 **Owns:** BPMN 2.0 XML parsing → `ProcessDefinition` structs, including ISO 8601 timer parsing.

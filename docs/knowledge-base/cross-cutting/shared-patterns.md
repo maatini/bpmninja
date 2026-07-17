@@ -39,15 +39,26 @@ Reusable patterns and conventions that span multiple modules.
 
 ## Fault-Tolerant Persistence Retry
 
-**Pattern:** Two-stage retry: inline (fast, 2 attempts) + background queue (slow, exponential backoff).
+**Pattern:** Two-stage retry: inline (fast, 2 attempts) + **bounded** background queue (slow, exponential backoff).
 
 **Used by:** All persistence operations in engine-core
 
 **How to follow:**
 - Inline: 2 attempts with 50ms backoff; if succeeds, no queue
-- Queue: `mpsc::channel` → background worker → exponential backoff (1s → 2s → ... → 60s, max 50 retries)
+- Queue: bounded `mpsc::channel` (default 10 000; `PERSISTENCE_RETRY_QUEUE_CAPACITY`) → background worker → exponential backoff (1s → 2s → … → 60s, max 50 retries)
+- Enqueue via non-blocking `try_send`; on full → drop + `bpmn_persistence_retry_dropped_total`
+- Permanent failure after max retries → `bpmn_persistence_retry_exhausted_total`
 - Job types: `PersistJob` enum covering all entity types
-- Worker reads latest state from in-memory before retrying (not stale snapshots)
+- Worker re-reads latest state from in-memory before retrying (not stale snapshots)
+
+## Fail-Closed Durability (Server)
+
+**Pattern:** Opt-in production gate `REQUIRE_NATS`; readiness mirrors durability.
+
+**How to follow:**
+- Docker/production: `REQUIRE_NATS=true` → refuse start without NATS
+- Dev: default `false` → in-memory with warning if NATS down
+- `/api/health` always 200; `/api/ready` fails when required persistence is missing or disconnected
 
 ## Broadcast Events (SSE Push)
 

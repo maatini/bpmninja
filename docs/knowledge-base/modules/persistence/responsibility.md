@@ -35,8 +35,8 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 
 **Invariants:**
 - Data is NOT persisted to disk — lost on restart
-- Used as the default persistence when NATS is unavailable
-- Used in all unit/integration tests (instant setup, no external dependencies)
+- Used in unit/integration tests (instant setup, no external dependencies)
+- May be used by the server only when NATS is down **and** `REQUIRE_NATS` is false (dev)
 - Must implement ALL `WorkflowPersistence` methods to serve as a valid backend
 
 ## Key Entry Points

@@ -14,14 +14,14 @@ BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible 
 | Async Runtime | Tokio 1.x | full features |
 | Web Framework | Axum 0.8 | REST API, SSE |
 | XML Parser | quick-xml 0.39 + serde | BPMN 2.0 parsing |
-| Scripting | Rhai 1.19 | Execution listeners, script tasks |
-| Persistence | NATS JetStream (async-nats 0.47) | KV stores, Object Store, Streams |
+| Scripting | Rhai 1.25 | Execution listeners, script tasks; sandboxed via ops/memory budget/timeout |
+| Persistence | NATS JetStream (async-nats 0.49) | KV stores, Object Store, Streams |
 | Concurrency | DashMap 6.x | Lock-free wait-state queues |
 | Desktop | Tauri 2.10, React 19, bpmn-js 18 | Tailwind CSS 4 |
 | External Client | TypeScript, ESM, Node ≥ 18 | Vitest tests |
 | Metrics | metrics-exporter-prometheus | /metrics endpoint |
 | Fuzzing | cargo-fuzz (libFuzzer) | 9 targets, AddressSanitizer |
-| Mutation | cargo-mutants | engine-core coverage 72.4% |
+| Mutation | cargo-mutants | engine-core; metrics via CI (`docs/quality-metrics.json`) |
 
 ## Workspace Structure
 
@@ -92,19 +92,32 @@ flowchart LR
 - **@tag:subprocess-flattening**: Embedded sub-processes are flattened into the main graph at parse time. No runtime scope nesting.
 - **@tag:camunda-compatible**: Service tasks use Camunda's fetch-and-lock pattern. TypeScript client mirrors `camunda-external-task-client-js` API.
 - **@tag:sse-push**: UI receives real-time state updates via SSE (`/api/events`), not polling.
-- **@tag:fault-tolerant-retry**: Two-stage persistence retry: inline (50ms backoff) + background worker queue (exponential backoff, max 50 retries).
+- **@tag:fault-tolerant-retry**: Two-stage persistence retry: inline (50ms backoff) + **bounded** background worker queue (default capacity 10 000, exponential backoff, max 50 retries; drops + metrics when full).
+- **@tag:fail-closed-durability**: Production/docker uses `REQUIRE_NATS=true` (fail-fast). Dev may run in-memory; `/api/ready` mirrors durability requirements.
+- **@tag:rhai-sandbox**: Scripts limited by `RHAI_MAX_OPERATIONS`, `RHAI_MAX_MEMORY_BYTES` (derives collection size caps), `RHAI_TIMEOUT_MS`.
 
 ## Test Coverage
 
 | Crate | Unit | E2E | Total |
 |-------|------|-----|-------|
-| engine-core | 214 | 5 | 219 |
+| engine-core | 217 | 5 | 222 |
 | bpmn-parser | 32 | — | 32 |
-| persistence-nats | 2 | — | 2 |
-| engine-server | 1 | 54 | 55 |
+| persistence-nats | 4 | — | 4 |
+| engine-server | 1 | ~56 | ~57 |
 | desktop-tauri | — | 48 | 48 |
 | external-task-client | 68 | — | 68 |
-| **Total** | **249** | **107** | **424** |
+| **Total** | **~322** | **~109** | **~431** |
+
+> Counts approximate; `cargo test --workspace` is the source of truth.
+
+## Production Hardening (env)
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `REQUIRE_NATS` | `false` | Fail-fast without NATS; readiness requires persistence |
+| `MAX_UPLOAD_BYTES` | `5 MiB` | Multipart instance-file upload limit → HTTP 413 |
+| `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded retry queue depth |
+| `RHAI_MAX_MEMORY_BYTES` | `2 MiB` | Script memory budget (collection caps) |
 
 ## Boundaries & Invariants
 
@@ -114,3 +127,4 @@ flowchart LR
 4. `ProcessDefinition` is immutable after deployment (`Arc<ProcessDefinition>`).
 5. Persistence operations go through the `retry_queue` — never directly called from engine logic.
 6. SSE events broadcast via `tokio::sync::broadcast` channel (capacity 256) — slow consumers don't block writers.
+7. `/api/health` = liveness (always 200 when process up); `/api/ready` = durability readiness (503 if required persistence missing or NATS down).

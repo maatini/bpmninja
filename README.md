@@ -40,16 +40,18 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
 - **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
-- **Fault-tolerant retry queue** — two-stage retry system with a background worker to handle NATS outages
+- **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
+- **Fail-closed durability** — `REQUIRE_NATS=true` (docker-compose default) refuses silent in-memory fallback; `/api/ready` mirrors persistence health
+- **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
-- **Rhai script engine** — execution listeners for dynamic variable manipulation
+- **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout)
 - **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported
 - **Suspend / resume** — pause and continue instances (timers and tasks blocked)
 - **Incident management** — handle failed service tasks with retry/resolve directly from the UI
 - **Historical instance archival** — completed instances are automatically archived to a separate store with search by definition, business key, date range, status and pagination
 - **Push-based UI updates** — engine fires SSE events (`GET /api/events`) on every state change; Tauri desktop app subscribes via a background task and emits Tauri events to React components, replacing polling
-- **Persistent log buffer** — rolling 5000-entry log stream captured by a custom `tracing` layer; queryable via `GET /api/logs` with level and text filters; automatically persisted to NATS JetStream (`ENGINE_LOGS` stream, 50 000 entries) when NATS is available, with a local JSON-Lines file as fallback (`engine_logs.jsonl`)
+- **Persistent log buffer** — rolling 5000-entry log stream captured by a custom `tracing` layer; queryable via `GET /api/logs` with level and text filters; automatically persisted to NATS JetStream (`ENGINE_LOGS` stream, 50 000 entries) when NATS is available, with a local JSON-Lines file as fallback (`engine_logs.jsonl`, gitignored; set `LOG_FILE=off` to disable)
 - **Prometheus metrics** — all key engine metrics exported at `/metrics` via `metrics-exporter-prometheus`
 - **Multi-arch Docker images** — CI builds `linux/amd64` + `linux/arm64` images via GitHub Actions with layer cache
 - **Desktop UI** — Tauri app with bpmn-js modeler, live instance/definition tracking with push updates, log stream viewer, history page for archived instances, storage mode badge (NATS / In-Memory), and DataViewer with automatic MIME/base64 detection (cross-platform releases via GitHub Actions CI)
@@ -349,8 +351,8 @@ The server runs at `http://localhost:8081`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | Liveness check → `200 OK` |
-| `GET` | `/api/ready` | Readiness check (checks NATS connection) |
+| `GET` | `/api/health` | Liveness check → always `200 OK` while the process is up |
+| `GET` | `/api/ready` | Readiness: `503` if required persistence is missing (`REQUIRE_NATS`) or NATS is disconnected |
 | `GET` | `/api/info` | Backend info (type, NATS URL, status) |
 | `GET` | `/api/monitoring` | Engine statistics (instances, tasks, storage, errors) |
 | `GET` | `/api/monitoring/buckets/:bucket/entries` | List KV bucket entries |
@@ -564,15 +566,17 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
-| **engine-core** | 214 | 5 | 219 |
+| **engine-core** | 217 | 5 | 222 |
 | **bpmn-parser** | 32 | — | 32 |
-| **persistence-nats** | 2 | — | 2 |
-| **engine-server** | 1 | 54 | 55 |
+| **persistence-nats** | 4 | — | 4 |
+| **engine-server** | 1 | ~56 | ~57 |
 | **desktop-tauri** | — | 48 | 48 |
 | **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Total** | **249** | **107** | **424** ✅ |
+| **Total** | **~322** | **~109** | **~431** ✅ |
 
-### engine-core Breakdown (219 tests)
+> Authoritative: `cargo test --workspace` (last full run green after production-hardening work).
+
+### engine-core Breakdown (~222 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -583,7 +587,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
 | `runtime::instance::tests` | 11 | Audit log limits, file variables, file references |
 | `adapter::in_memory::tests` | 8 | Storage info, history query filters, completed instance archival, pagination, date range, business key, state filter |
-| `retry_queue::tests` | 3 | Display, shutdown, skip missing entities |
+| `retry_queue::tests` | 4 | Display, shutdown, skip missing entities, full-queue drop |
 | `boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
 | Integration tests | 5 | BPMN compliance, complex gateways |
 
@@ -609,12 +613,12 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, nested processes |
 | `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
-| `e2e_files.rs` | 1 | Upload/download/delete lifecycle |
+| `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
 | `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
 | `e2e_history.rs` | 4 | History generation, querying, completed instances listing, business key filter, pagination |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration to a new definition version (compatible, renamed nodes, incompatible, dry-run) |
-| `e2e_monitoring.rs` | 4 | Health, ready (connected/disconnected), info, monitoring stats |
+| `e2e_monitoring.rs` | 5 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
 | `e2e_service_tasks.rs` | 7 | List service tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN error, lock conflict |
 | `e2e_start_errors.rs` | 4 | Invalid UUID, unknown definition, unknown BPMN ID, timer-start rejection |
 | `e2e_stress.rs` | 2 | Concurrent deployments, concurrent starts (multi-thread) |
@@ -658,7 +662,7 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 | **Project total** | **~177** | **~38,750** |
 
 ### Mutation Score
-A full workspace run via [`cargo-mutants`](https://mutants.rs) on the `engine-core` crate (CI workflow "Core Mutation Tests", 2026-04-13) produced a **mutation score of 72.4%** (359 caught, 137 missed, 552 unviable, 1 timeout out of 1049 mutants tested in ~3h). Top missed areas: `timer_processor.rs` (7 missed), `scripting/runner.rs` (4 missed), `handlers/events.rs` (1 missed). Results are stored as CI artifacts for 30 days.
+CI workflow **Core Mutation Tests** runs `cargo-mutants` on `engine-core` and publishes metrics via `docs/quality-metrics.json` / the Mutation Score badge. The metrics parser reads modern `outcomes.json` (`summary: CaughtMutant|MissedMutant|…` and top-level counters). A historical full run (2026-04-13) scored **72.4%**; the auto-updated QUALITY_METRICS block above reflects the latest successful CI merge. Artifacts are retained 30 days.
 
 ### Continuous Fuzzing
 To safeguard security- and stability-critical parser and execution components, a parallel **fuzzing workflow** based on `cargo-fuzz` (libFuzzer) runs daily in the CI/CD pipeline (and on relevant pull requests).

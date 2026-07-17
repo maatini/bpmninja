@@ -427,8 +427,8 @@ pub trait WorkflowPersistence: Send + Sync {
 
 Since NATS can experience outages, the engine uses a two-stage retry mechanism for stateful I/O operations:
 1. **Inline retry**: short backoff (e.g. 50ms) on the direct call. On success, execution continues immediately.
-2. **Background retry queue**: if the inline retry fails (e.g. NATS is offline), a `RetryJob` is dispatched to an asynchronous background worker. That worker reads the most recent state from the in-memory state with *exponential backoff* and feeds it into NATS as soon as the system is back online.
-This prevents state loss after a transient network failure.
+2. **Bounded background retry queue**: if the inline retry fails (e.g. NATS is offline), a `PersistJob` is enqueued on a bounded channel (default capacity 10 000, env `PERSISTENCE_RETRY_QUEUE_CAPACITY`). A background worker re-reads the latest in-memory state and retries with *exponential backoff* (max 50 attempts). If the queue is full, jobs are **dropped** and counted (`bpmn_persistence_retry_dropped_total`) to avoid OOM under prolonged outage.
+This prevents unbounded memory growth while still recovering from transient network failure.
 
 ---
 
@@ -510,10 +510,13 @@ graph LR
 
 ```rust
 struct AppState {
-    pub(crate) engine:       Arc<WorkflowEngine>,                           // Global shared instance (no RwLock needed!)
-    pub(crate) persistence:  Option<Arc<dyn WorkflowPersistence>>,          // Optional NATS backend
-    pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,          // XML cache (key → XML)
-    pub(crate) nats_url:     String,                                        // For /api/info endpoint
+    pub(crate) engine:            Arc<WorkflowEngine>,                  // Global shared instance (no RwLock needed!)
+    pub(crate) persistence:       Option<Arc<dyn WorkflowPersistence>>, // Optional NATS backend
+    pub(crate) deployed_xml:      Arc<RwLock<HashMap<String, String>>>, // XML cache (key → XML)
+    pub(crate) nats_url:          String,                               // For /api/info endpoint
+    pub(crate) log_buffer:        Arc<LogBuffer>,
+    pub(crate) require_nats:      bool,                                 // REQUIRE_NATS → readiness / durability
+    pub(crate) max_upload_bytes:  usize,                                // MAX_UPLOAD_BYTES (default 5 MiB)
 }
 ```
 
@@ -546,7 +549,9 @@ tokio::spawn(async move {
 | Endpoint | Function | Check |
 |----------|----------|-------|
 | `GET /api/health` | Liveness probe | Always `200 OK` when the server is running |
-| `GET /api/ready` | Readiness probe | Checks NATS connection, `503` when disconnected |
+| `GET /api/ready` | Readiness probe | `503` if `REQUIRE_NATS` is set but no persistence is configured, or if NATS storage check fails; otherwise `200` |
+
+Production/docker should set `REQUIRE_NATS=true` so a missing NATS backend fails startup instead of silently running in-memory.
 
 ---
 
@@ -665,12 +670,14 @@ Every state transition is stored as a `HistoryEntry`:
 | desktop-tauri (Rust backend) | 10 | 623 |
 | **Project total** | **~108** | **~22,871** |
 
-### Test Overview (167 tests, all ✅)
+### Test Overview (workspace, approximate)
 
-| Crate | Unit | E2E | Total |
+| Crate | Unit | E2E / Integration | Total |
 |---|---|---|---|
-| engine-core | 102 | — | 102 |
-| bpmn-parser | 27 | — | 27 |
-| persistence-nats | 2 | — | 2 |
-| engine-server | — | 36 | 36 |
-| **Total** | **131** | **36** | **167** |
+| engine-core | 217 | 5 | 222 |
+| bpmn-parser | 32 | — | 32 |
+| persistence-nats | 4 | — | 4 |
+| engine-server | 1 | ~56 | ~57 |
+| **Rust workspace (cargo test)** | | | **all green** |
+
+Source of truth: `cargo test --workspace`.

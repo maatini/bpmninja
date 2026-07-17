@@ -7,7 +7,7 @@
 | engine-core | Rust crate (direct) | All engine operations: `WorkflowEngine`, domain types, persistence trait |
 | bpmn-parser | Rust crate (direct) | Parsing BPMN XML on deploy |
 | persistence-nats | Rust crate (direct) | NATS connection and persistence backend |
-| persistence-memory | Rust crate (direct) | Used when NATS unavailable (in-memory fallback) |
+| persistence-memory | Rust crate (indirect via engine-core tests) | Dev in-memory only when `REQUIRE_NATS` is false and NATS is down |
 | axum | External crate | HTTP framework: routing, extractors, middleware |
 | tokio | External crate | Async runtime, signal handling, timers, spawn |
 | tracing / tracing-subscriber | External crate | Structured logging with env-filter, JSON + text formats |

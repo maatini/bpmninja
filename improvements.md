@@ -103,21 +103,21 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 
 ## Empfohlener Aktionsplan (phasiert)
 
-### Phase 0 — Sofort (1–3 Tage)
+### Phase 0 — Sofort (1–3 Tage) — ✅ erledigt (2026-07)
 
-1. **Q1** Rhai Memory-Limit verdrahten + Tests  
-2. **Q3** Upload-Größenlimit  
-3. **Q2 / M8** Fail-fast Persistence + Readiness-Semantik  
-4. **Q5** Getrackte Logs entfernen / gitignore  
-5. **Q6** Versions-Docs syncen  
+1. ~~**Q1** Rhai Memory-Limit verdrahten + Tests~~ ✅  
+2. ~~**Q3** Upload-Größenlimit~~ ✅  
+3. ~~**Q2 / M8** Fail-fast Persistence + Readiness-Semantik~~ ✅  
+4. ~~**Q5** Getrackte Logs entfernen / gitignore~~ ✅  
+5. ~~**Q6** Versions-Docs syncen~~ ✅  
 
 ### Phase 1 — Production Minimum Bar (1–2 Wochen)
 
-1. **M1** API-Authentifizierung (API-Keys als v1 OK; OIDC danach)  
-2. **Q4** CORS per Env absichern  
-3. **M3** Bounded Retry + Metrics  
-4. **M2** NATS-Integrationstests (Restore/Retry)  
-5. **Q7** Mutation-Metrics-Pipeline reparieren  
+1. **M1** API-Authentifizierung (API-Keys als v1 OK; OIDC danach) — offen  
+2. **Q4** CORS per Env absichern — offen  
+3. ~~**M3** Bounded Retry + Metrics~~ ✅  
+4. ~~**M2** NATS-Integrationstests (Restore/Retry)~~ ✅  
+5. ~~**Q7** Mutation-Metrics-Pipeline reparieren~~ ✅ (Parser fix; Badge aktualisiert sich beim nächsten Mutation-CI-Lauf)
 
 ### Phase 2 — Scale & Maintainability (2–6 Wochen)
 
@@ -204,4 +204,4 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 
 ---
 
-**Nächster sinnvoller Schritt:** Phase 0 abarbeiten (Q1–Q3, Q2/M8, Q5, Q6), danach Phase 1 (Auth + NATS-Tests).
+**Nächster sinnvoller Schritt:** Rest von Phase 1 — **M1** API-Auth und **Q4** CORS-Allowlist; danach Phase 2 (Indexierung, Test-Split, Supply-Chain-CI).
