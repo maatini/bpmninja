@@ -27,6 +27,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+# Runtime engine log file (LOG_FILE default); do not commit
+engine_logs.jsonl
 
 # ========================
 # Environment & Secrets
