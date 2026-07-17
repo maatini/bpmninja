@@ -38,8 +38,26 @@ desktop-tauri/                # Tauri Desktop-App (React + bpmn-js + Live-Tracki
 bpmn-ninja-external-task-client/ # TypeScript Camunda-kompatibler Client
 api-spec/                     # OpenAPI-Spezifikation
 fuzz/                         # Fuzz-Targets (Parser, Rhai, Cron etc.)
-docs/                         # OpenAPI, Architektur-Diagramme
+docs/                         # OpenAPI, Architektur-Diagramme, Knowledge Base
 ```
+
+## Knowledge Base (docs/knowledge-base/)
+
+> **Für Architektur, Verantwortlichkeiten und Abhängigkeiten immer zuerst `docs/knowledge-base/` konsultieren.**
+> Starte mit den relevanten `index.md`-Dateien.
+
+Die Knowledge Base dokumentiert systematisch jedes Modul mit:
+- **Responsibilities** — Was besitzt das Modul? Wofür ist es verantwortlich?
+- **Dependencies** — Eingehende und ausgehende Abhängigkeiten (intern + extern)
+- **Interfaces** — Öffentliche APIs, Events, Verträge, Datenmodelle
+- **Gotchas** — Bekannte Fallstricke, Randfälle, Wartungshinweise
+
+Schnelleinstieg:
+- [index.md](docs/knowledge-base/index.md) — Navigation + Quick Start
+- [overview.md](docs/knowledge-base/overview.md) — Projektübersicht, Tech-Stack, Architektur-Summary
+- [architecture/dependencies.md](docs/knowledge-base/architecture/dependencies.md) — Crate-Abhängigkeitsgraph
+- [architecture/data-flows.md](docs/knowledge-base/architecture/data-flows.md) — Wichtige Datenflüsse (Deployment, Execution, SSE, Timer, Persistence)
+- [cross-cutting/tags.md](docs/knowledge-base/cross-cutting/tags.md) — `@tag:xxx`-Referenzen
 
 ## MCP-Server (wichtig!)
 
