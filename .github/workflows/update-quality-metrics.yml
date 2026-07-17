@@ -15,7 +15,11 @@ permissions:
 jobs:
   update-metrics:
     name: Merge quality metrics and update README
-    if: github.event.workflow_run.conclusion == 'success'
+    # Mutation workflow uses continue-on-error; also merge when the run failed
+    # but still produced metrics artifacts (partial success).
+    if: >
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

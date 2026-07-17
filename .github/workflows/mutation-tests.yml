@@ -72,25 +72,55 @@ jobs:
               "total_tested": 0,
           }
 
-          if os.path.exists(outcomes_path):
-              with open(outcomes_path, "r", encoding="utf-8") as f:
-                  data = json.load(f)
+          # cargo-mutants outcomes.json schema (modern):
+          # {
+          #   "outcomes": [ { "summary": "CaughtMutant"|"MissedMutant"|"Unviable"|"Timeout"|"Success", ... } ],
+          #   "caught": N, "missed": N, "timeout": N, "unviable": N, ...
+          # }
+          # Older/wrong parsers looked for m["status"] == "caught" and always got no-data.
+
+          def parse_outcomes(data):
+              if isinstance(data, dict) and all(
+                  k in data for k in ("caught", "missed", "timeout", "unviable")
+              ):
+                  return (
+                      int(data.get("caught") or 0),
+                      int(data.get("missed") or 0),
+                      int(data.get("timeout") or 0),
+                      int(data.get("unviable") or 0),
+                  )
 
               if isinstance(data, dict):
                   entries = data.get("outcomes", [])
               else:
-                  entries = data
+                  entries = data if isinstance(data, list) else []
 
-              caught = sum(1 for m in entries if m.get("status") == "caught")
-              missed = sum(1 for m in entries if m.get("status") == "missed")
-              timeout = sum(1 for m in entries if m.get("status") == "timeout")
-              unviable = sum(1 for m in entries if m.get("status") == "unviable")
+              caught = missed = timeout = unviable = 0
+              for m in entries:
+                  # Prefer modern "summary"; fall back to legacy "status"
+                  label = (m.get("summary") or m.get("status") or "").lower()
+                  if label in ("caughtmutant", "caught"):
+                      caught += 1
+                  elif label in ("missedmutant", "missed"):
+                      missed += 1
+                  elif label in ("timeout", "timedout", "timeoutmutant"):
+                      timeout += 1
+                  elif label in ("unviable", "unviablemutant"):
+                      unviable += 1
+                  # "Success" baseline is ignored
+              return caught, missed, timeout, unviable
+
+          if os.path.exists(outcomes_path):
+              with open(outcomes_path, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              caught, missed, timeout, unviable = parse_outcomes(data)
               total_tested = caught + missed + timeout
               score = (caught / total_tested * 100.0) if total_tested else 0.0
 
               metrics.update(
                   {
-                      "status": "ok",
+                      "status": "ok" if total_tested > 0 or unviable > 0 else "no-data",
                       "mutation_score": round(score, 1),
                       "caught": caught,
                       "missed": missed,
@@ -102,6 +132,8 @@ jobs:
 
           with open("mutation-metrics.json", "w", encoding="utf-8") as f:
               json.dump(metrics, f, indent=2)
+
+          print(json.dumps(metrics, indent=2))
           PY
 
       - name: Upload mutation metrics
@@ -115,7 +147,7 @@ jobs:
       - name: Generate Job Summary
         if: always()
         run: |
-          python3 -c '
+          python3 - <<'PY'
           import json, os, sys
 
           out_file = "mutants.out/outcomes.json"
@@ -126,13 +158,35 @@ jobs:
           with open(out_file) as f:
               data = json.load(f)
 
-          # cargo-mutants JSON enthält eine Liste an Objekten oder ein Dictionary,
-          # je nach exakter Version. Dies wertet die Outcomes aus.
-          caught = sum(1 for m in data if m.get("status") == "caught")
-          missed = sum(1 for m in data if m.get("status") == "missed")
-          timeout = sum(1 for m in data if m.get("status") == "timeout")
-          unviable = sum(1 for m in data if m.get("status") == "unviable")
+          def parse_outcomes(data):
+              if isinstance(data, dict) and all(
+                  k in data for k in ("caught", "missed", "timeout", "unviable")
+              ):
+                  return (
+                      int(data.get("caught") or 0),
+                      int(data.get("missed") or 0),
+                      int(data.get("timeout") or 0),
+                      int(data.get("unviable") or 0),
+                      data.get("outcomes", []) if isinstance(data.get("outcomes"), list) else [],
+                  )
+              if isinstance(data, dict):
+                  entries = data.get("outcomes", [])
+              else:
+                  entries = data if isinstance(data, list) else []
+              caught = missed = timeout = unviable = 0
+              for m in entries:
+                  label = (m.get("summary") or m.get("status") or "").lower()
+                  if label in ("caughtmutant", "caught"):
+                      caught += 1
+                  elif label in ("missedmutant", "missed"):
+                      missed += 1
+                  elif label in ("timeout", "timedout", "timeoutmutant"):
+                      timeout += 1
+                  elif label in ("unviable", "unviablemutant"):
+                      unviable += 1
+              return caught, missed, timeout, unviable, entries
 
+          caught, missed, timeout, unviable, entries = parse_outcomes(data)
           total_tested = caught + missed + timeout
           score = (caught / total_tested * 100) if total_tested > 0 else 0
 
@@ -150,13 +204,23 @@ jobs:
           if missed > 0:
               summary += "### ❌ Überlebende Mutanten (Beispiele)\n"
               summary += "| Pfad | Zeile | Mutation |\n|---|---|---|\n"
-              missed_list = [m for m in data if m.get("status") == "missed"][:10]
+              missed_list = [
+                  m for m in entries
+                  if (m.get("summary") or m.get("status") or "").lower()
+                  in ("missedmutant", "missed")
+              ][:10]
               for m in missed_list:
-                  file = m.get("mutant", {}).get("source_file", "unknown")
-                  line = m.get("mutant", {}).get("line", "?")
-                  mut = m.get("mutant", {}).get("replacement", "unknown mutation")
+                  scenario = m.get("scenario") or {}
+                  mutant = scenario.get("Mutant") if isinstance(scenario, dict) else None
+                  if not isinstance(mutant, dict):
+                      mutant = m.get("mutant") or {}
+                  file = mutant.get("file") or mutant.get("source_file") or "unknown"
+                  span = mutant.get("span") or {}
+                  start = span.get("start") if isinstance(span, dict) else None
+                  line = start.get("line") if isinstance(start, dict) else mutant.get("line", "?")
+                  mut = mutant.get("replacement", "unknown mutation")
                   summary += f"| `{file}` | {line} | `{mut}` |\n"
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary_file:
               summary_file.write(summary)
-          '
+          PY
