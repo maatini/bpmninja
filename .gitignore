@@ -43,6 +43,11 @@ engine_logs.jsonl
 .claude/settings.local.json
 
 # ========================
+# Local scratch notes
+# ========================
+kladde.md
+
+# ========================
 # Editoren & OS
 # ========================
 .vscode/*
