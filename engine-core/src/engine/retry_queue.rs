@@ -1,9 +1,12 @@
 //! Background retry queue for failed persistence operations.
 //!
 //! When a persist operation fails after inline retries, the job is pushed
-//! to an unbounded channel. A background tokio task drains this channel,
+//! to a **bounded** channel. A background tokio task drains this channel,
 //! re-reads the current in-memory state, and retries the persistence call
 //! with exponential backoff.
+//!
+//! If the queue is full, new jobs are dropped and counted via
+//! `bpmn_persistence_retry_dropped_total` (prevents OOM under NATS outage).
 
 use super::super::runtime::*;
 use dashmap::DashMap;
@@ -28,6 +31,18 @@ pub(crate) const INLINE_RETRIES: u32 = 2;
 
 /// Delay between inline retries in milliseconds (doubles each attempt).
 pub(crate) const INLINE_BACKOFF_MS: u64 = 50;
+
+/// Default capacity of the background retry queue.
+pub(crate) const DEFAULT_RETRY_QUEUE_CAPACITY: usize = 10_000;
+
+/// Resolves retry queue capacity from `PERSISTENCE_RETRY_QUEUE_CAPACITY` or default.
+pub(crate) fn retry_queue_capacity_from_env() -> usize {
+    std::env::var("PERSISTENCE_RETRY_QUEUE_CAPACITY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_RETRY_QUEUE_CAPACITY)
+}
 
 /// A persistence operation that can be retried.
 #[derive(Debug, Clone)]
@@ -78,14 +93,19 @@ impl std::fmt::Display for PersistJob {
 }
 
 /// Sender half of the retry queue. Cheap to clone.
-pub(crate) type RetryQueueTx = mpsc::UnboundedSender<PersistJob>;
+pub(crate) type RetryQueueTx = mpsc::Sender<PersistJob>;
 
 /// Receiver half of the retry queue (consumed by the background task).
-pub(crate) type RetryQueueRx = mpsc::UnboundedReceiver<PersistJob>;
+pub(crate) type RetryQueueRx = mpsc::Receiver<PersistJob>;
 
-/// Creates a new retry queue channel pair.
+/// Creates a new bounded retry queue with default/env capacity.
 pub(crate) fn create_retry_queue() -> (RetryQueueTx, RetryQueueRx) {
-    mpsc::unbounded_channel()
+    create_retry_queue_with_capacity(retry_queue_capacity_from_env())
+}
+
+/// Creates a bounded retry queue with an explicit capacity (tests / custom sizing).
+pub(crate) fn create_retry_queue_with_capacity(capacity: usize) -> (RetryQueueTx, RetryQueueRx) {
+    mpsc::channel(capacity.max(1))
 }
 
 /// Spawns the background retry worker.
@@ -142,6 +162,7 @@ pub(crate) fn spawn_retry_worker(
                     }
                     Err(e) if attempt >= MAX_RETRIES => {
                         error_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        metrics::counter!("bpmn_persistence_retry_exhausted_total").increment(1);
                         tracing::error!(
                             "PERMANENT PERSISTENCE FAILURE after {} retries for {}: {}",
                             MAX_RETRIES,
@@ -315,7 +336,7 @@ mod tests {
             error_counter,
         );
 
-        tx.send(PersistJob::Shutdown).unwrap();
+        tx.send(PersistJob::Shutdown).await.unwrap();
         // Worker should exit cleanly
         tokio::time::timeout(std::time::Duration::from_secs(5), handle)
             .await
@@ -348,8 +369,10 @@ mod tests {
         );
 
         // Send a SaveInstance for a non-existent ID — should succeed silently
-        tx.send(PersistJob::SaveInstance(Uuid::new_v4())).unwrap();
-        tx.send(PersistJob::Shutdown).unwrap();
+        tx.send(PersistJob::SaveInstance(Uuid::new_v4()))
+            .await
+            .unwrap();
+        tx.send(PersistJob::Shutdown).await.unwrap();
 
         tokio::time::timeout(std::time::Duration::from_secs(5), handle)
             .await
@@ -358,5 +381,17 @@ mod tests {
 
         // No permanent failures should have been recorded
         assert_eq!(error_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn test_retry_queue_try_send_full_drops() {
+        let (tx, _rx) = create_retry_queue_with_capacity(1);
+        // Fill the single slot
+        tx.try_send(PersistJob::SaveInstance(Uuid::new_v4()))
+            .expect("first send should fit");
+        let err = tx
+            .try_send(PersistJob::SaveInstance(Uuid::new_v4()))
+            .expect_err("second send must hit Full");
+        assert!(matches!(err, mpsc::error::TrySendError::Full(_)));
     }
 }

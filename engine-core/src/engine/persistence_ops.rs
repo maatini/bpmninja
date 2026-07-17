@@ -51,11 +51,30 @@ impl WorkflowEngine {
     }
 
     /// Enqueues a failed job for background retry (if retry queue is available).
+    ///
+    /// Uses non-blocking `try_send` so request paths never stall. If the bounded
+    /// queue is full, the job is dropped, counted, and metric'd.
     fn enqueue_retry(&self, job: PersistJob) {
-        if let Some(ref tx) = self.retry_tx
-            && let Err(e) = tx.send(job)
-        {
-            tracing::error!("Failed to enqueue retry job: {} (channel closed)", e);
+        let Some(ref tx) = self.retry_tx else {
+            return;
+        };
+        match tx.try_send(job) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(job)) => {
+                self.persistence_error_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                metrics::counter!("bpmn_persistence_retry_dropped_total").increment(1);
+                tracing::error!(
+                    "Persistence retry queue full — dropping job {} (capacity exhausted)",
+                    job
+                );
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(job)) => {
+                tracing::error!(
+                    "Failed to enqueue retry job {} (channel closed)",
+                    job
+                );
+            }
         }
     }
 
