@@ -139,3 +139,82 @@ async fn test_file_upload_download_delete() {
     let inst_after: ProcessInstance = inst_resp_after.json().await.unwrap();
     assert!(!inst_after.variables.contains_key("greeting_file"));
 }
+
+/// Oversized multipart uploads must be rejected (Q3 / MAX_UPLOAD_BYTES).
+#[tokio::test]
+async fn test_file_upload_rejects_oversized_payload() {
+    // Explicit 1 KiB limit — no process-wide env mutation (safe under parallel tests).
+    let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
+        require_nats: Some(false),
+        max_upload_bytes: Some(1024),
+    });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    let xml = r#"
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1">
+          <bpmn:process id="Process_1" isExecutable="true">
+            <bpmn:startEvent id="Start" />
+            <bpmn:userTask id="Task1" />
+            <bpmn:endEvent id="End" />
+            <bpmn:sequenceFlow id="Flow_1" sourceRef="Start" targetRef="Task1" />
+            <bpmn:sequenceFlow id="Flow_2" sourceRef="Task1" targetRef="End" />
+          </bpmn:process>
+        </bpmn:definitions>
+    "#;
+
+    let deploy_resp = client
+        .post(format!("{}/api/deploy", base_url))
+        .json(&json!({ "name": "test-files-limit", "xml": xml }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deploy_resp.status(), StatusCode::OK);
+    let def_key = deploy_resp.json::<Value>().await.unwrap()["definition_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let start_resp = client
+        .post(format!("{}/api/start", base_url))
+        .json(&json!({ "definition_key": def_key }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_resp.status(), StatusCode::OK);
+    let instance_id = start_resp.json::<Value>().await.unwrap()["instance_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let big = vec![0u8; 2048];
+    let part = multipart::Part::bytes(big)
+        .file_name("too-big.bin")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let form = multipart::Form::new().part("file", part);
+
+    let upload_resp = client
+        .post(format!(
+            "{}/api/instances/{}/files/big_file",
+            base_url, instance_id
+        ))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        upload_resp.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "body: {}",
+        upload_resp.text().await.unwrap_or_default()
+    );
+}

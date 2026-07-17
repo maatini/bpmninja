@@ -75,6 +75,18 @@ async fn main() -> anyhow::Result<()> {
 
     let mut xml_cache = HashMap::new();
 
+    // REQUIRE_NATS=true|1|yes|on → fail-fast when NATS is unavailable (no silent data loss).
+    // Default false for local/dev; docker-compose sets true for production-like runs.
+    let require_nats = matches!(
+        env::var("REQUIRE_NATS")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    );
+
     let (engine, nats_persistence) = match NatsPersistence::connect(&nats_url, "WORKFLOW_EVENTS").await {
         Ok(p) => {
             tracing::info!("Connected to NATS at {}", nats_url);
@@ -93,6 +105,13 @@ async fn main() -> anyhow::Result<()> {
             (engine, Some(p_arc as Arc<dyn WorkflowPersistence>))
         }
         Err(e) => {
+            if require_nats {
+                anyhow::bail!(
+                    "NATS not available at {} and REQUIRE_NATS is set — refusing to start with in-memory fallback. Error: {}",
+                    nats_url,
+                    e
+                );
+            }
             tracing::error!(
                 "NATS not available at {} - running IN-MEMORY only! Error: {}",
                 nats_url,

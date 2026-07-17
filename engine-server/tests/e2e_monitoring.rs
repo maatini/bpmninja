@@ -34,8 +34,33 @@ async fn health_endpoint_returns_200() {
 async fn ready_endpoint_returns_200_without_nats() {
     let base = start_server().await;
     let res = reqwest::get(format!("{}/api/ready", base)).await.unwrap();
-    // Without NATS, ready should still return 200 (no persistence = always ready)
+    // Without REQUIRE_NATS, ready should still return 200 (dev in-memory mode)
     assert_eq!(res.status(), 200, "Ready without NATS should be 200");
+}
+
+#[tokio::test]
+async fn ready_endpoint_returns_503_when_nats_required() {
+    // Explicit config — no process-wide env mutation (safe under parallel tests).
+    let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
+        require_nats: Some(true),
+        max_upload_bytes: None,
+    });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failed");
+    let addr = listener.local_addr().expect("addr failed");
+    let base = format!("http://{}", addr);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let res = reqwest::get(format!("{}/api/ready", base)).await.unwrap();
+    assert_eq!(
+        res.status(),
+        503,
+        "Ready with REQUIRE_NATS and no persistence must be 503"
+    );
 }
 
 #[tokio::test]

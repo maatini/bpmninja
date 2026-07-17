@@ -14,6 +14,8 @@ pub(crate) enum AppError {
     Engine(EngineError),
     /// Client sent a malformed request (invalid UUID, bad XML, etc.).
     BadRequest(String),
+    /// Request body / multipart payload exceeds configured limit.
+    PayloadTooLarge(String),
 }
 
 impl From<EngineError> for AppError {
@@ -26,6 +28,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            Self::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
             Self::Engine(EngineError::InvalidDefinition(msg)) => (StatusCode::BAD_REQUEST, msg),
             Self::Engine(EngineError::NoMatchingCondition(msg)) => (
                 StatusCode::BAD_REQUEST,
@@ -94,4 +97,33 @@ pub struct AppState {
     pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,
     pub(crate) nats_url: String,
     pub(crate) log_buffer: Arc<LogBuffer>,
+    /// When true, `/api/ready` fails if no persistence backend is configured.
+    pub(crate) require_nats: bool,
+    /// Maximum multipart upload size in bytes (instance files).
+    pub(crate) max_upload_bytes: usize,
+}
+
+/// Parses common truthy env values (`1`, `true`, `yes`, `on`; case-insensitive).
+pub(crate) fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name)
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    )
+}
+
+/// Default max upload size: 5 MiB (aligned with JSON body limit).
+pub(crate) const DEFAULT_MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
+
+/// Reads `MAX_UPLOAD_BYTES` from the environment, falling back to 5 MiB.
+pub(crate) fn max_upload_bytes_from_env() -> usize {
+    std::env::var("MAX_UPLOAD_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_UPLOAD_BYTES)
 }

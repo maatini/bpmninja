@@ -19,7 +19,7 @@ The development setup allows all origins. For production deployment behind a spe
 
 ### ⚠️ Body size limit is 5 MB
 
-BPMN XML deployments are capped at 5 MB. File uploads for instance variables go through multipart and are NOT subject to this limit (files route handles `multipart/form-data` separately).
+BPMN XML deployments are capped at 5 MB (`DefaultBodyLimit`). Multipart file uploads for instance variables are capped separately via `MAX_UPLOAD_BYTES` (default 5 MiB) in `files.rs` — oversized uploads return **413 Payload Too Large**.
 
 ### ⚠️ Startup restore can take time
 
@@ -27,11 +27,11 @@ On server start with large NATS state, `StartupCoordinator.restore()` loads all 
 
 ### ⚠️ Log buffer is rolling (5,000 entries)
 
-Oldest entries are dropped when the buffer exceeds 5,000. NATS persistence (`ENGINE_LOGS` stream) stores 50,000 entries. The file fallback (`engine_logs.jsonl`) is NOT truncated — it grows indefinitely (mitigated by `LOG_FILE=off` option).
+Oldest entries are dropped when the buffer exceeds 5,000. NATS persistence (`ENGINE_LOGS` stream) stores 50,000 entries. The file fallback (`engine_logs.jsonl`) is NOT truncated — it grows indefinitely (mitigated by `LOG_FILE=off` or external rotation). The file is gitignored; never commit runtime logs.
 
-### ⚠️ In-memory fallback is silent
+### ⚠️ In-memory fallback is opt-in (dev)
 
-If NATS is unavailable, the server starts in in-memory mode with just a warning log. All state is lost on restart. This is by design for development, but prevent this in production.
+If NATS is unavailable and `REQUIRE_NATS` is unset/false, the server starts in in-memory mode with a warning log. All state is lost on restart. For production/docker-compose set `REQUIRE_NATS=true` (fail-fast at startup). `/api/ready` returns **503** when `REQUIRE_NATS=true` but no persistence is configured.
 
 ### ⚠️ Timer scheduler uses `tokio::spawn`
 

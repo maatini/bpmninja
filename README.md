@@ -258,11 +258,14 @@ The server runs at `http://localhost:8081`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `REQUIRE_NATS` | `false` | If true, refuse to start without NATS (no silent in-memory fallback); `/api/ready` requires persistence |
+| `MAX_UPLOAD_BYTES` | `5242880` | Max multipart file upload size (bytes) for instance files |
 | `PORT` | `8081` | HTTP server port |
 | `TIMER_INTERVAL_MS` | `1000` | Timer scheduler polling interval (ms) |
 | `RUST_LOG` | `info` | Log level filter (e.g. `debug`, `warn`, `engine_server=trace`) |
 | `LOG_FORMAT` | `text` | Log output format: `text` (human-readable) or `json` (structured) |
 | `LOG_FILE` | `engine_logs.jsonl` | Path for the file-based log fallback; set to `off` to disable file persistence |
+
 
 ---
 
@@ -499,6 +502,7 @@ services:
     environment:
       - PORT=8081
       - NATS_URL=nats://nats:4222
+      - REQUIRE_NATS=true
     depends_on:
       - nats
 

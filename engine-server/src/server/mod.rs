@@ -26,12 +26,46 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
+/// Optional overrides for app construction (primarily for tests).
+///
+/// When a field is `None`, the value is taken from the environment
+/// (`REQUIRE_NATS`, `MAX_UPLOAD_BYTES`). Explicit values avoid process-wide
+/// env races in parallel integration tests.
+#[derive(Debug, Clone, Default)]
+pub struct AppBuildConfig {
+    pub require_nats: Option<bool>,
+    pub max_upload_bytes: Option<usize>,
+}
+
 /// Builds the Axum router with all routes and middleware.
 ///
 /// Exposed as `pub` so integration tests can create the app without
-/// starting a full server binary.
+/// starting a full server binary. Forces `require_nats = false` so parallel
+/// tests are not affected by another test's `REQUIRE_NATS` env mutation.
 pub fn build_app() -> Router {
-    build_app_with_engine(Arc::new(WorkflowEngine::new()), None, HashMap::new(), None, Arc::new(LogBuffer::new()))
+    build_app_with_config(
+        Arc::new(WorkflowEngine::new()),
+        None,
+        HashMap::new(),
+        None,
+        Arc::new(LogBuffer::new()),
+        AppBuildConfig {
+            require_nats: Some(false),
+            max_upload_bytes: None,
+        },
+    )
+}
+
+/// Like [`build_app`], but with explicit config (no env side effects for tests).
+pub fn build_app_with_options(config: AppBuildConfig) -> Router {
+    build_app_with_config(
+        Arc::new(WorkflowEngine::new()),
+        None,
+        HashMap::new(),
+        None,
+        Arc::new(LogBuffer::new()),
+        config,
+    )
 }
 
 pub fn build_app_with_engine(
@@ -40,6 +74,24 @@ pub fn build_app_with_engine(
     xml_cache: HashMap<String, String>,
     prometheus_handle: Option<PrometheusHandle>,
     log_buffer: Arc<LogBuffer>,
+) -> Router {
+    build_app_with_config(
+        engine,
+        persistence,
+        xml_cache,
+        prometheus_handle,
+        log_buffer,
+        AppBuildConfig::default(),
+    )
+}
+
+pub fn build_app_with_config(
+    engine: Arc<WorkflowEngine>,
+    persistence: Option<Arc<dyn WorkflowPersistence>>,
+    xml_cache: HashMap<String, String>,
+    prometheus_handle: Option<PrometheusHandle>,
+    log_buffer: Arc<LogBuffer>,
+    config: AppBuildConfig,
 ) -> Router {
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -50,6 +102,12 @@ pub fn build_app_with_engine(
         deployed_xml: Arc::new(RwLock::new(xml_cache)),
         nats_url,
         log_buffer,
+        require_nats: config
+            .require_nats
+            .unwrap_or_else(|| state::env_flag("REQUIRE_NATS")),
+        max_upload_bytes: config
+            .max_upload_bytes
+            .unwrap_or_else(state::max_upload_bytes_from_env),
     });
 
     let cors = CorsLayer::new()

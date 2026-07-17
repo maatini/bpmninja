@@ -6,5 +6,7 @@ pub mod startup;
 mod server;
 pub use log_buffer::LogBuffer;
 pub use log_nats::NatsLogSink;
-pub use server::{build_app, build_app_with_engine};
+pub use server::{
+    AppBuildConfig, build_app, build_app_with_config, build_app_with_engine, build_app_with_options,
+};
 pub use startup::StartupCoordinator;

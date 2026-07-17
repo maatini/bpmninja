@@ -26,6 +26,15 @@ pub(crate) struct MonitoringData {
 }
 
 pub(crate) async fn ready_endpoint(State(state): State<Arc<AppState>>) -> axum::response::Response {
+    // Durability required but not configured (e.g. silent in-memory after connect fail
+    // should never reach here when REQUIRE_NATS=true fail-fast is on — belt-and-suspenders).
+    if state.require_nats && state.persistence.is_none() {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Persistence required but not configured",
+        )
+            .into_response();
+    }
     if let Some(ref p) = state.persistence
         && p.get_storage_info().await.is_err()
     {

@@ -70,14 +70,17 @@ Reusable patterns and conventions that span multiple modules.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server address |
+| `REQUIRE_NATS` | `false` | Fail-fast without NATS; readiness requires persistence |
+| `MAX_UPLOAD_BYTES` | `5242880` | Multipart file upload limit (bytes) |
 | `PORT` | `8081` | HTTP listen port |
 | `TIMER_INTERVAL_MS` | `1000` | Timer check interval |
 | `RUST_LOG` | `info` | Log level filter |
 | `LOG_FORMAT` | `text` | `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | Log file path (or `off`) |
 | `RHAI_MAX_OPERATIONS` | `50000` | Rhai operation limit |
-| `RHAI_MAX_MEMORY_BYTES` | `2097152` | Rhai memory limit |
+| `RHAI_MAX_MEMORY_BYTES` | `2097152` | Rhai memory budget (derives collection caps) |
 | `RHAI_TIMEOUT_MS` | `1000` | Rhai timeout |
+| `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded background retry queue size |
 
 ## Thin Client Pattern (Desktop App)
 

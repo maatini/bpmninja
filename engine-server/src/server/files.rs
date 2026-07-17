@@ -34,6 +34,14 @@ pub(crate) async fn upload_instance_file(
             .await
             .map_err(|e| AppError::BadRequest(e.to_string()))?;
 
+        let max_bytes = state.max_upload_bytes;
+        if data.len() > max_bytes {
+            return Err(AppError::PayloadTooLarge(format!(
+                "Upload exceeds maximum size of {max_bytes} bytes (got {} bytes)",
+                data.len()
+            )));
+        }
+
         let file_ref = engine_core::model::FileReference::new(
             instance_id,
             &var_name,

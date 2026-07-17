@@ -20,8 +20,8 @@
 3. **UUID validation at boundary**: Path parameters are parsed to `Uuid` immediately, returning 400 on failure.
 4. **SSE events are fire-and-forget**: Server doesn't care if SSE clients miss events (channel capacity 256).
 5. **Graceful shutdown**: `Ctrl+C` / `SIGTERM` shuts down timer scheduler, flushes persistence queue, and stops Axum.
-6. **Deployment size limit**: BPMN XML uploads capped at 5 MB (configurable in `build_app_with_engine`).
-7. **NATS optional**: Server starts in in-memory mode if NATS is unavailable, logging a warning.
+6. **Deployment size limit**: BPMN XML uploads capped at 5 MB (configurable in `build_app_with_engine`). Multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB).
+7. **NATS optional in dev**: Without `REQUIRE_NATS`, server starts in in-memory mode if NATS is unavailable (warning log). With `REQUIRE_NATS=true` (docker-compose default), startup fails instead of silent data-loss fallback.
 8. **Prometheus optional**: `/metrics` only mounted if `prometheus_handle` is `Some`.
 
 ## Internal Module Responsibilities

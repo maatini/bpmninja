@@ -18,6 +18,8 @@ services:
     environment:
       - PORT=8081
       - NATS_URL=nats://nats:4222
+      # Fail-fast: do not silently fall back to in-memory (data loss after restart)
+      - REQUIRE_NATS=true
     depends_on:
       - nats
 
