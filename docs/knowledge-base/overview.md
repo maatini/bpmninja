@@ -4,7 +4,7 @@
 
 BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible but leaner alternative focused on token-based execution, lock-free concurrency via DashMap, NATS JetStream persistence, and a Tauri React desktop UI with live bpmn-js tracking.
 
-**Version:** 0.7.18 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
+**Version:** 0.7.19 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
 
 ## Tech Stack
 
