@@ -23,17 +23,16 @@ export function SettingsPage({ engineStatus, onConnectionChanged }: Props) {
   )
 
   useEffect(() => {
-    loadInfo()
-  }, [])
-
-  const loadInfo = async () => {
-    try {
-      const currentUrl = await getApiUrl()
-      setLocalApiUrl(currentUrl)
-    } catch (e: any) {
-      console.error('Failed to load API URL', e)
+    const loadInfo = async () => {
+      try {
+        const currentUrl = await getApiUrl()
+        setLocalApiUrl(currentUrl)
+      } catch (e: any) {
+        console.error('Failed to load API URL', e)
+      }
     }
-  }
+    void loadInfo()
+  }, [])
 
   const handleSaveAndVerify = async () => {
     setLoading(true)
