@@ -67,10 +67,15 @@ function ScriptEntry(props: any) {
     let listener = findListener(element, eventType);
 
     if (!value || value.trim() === '') {
-      // Remove the listener if the script is cleared
+      // Remove the listener if the script is cleared.
+      // Build a fresh ExtensionElements instead of mutating element-owned
+      // moddle state in place (react-hooks/immutability).
       if (listener) {
-        extEls.values = (extEls.values || []).filter((v: any) => v !== listener);
-        modeling.updateProperties(element, { extensionElements: extEls });
+        const nextValues = (extEls.values || []).filter((v: any) => v !== listener);
+        const nextExtEls = bpmnFactory.create('bpmn:ExtensionElements', {
+          values: nextValues,
+        });
+        modeling.updateProperties(element, { extensionElements: nextExtEls });
       }
       return;
     }
@@ -88,19 +93,27 @@ function ScriptEntry(props: any) {
         script: scriptEl,
       });
 
-      extEls.values = [...(extEls.values || []), listener];
-      modeling.updateProperties(element, { extensionElements: extEls });
+      const nextExtEls = bpmnFactory.create('bpmn:ExtensionElements', {
+        values: [...(extEls.values || []), listener],
+      });
+      modeling.updateProperties(element, { extensionElements: nextExtEls });
     } else {
-      // Update existing script
-      if (!listener.script) {
-        listener.script = bpmnFactory.create('camunda:Script', {
-          scriptFormat: 'rhai',
-          value: value,
-        });
-      } else {
-        listener.script.value = value;
-      }
-      modeling.updateProperties(element, { extensionElements: extEls });
+      // Update existing script via a new Script node, then re-attach listener
+      const scriptEl = bpmnFactory.create('camunda:Script', {
+        scriptFormat: 'rhai',
+        value: value,
+      });
+      const nextListener = bpmnFactory.create('camunda:ExecutionListener', {
+        event: eventType,
+        script: scriptEl,
+      });
+      const nextValues = (extEls.values || []).map((v: any) =>
+        v === listener ? nextListener : v
+      );
+      const nextExtEls = bpmnFactory.create('bpmn:ExtensionElements', {
+        values: nextValues,
+      });
+      modeling.updateProperties(element, { extensionElements: nextExtEls });
     }
   };
 
