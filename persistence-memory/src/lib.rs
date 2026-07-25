@@ -366,24 +366,18 @@ impl WorkflowPersistence for InMemoryPersistence {
                 {
                     return false;
                 }
-                match query.state_filter.as_deref() {
+                let matches_state = match query.state_filter.as_deref() {
                     Some("completed") => {
-                        if !matches!(
-                            inst.state,
-                            engine_core::runtime::InstanceState::Completed
-                        ) {
-                            return false;
-                        }
+                        matches!(inst.state, engine_core::runtime::InstanceState::Completed)
                     }
-                    Some("error") => {
-                        if !matches!(
-                            inst.state,
-                            engine_core::runtime::InstanceState::CompletedWithError { .. }
-                        ) {
-                            return false;
-                        }
-                    }
-                    _ => {}
+                    Some("error") => matches!(
+                        inst.state,
+                        engine_core::runtime::InstanceState::CompletedWithError { .. }
+                    ),
+                    _ => true,
+                };
+                if !matches_state {
+                    return false;
                 }
                 true
             })
