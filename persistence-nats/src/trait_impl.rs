@@ -921,28 +921,25 @@ impl WorkflowPersistence for NatsPersistence {
                 return false;
             }
             if let Some(ref sf) = query.state_filter {
-                match sf.as_str() {
+                let matches_state = match sf.as_str() {
                     "completed" => {
-                        if !matches!(inst.state, engine_core::runtime::InstanceState::Completed) {
-                            return false;
-                        }
+                        matches!(inst.state, engine_core::runtime::InstanceState::Completed)
                     }
-                    "error" => {
-                        if !matches!(
-                            inst.state,
-                            engine_core::runtime::InstanceState::CompletedWithError { .. }
-                        ) {
-                            return false;
-                        }
-                    }
-                    _ => {}
+                    "error" => matches!(
+                        inst.state,
+                        engine_core::runtime::InstanceState::CompletedWithError { .. }
+                    ),
+                    _ => true,
+                };
+                if !matches_state {
+                    return false;
                 }
             }
             true
         });
 
         // Sort by completed_at descending (newest first)
-        all.sort_by(|a, b| b.completed_at.cmp(&a.completed_at));
+        all.sort_by_key(|inst| std::cmp::Reverse(inst.completed_at));
 
         // Pagination
         if let Some(offset) = query.offset {
