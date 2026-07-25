@@ -370,21 +370,18 @@ impl WorkflowPersistence for InMemoryPersistence {
                     return false;
                 }
                 if let Some(ref sf) = query.state_filter {
-                    match sf.as_str() {
+                    let matches_state = match sf.as_str() {
                         "completed" => {
-                            if !matches!(inst.state, crate::runtime::InstanceState::Completed) {
-                                return false;
-                            }
+                            matches!(inst.state, crate::runtime::InstanceState::Completed)
                         }
-                        "error" => {
-                            if !matches!(
-                                inst.state,
-                                crate::runtime::InstanceState::CompletedWithError { .. }
-                            ) {
-                                return false;
-                            }
-                        }
-                        _ => {}
+                        "error" => matches!(
+                            inst.state,
+                            crate::runtime::InstanceState::CompletedWithError { .. }
+                        ),
+                        _ => true,
+                    };
+                    if !matches_state {
+                        return false;
                     }
                 }
                 true
@@ -392,7 +389,7 @@ impl WorkflowPersistence for InMemoryPersistence {
             .cloned()
             .collect();
 
-        results.sort_by(|a, b| b.completed_at.cmp(&a.completed_at));
+        results.sort_by_key(|inst| std::cmp::Reverse(inst.completed_at));
 
         if let Some(offset) = query.offset {
             results = results.into_iter().skip(offset).collect();

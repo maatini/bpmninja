@@ -78,15 +78,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # cargo-fuzz requires nightly for -Z flags and sanitizer instrumentation
+      # cargo-fuzz requires nightly for -Z flags and sanitizer instrumentation.
+      # Pin a dated nightly: floating `nightly` regressed on 2026-07-24 with an ICE
+      # when compiling tokio under AddressSanitizer (`-Zsanitizer=address`):
+      #   rustc 1.99.0-nightly (da86f4d07 2026-07-24)
+      #   rustc_codegen_ssa operand.rs: "not immediate" Uninit/UnsafeCell/Notified
+      # Last known good: nightly-2026-07-22 (6f72b5dd5). Re-test floating nightly
+      # once the upstream ICE is fixed, then drop the pin.
       - name: Install Rust nightly toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-22
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          # Separate cache per fuzz target to avoid poisoning other builds
-          shared-key: "fuzz-${{ matrix.target }}"
+          # Separate cache per fuzz target + toolchain pin to avoid poisoning other builds
+          shared-key: "fuzz-nightly-2026-07-22-${{ matrix.target }}"
           # Cache the fuzz corpus between runs for incremental coverage growth
           cache-directories: |
             fuzz/corpus
