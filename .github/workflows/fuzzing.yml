@@ -100,7 +100,7 @@ jobs:
             fuzz/corpus
 
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-fuzz
 
