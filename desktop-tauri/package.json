@@ -13,7 +13,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@base-ui/react": "^1.6.0",
+    "@base-ui/react": "^1.7.0",
     "@bpmn-io/properties-panel": "^3.48.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@monaco-editor/react": "^4.7.0",
