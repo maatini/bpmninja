@@ -79,6 +79,10 @@ jobs:
           cache: npm
           cache-dependency-path: desktop-tauri/package-lock.json
 
+      - name: Assert TypeScript peer range
+        working-directory: desktop-tauri
+        run: npm run test:deps
+
       - name: Install dependencies
         working-directory: desktop-tauri
         run: npm ci

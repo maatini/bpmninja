@@ -12,6 +12,12 @@ permissions:
   contents: write
   actions: read
 
+# Serialize metrics updates so two workflow_run jobs do not
+# commit against the same stale main and reject each other.
+concurrency:
+  group: update-quality-metrics
+  cancel-in-progress: false
+
 jobs:
   update-metrics:
     name: Merge quality metrics and update README
@@ -24,6 +30,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Download metrics artifacts from triggering run
         uses: actions/download-artifact@v8
@@ -133,12 +141,4 @@ jobs:
           PY
 
       - name: Commit and push if changed
-        run: |
-          git add docs/quality-metrics.json docs/quality-badges.json README.md
-          if git diff --cached --quiet; then
-            echo "No metrics updates."
-            exit 0
-          fi
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "chore(docs): aktualisiere qualitaetsmetriken automatisch"
-          git push
+        run: bash .github/scripts/commit-and-push-quality-metrics.sh
