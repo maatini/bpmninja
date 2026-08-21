@@ -1,8 +1,8 @@
+use crate::log_buffer::LogBuffer;
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use engine_core::WorkflowEngine;
 use engine_core::error::EngineError;
 use engine_core::persistence::WorkflowPersistence;
-use crate::log_buffer::LogBuffer;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -76,7 +76,9 @@ impl IntoResponse for AppError {
             ),
             Self::Engine(EngineError::OrphanedToken(node)) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!("Orphaned token: node '{node}' not found in target definition — provide a mapping"),
+                format!(
+                    "Orphaned token: node '{node}' not found in target definition — provide a mapping"
+                ),
             ),
             Self::Engine(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
         };
@@ -103,17 +105,44 @@ pub struct AppState {
     pub(crate) max_upload_bytes: usize,
 }
 
-/// Parses common truthy env values (`1`, `true`, `yes`, `on`; case-insensitive).
-pub(crate) fn env_flag(name: &str) -> bool {
-    matches!(
-        std::env::var(name)
-            .ok()
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("1") | Some("true") | Some("yes") | Some("on")
-    )
+/// `REQUIRE_NATS` is fail-closed: unset defaults to **true**.
+/// Opt into silent in-memory mode with `false` / `0` / `no` / `off`.
+pub fn require_nats_from_env() -> bool {
+    parse_require_nats(std::env::var("REQUIRE_NATS").ok().as_deref())
+}
+
+pub(crate) fn parse_require_nats(value: Option<&str>) -> bool {
+    match value {
+        None => true,
+        Some(raw) => !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod require_nats_tests {
+    use super::parse_require_nats;
+
+    #[test]
+    fn unset_is_fail_closed() {
+        assert!(parse_require_nats(None));
+    }
+
+    #[test]
+    fn explicit_false_opts_into_in_memory() {
+        for v in ["false", "0", "no", "OFF", " False "] {
+            assert!(!parse_require_nats(Some(v)), "{v}");
+        }
+    }
+
+    #[test]
+    fn explicit_true_stays_required() {
+        for v in ["true", "1", "yes", "on"] {
+            assert!(parse_require_nats(Some(v)), "{v}");
+        }
+    }
 }
 
 /// Default max upload size: 5 MiB (aligned with JSON body limit).

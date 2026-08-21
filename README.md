@@ -41,7 +41,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
-- **Fail-closed durability** — `REQUIRE_NATS=true` (docker-compose default) refuses silent in-memory fallback; `/api/ready` mirrors persistence health
+- **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
@@ -260,7 +260,7 @@ The server runs at `http://localhost:8081`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
-| `REQUIRE_NATS` | `false` | If true, refuse to start without NATS (no silent in-memory fallback); `/api/ready` requires persistence |
+| `REQUIRE_NATS` | `true` | Fail-closed: refuse to start without NATS (no silent in-memory fallback). Set `false` for ephemeral local runs; `/api/ready` requires persistence when enabled |
 | `MAX_UPLOAD_BYTES` | `5242880` | Max multipart file upload size (bytes) for instance files |
 | `PORT` | `8081` | HTTP server port |
 | `TIMER_INTERVAL_MS` | `1000` | Timer scheduler polling interval (ms) |
@@ -557,7 +557,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 > Snapshot from 2026-04-17. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
-- Letztes Update (UTC): `2026-08-18T05:55:56.107576+00:00`
+- Letztes Update (UTC): `2026-08-21T09:39:56.083085+00:00`
 - Mutation Score: **0.0%** (caught: 0, missed: 0, timeout: 0)
 - Fuzzing: **9/9 targets** (ok)
 <!-- QUALITY_METRICS:END -->
@@ -662,7 +662,7 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 | **Project total** | **~177** | **~38,750** |
 
 ### Mutation Score
-CI workflow **Core Mutation Tests** runs `cargo-mutants` on `engine-core` and publishes metrics via `docs/quality-metrics.json` / the Mutation Score badge. The metrics parser reads modern `outcomes.json` (`summary: CaughtMutant|MissedMutant|…` and top-level counters). A historical full run (2026-04-13) scored **72.4%**; the auto-updated QUALITY_METRICS block above reflects the latest successful CI merge. Artifacts are retained 30 days.
+CI workflow **Core Mutation Tests** runs `cargo-mutants` on `engine-core` and publishes metrics via `docs/quality-metrics.json` / the Mutation Score badge. The metrics parser reads `outcomes.json` (`summary: CaughtMutant|MissedMutant|…`), nested summary counters, and `caught.txt`/`missed.txt` fallbacks. Empty mutation artifacts no longer overwrite a previous successful score with 0.0%. A historical full run (2026-04-13) scored **72.4%**; the auto-updated QUALITY_METRICS block above reflects the latest successful CI merge. Artifacts are retained 30 days.
 
 ### Continuous Fuzzing
 To safeguard security- and stability-critical parser and execution components, a parallel **fuzzing workflow** based on `cargo-fuzz` (libFuzzer) runs daily in the CI/CD pipeline (and on relevant pull requests).

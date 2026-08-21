@@ -4,7 +4,7 @@
 
 BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible but leaner alternative focused on token-based execution, lock-free concurrency via DashMap, NATS JetStream persistence, and a Tauri React desktop UI with live bpmn-js tracking.
 
-**Version:** 0.7.19 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
+**Version:** 0.7.20 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
 
 ## Tech Stack
 
@@ -32,7 +32,7 @@ bpmninja/                          # Cargo workspace root (6 crates)
 ├── persistence-nats/              # NATS JetStream WorkflowPersistence impl
 ├── persistence-memory/             # In-memory WorkflowPersistence impl (tests)
 ├── engine-server/                 # Axum REST API + background services
-├── agent-orchestrator/            # Example external worker (stub)
+├── agent-orchestrator/            # Demo Rust worker (one-shot, not a loop)
 ├── bpmn-ninja-external-task-client/ # npm package (separate workspace)
 ├── desktop-tauri/                 # Tauri app (separate Cargo project + npm)
 ├── api-spec/                      # TypeSpec → OpenAPI
@@ -52,7 +52,7 @@ flowchart LR
     end
 
     subgraph Server["engine-server :8081"]
-        REST["Axum REST API<br>38 endpoints"]
+        REST["Axum REST API<br>46 endpoints"]
         SSE["SSE /api/events"]
         Timer["Timer Scheduler<br>background task"]
         LogBuf["Log Buffer<br>5000 entries rolling"]
@@ -93,7 +93,7 @@ flowchart LR
 - **@tag:camunda-compatible**: Service tasks use Camunda's fetch-and-lock pattern. TypeScript client mirrors `camunda-external-task-client-js` API.
 - **@tag:sse-push**: UI receives real-time state updates via SSE (`/api/events`), not polling.
 - **@tag:fault-tolerant-retry**: Two-stage persistence retry: inline (50ms backoff) + **bounded** background worker queue (default capacity 10 000, exponential backoff, max 50 retries; drops + metrics when full).
-- **@tag:fail-closed-durability**: Production/docker uses `REQUIRE_NATS=true` (fail-fast). Dev may run in-memory; `/api/ready` mirrors durability requirements.
+- **@tag:fail-closed-durability**: `REQUIRE_NATS` defaults to true (fail-fast). In-memory requires `REQUIRE_NATS=false`; `/api/ready` mirrors durability requirements.
 - **@tag:rhai-sandbox**: Scripts limited by `RHAI_MAX_OPERATIONS`, `RHAI_MAX_MEMORY_BYTES` (derives collection size caps), `RHAI_TIMEOUT_MS`.
 
 ## Test Coverage
@@ -114,7 +114,7 @@ flowchart LR
 
 | Variable | Default | Role |
 |----------|---------|------|
-| `REQUIRE_NATS` | `false` | Fail-fast without NATS; readiness requires persistence |
+| `REQUIRE_NATS` | `true` | Fail-fast without NATS; readiness requires persistence. Set `false` for in-memory |
 | `MAX_UPLOAD_BYTES` | `5 MiB` | Multipart instance-file upload limit → HTTP 413 |
 | `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded retry queue depth |
 | `RHAI_MAX_MEMORY_BYTES` | `2 MiB` | Script memory budget (collection caps) |

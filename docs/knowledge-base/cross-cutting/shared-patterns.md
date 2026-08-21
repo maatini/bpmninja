@@ -53,11 +53,11 @@ Reusable patterns and conventions that span multiple modules.
 
 ## Fail-Closed Durability (Server)
 
-**Pattern:** Opt-in production gate `REQUIRE_NATS`; readiness mirrors durability.
+**Pattern:** Fail-closed gate `REQUIRE_NATS` (default true); readiness mirrors durability.
 
 **How to follow:**
-- Docker/production: `REQUIRE_NATS=true` → refuse start without NATS
-- Dev: default `false` → in-memory with warning if NATS down
+- Default / Docker / production: `REQUIRE_NATS=true` → refuse start without NATS
+- Ephemeral local: `REQUIRE_NATS=false` → in-memory with warning if NATS down
 - `/api/health` always 200; `/api/ready` fails when required persistence is missing or disconnected
 
 ## Broadcast Events (SSE Push)
@@ -81,7 +81,7 @@ Reusable patterns and conventions that span multiple modules.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server address |
-| `REQUIRE_NATS` | `false` | Fail-fast without NATS; readiness requires persistence |
+| `REQUIRE_NATS` | `true` | Fail-fast without NATS; readiness requires persistence |
 | `MAX_UPLOAD_BYTES` | `5242880` | Multipart file upload limit (bytes) |
 | `PORT` | `8081` | HTTP listen port |
 | `TIMER_INTERVAL_MS` | `1000` | Timer check interval |

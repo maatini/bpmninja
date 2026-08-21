@@ -4032,17 +4032,26 @@ async fn test_script_max_memory_rejects_large_array() {
         timeout_ms: 1_000,
     };
     let (_, max_array, _) = cfg.derived_collection_limits();
-    assert!(max_array < 100, "tiny budget should yield small array cap, got {max_array}");
+    assert!(
+        max_array < 100,
+        "tiny budget should yield small array cap, got {max_array}"
+    );
 
     let engine = cfg.build_engine();
     // Grow an array past the derived cap.
-    let script = format!("let a = []; for i in 0..{} {{ a.push(i); }}", max_array + 50);
+    let script = format!(
+        "let a = []; for i in 0..{} {{ a.push(i); }}",
+        max_array + 50
+    );
     let err = engine
         .eval::<()>(&script)
         .expect_err("oversized array must fail under max_memory-derived cap");
     let msg = err.to_string().to_lowercase();
     assert!(
-        msg.contains("array") || msg.contains("limit") || msg.contains("exceed") || msg.contains("size"),
+        msg.contains("array")
+            || msg.contains("limit")
+            || msg.contains("exceed")
+            || msg.contains("size"),
         "unexpected error for memory limit: {msg}"
     );
 }
@@ -4056,7 +4065,10 @@ async fn test_execute_script_safe_respects_max_memory() {
         timeout_ms: 1_000,
     };
     let (_, max_array, _) = cfg.derived_collection_limits();
-    let script = format!("let a = []; for i in 0..{} {{ a.push(i); }}", max_array + 50);
+    let script = format!(
+        "let a = []; for i in 0..{} {{ a.push(i); }}",
+        max_array + 50
+    );
     let vars = std::collections::HashMap::new();
     let result = crate::scripting::execute_script_safe(&cfg, &script, &vars).await;
     assert!(result.is_err(), "expected ScriptError for oversize array");
@@ -4956,7 +4968,10 @@ async fn migrate_instance_same_node_ids_succeeds() {
     // Instanz wartet jetzt auf UserTask "ut"
     let state = engine.get_instance_state(inst_id).await.unwrap();
     assert!(
-        matches!(state, crate::runtime::InstanceState::WaitingOnUserTask { .. }),
+        matches!(
+            state,
+            crate::runtime::InstanceState::WaitingOnUserTask { .. }
+        ),
         "Unexpected state: {state:?}"
     );
 
@@ -5009,7 +5024,10 @@ async fn migrate_instance_with_node_mapping_succeeds() {
     mapping.insert("old_task".to_string(), "new_task".to_string());
 
     let result = engine.migrate_instance(inst_id, key_v2, mapping).await;
-    assert!(result.is_ok(), "Migration mit Mapping fehlgeschlagen: {result:?}");
+    assert!(
+        result.is_ok(),
+        "Migration mit Mapping fehlgeschlagen: {result:?}"
+    );
 
     let details = engine.get_instance_details(inst_id).await.unwrap();
     assert_eq!(details.definition_key, key_v2);
@@ -5031,7 +5049,10 @@ async fn migrate_instance_orphaned_token_without_mapping_fails() {
 
     let def_v2 = ProcessDefinitionBuilder::new("orphan_test")
         .node("start", BpmnElement::StartEvent)
-        .node("completely_different_task", BpmnElement::UserTask("alice".into()))
+        .node(
+            "completely_different_task",
+            BpmnElement::UserTask("alice".into()),
+        )
         .node("end", BpmnElement::EndEvent)
         .flow("start", "completely_different_task")
         .flow("completely_different_task", "end")
@@ -5054,8 +5075,14 @@ async fn migrate_instance_orphaned_token_without_mapping_fails() {
 
     // Instanz darf NICHT verändert worden sein
     let details = engine.get_instance_details(inst_id).await.unwrap();
-    assert_eq!(details.definition_key, key_v1, "definition_key darf sich nicht geändert haben");
-    assert_eq!(details.current_node, "old_task", "current_node darf sich nicht geändert haben");
+    assert_eq!(
+        details.definition_key, key_v1,
+        "definition_key darf sich nicht geändert haben"
+    );
+    assert_eq!(
+        details.current_node, "old_task",
+        "current_node darf sich nicht geändert haben"
+    );
 }
 
 #[tokio::test]

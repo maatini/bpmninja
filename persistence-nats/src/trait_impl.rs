@@ -39,7 +39,9 @@ impl WorkflowPersistence for NatsPersistence {
                 Ok(key) if key.starts_with(&prefix) => match store.get(&key).await {
                     Ok(Some(data)) => match serde_json::from_slice::<Token>(&data) {
                         Ok(token) => tokens.push(token),
-                        Err(e) => tracing::warn!("Token '{}' deserialisieren fehlgeschlagen: {}", key, e),
+                        Err(e) => {
+                            tracing::warn!("Token '{}' deserialisieren fehlgeschlagen: {}", key, e)
+                        }
                     },
                     Ok(None) => {}
                     Err(e) => tracing::warn!("Token '{}' lesen fehlgeschlagen: {}", key, e),

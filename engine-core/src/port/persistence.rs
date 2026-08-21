@@ -93,7 +93,8 @@ pub trait WorkflowPersistence: Send + Sync {
     /// Load all tokens belonging to a specific process instance.
     async fn load_tokens(&self, instance_id: uuid::Uuid) -> EngineResult<Vec<Token>>;
     /// Delete a single token of a process instance.
-    async fn delete_token(&self, instance_id: uuid::Uuid, token_id: uuid::Uuid) -> EngineResult<()>;
+    async fn delete_token(&self, instance_id: uuid::Uuid, token_id: uuid::Uuid)
+    -> EngineResult<()>;
 
     /// Persist the current state of a process instance.
     async fn save_instance(&self, instance: &ProcessInstance) -> EngineResult<()>;

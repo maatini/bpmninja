@@ -1,11 +1,14 @@
 //! GET /api/logs — gibt gefilterte Einträge aus dem In-Memory-Log-Buffer zurück.
 
-use axum::{Json, extract::{Query, State}};
+use axum::{
+    Json,
+    extract::{Query, State},
+};
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::log_buffer::LogEntry;
 use super::state::AppState;
+use crate::log_buffer::LogEntry;
 
 #[derive(Deserialize)]
 pub(crate) struct LogQuery {

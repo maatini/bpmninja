@@ -753,9 +753,7 @@ impl WorkflowEngine {
         self.record_history_event(
             instance_id,
             crate::history::HistoryEventType::InstanceMigrated,
-            &format!(
-                "Instanz zu Definition '{target_id}' (v{target_version}) migriert"
-            ),
+            &format!("Instanz zu Definition '{target_id}' (v{target_version}) migriert"),
             crate::history::ActorType::User,
             None,
             Some(&old_state),

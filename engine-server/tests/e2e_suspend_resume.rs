@@ -71,7 +71,11 @@ async fn suspend_instance_returns_204() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "suspending a running instance should return 204");
+    assert_eq!(
+        res.status(),
+        204,
+        "suspending a running instance should return 204"
+    );
 }
 
 /// After suspend, GET returns a Suspended state.
@@ -124,7 +128,11 @@ async fn resume_suspended_instance_returns_204() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "resuming a suspended instance should return 204");
+    assert_eq!(
+        res.status(),
+        204,
+        "resuming a suspended instance should return 204"
+    );
 
     // State should no longer be Suspended
     let inst = client
@@ -162,7 +170,11 @@ async fn move_token_to_existing_node_returns_204() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "move-token to a known node should return 204");
+    assert_eq!(
+        res.status(),
+        204,
+        "move-token to a known node should return 204"
+    );
 
     let inst = client
         .get(format!("{}/api/instances/{}", base, inst_id))

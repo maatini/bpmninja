@@ -7,8 +7,8 @@ The NATS server must be started with `--js` flag: `nats-server --js` (docker-com
 ### ⚠️ In-memory fallback is opt-in (dev only)
 
 If NATS is unreachable, `engine-server` behavior depends on **`REQUIRE_NATS`**:
-- `false` (default local): start with no persistence + error log (data lost on restart)
-- `true` (docker-compose / production): **refuse to start**
+- `true` (default, docker-compose / production): **refuse to start**
+- `false` (explicit local opt-in): start with no persistence + error log (data lost on restart)
 
 `/api/ready` returns **503** when `require_nats` is set but no persistence is attached, or when the backend storage check fails.
 
@@ -43,7 +43,7 @@ The engine's `retry_queue` (not the adapter) handles transient write failures:
 2. Background: bounded channel (default 10 000 jobs); exponential backoff up to 60s, max 50 retries
 3. If the queue is **full**, new jobs are **dropped** and counted (`bpmn_persistence_retry_dropped_total`) — prevents OOM under prolonged outage
 
-Integration tests in `persistence-nats/src/tests.rs` cover token, history, definition/instance restore, and user-task roundtrips (skip if NATS is not reachable).
+Integration tests in `persistence-nats/src/tests.rs` cover token, history, definition/instance restore, and user-task roundtrips. Locally they skip if NATS is unreachable; in CI (`CI=true`) they fail instead. GitHub Actions starts NATS with JetStream before `cargo test --workspace`.
 
 ### ⚠️ BPMN XML is stored separately from definitions
 
@@ -54,7 +54,7 @@ Integration tests in `persistence-nats/src/tests.rs` cover token, history, defin
 To add a new persistent entity:
 1. Add the trait method to `WorkflowPersistence` in `engine-core/src/port/persistence.rs`
 2. Implement in `persistence-nats/src/trait_impl.rs` (new KV bucket + CRUD)
-3. Implement in `persistence-memory/src/lib.rs` (new HashMap + CRUD)
+3. Implement in `engine-core/src/adapter/in_memory.rs` (new HashMap + CRUD); `persistence-memory` re-exports that type
 4. Add a `PersistJob` variant in `engine-core/src/engine/retry_queue.rs`
 5. Add restoration in `engine-server/src/startup.rs`
 6. Update the `RestoreStats` struct

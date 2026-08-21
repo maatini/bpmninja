@@ -453,10 +453,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.call_activities {
         let node_id = task.id.clone();
         let called_element = task.called_element.unwrap_or_else(|| task.id.clone());
-        builder = builder.node(
-            task.id,
-            BpmnElement::CallActivity { called_element },
-        );
+        builder = builder.node(task.id, BpmnElement::CallActivity { called_element });
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 

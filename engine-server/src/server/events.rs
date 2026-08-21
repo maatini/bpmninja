@@ -11,8 +11,8 @@ use axum::{
     },
 };
 use engine_core::engine::EngineEvent;
-use tokio_stream::Stream;
 use std::{convert::Infallible, sync::Arc};
+use tokio_stream::Stream;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use super::state::AppState;

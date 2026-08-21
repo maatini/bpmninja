@@ -24,12 +24,8 @@ impl WorkflowEngine {
             NextAction::ContinueMultiple(forked_tokens) => {
                 let branch_count = forked_tokens.len();
 
-                self.register_join_barrier_if_needed(
-                    instance_id,
-                    current_gateway_id,
-                    branch_count,
-                )
-                .await?;
+                self.register_join_barrier_if_needed(instance_id, current_gateway_id, branch_count)
+                    .await?;
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
@@ -48,13 +44,8 @@ impl WorkflowEngine {
                 }
 
                 for (idx, fork_token) in forked_tokens.into_iter().enumerate() {
-                    self.register_active_token(
-                        instance_id,
-                        current_gateway_id,
-                        idx,
-                        &fork_token,
-                    )
-                    .await?;
+                    self.register_active_token(instance_id, current_gateway_id, idx, &fork_token)
+                        .await?;
                     queue.push_back(fork_token);
                 }
             }
@@ -229,9 +220,8 @@ impl WorkflowEngine {
                         let mut inst = inst_arc.write().await;
                         inst.state = InstanceState::Completed;
                         inst.completed_at = Some(chrono::Utc::now());
-                        inst.audit_log.push(
-                            "⏹ All tokens completed. Process fully completed.".to_string(),
-                        );
+                        inst.audit_log
+                            .push("⏹ All tokens completed. Process fully completed.".to_string());
                     }
                     self.record_history_event(
                         instance_id,

@@ -51,7 +51,10 @@ impl WorkflowEngine {
 
         tracing::info!(
             "Deployed definition '{}' (v{}, key: {})",
-            self.definitions.get(&key).map(|d| d.id.clone()).unwrap_or_default(),
+            self.definitions
+                .get(&key)
+                .map(|d| d.id.clone())
+                .unwrap_or_default(),
             version,
             key
         );
@@ -65,9 +68,7 @@ impl WorkflowEngine {
         mut definition: ProcessDefinition,
         highest_version: Option<i32>,
     ) -> ProcessDefinition {
-        definition.version = highest_version
-            .map(|v| v + 1)
-            .unwrap_or(definition.version);
+        definition.version = highest_version.map(|v| v + 1).unwrap_or(definition.version);
         definition
     }
 

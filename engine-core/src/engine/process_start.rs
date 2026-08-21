@@ -129,8 +129,13 @@ impl WorkflowEngine {
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        let mut instance =
-            Self::build_initial_instance(definition_key, instance_id, &start_id, variables.clone(), parent_instance_id);
+        let mut instance = Self::build_initial_instance(
+            definition_key,
+            instance_id,
+            &start_id,
+            variables.clone(),
+            parent_instance_id,
+        );
         instance.business_key = business_key;
 
         tracing::info!(

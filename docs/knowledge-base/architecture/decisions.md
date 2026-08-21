@@ -12,7 +12,8 @@
 
 **Consequences:**
 - `WorkflowPersistence` trait is large (30+ methods) — any new persistence operation requires trait changes
-- Two implementations must be kept in sync (NATS + in-memory)
+- Two backends must be kept in sync (NATS + in-memory)
+- The in-memory adapter is a HashMap implementation in `engine-core::adapter` (no I/O). `persistence-memory` re-exports that type so unit tests and the same crate identity stay aligned (a `[dev-dependency]` on `persistence-memory` would duplicate `engine-core` under `cfg(test)`).
 
 ## ADR-002: Token-Based Execution Model
 
@@ -111,7 +112,7 @@
 
 ## ADR-009: Fail-closed durability (`REQUIRE_NATS`)
 
-**Decision:** Production deployments set `REQUIRE_NATS=true` (docker-compose default). The server exits on NATS connect failure instead of silently running without persistence. `/api/ready` returns 503 when required persistence is missing or unreachable. Local/dev keeps `REQUIRE_NATS=false` for convenience.
+**Decision:** `REQUIRE_NATS` defaults to **true** (fail-closed). The server exits on NATS connect failure instead of silently running without persistence. `/api/ready` returns 503 when required persistence is missing or unreachable. Ephemeral local runs must set `REQUIRE_NATS=false` explicitly.
 
 **Rationale:** Silent in-memory fallback looks healthy to operators but loses all state on restart.
 

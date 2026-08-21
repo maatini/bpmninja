@@ -105,7 +105,11 @@ async fn migrate_instance_same_node_ids_returns_204() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "migration with identical node IDs should succeed");
+    assert_eq!(
+        res.status(),
+        204,
+        "migration with identical node IDs should succeed"
+    );
 }
 
 /// After migration the instance reflects the new definition key.
@@ -163,7 +167,11 @@ async fn migrate_instance_with_node_mapping_returns_204() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "migration with explicit node mapping should succeed");
+    assert_eq!(
+        res.status(),
+        204,
+        "migration with explicit node mapping should succeed"
+    );
 
     // Instance should now be waiting at the renamed node
     let inst = client

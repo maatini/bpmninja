@@ -33,7 +33,7 @@
 | Variable | Default | Used In |
 |----------|---------|---------|
 | `NATS_URL` | `nats://localhost:4222` | main.rs: NATS connection |
-| `REQUIRE_NATS` | `false` | main.rs: fail-fast if NATS unavailable; ready fails without persistence |
+| `REQUIRE_NATS` | `true` | main.rs: fail-fast if NATS unavailable; ready fails without persistence. Opt out with `false` |
 | `MAX_UPLOAD_BYTES` | `5242880` (5 MiB) | files.rs: multipart upload size limit |
 | `PORT` | `8081` | main.rs: HTTP listen port |
 | `TIMER_INTERVAL_MS` | `1000` | main.rs: timer scheduler interval |

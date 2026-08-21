@@ -40,7 +40,11 @@ impl WorkflowEngine {
             assignee: assignee.clone(),
             token_id: token.id,
             created_at: Utc::now(),
-            business_key: if inst.business_key.is_empty() { None } else { Some(inst.business_key.clone()) },
+            business_key: if inst.business_key.is_empty() {
+                None
+            } else {
+                Some(inst.business_key.clone())
+            },
         };
 
         inst.current_node = current_id.to_string();
@@ -160,7 +164,11 @@ impl WorkflowEngine {
             retries: 3,
             error_message: None,
             error_details: None,
-            business_key: if inst.business_key.is_empty() { None } else { Some(inst.business_key.clone()) },
+            business_key: if inst.business_key.is_empty() {
+                None
+            } else {
+                Some(inst.business_key.clone())
+            },
         };
 
         inst.current_node = current_id.to_string();

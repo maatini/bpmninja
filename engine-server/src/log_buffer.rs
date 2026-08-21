@@ -181,9 +181,7 @@ impl LogBuffer {
     /// - `level_filter`: Mindest-Level ("error", "warn", "info", "debug", "trace").
     /// - `search`: Substring-Filter auf `message` und `target` (case-insensitive).
     pub fn entries(&self, level_filter: Option<&str>, search: Option<&str>) -> Vec<LogEntry> {
-        let min_level = level_filter
-            .and_then(parse_level)
-            .unwrap_or(Level::TRACE);
+        let min_level = level_filter.and_then(parse_level).unwrap_or(Level::TRACE);
 
         let search_lower = search.map(|s| s.to_lowercase());
 
@@ -221,26 +219,25 @@ impl LogBuffer {
         inner.entries.push_back(entry.clone());
 
         // Datei-Persistenz nur wenn kein NATS-Sender aktiv ist
-        let compact_info: Option<(PathBuf, Vec<LogEntry>)> =
-            if inner.nats_tx.is_none() {
-                if let Some(ref mut persist) = inner.persist {
-                    append_entry_to_file(&persist.path, &entry);
-                    persist.written_since_compact += 1;
+        let compact_info: Option<(PathBuf, Vec<LogEntry>)> = if inner.nats_tx.is_none() {
+            if let Some(ref mut persist) = inner.persist {
+                append_entry_to_file(&persist.path, &entry);
+                persist.written_since_compact += 1;
 
-                    if persist.written_since_compact >= COMPACT_AFTER {
-                        persist.written_since_compact = 0;
-                        // Felder-Split: inner.persist (mut) + inner.entries (immut) — OK
-                        let snapshot: Vec<LogEntry> = inner.entries.iter().cloned().collect();
-                        Some((persist.path.clone(), snapshot))
-                    } else {
-                        None
-                    }
+                if persist.written_since_compact >= COMPACT_AFTER {
+                    persist.written_since_compact = 0;
+                    // Felder-Split: inner.persist (mut) + inner.entries (immut) — OK
+                    let snapshot: Vec<LogEntry> = inner.entries.iter().cloned().collect();
+                    Some((persist.path.clone(), snapshot))
                 } else {
                     None
                 }
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
 
         // NATS-Sender klonen, bevor der Lock freigegeben wird
         let nats_tx = inner.nats_tx.clone();

@@ -144,7 +144,11 @@ async fn call_activity_kind_ist_unterinstanz() {
         .await
         .unwrap();
     let instances: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(instances.len(), 2, "Es müssen genau 2 Instanzen existieren (Eltern + Kind)");
+    assert_eq!(
+        instances.len(),
+        2,
+        "Es müssen genau 2 Instanzen existieren (Eltern + Kind)"
+    );
 
     // Kind-Instanz finden: hat parent_instance_id gesetzt
     let kind = instances
@@ -201,7 +205,9 @@ async fn call_activity_variablen_propagation() {
     let parent: Value = res.json().await.unwrap();
 
     assert_eq!(
-        parent["state"].as_str().unwrap_or(&parent["state"].to_string()),
+        parent["state"]
+            .as_str()
+            .unwrap_or(&parent["state"].to_string()),
         "Completed",
         "Eltern-Prozess muss nach Kind-Abschluss Completed sein: {:?}",
         parent["state"]
@@ -248,7 +254,9 @@ async fn call_activity_eltern_abschluss_nach_kind() {
         .unwrap();
     let parent: Value = res.json().await.unwrap();
     assert_eq!(
-        parent["state"].as_str().unwrap_or(&parent["state"].to_string()),
+        parent["state"]
+            .as_str()
+            .unwrap_or(&parent["state"].to_string()),
         "Completed",
         "Eltern-Prozess muss Completed sein: {:?}",
         parent["state"]
@@ -261,7 +269,11 @@ async fn call_activity_eltern_abschluss_nach_kind() {
         .await
         .unwrap();
     let tasks: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(tasks.len(), 0, "Nach Abschluss darf kein UserTask mehr offen sein");
+    assert_eq!(
+        tasks.len(),
+        0,
+        "Nach Abschluss darf kein UserTask mehr offen sein"
+    );
 }
 
 /// Call-Activity mit Kind-ServiceTask: Eltern wartet, Kind-ServiceTask wird per fetchAndLock bearbeitet
@@ -298,12 +310,19 @@ async fn call_activity_mit_kind_service_task() {
         .await
         .unwrap();
     let service_tasks: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(service_tasks.len(), 1, "Genau ein ServiceTask des Kinds muss verfügbar sein");
+    assert_eq!(
+        service_tasks.len(),
+        1,
+        "Genau ein ServiceTask des Kinds muss verfügbar sein"
+    );
     let svc_task_id = service_tasks[0]["id"].as_str().unwrap().to_string();
 
     // ServiceTask abschließen
     let res = client
-        .post(format!("{}/api/service-task/{}/complete", base, svc_task_id))
+        .post(format!(
+            "{}/api/service-task/{}/complete",
+            base, svc_task_id
+        ))
         .json(&serde_json::json!({
             "workerId": "test_worker",
             "variables": { "svc_ergebnis": 42 }
@@ -311,7 +330,11 @@ async fn call_activity_mit_kind_service_task() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 204, "ServiceTask-Complete muss 204 zurückgeben");
+    assert_eq!(
+        res.status(),
+        204,
+        "ServiceTask-Complete muss 204 zurückgeben"
+    );
 
     // Eltern muss jetzt Completed sein
     let res = client
@@ -321,7 +344,9 @@ async fn call_activity_mit_kind_service_task() {
         .unwrap();
     let parent: Value = res.json().await.unwrap();
     assert_eq!(
-        parent["state"].as_str().unwrap_or(&parent["state"].to_string()),
+        parent["state"]
+            .as_str()
+            .unwrap_or(&parent["state"].to_string()),
         "Completed",
         "Eltern-Prozess muss nach Kind-ServiceTask-Abschluss Completed sein: {:?}",
         parent["state"]

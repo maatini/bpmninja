@@ -58,8 +58,8 @@ Snapshots are taken every 8 audit entries. The `calculate_diff` function compare
 
 `WorkflowEngine.persistence` is `Option<Arc<dyn WorkflowPersistence>>`. The engine runs fine without persistence (in-memory / unit tests). Server code in `engine-server/main.rs`:
 - NATS connect OK → attach `NatsPersistence` + restore
-- NATS fail + `REQUIRE_NATS=false` → in-memory with error log (dev only)
-- NATS fail + `REQUIRE_NATS=true` → **process exits** (docker-compose default)
+- NATS fail + `REQUIRE_NATS=false` → in-memory with error log (explicit local opt-in)
+- NATS fail + `REQUIRE_NATS=true` (default) → **process exits**
 
 ### ⚠️ Retry queue is bounded
 

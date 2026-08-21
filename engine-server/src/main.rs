@@ -75,19 +75,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut xml_cache = HashMap::new();
 
-    // REQUIRE_NATS=true|1|yes|on → fail-fast when NATS is unavailable (no silent data loss).
-    // Default false for local/dev; docker-compose sets true for production-like runs.
-    let require_nats = matches!(
-        env::var("REQUIRE_NATS")
-            .ok()
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("1") | Some("true") | Some("yes") | Some("on")
-    );
+    // REQUIRE_NATS defaults to true (fail-closed). Opt out with false|0|no|off
+    // to allow in-memory mode without persistence (state is lost on restart).
+    let require_nats = engine_server::require_nats_from_env();
 
-    let (engine, nats_persistence) = match NatsPersistence::connect(&nats_url, "WORKFLOW_EVENTS").await {
+    let (engine, nats_persistence) = match NatsPersistence::connect(&nats_url, "WORKFLOW_EVENTS")
+        .await
+    {
         Ok(p) => {
             tracing::info!("Connected to NATS at {}", nats_url);
             let p_arc = Arc::new(p);
@@ -107,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => {
             if require_nats {
                 anyhow::bail!(
-                    "NATS not available at {} and REQUIRE_NATS is set — refusing to start with in-memory fallback. Error: {}",
+                    "NATS not available at {} and REQUIRE_NATS is enabled (default) — refusing to start with in-memory fallback. Set REQUIRE_NATS=false for ephemeral local runs. Error: {}",
                     nats_url,
                     e
                 );
