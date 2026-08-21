@@ -32,17 +32,11 @@ async fn test_save_and_load_token() {
         serde_json::Value::String("test_value".into()),
     );
 
-    persistence
-        .save_token(instance_id, &token)
-        .await
-        .unwrap();
+    persistence.save_token(instance_id, &token).await.unwrap();
 
     // Event-Sourcing Light Scenario
     token.current_node = "next_node".to_string();
-    persistence
-        .save_token(instance_id, &token)
-        .await
-        .unwrap();
+    persistence.save_token(instance_id, &token).await.unwrap();
 
     let loaded_tokens = persistence.load_tokens(instance_id).await.unwrap();
 
@@ -190,7 +184,10 @@ async fn test_definition_instance_restore_roundtrip() {
         .expect("instance must be restored");
     assert_eq!(found.business_key, "bk-restore");
     assert_eq!(found.current_node, "start");
-    assert_eq!(found.variables.get("foo").and_then(|v| v.as_str()), Some("bar"));
+    assert_eq!(
+        found.variables.get("foo").and_then(|v| v.as_str()),
+        Some("bar")
+    );
     assert_eq!(found.state, InstanceState::Running);
 
     // Delete and verify gone

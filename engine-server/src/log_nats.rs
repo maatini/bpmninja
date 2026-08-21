@@ -95,11 +95,8 @@ impl NatsLogSink {
         let mut entries: Vec<LogEntry> = Vec::new();
 
         // Timeout-Loop: Nachrichten lesen bis keine mehr kommen (< 200 ms Pause).
-        while let Ok(Some(msg)) = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            messages.next(),
-        )
-        .await
+        while let Ok(Some(msg)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), messages.next()).await
         {
             if let Ok(msg) = msg
                 && let Ok(entry) = serde_json::from_slice::<LogEntry>(&msg.payload)

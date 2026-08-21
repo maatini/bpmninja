@@ -105,8 +105,10 @@ pub(crate) fn find_compensation_handler(
 pub(crate) fn same_gateway_type(a: &BpmnElement, b: &BpmnElement) -> bool {
     matches!(
         (a, b),
-        (BpmnElement::ExclusiveGateway { .. }, BpmnElement::ExclusiveGateway { .. })
-            | (BpmnElement::InclusiveGateway, BpmnElement::InclusiveGateway)
+        (
+            BpmnElement::ExclusiveGateway { .. },
+            BpmnElement::ExclusiveGateway { .. }
+        ) | (BpmnElement::InclusiveGateway, BpmnElement::InclusiveGateway)
             | (BpmnElement::ParallelGateway, BpmnElement::ParallelGateway)
     )
 }

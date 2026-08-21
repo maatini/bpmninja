@@ -1,5 +1,5 @@
-use serde_json::Value;
 use anyhow::{Context, anyhow};
+use serde_json::Value;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -91,9 +91,9 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     for task in &user_tasks {
-        let task_id = task["task_id"]
-            .as_str()
-            .with_context(|| format!("Missing or invalid 'task_id' in user task payload: {task}"))?;
+        let task_id = task["task_id"].as_str().with_context(|| {
+            format!("Missing or invalid 'task_id' in user task payload: {task}")
+        })?;
         tracing::info!("Completing user task: {}", task_id);
         client
             .post(format!("{}/api/complete/{}", base_url, task_id))

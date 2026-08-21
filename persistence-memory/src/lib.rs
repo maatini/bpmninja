@@ -397,9 +397,9 @@ impl WorkflowPersistence for InMemoryPersistence {
     }
 
     async fn get_completed_instance(&self, id: &str) -> EngineResult<Option<ProcessInstance>> {
-        let uuid = id.parse::<uuid::Uuid>().map_err(|e| {
-            engine_core::domain::EngineError::PersistenceError(e.to_string())
-        })?;
+        let uuid = id
+            .parse::<uuid::Uuid>()
+            .map_err(|e| engine_core::domain::EngineError::PersistenceError(e.to_string()))?;
         let store = self.completed_instances.read().await;
         Ok(store.get(&uuid).cloned())
     }

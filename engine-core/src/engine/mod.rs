@@ -132,11 +132,7 @@ impl WorkflowEngine {
         if let Some(tx) = &self.retry_tx {
             // Async send waits for capacity so Shutdown is not lost when the
             // bounded queue is still draining residual jobs.
-            if tx
-                .send(retry_queue::PersistJob::Shutdown)
-                .await
-                .is_err()
-            {
+            if tx.send(retry_queue::PersistJob::Shutdown).await.is_err() {
                 tracing::warn!("Retry queue closed before Shutdown could be sent");
             }
         }

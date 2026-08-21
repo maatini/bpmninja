@@ -9,10 +9,10 @@ use crate::engine::WorkflowEngine;
 use crate::runtime::*;
 use crate::scripting;
 
-pub(crate) mod helpers;
 mod completion;
-mod parallel;
+pub(crate) mod helpers;
 mod next_action;
+mod parallel;
 
 pub(crate) use helpers::{
     find_any_boundary_escalation_event, find_boundary_error_event, find_compensation_handler,
@@ -153,8 +153,14 @@ impl WorkflowEngine {
             .await;
 
             let token_id = token.id;
-            self.handle_next_action(action, instance_id, token_id, &current_gateway_id, &mut queue)
-                .await?;
+            self.handle_next_action(
+                action,
+                instance_id,
+                token_id,
+                &current_gateway_id,
+                &mut queue,
+            )
+            .await?;
         } // end while
 
         // Flush persistence for the entire batch
@@ -370,5 +376,4 @@ impl WorkflowEngine {
             }
         }
     }
-
 }

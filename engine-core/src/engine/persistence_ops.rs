@@ -70,10 +70,7 @@ impl WorkflowEngine {
                 );
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(job)) => {
-                tracing::error!(
-                    "Failed to enqueue retry job {} (channel closed)",
-                    job
-                );
+                tracing::error!("Failed to enqueue retry job {} (channel closed)", job);
             }
         }
     }
@@ -206,8 +203,7 @@ impl WorkflowEngine {
                 // Snapshot-Heuristik: alle 8 Audit-Log-Einträge ODER immer bei
                 // Instanz-Abschluss — damit ist der letzte Zustand (Variablen,
                 // current_node, completed_at) garantiert in der Historie enthalten.
-                let periodic_snapshot = !curr.audit_log.is_empty()
-                    && curr.audit_log.len() % 8 == 0;
+                let periodic_snapshot = !curr.audit_log.is_empty() && curr.audit_log.len() % 8 == 0;
 
                 if (is_terminal || periodic_snapshot)
                     && let Ok(json_state) = serde_json::to_value(&curr)
@@ -398,7 +394,9 @@ impl WorkflowEngine {
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             if let Err(e) = p.save_completed_instance(&inst).await {
-                tracing::warn!("Failed to archive completed instance {instance_id} to history: {e}");
+                tracing::warn!(
+                    "Failed to archive completed instance {instance_id} to history: {e}"
+                );
             }
         }
         // Deliberately NOT deleting from active persistence bucket or DashMap.
