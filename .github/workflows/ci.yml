@@ -27,14 +27,37 @@ jobs:
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Check formatting
+        run: cargo fmt --all --check
+
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name bpmninja-nats \
+            -p 4222:4222 -p 8222:8222 \
+            nats:alpine --js --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then
+              echo "NATS ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "NATS failed to become ready"
+          docker logs bpmninja-nats
+          exit 1
+
       - name: Run tests
+        env:
+          NATS_URL: nats://127.0.0.1:4222
         run: cargo test --workspace
 
   external-task-client:
@@ -64,9 +87,20 @@ jobs:
         working-directory: bpmn-ninja-external-task-client
         run: npm test
 
-  desktop-frontend:
-    name: Desktop frontend lint and build
+  ci-scripts:
+    name: CI helper scripts
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Test quality-metrics parsers
+        run: python3 .github/scripts/tests/test_mutation_metrics.py
+
+  desktop-frontend:
+    name: Desktop frontend lint, build, and E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -94,3 +128,11 @@ jobs:
       - name: Build frontend bundle
         working-directory: desktop-tauri
         run: npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: desktop-tauri
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E
+        working-directory: desktop-tauri
+        run: npm run test:e2e

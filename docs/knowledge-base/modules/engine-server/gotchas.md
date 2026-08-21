@@ -31,7 +31,7 @@ Oldest entries are dropped when the buffer exceeds 5,000. NATS persistence (`ENG
 
 ### ⚠️ In-memory fallback is opt-in (dev)
 
-If NATS is unavailable and `REQUIRE_NATS` is unset/false, the server starts in in-memory mode with a warning log. All state is lost on restart. For production/docker-compose set `REQUIRE_NATS=true` (fail-fast at startup). `/api/ready` returns **503** when `REQUIRE_NATS=true` but no persistence is configured.
+`REQUIRE_NATS` defaults to **true**. If NATS is unavailable the process refuses to start. Set `REQUIRE_NATS=false` only for ephemeral local runs (warning log; all state is lost on restart). `/api/ready` returns **503** when NATS is required but no persistence is configured.
 
 ### ⚠️ Timer scheduler uses `tokio::spawn`
 

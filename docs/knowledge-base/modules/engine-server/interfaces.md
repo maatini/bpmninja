@@ -35,19 +35,19 @@ pub struct AppState {
 | `OrphanedToken(node)` | 422 | Migration: node missing in target definition |
 | All other `EngineError` | 500 | Internal server error |
 
-## Route Map (38 endpoints)
+## Route Map (46 endpoints)
 
-See [modules/engine-server/interfaces.md] for the complete table. Key groups:
+See groups below. Key groups:
 
 | Group | Count | Key Endpoints |
 |-------|-------|---------------|
 | Definitions | 5 | `POST /api/deploy`, `GET /api/definitions`, `GET /api/definitions/:id/xml`, `DELETE /api/definitions/:id`, `DELETE /api/definitions/bpmn/:bpmn_id` |
-| Instances | 9 | `POST /api/start`, `POST /api/start/latest`, `POST /api/start/timer`, `GET/PUT/DELETE /api/instances...`, `suspend`, `resume`, `move-token`, `migrate` |
+| Instances | 11 | `POST /api/start`, `POST /api/start/latest`, `POST /api/start/timer`, `GET/DELETE /api/instances...`, `variables`, `suspend`, `resume`, `move-token`, `migrate` |
 | User Tasks | 2 | `GET /api/tasks`, `POST /api/complete/:id` |
 | Service Tasks | 8 | `GET /api/service-tasks`, `fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`, `retry`, `resolve` |
 | Files | 3 | `POST/GET/DELETE /api/instances/:id/files/:var` |
 | Events & Messages | 4 | `POST /api/message`, `GET /api/messages`, `GET /api/timers`, `POST /api/timers/process` |
-| History & Archive | 4 | `GET /api/instances/:id/history`, `GET /api/history/instances`, `GET /api/history/instances/:id` |
+| History & Archive | 4 | `GET /api/instances/:id/history`, `GET /api/instances/:id/history/:event_id`, `GET /api/history/instances`, `GET /api/history/instances/:id` |
 | Monitoring & Health | 7 | `GET /api/health`, `/api/ready`, `/api/info`, `/api/monitoring`, bucket entries, `/metrics` |
 | Observability | 2 | `GET /api/logs`, `GET /api/events` (SSE) |
 
@@ -80,7 +80,7 @@ Returns JSON array of log entries with `timestamp`, `level`, `target`, `message`
 ```rust
 // Public API for tests and server binary
 pub struct AppBuildConfig {
-    pub require_nats: Option<bool>,      // None → env REQUIRE_NATS
+    pub require_nats: Option<bool>,      // None → env REQUIRE_NATS (default true)
     pub max_upload_bytes: Option<usize>, // None → env MAX_UPLOAD_BYTES
 }
 

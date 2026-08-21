@@ -2,7 +2,7 @@
 
 ## What engine-server Owns
 
-1. **@tag:rest-api** — Complete REST API surface: 38 endpoints across definitions, instances, tasks, files, events, messages, history, monitoring, and health.
+1. **@tag:rest-api** — Complete REST API surface: 46 endpoints across definitions, instances, tasks, files, events, messages, history, monitoring, and health.
 2. **@tag:http-error-mapping** — `AppError` enum maps `EngineError` variants to HTTP status codes with JSON error bodies.
 3. **@tag:sse-endpoint** — `GET /api/events` endpoint bridging `EngineEvent` broadcast channel to Server-Sent Events for push-based UI updates.
 4. **@tag:timer-scheduler** — Background Tokio task that periodically calls `engine.process_timers()` (interval configurable via `TIMER_INTERVAL_MS`, default 1000ms).
@@ -21,7 +21,7 @@
 4. **SSE events are fire-and-forget**: Server doesn't care if SSE clients miss events (channel capacity 256).
 5. **Graceful shutdown**: `Ctrl+C` / `SIGTERM` shuts down timer scheduler, flushes persistence queue, and stops Axum.
 6. **Deployment size limit**: BPMN XML uploads capped at 5 MB (configurable in `build_app_with_engine`). Multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB).
-7. **NATS optional in dev**: Without `REQUIRE_NATS`, server starts in in-memory mode if NATS is unavailable (warning log). With `REQUIRE_NATS=true` (docker-compose default), startup fails instead of silent data-loss fallback.
+7. **NATS required by default**: `REQUIRE_NATS` defaults to true — startup fails if NATS is unavailable. Set `REQUIRE_NATS=false` only for ephemeral local runs (in-memory, state lost on restart).
 8. **Prometheus optional**: `/metrics` only mounted if `prometheus_handle` is `Some`.
 
 ## Internal Module Responsibilities

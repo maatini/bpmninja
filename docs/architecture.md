@@ -16,7 +16,7 @@ The project is a Cargo workspace with 6 crates, a Tauri desktop app and an API s
 | **persistence-nats** | ~1,149 | (inline) | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
 | **engine-server** | ~1,280 | ~1,934 | Axum REST API (HTTP adapter) + background timer scheduler |
 | **desktop-tauri** | ~5,186 (TS) + ~623 (Rust) | — | Tauri + React + TailwindCSS + bpmn-js modeler (thin client) |
-| **agent-orchestrator** | stub | — | External worker orchestration (planned) |
+| **agent-orchestrator** | demo | — | One-shot example worker (not a production loop) |
 
 ### Workspace Dependency Graph
 
@@ -436,7 +436,7 @@ This prevents unbounded memory growth while still recovering from transient netw
 
 > Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](openapi.yaml)**
 
-### 6.1 Route Overview (38 endpoints)
+### 6.1 Route Overview (46 endpoints)
 
 ```mermaid
 graph LR
@@ -551,7 +551,7 @@ tokio::spawn(async move {
 | `GET /api/health` | Liveness probe | Always `200 OK` when the server is running |
 | `GET /api/ready` | Readiness probe | `503` if `REQUIRE_NATS` is set but no persistence is configured, or if NATS storage check fails; otherwise `200` |
 
-Production/docker should set `REQUIRE_NATS=true` so a missing NATS backend fails startup instead of silently running in-memory.
+`REQUIRE_NATS` defaults to true so a missing NATS backend fails startup instead of silently running in-memory. Set `REQUIRE_NATS=false` only for ephemeral local runs.
 
 ---
 

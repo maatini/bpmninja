@@ -11,13 +11,13 @@ pub(crate) mod state;
 pub(crate) mod tasks;
 pub(crate) mod timers;
 
+use crate::log_buffer::LogBuffer;
 use axum::{
     Router,
     http::Method,
     middleware,
     routing::{delete, get, post, put},
 };
-use crate::log_buffer::LogBuffer;
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
 use metrics_exporter_prometheus::PrometheusHandle;
@@ -26,10 +26,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
+pub use state::require_nats_from_env;
+
 /// Optional overrides for app construction (primarily for tests).
 ///
 /// When a field is `None`, the value is taken from the environment
-/// (`REQUIRE_NATS`, `MAX_UPLOAD_BYTES`). Explicit values avoid process-wide
+/// (`REQUIRE_NATS` fail-closed default, `MAX_UPLOAD_BYTES`). Explicit values avoid process-wide
 /// env races in parallel integration tests.
 #[derive(Debug, Clone, Default)]
 pub struct AppBuildConfig {
@@ -104,7 +106,7 @@ pub fn build_app_with_config(
         log_buffer,
         require_nats: config
             .require_nats
-            .unwrap_or_else(|| state::env_flag("REQUIRE_NATS")),
+            .unwrap_or_else(state::require_nats_from_env),
         max_upload_bytes: config
             .max_upload_bytes
             .unwrap_or_else(state::max_upload_bytes_from_env),
