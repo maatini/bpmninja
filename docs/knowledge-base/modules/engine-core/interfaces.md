@@ -2,6 +2,8 @@
 
 ## Public API Surface
 
+Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engine_core::persistence` → `port`, `engine_core::timer_definition` → `domain::timer`.
+
 ### Core Structs (re-exported via `engine-core::*`)
 
 | Type | Location | Purpose |

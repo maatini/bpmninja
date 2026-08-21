@@ -26,18 +26,16 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 ## persistence-memory (Testing/Development)
 
 **Crate:** `persistence-memory/`  
-**Source:** 1 file: `lib.rs` (~450 LoC)
+**Source:** `lib.rs` re-exports `engine_core::adapter::InMemoryPersistence`
 
 **Owns:**
-1. In-memory `HashMap`-backed storage for all entity types
-2. `Vec`-backed history and completed instance archive
-3. Full `WorkflowPersistence` trait implementation
+1. The public crate name used by `engine-server`, fuzz, and integration tests
+2. No separate HashMap implementation — the type lives in `engine-core`
 
 **Invariants:**
 - Data is NOT persisted to disk — lost on restart
 - Used in unit/integration tests (instant setup, no external dependencies)
 - May be used by the server only when NATS is down **and** `REQUIRE_NATS` is false (dev)
-- Must implement ALL `WorkflowPersistence` methods to serve as a valid backend
 
 ## Key Entry Points
 

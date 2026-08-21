@@ -23,5 +23,5 @@ The heart of BPMNinja — a **pure state machine** with no network or I/O code. 
 | `history/` | `src/history/` | Audit trail, diff calculation, `HistoryEntry`, `HistoryDiff` |
 | `scripting/` | `src/scripting/` | Rhai sandbox: ops / memory budget (collection caps) / timeout |
 | `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `PendingUserTask`, `PendingServiceTask`, `NextAction` |
-| `adapter/` | `src/adapter/` | In-memory persistence implementation for testing |
+| `adapter/` | `src/adapter/` | Single in-memory `WorkflowPersistence` impl (re-exported by `persistence-memory`) |
 | `condition.rs` | `src/condition.rs` | Expression evaluator for gateway conditions |

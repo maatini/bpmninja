@@ -1,13 +1,14 @@
 [package]
 name = "persistence-memory"
-version = "0.7.20"
+version = "0.7.21"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "In-memory WorkflowPersistence implementation for testing"
+description = "Re-export of engine-core in-memory WorkflowPersistence"
 
 [dependencies]
 engine-core = { path = "../engine-core" }
-tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.23", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-async-trait = "0.1"

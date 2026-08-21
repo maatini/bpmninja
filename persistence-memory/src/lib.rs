@@ -1,429 +1,120 @@
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+//! In-memory `WorkflowPersistence` — Reexport der einzigen Implementierung in `engine-core`.
 
-use engine_core::domain::EngineResult;
-use engine_core::domain::{ProcessDefinition, Token};
-use engine_core::history::HistoryEntry;
-use engine_core::persistence::{
-    BucketEntry, BucketEntryDetail, CompletedInstanceQuery, HistoryQuery, StorageInfo,
-    WorkflowPersistence,
-};
-use engine_core::runtime::{
-    PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessInstance,
-};
+pub use engine_core::adapter::InMemoryPersistence;
 
-#[derive(Default, Clone)]
-pub struct InMemoryPersistence {
-    tokens: Arc<RwLock<HashMap<String, Vec<Token>>>>,
-    instances: Arc<RwLock<HashMap<uuid::Uuid, ProcessInstance>>>,
-    definitions: Arc<RwLock<HashMap<uuid::Uuid, ProcessDefinition>>>,
-    user_tasks: Arc<RwLock<HashMap<uuid::Uuid, PendingUserTask>>>,
-    service_tasks: Arc<RwLock<HashMap<uuid::Uuid, PendingServiceTask>>>,
-    timers: Arc<RwLock<HashMap<uuid::Uuid, PendingTimer>>>,
-    message_catches: Arc<RwLock<HashMap<uuid::Uuid, PendingMessageCatch>>>,
-    files: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-    bpmn_xmls: Arc<RwLock<HashMap<String, String>>>,
-    history: Arc<RwLock<HashMap<uuid::Uuid, Vec<HistoryEntry>>>>,
-    completed_instances: Arc<RwLock<HashMap<uuid::Uuid, ProcessInstance>>>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine_core::history::{ActorType, HistoryEntry, HistoryEventType};
+    use engine_core::persistence::{HistoryQuery, WorkflowPersistence};
+    use engine_core::runtime::{InstanceState, ProcessInstance};
+    use std::collections::HashMap;
 
-impl InMemoryPersistence {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
+    #[tokio::test]
+    async fn test_query_history_filters() {
+        let p = InMemoryPersistence::new();
+        let inst_id = uuid::Uuid::new_v4();
+        let now = chrono::Utc::now();
 
-#[async_trait]
-impl WorkflowPersistence for InMemoryPersistence {
-    async fn save_token(&self, instance_id: uuid::Uuid, token: &Token) -> EngineResult<()> {
-        let mut t = self.tokens.write().await;
-        let key = format!("token-{instance_id}-{}", token.id);
-        t.insert(key, vec![token.clone()]);
-        Ok(())
-    }
+        let make_entry = |event_type, actor_type, node: &str, ts| HistoryEntry {
+            id: uuid::Uuid::new_v4(),
+            instance_id: inst_id,
+            event_type,
+            description: "test".into(),
+            actor_type,
+            actor_id: None,
+            node_id: Some(node.into()),
+            diff: None,
+            timestamp: ts,
+            context: HashMap::new(),
+            metadata: None,
+            definition_version: None,
+            is_snapshot: false,
+            full_state_snapshot: None,
+        };
 
-    async fn load_tokens(&self, instance_id: uuid::Uuid) -> EngineResult<Vec<Token>> {
-        let t = self.tokens.read().await;
-        let prefix = format!("token-{instance_id}-");
-        Ok(t.iter()
-            .filter(|(k, _)| k.starts_with(&prefix))
-            .flat_map(|(_, v)| v.iter().cloned())
-            .collect())
-    }
+        let e1 = make_entry(
+            HistoryEventType::InstanceStarted,
+            ActorType::Engine,
+            "start",
+            now - chrono::Duration::hours(2),
+        );
+        let e2 = make_entry(
+            HistoryEventType::TaskCompleted,
+            ActorType::User,
+            "task1",
+            now - chrono::Duration::hours(1),
+        );
+        let e3 = make_entry(
+            HistoryEventType::InstanceCompleted,
+            ActorType::Engine,
+            "end",
+            now,
+        );
 
-    async fn delete_token(
-        &self,
-        instance_id: uuid::Uuid,
-        token_id: uuid::Uuid,
-    ) -> EngineResult<()> {
-        let mut t = self.tokens.write().await;
-        let key = format!("token-{instance_id}-{token_id}");
-        t.remove(&key);
-        Ok(())
-    }
+        p.append_history_entry(&e1).await.unwrap();
+        p.append_history_entry(&e2).await.unwrap();
+        p.append_history_entry(&e3).await.unwrap();
 
-    async fn save_instance(&self, instance: &ProcessInstance) -> EngineResult<()> {
-        let mut i = self.instances.write().await;
-        i.insert(instance.id, instance.clone());
-        Ok(())
-    }
-
-    async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {
-        let i = self.instances.read().await;
-        Ok(i.values().cloned().collect())
-    }
-
-    async fn delete_instance(&self, id: &str) -> EngineResult<()> {
-        if let Ok(uid) = uuid::Uuid::parse_str(id) {
-            let mut i = self.instances.write().await;
-            i.remove(&uid);
-        }
-        Ok(())
-    }
-
-    async fn save_definition(&self, definition: &ProcessDefinition) -> EngineResult<()> {
-        let mut d = self.definitions.write().await;
-        d.insert(definition.key, definition.clone());
-        Ok(())
-    }
-
-    async fn list_definitions(&self) -> EngineResult<Vec<ProcessDefinition>> {
-        let d = self.definitions.read().await;
-        Ok(d.values().cloned().collect())
-    }
-
-    async fn delete_definition(&self, key: &str) -> EngineResult<()> {
-        if let Ok(uid) = uuid::Uuid::parse_str(key) {
-            let mut d = self.definitions.write().await;
-            d.remove(&uid);
-        }
-        Ok(())
-    }
-
-    async fn save_user_task(&self, task: &PendingUserTask) -> EngineResult<()> {
-        let mut u = self.user_tasks.write().await;
-        u.insert(task.task_id, task.clone());
-        Ok(())
-    }
-
-    async fn delete_user_task(&self, task_id: uuid::Uuid) -> EngineResult<()> {
-        let mut u = self.user_tasks.write().await;
-        u.remove(&task_id);
-        Ok(())
-    }
-
-    async fn list_user_tasks(&self) -> EngineResult<Vec<PendingUserTask>> {
-        let u = self.user_tasks.read().await;
-        Ok(u.values().cloned().collect())
-    }
-
-    async fn save_service_task(&self, task: &PendingServiceTask) -> EngineResult<()> {
-        let mut s = self.service_tasks.write().await;
-        s.insert(task.id, task.clone());
-        Ok(())
-    }
-
-    async fn delete_service_task(&self, task_id: uuid::Uuid) -> EngineResult<()> {
-        let mut s = self.service_tasks.write().await;
-        s.remove(&task_id);
-        Ok(())
-    }
-
-    async fn list_service_tasks(&self) -> EngineResult<Vec<PendingServiceTask>> {
-        let s = self.service_tasks.read().await;
-        Ok(s.values().cloned().collect())
-    }
-
-    async fn save_timer(&self, timer: &PendingTimer) -> EngineResult<()> {
-        let mut t = self.timers.write().await;
-        t.insert(timer.id, timer.clone());
-        Ok(())
-    }
-
-    async fn delete_timer(&self, timer_id: uuid::Uuid) -> EngineResult<()> {
-        let mut t = self.timers.write().await;
-        t.remove(&timer_id);
-        Ok(())
-    }
-
-    async fn list_timers(&self) -> EngineResult<Vec<PendingTimer>> {
-        let t = self.timers.read().await;
-        Ok(t.values().cloned().collect())
-    }
-
-    async fn save_message_catch(&self, catch: &PendingMessageCatch) -> EngineResult<()> {
-        let mut m = self.message_catches.write().await;
-        m.insert(catch.id, catch.clone());
-        Ok(())
-    }
-
-    async fn delete_message_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()> {
-        let mut m = self.message_catches.write().await;
-        m.remove(&catch_id);
-        Ok(())
-    }
-
-    async fn list_message_catches(&self) -> EngineResult<Vec<PendingMessageCatch>> {
-        let m = self.message_catches.read().await;
-        Ok(m.values().cloned().collect())
-    }
-
-    async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()> {
-        let mut f = self.files.write().await;
-        f.insert(object_key.to_string(), data.to_vec());
-        Ok(())
-    }
-
-    async fn load_file(&self, object_key: &str) -> EngineResult<Vec<u8>> {
-        let f = self.files.read().await;
-        f.get(object_key).cloned().ok_or_else(|| {
-            engine_core::domain::EngineError::PersistenceError("File not found".into())
-        })
-    }
-
-    async fn delete_file(&self, object_key: &str) -> EngineResult<()> {
-        let mut f = self.files.write().await;
-        f.remove(object_key);
-        Ok(())
-    }
-
-    async fn save_bpmn_xml(&self, definition_key: &str, xml: &str) -> EngineResult<()> {
-        let mut b = self.bpmn_xmls.write().await;
-        b.insert(definition_key.to_string(), xml.to_string());
-        Ok(())
-    }
-
-    async fn load_bpmn_xml(&self, definition_key: &str) -> EngineResult<String> {
-        let b = self.bpmn_xmls.read().await;
-        b.get(definition_key).cloned().ok_or_else(|| {
-            engine_core::domain::EngineError::NoSuchDefinition(
-                uuid::Uuid::parse_str(definition_key).unwrap_or_default(),
-            )
-        })
-    }
-
-    async fn list_bpmn_xml_ids(&self) -> EngineResult<Vec<String>> {
-        let b = self.bpmn_xmls.read().await;
-        Ok(b.keys().cloned().collect())
-    }
-
-    async fn get_storage_info(&self) -> EngineResult<Option<StorageInfo>> {
-        let f_len = self.files.read().await.len();
-        let i_len = self.instances.read().await.len();
-        let d_len = self.definitions.read().await.len();
-        let ut_len = self.user_tasks.read().await.len();
-        let st_len = self.service_tasks.read().await.len();
-        let t_len = self.timers.read().await.len();
-        let m_len = self.message_catches.read().await.len();
-        let h_len: usize = self.history.read().await.values().map(|v| v.len()).sum();
-        let bpmn_len = self.bpmn_xmls.read().await.len();
-
-        let buckets = vec![
-            engine_core::persistence::BucketInfo {
-                name: "instances".into(),
-                bucket_type: "kv".into(),
-                entries: i_len as u64,
-                size_bytes: (i_len * 512) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "definitions".into(),
-                bucket_type: "kv".into(),
-                entries: d_len as u64,
-                size_bytes: (d_len * 256) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "user_tasks".into(),
-                bucket_type: "kv".into(),
-                entries: ut_len as u64,
-                size_bytes: (ut_len * 128) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "service_tasks".into(),
-                bucket_type: "kv".into(),
-                entries: st_len as u64,
-                size_bytes: (st_len * 128) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "timers".into(),
-                bucket_type: "kv".into(),
-                entries: t_len as u64,
-                size_bytes: (t_len * 128) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "messages".into(),
-                bucket_type: "kv".into(),
-                entries: m_len as u64,
-                size_bytes: (m_len * 128) as u64,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "bpmn_xml".into(),
-                bucket_type: "object_store".into(),
-                entries: bpmn_len as u64,
-                size_bytes: 0,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "instance_files".into(),
-                bucket_type: "object_store".into(),
-                entries: f_len as u64,
-                size_bytes: 0,
-            },
-            engine_core::persistence::BucketInfo {
-                name: "history".into(),
-                bucket_type: "stream".into(),
-                entries: h_len as u64,
-                size_bytes: 0,
-            },
-        ];
-
-        Ok(Some(StorageInfo {
-            backend_name: "InMemoryPersistence".to_string(),
-            version: "1.0.0".to_string(),
-            host: "localhost".to_string(),
-            port: 0,
-            memory_bytes: (f_len * 1024 + i_len * 512) as u64,
-            storage_bytes: 0,
-            streams: 0,
-            consumers: 0,
-            buckets,
-        }))
-    }
-
-    async fn append_history_entry(&self, entry: &HistoryEntry) -> EngineResult<()> {
-        let mut h = self.history.write().await;
-        h.entry(entry.instance_id)
-            .or_insert_with(Vec::new)
-            .push(entry.clone());
-        Ok(())
-    }
-
-    async fn query_history(&self, query: HistoryQuery) -> EngineResult<Vec<HistoryEntry>> {
-        let h = self.history.read().await;
-        let mut events = h.get(&query.instance_id).cloned().unwrap_or_default();
-
-        if let Some(types) = &query.event_types {
-            events.retain(|e| types.contains(&e.event_type));
-        }
-        if let Some(node_id) = &query.node_id {
-            events.retain(|e| e.node_id.as_ref() == Some(node_id));
-        }
-        if let Some(actor) = &query.actor_type {
-            events.retain(|e| e.actor_type == *actor);
-        }
-        if let Some(from) = query.from {
-            events.retain(|e| e.timestamp >= from);
-        }
-        if let Some(to) = query.to {
-            events.retain(|e| e.timestamp <= to);
-        }
-
-        events.sort_by_key(|e| e.timestamp);
-
-        if let Some(offset) = query.offset {
-            events = events.into_iter().skip(offset).collect();
-        }
-        if let Some(limit) = query.limit {
-            events.truncate(limit);
-        }
-
-        Ok(events)
-    }
-
-    async fn save_completed_instance(&self, instance: &ProcessInstance) -> EngineResult<()> {
-        let mut store = self.completed_instances.write().await;
-        store.insert(instance.id, instance.clone());
-        Ok(())
-    }
-
-    async fn query_completed_instances(
-        &self,
-        query: CompletedInstanceQuery,
-    ) -> EngineResult<Vec<ProcessInstance>> {
-        let store = self.completed_instances.read().await;
-        let mut results: Vec<ProcessInstance> = store
-            .values()
-            .filter(|inst| {
-                if let Some(ref dk) = query.definition_key
-                    && inst.definition_key != *dk
-                {
-                    return false;
-                }
-                if let Some(ref bk) = query.business_key
-                    && !inst.business_key.contains(bk.as_str())
-                {
-                    return false;
-                }
-                if let Some(ref from) = query.from
-                    && let Some(ref completed) = inst.completed_at
-                    && completed < from
-                {
-                    return false;
-                }
-                if let Some(ref to) = query.to
-                    && let Some(ref completed) = inst.completed_at
-                    && completed > to
-                {
-                    return false;
-                }
-                let matches_state = match query.state_filter.as_deref() {
-                    Some("completed") => {
-                        matches!(inst.state, engine_core::runtime::InstanceState::Completed)
-                    }
-                    Some("error") => matches!(
-                        inst.state,
-                        engine_core::runtime::InstanceState::CompletedWithError { .. }
-                    ),
-                    _ => true,
-                };
-                if !matches_state {
-                    return false;
-                }
-                true
+        let all = p
+            .query_history(HistoryQuery {
+                instance_id: inst_id,
+                ..Default::default()
             })
-            .cloned()
-            .collect();
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 3);
 
-        results.sort_by_key(|a| std::cmp::Reverse(a.completed_at));
+        let tasks_only = p
+            .query_history(HistoryQuery {
+                instance_id: inst_id,
+                event_types: Some(vec![HistoryEventType::TaskCompleted]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(tasks_only.len(), 1);
 
-        if let Some(offset) = query.offset {
-            results = results.into_iter().skip(offset).collect();
-        }
-        if let Some(limit) = query.limit {
-            results.truncate(limit);
-        }
-
-        Ok(results)
+        let page = p
+            .query_history(HistoryQuery {
+                instance_id: inst_id,
+                offset: Some(1),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].event_type, HistoryEventType::TaskCompleted);
     }
 
-    async fn get_completed_instance(&self, id: &str) -> EngineResult<Option<ProcessInstance>> {
-        let uuid = id
-            .parse::<uuid::Uuid>()
-            .map_err(|e| engine_core::domain::EngineError::PersistenceError(e.to_string()))?;
-        let store = self.completed_instances.read().await;
-        Ok(store.get(&uuid).cloned())
-    }
+    #[tokio::test]
+    async fn test_get_storage_info_arithmetic() {
+        let p = InMemoryPersistence::new();
+        p.save_file("file1", &[0u8; 100]).await.unwrap();
+        p.save_file("file2", &[0u8; 200]).await.unwrap();
 
-    async fn get_bucket_entries(
-        &self,
-        bucket_name: &str,
-        offset: usize,
-        limit: usize,
-    ) -> EngineResult<Vec<BucketEntry>> {
-        let _ = (bucket_name, offset, limit);
-        Err(engine_core::domain::EngineError::PersistenceError(
-            "Bucket browsing not implemented for in-memory persistence".into(),
-        ))
-    }
+        let inst = ProcessInstance {
+            id: uuid::Uuid::new_v4(),
+            definition_key: uuid::Uuid::new_v4(),
+            business_key: String::new(),
+            parent_instance_id: None,
+            state: InstanceState::Running,
+            current_node: "x".into(),
+            audit_log: vec![],
+            variables: HashMap::new(),
+            tokens: HashMap::new(),
+            active_tokens: vec![],
+            join_barriers: HashMap::new(),
+            multi_instance_state: HashMap::new(),
+            compensation_log: Vec::new(),
+            started_at: None,
+            completed_at: None,
+        };
+        p.save_instance(&inst).await.unwrap();
 
-    async fn get_bucket_entry_detail(
-        &self,
-        bucket_name: &str,
-        key: &str,
-    ) -> EngineResult<BucketEntryDetail> {
-        let _ = (bucket_name, key);
-        Err(engine_core::domain::EngineError::PersistenceError(
-            "Bucket detail browsing not implemented for in-memory persistence".into(),
-        ))
+        let info = p.get_storage_info().await.unwrap().unwrap();
+        assert_eq!(info.backend_name, "InMemoryPersistence");
+        assert_eq!(info.memory_bytes, 2 * 1024 + 512);
     }
 }

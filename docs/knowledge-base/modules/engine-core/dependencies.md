@@ -22,13 +22,15 @@
 - reqwest (no HTTP client)
 - Any filesystem or network crate
 
+The in-memory persistence adapter is in-process (`adapter::InMemoryPersistence`, HashMaps only). NATS lives in `persistence-nats`. `persistence-memory` re-exports the core adapter.
+
 ## Inbound (Who Depends on engine-core)
 
 | Caller | How | Purpose | Key Types Used |
 |--------|-----|---------|---------------|
 | **bpmn-parser** | Direct Rust import | Consumes domain types | `ProcessDefinition`, `BpmnElement`, `TimerDefinition`, `EngineError`, `EngineResult`, `SequenceFlow`, `ExecutionListener` |
 | **persistence-nats** | Direct Rust import + trait impl | Implements `WorkflowPersistence` + uses domain types | `WorkflowPersistence`, `ProcessDefinition`, `ProcessInstance`, `Token`, `PendingUserTask`, `PendingServiceTask`, `PendingTimer`, `PendingMessageCatch`, `HistoryEntry`, `StorageInfo` |
-| **persistence-memory** | Direct Rust import + trait impl | Implements `WorkflowPersistence` + uses domain types | Same as above |
+| **persistence-memory** | Direct Rust import + re-export | Re-exports `adapter::InMemoryPersistence` | Same domain types as NATS adapter |
 | **engine-server** | Direct Rust import | All engine operations via REST handlers | `WorkflowEngine`, all domain types, all pending types, `EngineEvent`, `EngineError` |
 | **agent-orchestrator** | Direct Rust import | Public types for worker tasks | `PendingServiceTask`, `EngineError` |
 
@@ -63,7 +65,7 @@ graph TD
 ```toml
 [package]
 name = "engine-core"
-version = "0.7.20"
+version = "0.7.21"
 edition = "2024"
 
 [dependencies]

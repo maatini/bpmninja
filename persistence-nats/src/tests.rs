@@ -5,14 +5,27 @@ use uuid::Uuid;
 
 use crate::client::NatsPersistence;
 
-pub async fn setup_nats_test() -> Option<Arc<NatsPersistence>> {
-    let url = "nats://localhost:4222";
-    let stream = format!("TEST_STREAM_{}", Uuid::new_v4());
+fn nats_url() -> String {
+    std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+}
 
-    match NatsPersistence::connect(url, &stream).await {
+fn nats_required() -> bool {
+    std::env::var("CI").is_ok() || std::env::var("REQUIRE_NATS_TESTS").is_ok()
+}
+
+pub async fn setup_nats_test() -> Option<Arc<NatsPersistence>> {
+    connect_nats(&format!("TEST_STREAM_{}", Uuid::new_v4())).await
+}
+
+async fn connect_nats(stream: &str) -> Option<Arc<NatsPersistence>> {
+    let url = nats_url();
+    match NatsPersistence::connect(&url, stream).await {
         Ok(persistence) => Some(Arc::new(persistence)),
         Err(e) => {
-            tracing::warn!("Skipping NATS test, could not connect: {}", e);
+            if nats_required() {
+                panic!("NATS JetStream required in CI ({url}): {e}");
+            }
+            tracing::warn!("Skipping NATS test, could not connect: {e}");
             None
         }
     }
@@ -117,15 +130,12 @@ async fn test_definition_instance_restore_roundtrip() {
     use engine_core::runtime::{InstanceState, ProcessInstance};
     use std::collections::HashMap;
 
-    let url = "nats://localhost:4222";
+    let url = nats_url();
     let stream = format!("TEST_RESTORE_{}", Uuid::new_v4());
 
-    let persistence = match NatsPersistence::connect(url, &stream).await {
-        Ok(p) => Arc::new(p),
-        Err(e) => {
-            tracing::warn!("Skipping NATS restore test, could not connect: {}", e);
-            return;
-        }
+    let persistence = match connect_nats(&stream).await {
+        Some(p) => p,
+        None => return,
     };
 
     let def = ProcessDefinitionBuilder::new("restore_proc")
@@ -162,10 +172,13 @@ async fn test_definition_instance_restore_roundtrip() {
     persistence.save_instance(&instance).await.unwrap();
 
     // Simulate crash recovery: new connection, reload from KV.
-    let restored = match NatsPersistence::connect(url, &stream).await {
+    let restored = match NatsPersistence::connect(&url, &stream).await {
         Ok(p) => Arc::new(p),
         Err(e) => {
-            tracing::warn!("Skipping restore reconnect: {}", e);
+            if nats_required() {
+                panic!("NATS JetStream reconnect required in CI ({url}): {e}");
+            }
+            tracing::warn!("Skipping restore reconnect: {e}");
             return;
         }
     };

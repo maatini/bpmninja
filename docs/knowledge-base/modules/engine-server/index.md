@@ -1,6 +1,6 @@
 # engine-server
 
-Axum-based HTTP REST API server for BPMNinja. Provides 38 endpoints for process management, task handling, monitoring, file storage, and push-based event streaming via SSE.
+Axum-based HTTP REST API server for BPMNinja. Provides 46 endpoints for process management, task handling, monitoring, file storage, and push-based event streaming via SSE.
 
 **Crate path:** `engine-server/`  
 **Source:** `engine-server/src/` (18 files: main.rs, startup.rs, server/ with 12 route modules, log_buffer.rs, log_nats.rs, observability.rs)  

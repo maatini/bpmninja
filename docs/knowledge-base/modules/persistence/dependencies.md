@@ -6,7 +6,7 @@
 |-----------|------|---------|---------|
 | engine-core | Rust crate | Both backends | `WorkflowPersistence` trait + all domain types |
 | async-nats | External crate | persistence-nats | NATS JetStream client (KV, Object Store, Streams) |
-| serde_json | External crate | Both backends | JSON serialization |
+| serde_json | External crate | persistence-nats | JSON serialization |
 | futures | External crate | persistence-nats | Stream operations for KV key listing |
 | tracing | External crate | persistence-nats | Logging (NATS connection status) |
 
@@ -26,6 +26,7 @@
 graph TD
     subgraph "engine-core"
         WP["WorkflowPersistence trait<br>30+ methods"]
+        ADAPTER["adapter::InMemoryPersistence<br>HashMap + Vec"]
     end
     
     subgraph "persistence-nats"
@@ -35,11 +36,12 @@ graph TD
     end
     
     subgraph "persistence-memory"
-        MEM["InMemoryPersistence<br>HashMap + Vec"]
+        MEM["pub use InMemoryPersistence"]
     end
     
     WP -. "impl" .-> NATS
-    WP -. "impl" .-> MEM
+    WP -. "impl" .-> ADAPTER
+    MEM -. "re-export" .-> ADAPTER
     NATS --> NATS_IMPL
     NATS --> NATS_CLIENT
     

@@ -1,7 +1,7 @@
 # agent-orchestrator
 
-Example Rust external task worker. Currently a minimal stub — demonstrates the pattern but contains little functionality.
+One-shot demo: deploy an example process, start it, then `fetchAndLock`/`complete` until idle. Not a production worker loop.
 
 **Crate path:** `agent-orchestrator/` (in Cargo workspace)
 
-**Status:** Stub — planned for future expansion. The TypeScript `external-task-client` is the recommended worker SDK.
+**Status:** Demo example. The TypeScript `external-task-client` is the recommended worker SDK.

@@ -40,7 +40,7 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:persistence-port` | WorkflowPersistence trait in engine-core/src/port |
 | `@tag:prometheus-metrics` | /metrics endpoint with counters and gauges |
 | `@tag:request-size-limit` | 5 MB body limit for BPMN XML deployment |
-| `@tag:rest-api` | Complete REST API surface: 38 endpoints |
+| `@tag:rest-api` | Complete REST API surface: 46 endpoints |
 | `@tag:retry-backoff` | Exponential backoff (1s → 2s → 4s → ..., max 30s) |
 | `@tag:retry-queue` | Background persistence retry worker |
 | `@tag:rhai-scripting` | Sandboxed Rhai script execution with resource limits |

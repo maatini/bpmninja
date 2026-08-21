@@ -29,7 +29,7 @@
 | [persistence](modules/persistence/) | NATS JetStream (prod) + in-memory (tests/dev) via `WorkflowPersistence` | `NatsPersistence::connect`, `InMemoryPersistence::new` |
 | [desktop-tauri](modules/desktop-tauri/) | Tauri + React + bpmn-js desktop app (thin client) | `App.tsx`, Tauri commands in `src-tauri/` |
 | [external-task-client](modules/external-task-client/) | TypeScript Camunda-compatible worker client | `ExternalTaskClient`, `TaskService` |
-| [agent-orchestrator](modules/agent-orchestrator/) | Example Rust external task worker (stub) | `main.rs` |
+| [agent-orchestrator](modules/agent-orchestrator/) | Demo Rust worker (one-shot deploy/complete) | `main.rs` |
 | [api-spec](modules/api-spec/) | OpenAPI 3.0 specification (TypeSpec source) | `main.tsp`, `docs/openapi.yaml` |
 | [fuzz](modules/fuzz/) | Cargo-fuzz targets for parser, Rhai, cron, tokens, server payloads | 9 fuzz targets in `fuzz/` |
 

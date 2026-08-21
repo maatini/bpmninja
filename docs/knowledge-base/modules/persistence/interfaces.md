@@ -43,16 +43,7 @@ impl WorkflowPersistence for NatsPersistence { ... }
 ## persistence-memory Public API
 
 ```rust
-// lib.rs
-pub struct InMemoryPersistence {
-    // HashMap fields for each entity type
-}
-
-impl InMemoryPersistence {
-    pub fn new() -> Self;
-}
-
-impl WorkflowPersistence for InMemoryPersistence { ... }
+pub use engine_core::adapter::InMemoryPersistence;
 ```
 
 ## Monitoring Data Types (from engine-core port)

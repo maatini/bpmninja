@@ -1,5 +1,5 @@
-// InMemoryPersistence steht in `engine-core` nur für Tests zur Verfügung.
-// Für externe Crates (fuzz, engine-server-tests etc.) steht `persistence-memory` bereit.
+// Kanonische In-Memory-Implementierung von `WorkflowPersistence`.
+// `persistence-memory` reexportiert denselben Typ für engine-server, fuzz und Integrationstests.
 
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -543,6 +543,6 @@ mod tests {
 
         let info = p.get_storage_info().await.unwrap().unwrap();
         assert_eq!(info.backend_name, "InMemoryPersistence");
-        assert_eq!(info.memory_bytes, 2 * 1024 + 1 * 512);
+        assert_eq!(info.memory_bytes, 2 * 1024 + 512);
     }
 }

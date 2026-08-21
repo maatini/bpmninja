@@ -11,7 +11,7 @@ flowchart TD
     end
 
     subgraph "engine-server (Axum)"
-        REST["REST Routes<br>38 endpoints"]
+        REST["REST Routes<br>46 endpoints"]
         SSE["SSE Handler<br>/api/events"]
         Logs["Log API<br>/api/logs"]
         Metrics["Prometheus<br>/metrics"]

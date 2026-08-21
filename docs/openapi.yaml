@@ -6,7 +6,7 @@ info:
     
     Built with Axum (Rust). Supports BPMN process deployment, instance management,
     user/service task handling, message correlation, timer processing, and file attachments.
-  version: 0.7.14
+  version: 0.7.19
   contact:
     name: bpmninja
   license:
@@ -34,7 +34,9 @@ tags:
   - name: History
     description: Query the event history of process instances
   - name: Monitoring
-    description: Health checks, readiness probes, and engine statistics
+    description: Health checks, readiness probes, engine statistics, and Prometheus metrics
+  - name: Observability
+    description: Live log buffer and SSE engine events
 
 paths:
   # ─────────────────────────────── Definitions ───────────────────────────────
@@ -192,6 +194,27 @@ paths:
         '404':
           description: No definition found with this BPMN process ID
 
+  /api/start/timer:
+    post:
+      tags: [Instances]
+      summary: Start an instance from a timer start event
+      description: Starts an instance whose start event carries a timerEventDefinition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRequest'
+      responses:
+        '200':
+          description: Instance started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+        '400':
+          description: Definition has no timer start event
+
   /api/instances:
     get:
       tags: [Instances]
@@ -232,6 +255,90 @@ paths:
           description: Instance deleted
         '404':
           description: Instance not found
+
+  /api/instances/{id}/suspend:
+    post:
+      tags: [Instances]
+      summary: Suspend a running instance
+      description: Pauses timers and task completion. Variables and token moves remain allowed.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Instance suspended
+        '404':
+          description: Instance not found
+        '409':
+          description: Instance already in a terminal or suspended state
+
+  /api/instances/{id}/resume:
+    post:
+      tags: [Instances]
+      summary: Resume a suspended instance
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Instance resumed
+        '404':
+          description: Instance not found
+        '409':
+          description: Instance is not suspended
+
+  /api/instances/{id}/move-token:
+    post:
+      tags: [Instances]
+      summary: Move an instance token to another node
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_node_id]
+              properties:
+                target_node_id:
+                  type: string
+      responses:
+        '204':
+          description: Token moved
+        '404':
+          description: Instance or node not found
+        '409':
+          description: Operation blocked (e.g. suspended instance)
+
+  /api/instances/{id}/migrate:
+    post:
+      tags: [Instances]
+      summary: Migrate an instance to another definition version
+      description: Changes `definition_key` and optionally remaps BPMN node IDs. Fails with 422 if a token would become orphaned.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_definition_key]
+              properties:
+                target_definition_key:
+                  type: string
+                  format: uuid
+                node_mapping:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional old node ID → new node ID map
+      responses:
+        '204':
+          description: Instance migrated
+        '404':
+          description: Instance or target definition not found
+        '422':
+          description: Orphaned token (unmapped node missing in target definition)
 
   # ─────────────────────────────── User Tasks ────────────────────────────────
 
@@ -382,6 +489,32 @@ paths:
         '400':
           description: No matching boundary error event found
 
+  /api/service-task/{id}/retry:
+    post:
+      tags: [Service Tasks]
+      summary: Retry an incident
+      description: Retries a failed service task that has become an incident.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Retry scheduled
+        '404':
+          description: Service task not found
+
+  /api/service-task/{id}/resolve:
+    post:
+      tags: [Service Tasks]
+      summary: Resolve an incident
+      description: Marks the incident resolved without completing the worker task.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '204':
+          description: Incident resolved
+        '404':
+          description: Service task not found
+
   # ────────────────────────────── Variables ───────────────────────────────────
 
   /api/instances/{id}/variables:
@@ -530,6 +663,51 @@ paths:
                 properties:
                   processed:
                     type: integer
+
+  /api/timers:
+    get:
+      tags: [Messages & Timers]
+      summary: List pending timers
+      responses:
+        '200':
+          description: Pending timers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    instance_id:
+                      type: string
+                      format: uuid
+                    node_id:
+                      type: string
+                    fire_at:
+                      type: string
+                      format: date-time
+
+  /api/messages:
+    get:
+      tags: [Messages & Timers]
+      summary: List pending message catch events
+      responses:
+        '200':
+          description: Pending message catches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    instance_id:
+                      type: string
+                      format: uuid
+                    node_id:
+                      type: string
+                    message_name:
+                      type: string
 
   # ─────────────────────────────── History ────────────────────────────────────
 
@@ -774,6 +952,69 @@ paths:
                 type: object
         '404':
           description: Key not found
+
+  /api/logs:
+    get:
+      tags: [Observability]
+      summary: Query the in-memory log buffer
+      description: |
+        Returns a filtered snapshot of the rolling log buffer (newest first).
+        Default limit 500, hard cap 5000.
+      parameters:
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [error, warn, info, debug, trace]
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Case-insensitive substring on message and target
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+      responses:
+        '200':
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
+
+  /api/events:
+    get:
+      tags: [Observability]
+      summary: Server-Sent Events for engine state changes
+      description: |
+        Stream of `instance_changed`, `task_changed`, and `definition_changed`.
+        Broadcast capacity is 256; slow clients may miss events and should re-fetch via REST.
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /metrics:
+    get:
+      tags: [Monitoring]
+      summary: Prometheus metrics
+      description: |
+        Prometheus text format. The route is only mounted when the Prometheus
+        recorder is installed at process start.
+      responses:
+        '200':
+          description: Metrics scrape
+          content:
+            text/plain:
+              schema:
+                type: string
 
 # ═══════════════════════════════ Components ═══════════════════════════════════
 
@@ -1167,3 +1408,17 @@ components:
                     type: integer
                   size_bytes:
                     type: integer
+
+    LogEntry:
+      type: object
+      required: [timestamp, level, target, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+        target:
+          type: string
+        message:
+          type: string

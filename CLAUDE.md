@@ -204,5 +204,5 @@ cargo run -p engine-server
 
 ## Versionierung
 
-Alle Crates synchron auf Version **0.7.20** (aktuell).  
-Git-Tags: `v0.7.20`
+Alle Crates synchron auf Version **0.7.21** (aktuell).  
+Git-Tags: `v0.7.21`

@@ -141,6 +141,18 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DeployRequest'
+  /api/events:
+    get:
+      operationId: Api_engineEvents
+      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            text/event-stream:
+              schema:
+                type: string
   /api/health:
     get:
       operationId: Api_health
@@ -493,6 +505,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/migrate:
+    post:
+      operationId: Api_migrateInstance
+      description: Migrate a running instance to a different process definition version.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateInstanceRequest'
   /api/instances/{id}/move-token:
     post:
       operationId: Api_moveToken
@@ -577,6 +614,45 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateVariablesRequest'
+  /api/logs:
+    get:
+      operationId: Api_getLogs
+      description: Filtered snapshot of the in-memory log buffer (newest first, max 5000).
+      parameters:
+        - name: level
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/message:
     post:
       operationId: Api_correlateMessage
@@ -1002,6 +1078,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /metrics:
+    get:
+      operationId: metrics
+      description: Prometheus text format. Mounted only when the Prometheus recorder is installed at process start.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            text/plain:
+              schema:
+                type: string
 components:
   schemas:
     AppError:
@@ -1197,6 +1285,35 @@ components:
         timestamp:
           type: string
         details: {}
+    LogEntry:
+      type: object
+      required:
+        - timestamp
+        - level
+        - target
+        - message
+      properties:
+        timestamp:
+          type: string
+        level:
+          type: string
+        target:
+          type: string
+        message:
+          type: string
+    MigrateInstanceRequest:
+      type: object
+      required:
+        - target_definition_key
+      properties:
+        target_definition_key:
+          type: string
+          description: UUID of the target ProcessDefinition.
+        node_mapping:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional mapping of old BPMN node IDs to new BPMN node IDs. Required for nodes that were renamed between versions.
     MonitoringData:
       type: object
       required:

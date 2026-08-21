@@ -225,6 +225,13 @@ model UploadFileRequest {
   file: HttpPart<bytes>;
 }
 
+model LogEntry {
+  timestamp: string;
+  level: string;
+  target: string;
+  message: string;
+}
+
 // --------------------------------------------------------------------------
 // Endpoints
 // --------------------------------------------------------------------------
@@ -409,4 +416,27 @@ namespace Api {
 
   @get @route("/ready")
   op ready(): { @statusCode statusCode: 200 } | AppError;
+
+  @get @route("/logs")
+  @doc("Filtered snapshot of the in-memory log buffer (newest first, max 5000).")
+  op getLogs(
+    @query level?: string,
+    @query search?: string,
+    @query limit?: int32
+  ): LogEntry[] | AppError;
+
+  @get @route("/events")
+  @doc("SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.")
+  op engineEvents(): {
+    @header contentType: "text/event-stream";
+    @body body: string;
+  };
 }
+
+@get
+@route("/metrics")
+@doc("Prometheus text format. Mounted only when the Prometheus recorder is installed at process start.")
+op metrics(): {
+  @header contentType: "text/plain";
+  @body body: string;
+};

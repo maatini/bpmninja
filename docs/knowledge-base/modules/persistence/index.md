@@ -1,6 +1,6 @@
 # persistence
 
-Storage backends implementing the `WorkflowPersistence` trait via the hexagonal port in engine-core. Two implementations: NATS JetStream (production; docker `REQUIRE_NATS=true`) and in-memory (tests + optional local dev fallback).
+Storage backends implementing the `WorkflowPersistence` trait via the hexagonal port in engine-core. Two backends: NATS JetStream (production; docker `REQUIRE_NATS=true`) and in-memory (`engine-core::adapter`, re-exported by `persistence-memory` for tests and optional local dev fallback).
 
 **Crate paths:** `persistence-nats/` (~4 integration tests, skip without NATS) and `persistence-memory/`
 
