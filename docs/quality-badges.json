@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "label": "Mutation Score",
-  "message": "0.0%",
-  "color": "red",
+  "message": "68.2%",
+  "color": "yellow",
   "namedLogo": "rust",
   "links": [
     "https://github.com/maatini/bpmninja/actions/workflows/mutation-tests.yml"
