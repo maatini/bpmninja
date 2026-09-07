@@ -11,5 +11,5 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-croner = "3"
+croner = "4"
 chrono = { version = "0.4", features = ["serde"] }
