@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-09T09:12:10.959790+00:00",
+  "updated_at": "2026-09-10T07:48:58.102638+00:00",
   "mutation": {
     "source": "core-mutation-tests",
     "generated_at": "2026-09-09T09:11:57.906312+00:00",
@@ -14,7 +14,7 @@
   },
   "fuzz": {
     "source": "fuzz-testing",
-    "generated_at": "2026-09-09T07:51:30.453266+00:00",
+    "generated_at": "2026-09-10T07:48:46.357764+00:00",
     "status": "ok",
     "targets_total": 9,
     "targets_passed": 9,
@@ -23,47 +23,47 @@
       {
         "target": "fuzz_bpmn_parser",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:13.244175+00:00"
+        "generated_at": "2026-09-10T07:48:02.612146+00:00"
       },
       {
         "target": "fuzz_condition",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:20.796662+00:00"
+        "generated_at": "2026-09-10T07:48:02.175437+00:00"
       },
       {
         "target": "fuzz_cron_expression",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:20.567494+00:00"
+        "generated_at": "2026-09-10T07:48:31.172647+00:00"
       },
       {
         "target": "fuzz_deploy_roundtrip",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:52.677067+00:00"
+        "generated_at": "2026-09-10T07:48:15.047078+00:00"
       },
       {
         "target": "fuzz_history_diff",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:38.350435+00:00"
+        "generated_at": "2026-09-10T07:47:56.005663+00:00"
       },
       {
         "target": "fuzz_iso8601_duration",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:33.564382+00:00"
+        "generated_at": "2026-09-10T07:47:59.207726+00:00"
       },
       {
         "target": "fuzz_rhai_script",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:39.188582+00:00"
+        "generated_at": "2026-09-10T07:47:58.800806+00:00"
       },
       {
         "target": "fuzz_server_payloads",
         "status": "ok",
-        "generated_at": "2026-09-09T07:51:19.295085+00:00"
+        "generated_at": "2026-09-10T07:47:57.654259+00:00"
       },
       {
         "target": "fuzz_token_deserialize",
         "status": "ok",
-        "generated_at": "2026-09-09T07:50:38.372117+00:00"
+        "generated_at": "2026-09-10T07:48:02.018955+00:00"
       }
     ]
   }
