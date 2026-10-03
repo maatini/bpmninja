@@ -86,6 +86,12 @@ The previous state is stored in `InstanceState::Suspended { previous_state: Box<
 - The merged token gets `is_merged = true` flag
 - The barrier is removed from `instance.join_barriers`
 
+### ⚠️ Inclusive gateway join is AND-style
+
+`execute_inclusive_gateway` splits on every outgoing flow whose condition is true (BPMN OR). Join uses the same `incoming_count >= 2` + `WaitForJoin` path as ParallelGateway. `arrive_at_join` waits for `incoming_flow_count(gateway)` tokens, not for the number of paths taken at the matching split. After a partial inclusive split the join can stall.
+
+`ComplexGateway` uses the same barrier, plus an optional `join_condition` (`activationCondition`) evaluated on the merged variables of tokens that have already arrived — the join can fire early when that condition is true.
+
 ### ⚠️ Instance migration
 
 Migration changes the `definition_key` and optionally remaps node IDs. The `node_mapping: HashMap<String, String>` provides old→new node translations. If a node ID exists in the old definition but is missing in the new one (and no mapping exists), migration fails with `EngineError::OrphanedToken`.

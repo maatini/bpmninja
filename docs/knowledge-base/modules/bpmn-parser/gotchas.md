@@ -23,6 +23,38 @@ Months/years are approximated to 30/365 days. This is NOT ISO 8601 compliant for
 
 The parser supports `camunda:executionListener` (with `camunda:` namespace prefix). If standard `bpmn:extensionElements` are used, the parser also extracts them. Both are mapped to `ExecutionListener` structs.
 
+Assignee and topic are **not** read from Camunda Modeler attributes:
+
+| BPMN / Camunda attribute | Parser field | Fallback |
+|--------------------------|--------------|----------|
+| `data-assignee` on `userTask` | `UserTask(assignee)` | `"unassigned"` |
+| `data-topic` on `serviceTask` | `ServiceTask.topic` | then `data-handler`, then node id |
+| `camunda:assignee` | ignored | `"unassigned"` |
+| `camunda:topic` | ignored | node id |
+
+The desktop modeler writes `data-assignee` / `data-topic`. XML exported from Camunda Modeler typically uses `camunda:assignee` / `camunda:topic` and will deploy with those fallbacks.
+
+### ⚠️ Silent task and event mapping
+
+Unknown or empty activity types become `ServiceTask` and enter the fetch-and-lock queue:
+
+| XML | Becomes | Topic / notes |
+|-----|---------|----------------|
+| `receiveTask`, `manualTask`, `businessRuleTask`, generic `task` | `ServiceTask` | `name` or node id. No DMN for business-rule tasks. |
+| `scriptTask` with empty `<script>` and no `data-script` | `ServiceTask` | `name` or node id |
+| `intermediateCatchEvent` without timer or message definition | `ServiceTask` | topic `"event_passthrough"` |
+| Sub-process internal start events (flattening) | `ServiceTask` | topic `"noop"` |
+
+`complexGateway` is a first-class `ComplexGateway { join_condition, default }` (`activationCondition` → `join_condition`). Compensation and escalation events (`compensateEventDefinition` / `escalationEventDefinition` on throw, end, and boundary) are first-class elements, not pass-through tasks.
+
+### ⚠️ Only one `<process>` per file
+
+`parse_bpmn_xml` keeps a single process: the first with `isExecutable="true"`, otherwise `processes[0]`. Additional `<process>` elements in the same definitions file are dropped.
+
+### ⚠️ InclusiveGateway join is AND-style at runtime
+
+The parser maps `inclusiveGateway` to `InclusiveGateway` with no extra join metadata. Engine-core join uses the same `JoinBarrier` as `ParallelGateway`: when the gateway has two or more incoming flows, it waits until that many tokens have arrived. Split still takes every outgoing flow whose condition is true. After a partial split the join can stall, because tokens on untaken incoming flows never arrive.
+
 ### ⚠️ Invalid XML returns EngineError, never panics
 
 All parsing errors produce `EngineError::InvalidDefinition(msg)` with a descriptive message. The parser uses `Result` throughout — no `.unwrap()` calls in the parser path.

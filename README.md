@@ -105,8 +105,10 @@ For full local verification, run the root checks plus module-specific checks fro
 | <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **EndEvent** | End point — process instance is marked as completed. |
 | <img src="readme-assets/bpmn-icons/terminate-end-event.svg" width="28"> | **TerminateEndEvent** | End point — immediately aborts all active tokens. |
 | <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminates the process with a BPMN error code (`errorCode`). |
-| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. |
-| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). |
+| | **EscalationEndEvent** | Ends the current path and throws a BPMN escalation (`escalationCode`). Uncaught escalations are non-fatal. |
+| | **CompensationEndEvent** | Runs registered compensation handlers (optional `activityRef`, otherwise LIFO), then completes the token. |
+| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. Assignee comes from `data-assignee` (fallback `"unassigned"`). |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). Topic comes from `data-topic`, then `data-handler`, then the node id. |
 | <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Executes inline scripts via the Rhai engine. |
 | <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Sends a message via throw event and continues immediately. |
 
@@ -116,8 +118,9 @@ For full local verification, run the root checks plus module-specific checks fro
 |:---:|---|---|
 | <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Exactly one path is chosen (condition evaluation). Optional default flow. |
 | <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | All paths are followed in parallel (token fork). Join waits for all tokens (JoinBarrier). |
-| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | All paths with a `true` condition are followed in parallel. Join waits for the expected tokens. |
+| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Split: all outgoing paths with a `true` condition (unconditional flows always). Join waits for all incoming sequence flows (AND-style `JoinBarrier`). |
 | <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pauses until exactly one of the target catch events (timer/message) fires. |
+| | **ComplexGateway** | Split: all matching conditions, optional default flow. Join waits for all incoming tokens, or fires early when `activationCondition` is true on the merged variables of arrived tokens. |
 
 ### Intermediate Events
 
@@ -128,6 +131,10 @@ For full local verification, run the root checks plus module-specific checks fro
 | <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | Timer event attached to a task (interrupting/non-interrupting). Timer is automatically cancelled when the task completes. |
 | <img src="readme-assets/bpmn-icons/boundary-message-event.svg" width="28"> | **BoundaryMessageEvent** | Message event attached to a task (interrupting/non-interrupting). Waits asynchronously for external messages. |
 | <img src="readme-assets/bpmn-icons/boundary-error-event.svg" width="28"> | **BoundaryErrorEvent** | Catches BPMN errors (`errorCode`) of a ServiceTask and routes onto an alternative path. |
+| | **BoundaryEscalationEvent** | Catches a BPMN escalation on the attached activity (interrupting or non-interrupting). |
+| | **BoundaryCompensationEvent** | Registered when the attached activity completes successfully. Later executed by a compensation throw/end event. |
+| | **EscalationThrowEvent** | Throws a BPMN escalation. A matching `BoundaryEscalationEvent` handles it; uncaught escalations continue the token. |
+| | **CompensationThrowEvent** | Runs registered compensation handlers (`activityRef` or all in LIFO order) and continues. |
 
 ### Activities & Sub-Processes
 
@@ -160,15 +167,17 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
 - **Multi-Instance (Parallel):** Instead of opening encapsulated execution scopes per iteration, engine forking creates simple parallel tokens on the same task object within the global instance variables.
+- **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join uses the same `JoinBarrier` as ParallelGateway and waits until `incoming_flow_count` tokens have arrived (`incoming_count >= 2`). It does not wait only for tokens on paths that were taken. After a partial split the join can stall.
+- **Camunda assignee/topic attributes:** User tasks read `data-assignee` (fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then the node id. Camunda Modeler attributes `camunda:assignee` and `camunda:topic` are **not** parsed.
+- **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
+- **One process per file:** Only the first `<process isExecutable="true">` is deployed; if none is marked executable, the first `<process>` is used. Further processes in the same file are ignored.
 
 ### Currently Unsupported BPMN Elements
 
 The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Other task types:** `BusinessRuleTask` (no DMN support), `ManualTask`, `ReceiveTask`.
 - **Specific intermediate/boundary events:** `SignalEvent`, `CancelEvent`, `LinkEvent`.
 - **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
-- **Specialized gateways:** `Complex Gateway`.
 - **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
 ---
