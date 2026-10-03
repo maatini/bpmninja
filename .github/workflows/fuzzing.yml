@@ -85,10 +85,17 @@ jobs:
       #   rustc_codegen_ssa operand.rs: "not immediate" Uninit/UnsafeCell/Notified
       # Last known good: nightly-2026-07-22 (6f72b5dd5). Re-test floating nightly
       # once the upstream ICE is fixed, then drop the pin.
+      #
+      # rust-toolchain.toml at the repo root pins stable 1.99.0. cargo/rustup
+      # would otherwise ignore the nightly below and fail with
+      # "the option `Z` is only accepted on the nightly compiler".
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-07-22
+
+      - name: Override rust-toolchain.toml for cargo-fuzz
+        run: echo "RUSTUP_TOOLCHAIN=nightly-2026-07-22" >> "$GITHUB_ENV"
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
