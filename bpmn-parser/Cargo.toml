@@ -3,6 +3,7 @@ name = "bpmn-parser"
 version = "0.7.21"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+rust-version.workspace = true
 
 [dependencies]
 engine-core = { path = "../engine-core" }

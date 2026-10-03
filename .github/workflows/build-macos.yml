@@ -31,8 +31,9 @@ jobs:
           node-version: 24
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Install UI Dependencies

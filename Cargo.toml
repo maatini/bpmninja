@@ -7,7 +7,10 @@ members = [
     "agent-orchestrator",
     "engine-server"
 ]
-resolver = "2"
+resolver = "3"
+
+[workspace.package]
+rust-version = "1.99"
 
 [workspace.dependencies]
 tokio = { version = "1.52", features = ["full"] }
@@ -17,3 +20,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Kleineres Docker-Binary: thin-LTO, eine Codegen-Unit, Symbol-Strip.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
