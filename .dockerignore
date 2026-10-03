@@ -10,14 +10,15 @@ target/
 .git/
 .github/
 
-# Node.js / Frontend (not needed for engine-server)
+# Node.js / Frontend / Spec / Fuzz (not needed for engine-server)
 node_modules/
 **/node_modules/
-desktop-tauri/dist/
-desktop-tauri/src-tauri/target/
-desktop-tauri/src-tauri/gen/
-desktop-tauri/src-tauri/bundle/
-desktop-tauri/src-tauri/WixTools/
+desktop-tauri/
+bpmn-ninja-external-task-client/
+api-spec/
+fuzz/
+docs/
+graphify-out/
 
 # Devbox / Nix
 .devbox/
