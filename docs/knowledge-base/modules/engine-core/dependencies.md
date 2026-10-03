@@ -65,7 +65,7 @@ graph TD
 ```toml
 [package]
 name = "engine-core"
-version = "0.7.21"
+version = "0.7.22"
 edition = "2024"
 
 [dependencies]
