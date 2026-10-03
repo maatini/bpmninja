@@ -1,6 +1,6 @@
 {
   "name": "bpmninja-api-spec",
-  "version": "0.7.22",
+  "version": "0.7.23",
   "description": "TypeSpec API specification for bpmninja engine-server",
   "private": true,
   "license": "MIT OR Apache-2.0",
