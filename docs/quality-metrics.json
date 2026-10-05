@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-10-05T09:58:35.402448+00:00",
+  "updated_at": "2026-10-05T11:12:47.461829+00:00",
   "mutation": {
     "source": "core-mutation-tests",
-    "generated_at": "2026-10-04T10:50:07.809491+00:00",
+    "generated_at": "2026-10-05T11:12:26.911861+00:00",
     "status": "ok",
     "mutation_score": 68.2,
     "caught": 381,
