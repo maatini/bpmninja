@@ -20,16 +20,16 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("ENGINE_API_URL").unwrap_or_else(|_| "http://localhost:8081".to_string());
 
     let mut default_headers = reqwest::header::HeaderMap::new();
-    if let Ok(api_key) = std::env::var("BPMNINJA_API_KEY") {
-        if !api_key.is_empty() {
-            let value = format!("Bearer {api_key}");
-            default_headers.insert(
-                reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&value)
-                    .context("BPMNINJA_API_KEY enthält ungültige Header-Zeichen")?,
-            );
-            tracing::info!("Authorization: Bearer (BPMNINJA_API_KEY gesetzt)");
-        }
+    if let Ok(api_key) = std::env::var("BPMNINJA_API_KEY")
+        && !api_key.is_empty()
+    {
+        let value = format!("Bearer {api_key}");
+        default_headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&value)
+                .context("BPMNINJA_API_KEY enthält ungültige Header-Zeichen")?,
+        );
+        tracing::info!("Authorization: Bearer (BPMNINJA_API_KEY gesetzt)");
     }
 
     let client = reqwest::Client::builder()

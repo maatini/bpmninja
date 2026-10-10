@@ -1,6 +1,10 @@
 openapi: 3.0.0
 info:
   title: bpmninja Engine Server API
+  description: |-
+    Optional API-key auth when env BPMNINJA_API_KEY is set.
+    Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+    GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
   version: 0.0.0
 tags: []
 paths:
@@ -166,6 +170,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+      security:
+        - {}
   /api/history/instances:
     get:
       operationId: Api_listCompletedInstances
@@ -797,6 +803,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+      security:
+        - {}
   /api/service-task/fetchAndLock:
     post:
       operationId: Api_fetchAndLockServiceTasks
@@ -1111,6 +1119,10 @@ paths:
             text/plain:
               schema:
                 type: string
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+  - {}
 components:
   schemas:
     AppError:
@@ -1250,6 +1262,7 @@ components:
         newDuration:
           type: integer
           format: int64
+          description: New lock duration in milliseconds. Server converts to seconds for the engine.
     FailServiceTaskRequest:
       type: object
       required:
@@ -1552,6 +1565,7 @@ components:
         lockDuration:
           type: integer
           format: int64
+          description: Lock duration in milliseconds (Camunda-compatible). Server converts to seconds for the engine.
     UpdateVariablesRequest:
       type: object
       required:
@@ -1583,6 +1597,14 @@ components:
           format: int64
         content_type:
           type: string
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: Bearer
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
 servers:
   - url: http://localhost:8081
     description: Local Engine Server

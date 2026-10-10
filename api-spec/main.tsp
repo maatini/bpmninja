@@ -15,7 +15,7 @@ Optional API-key auth when env BPMNINJA_API_KEY is set.
 Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
 """)
-@useAuth(BearerAuth | ApiKeyAuth<"X-API-Key", "header"> | NoAuth)
+@useAuth(BearerAuth | ApiKeyAuth<ApiKeyLocation.header, "X-API-Key"> | NoAuth)
 namespace MiniBpm;
 
 // --------------------------------------------------------------------------
