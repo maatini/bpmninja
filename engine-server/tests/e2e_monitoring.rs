@@ -44,6 +44,8 @@ async fn ready_endpoint_returns_503_when_nats_required() {
     let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
         require_nats: Some(true),
         max_upload_bytes: None,
+        api_key: Some(None),
+        ..Default::default()
     });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

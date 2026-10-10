@@ -1,4 +1,5 @@
 use tokio::sync::RwLock;
+pub(crate) mod auth;
 pub(crate) mod deploy;
 pub(crate) mod events;
 pub(crate) mod files;
@@ -14,7 +15,7 @@ pub(crate) mod timers;
 use crate::log_buffer::LogBuffer;
 use axum::{
     Router,
-    http::Method,
+    http::{HeaderName, HeaderValue, Method, header},
     middleware,
     routing::{delete, get, post, put},
 };
@@ -26,24 +27,30 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-pub use state::require_nats_from_env;
+pub use state::{MAX_XML_BYTES, default_cors_origins, require_nats_from_env};
 
 /// Optional overrides for app construction (primarily for tests).
 ///
-/// When a field is `None`, the value is taken from the environment
-/// (`REQUIRE_NATS` fail-closed default, `MAX_UPLOAD_BYTES`). Explicit values avoid process-wide
-/// env races in parallel integration tests.
+/// When a field is `None`, the value is taken from the environment.
+/// Explicit values avoid process-wide env races in parallel integration tests.
+///
+/// `api_key`: `None` = from `BPMNINJA_API_KEY`, `Some(None)` = auth off,
+/// `Some(Some(k))` = auth on with that key.
 #[derive(Debug, Clone, Default)]
 pub struct AppBuildConfig {
     pub require_nats: Option<bool>,
     pub max_upload_bytes: Option<usize>,
+    pub max_xml_bytes: Option<usize>,
+    pub api_key: Option<Option<String>>,
+    pub cors_origins: Option<Vec<String>>,
 }
 
 /// Builds the Axum router with all routes and middleware.
 ///
 /// Exposed as `pub` so integration tests can create the app without
-/// starting a full server binary. Forces `require_nats = false` so parallel
-/// tests are not affected by another test's `REQUIRE_NATS` env mutation.
+/// starting a full server binary. Forces `require_nats = false` and auth off
+/// so parallel tests are not affected by process env. CORS is the default
+/// allowlist (not `Any`).
 pub fn build_app() -> Router {
     build_app_with_config(
         Arc::new(WorkflowEngine::new()),
@@ -54,6 +61,9 @@ pub fn build_app() -> Router {
         AppBuildConfig {
             require_nats: Some(false),
             max_upload_bytes: None,
+            max_xml_bytes: Some(MAX_XML_BYTES),
+            api_key: Some(None),
+            cors_origins: Some(default_cors_origins()),
         },
     )
 }
@@ -98,6 +108,19 @@ pub fn build_app_with_config(
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
+    let api_key = match config.api_key {
+        Some(explicit) => explicit.and_then(|k| state::parse_api_key(Some(&k))),
+        None => state::api_key_from_env(),
+    };
+    let cors_origins = match config.cors_origins {
+        Some(origins) if !origins.is_empty() => origins,
+        Some(_) => state::default_cors_origins(),
+        None => state::cors_origins_from_env(),
+    };
+    let max_xml_bytes = config
+        .max_xml_bytes
+        .unwrap_or_else(state::max_xml_bytes_from_env);
+
     let state = Arc::new(AppState {
         engine,
         persistence,
@@ -110,12 +133,19 @@ pub fn build_app_with_config(
         max_upload_bytes: config
             .max_upload_bytes
             .unwrap_or_else(state::max_upload_bytes_from_env),
+        max_xml_bytes,
+        api_key,
+        cors_origins: cors_origins.clone(),
     });
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers(Any);
+    tracing::info!(
+        auth_enabled = state.api_key.is_some(),
+        cors_origins = ?state.cors_origins,
+        max_xml_bytes,
+        "HTTP security config"
+    );
+
+    let cors = build_cors_layer(&cors_origins);
 
     let mut router = Router::new()
         .route("/api/deploy", post(deploy::deploy_definition))
@@ -225,9 +255,8 @@ pub fn build_app_with_config(
         .layer(middleware::from_fn(
             crate::observability::http_metrics_middleware,
         ))
-        .layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024))
-        .layer(cors)
-        .with_state(state);
+        .layer(axum::extract::DefaultBodyLimit::max(max_xml_bytes))
+        .with_state(state.clone());
 
     // Mount /metrics endpoint (separate state: PrometheusHandle)
     if let Some(handle) = prometheus_handle {
@@ -237,5 +266,54 @@ pub fn build_app_with_config(
         router = router.merge(metrics_router);
     }
 
+    // Auth + CORS wrap the merged router so `/metrics` is also protected.
+    // CORS is outermost so preflight OPTIONS is answered before the API-key gate.
     router
+        .layer(middleware::from_fn_with_state(state, auth::auth_middleware))
+        .layer(cors)
+}
+
+fn build_cors_layer(origins: &[String]) -> CorsLayer {
+    let methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
+    let headers = [
+        header::AUTHORIZATION,
+        header::CONTENT_TYPE,
+        header::ACCEPT,
+        HeaderName::from_static("x-api-key"),
+    ];
+
+    if origins.iter().any(|o| o == "*") {
+        return CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(methods)
+            .allow_headers(headers);
+    }
+
+    let mut values: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|origin| match origin.parse() {
+            Ok(v) => Some(v),
+            Err(_) => {
+                tracing::warn!(origin, "Ignoring invalid CORS origin");
+                None
+            }
+        })
+        .collect();
+    if values.is_empty() {
+        values = state::DEFAULT_CORS_ORIGINS
+            .iter()
+            .filter_map(|o| (*o).parse().ok())
+            .collect();
+    }
+
+    CorsLayer::new()
+        .allow_origin(values)
+        .allow_methods(methods)
+        .allow_headers(headers)
 }

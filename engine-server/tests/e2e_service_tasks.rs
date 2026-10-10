@@ -79,7 +79,7 @@ async fn setup_locked_task(topic: &str, xml: &str) -> (String, reqwest::Client, 
         .json(&serde_json::json!({
             "workerId": "worker1",
             "maxTasks": 1,
-            "topics": [{ "topicName": topic, "lockDuration": 30 }]
+            "topics": [{ "topicName": topic, "lockDuration": 30000 }]
         }))
         .send()
         .await
@@ -169,7 +169,7 @@ async fn extend_lock_succeeds() {
         .post(format!("{}/api/service-task/{}/extendLock", base, task_id))
         .json(&serde_json::json!({
             "workerId": "worker1",
-            "newDuration": 120
+            "newDuration": 120000
         }))
         .send()
         .await
@@ -186,7 +186,7 @@ async fn extend_lock_wrong_worker_returns_conflict() {
         .post(format!("{}/api/service-task/{}/extendLock", base, task_id))
         .json(&serde_json::json!({
             "workerId": "wrong_worker",
-            "newDuration": 120
+            "newDuration": 120000
         }))
         .send()
         .await

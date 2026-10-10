@@ -7,7 +7,7 @@ pub mod startup;
 pub use log_buffer::LogBuffer;
 pub use log_nats::NatsLogSink;
 pub use server::{
-    AppBuildConfig, build_app, build_app_with_config, build_app_with_engine,
-    build_app_with_options, require_nats_from_env,
+    AppBuildConfig, MAX_XML_BYTES, build_app, build_app_with_config, build_app_with_engine,
+    build_app_with_options, default_cors_origins, require_nats_from_env,
 };
 pub use startup::StartupCoordinator;

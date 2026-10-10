@@ -36,7 +36,7 @@ npm run build
 import { ExternalTaskClient } from "@bpmninja/external-task-client";
 
 const client = new ExternalTaskClient({
-  baseUrl: "http://localhost:8080",
+  baseUrl: "http://localhost:8081",
   workerId: "my-worker",
   maxRetries: 3,
 });
@@ -62,9 +62,10 @@ client.start();
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `baseUrl` | `string` | `http://localhost:8080` | BPMNinja engine URL |
+| `baseUrl` | `string` | `http://localhost:8081` | BPMNinja engine URL |
 | `workerId` | `string` | Auto-generated | Unique worker identifier |
-| `lockDuration` | `number` | `30000` | Lock duration in ms |
+| `apiKey` | `string` | — | Optional; sent as `Authorization: Bearer <apiKey>` on every request |
+| `lockDuration` | `number` | `30000` | Lock duration in ms (sent as ms to the engine, no conversion) |
 | `maxTasks` | `number` | `10` | Max tasks fetched per poll |
 | `asyncResponseTimeout` | `number` | `10000` | Long-poll timeout in ms |
 | `pollingInterval` | `number` | `300` | Interval between polls in ms |
@@ -120,7 +121,7 @@ Reports a task failure. When `retries` is `0`, the engine creates an incident.
 
 #### `extendLock(additionalDurationMs: number): Promise<void>`
 
-Extends the lock on the current task.
+Extends the lock on the current task. `newDuration` is sent in **milliseconds**.
 
 #### `bpmnError(errorCode: string): Promise<void>`
 

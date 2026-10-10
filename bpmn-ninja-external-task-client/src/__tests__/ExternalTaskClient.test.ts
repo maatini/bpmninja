@@ -27,7 +27,7 @@ describe('ExternalTaskClient', () => {
   describe('Konstruktor & Konfiguration', () => {
     it('Default-Werte werden korrekt gesetzt (baseUrl, lockDuration, maxTasks, etc.)', () => {
       const client = new ExternalTaskClient();
-      expect((client as any).config.baseUrl).toBe('http://localhost:8080');
+      expect((client as any).config.baseUrl).toBe('http://localhost:8081');
       expect((client as any).config.lockDuration).toBe(30000);
       expect((client as any).config.maxTasks).toBe(10);
       expect((client as any).config.workerId).toBeDefined();
@@ -59,6 +59,11 @@ describe('ExternalTaskClient', () => {
     it('Benutzerdefinierter Logger wird verwendet', () => {
       const client = new ExternalTaskClient({ logger: mockLogger });
       expect((client as any).config.logger).toBe(mockLogger);
+    });
+
+    it('apiKey wird in der Config gespeichert', () => {
+      const client = new ExternalTaskClient({ apiKey: 'k' });
+      expect((client as any).config.apiKey).toBe('k');
     });
   });
 
@@ -188,24 +193,52 @@ describe('ExternalTaskClient', () => {
       const callArgs = fetchMock.mock.calls[0];
       const body = JSON.parse(callArgs[1].body);
 
+      expect(callArgs[0]).toBe('http://localhost:8081/api/service-task/fetchAndLock');
       expect(body.asyncResponseTimeout).toBe(5000);
       expect(body.topics).toEqual([
-        { topicName: 't1', lockDuration: 5 }, // 5000ms -> 5s
-        { topicName: 't2', lockDuration: 30 } // default 30s
+        { topicName: 't1', lockDuration: 5000 }, // 5000ms bleibt 5000
+        { topicName: 't2', lockDuration: 30000 } // default 30000ms
       ]);
       await stopClientAndFlush(client);
     });
 
-    it('lockDuration wird von ms in Sekunden umgerechnet', async () => {
+    it('lockDuration 1500ms wird als 1500 gesendet (keine Sekunden-Konvertierung)', async () => {
       const client = new ExternalTaskClient({ logger: false });
-      client.subscribe('t1', vi.fn(), { lockDuration: 1500 }); // 1.5s -> 2s ceil
+      client.subscribe('t1', vi.fn(), { lockDuration: 1500 });
 
       mockFetchResponse(fetchMock, { ok: true, status: 200, json: [] });
       client.start();
       await vi.advanceTimersByTimeAsync(1);
 
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(body.topics[0].lockDuration).toBe(2);
+      expect(body.topics[0].lockDuration).toBe(1500);
+      await stopClientAndFlush(client);
+    });
+
+    it('apiKey setzt Authorization Bearer Header auf fetchAndLock', async () => {
+      const client = new ExternalTaskClient({ logger: false, apiKey: 'test-secret' });
+      client.subscribe('t1', vi.fn());
+
+      mockFetchResponse(fetchMock, { ok: true, status: 200, json: [] });
+      client.start();
+      await vi.advanceTimersByTimeAsync(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers;
+      expect(headers.Authorization).toBe('Bearer test-secret');
+      expect(headers['Content-Type']).toBe('application/json');
+      await stopClientAndFlush(client);
+    });
+
+    it('ohne apiKey kein Authorization Header', async () => {
+      const client = new ExternalTaskClient({ logger: false });
+      client.subscribe('t1', vi.fn());
+
+      mockFetchResponse(fetchMock, { ok: true, status: 200, json: [] });
+      client.start();
+      await vi.advanceTimersByTimeAsync(1);
+
+      const headers = fetchMock.mock.calls[0][1].headers;
+      expect(headers.Authorization).toBeUndefined();
       await stopClientAndFlush(client);
     });
 

@@ -13,14 +13,15 @@ class ExternalTaskClient {
 
 // Configuration
 interface ClientConfig {
-  baseUrl: string;                    // e.g. "http://localhost:8081"
-  workerId: string;
+  baseUrl?: string;                   // default: "http://localhost:8081"
+  workerId?: string;
+  apiKey?: string;                    // optional; Authorization: Bearer <apiKey>
   maxTasks?: number;                  // default: 10
   asyncResponseTimeout?: number;      // default: 10000 (ms, long polling)
   interval?: number;                  // default: 100 (ms, poll interval)
   maxRetries?: number;                // default: 3
   autoExtendLock?: boolean;           // default: false
-  lockDuration?: number;              // default: 20000 (ms)
+  lockDuration?: number;              // default: 30000 (ms, sent as ms to engine)
   logger?: Logger | false;            // false = disable, default: pino
 }
 
@@ -62,7 +63,7 @@ interface Subscription {
 interface SubscribeOptions {
   maxTasks?: number;                  // Override per-topic
   asyncResponseTimeout?: number;      // Override per-topic
-  lockDuration?: number;              // Override per-topic
+  lockDuration?: number;              // Override per-topic (ms, sent as-is)
 }
 ```
 
@@ -84,6 +85,7 @@ import { ExternalTaskClient } from "@bpmninja/external-task-client";
 const client = new ExternalTaskClient({
   baseUrl: "http://localhost:8081",
   workerId: "my-worker-01",
+  apiKey: process.env.BPMNINJA_API_KEY, // optional Bearer
   maxRetries: 3,
   autoExtendLock: true,
 });

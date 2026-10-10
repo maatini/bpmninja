@@ -11,6 +11,9 @@ pub struct AppState {
     pub log_buffer: Arc<LogBuffer>,
     pub require_nats: bool,           // REQUIRE_NATS → readiness / durability
     pub max_upload_bytes: usize,      // MAX_UPLOAD_BYTES (default 5 MiB)
+    pub max_xml_bytes: usize,         // MAX_XML_BYTES (default 10 MiB)
+    pub api_key: Option<String>,      // BPMNINJA_API_KEY; None = auth off
+    pub cors_origins: Vec<String>,    // CORS_ORIGINS; `*` = Allow Any
 }
 ```
 
@@ -20,6 +23,7 @@ pub struct AppState {
 |-------------------|-------------|---------|
 | `InvalidDefinition(msg)` | 400 | Bad XML, missing fields |
 | `NoMatchingCondition(msg)` | 400 | Gateway condition mismatch |
+| `AppError::Unauthorized` | 401 | Missing/wrong API key (`BPMNINJA_API_KEY` set) |
 | `AppError::BadRequest(msg)` | 400 | Invalid UUID, bad JSON |
 | `AppError::PayloadTooLarge(msg)` | 413 | Multipart upload exceeds `max_upload_bytes` |
 | `NoSuchDefinition(id)` | 404 | Definition not found |
@@ -80,12 +84,17 @@ Returns JSON array of log entries with `timestamp`, `level`, `target`, `message`
 ```rust
 // Public API for tests and server binary
 pub struct AppBuildConfig {
-    pub require_nats: Option<bool>,      // None → env REQUIRE_NATS (default true)
-    pub max_upload_bytes: Option<usize>, // None → env MAX_UPLOAD_BYTES
+    pub require_nats: Option<bool>,           // None → env REQUIRE_NATS (default true)
+    pub max_upload_bytes: Option<usize>,      // None → env MAX_UPLOAD_BYTES
+    pub max_xml_bytes: Option<usize>,         // None → env MAX_XML_BYTES (default 10 MiB)
+    pub api_key: Option<Option<String>>,      // None → env BPMNINJA_API_KEY; Some(None)=off; Some(Some(k))=on
+    pub cors_origins: Option<Vec<String>>,    // None → env CORS_ORIGINS (default allowlist, never Any)
 }
 
+pub const MAX_XML_BYTES: usize = 10 * 1024 * 1024; // DefaultBodyLimit == deploy cap
+
 pub fn build_app() -> Router
-// Test-friendly: require_nats = false (avoids env races under parallel tests)
+// Test-friendly: require_nats = false, api_key off, default CORS allowlist (not Any)
 
 pub fn build_app_with_options(config: AppBuildConfig) -> Router
 
@@ -96,9 +105,23 @@ pub fn build_app_with_engine(
     prometheus_handle: Option<PrometheusHandle>,
     log_buffer: Arc<LogBuffer>,
 ) -> Router
-// Uses AppBuildConfig::default() → env for require_nats / max_upload_bytes
+// Uses AppBuildConfig::default() → env for require_nats / limits / api_key / CORS
 
 pub fn build_app_with_config(..., config: AppBuildConfig) -> Router
+```
+
+## HTTP lock duration
+
+`POST /api/service-task/fetchAndLock` `topics[].lockDuration` and `POST /api/service-task/{id}/extendLock` `newDuration` are **milliseconds**. Server converts to seconds for engine-core: `ms <= 0 → 0`, else `(ms + 999) / 1000`. Empty topics → default **30_000 ms**.
+
+## Auth & CORS env
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CORS_ORIGINS` | localhost:1420 + Tauri origins | Comma-separated. `*` = Allow Any (dev only). |
+| `BIND_ADDR` (alias `BIND_ADDRESS`) | `0.0.0.0` | Listen host; Docker needs `0.0.0.0`. Combined with `PORT`. |
+| `BPMNINJA_API_KEY` | unset (auth off) | Bearer or `X-API-Key`. Health/ready stay public. |
+| `MAX_XML_BYTES` | `10485760` (10 MiB) | JSON/XML body + deploy cap. |
 
 // Public exports
 pub struct StartupCoordinator { ... }

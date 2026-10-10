@@ -147,6 +147,8 @@ async fn test_file_upload_rejects_oversized_payload() {
     let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
         require_nats: Some(false),
         max_upload_bytes: Some(1024),
+        api_key: Some(None),
+        ..Default::default()
     });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

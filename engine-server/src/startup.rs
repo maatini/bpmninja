@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use engine_core::ProcessDefinition;
 use engine_core::WorkflowEngine;
 use engine_core::WorkflowPersistence;
 use persistence_nats::NatsPersistence;
@@ -51,10 +52,66 @@ impl StartupCoordinator {
         engine: &mut WorkflowEngine,
         deployed_xml: &mut HashMap<String, String>,
     ) -> usize {
+        match self.nats.list_definitions().await {
+            Ok(defs) if !defs.is_empty() => {
+                self.restore_definitions_from_json(engine, deployed_xml, defs)
+                    .await
+            }
+            Ok(_) => {
+                tracing::info!("Definitions-KV leer — Fallback auf XML-Parse für Restore.");
+                self.restore_definitions_from_xml(engine, deployed_xml)
+                    .await
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Definitionen aus Definitions-KV laden fehlgeschlagen: {:?}. Versuche XML-Fallback.",
+                    e
+                );
+                self.restore_definitions_from_xml(engine, deployed_xml)
+                    .await
+            }
+        }
+    }
+
+    async fn restore_definitions_from_json(
+        &self,
+        engine: &mut WorkflowEngine,
+        deployed_xml: &mut HashMap<String, String>,
+        mut defs: Vec<ProcessDefinition>,
+    ) -> usize {
+        defs.sort_by(|a, b| a.id.cmp(&b.id).then(a.version.cmp(&b.version)));
+        let mut count = 0;
+        for def in defs {
+            let xml_key = def.key.to_string();
+            let (key, _) = engine.deploy_definition(def).await;
+            match self.nats.load_bpmn_xml(&xml_key).await {
+                Ok(xml) => {
+                    deployed_xml.insert(key.to_string(), xml);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "BPMN-XML für Definition '{}' fehlt oder nicht ladbar: {:?} — Definition trotzdem restored.",
+                        key,
+                        e
+                    );
+                }
+            }
+            tracing::info!("Definition wiederhergestellt (key: {}, JSON)", key);
+            count += 1;
+        }
+        tracing::info!("Restore abgeschlossen: {count} Definition(en) aus Definitions-KV.");
+        count
+    }
+
+    async fn restore_definitions_from_xml(
+        &self,
+        engine: &mut WorkflowEngine,
+        deployed_xml: &mut HashMap<String, String>,
+    ) -> usize {
         let ids = match self.nats.list_bpmn_xml_ids().await {
             Ok(ids) => ids,
             Err(e) => {
-                tracing::error!("Definitionen aus NATS laden fehlgeschlagen: {:?}", e);
+                tracing::error!("Definitionen aus NATS-XML laden fehlgeschlagen: {:?}", e);
                 return 0;
             }
         };
@@ -68,7 +125,7 @@ impl StartupCoordinator {
                         }
                         let (key, _) = engine.deploy_definition(def).await;
                         deployed_xml.insert(key.to_string(), xml);
-                        tracing::info!("Definition wiederhergestellt (key: {})", key);
+                        tracing::info!("Definition wiederhergestellt (key: {}, XML-Fallback)", key);
                         count += 1;
                     }
                     Err(e) => tracing::error!("BPMN '{}' parsen fehlgeschlagen: {:?}", nats_key, e),
@@ -76,7 +133,7 @@ impl StartupCoordinator {
                 Err(e) => tracing::error!("XML für '{}' laden fehlgeschlagen: {:?}", nats_key, e),
             }
         }
-        tracing::info!("Restore abgeschlossen: {count} Definition(en).");
+        tracing::info!("Restore abgeschlossen: {count} Definition(en) via XML-Fallback.");
         count
     }
 

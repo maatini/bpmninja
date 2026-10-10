@@ -16,13 +16,22 @@
  * API paths and enhanced with a global retry mechanism.
  */
 export interface ClientConfig {
-  /** Base URL of the BPMNinja engine (default: "http://localhost:8080") */
+  /** Base URL of the BPMNinja engine (default: "http://localhost:8081") */
   baseUrl?: string;
 
   /** Unique identifier for this worker instance (default: auto-generated) */
   workerId?: string;
 
-  /** Duration in ms to lock a task after fetching (default: 30000) */
+  /**
+   * Optional API key. When set, every request sends
+   * `Authorization: Bearer <apiKey>`.
+   */
+  apiKey?: string;
+
+  /**
+   * Duration in ms to lock a task after fetching (default: 30000).
+   * Sent as milliseconds to the engine — no conversion to seconds.
+   */
   lockDuration?: number;
 
   /** Maximum number of tasks to fetch per poll (default: 10) */
@@ -76,6 +85,7 @@ export interface ClientConfig {
 export interface ResolvedConfig {
   baseUrl: string;
   workerId: string;
+  apiKey?: string;
   lockDuration: number;
   maxTasks: number;
   asyncResponseTimeout: number;
@@ -152,6 +162,7 @@ export interface FetchAndLockRequest {
 /** Topic subscription within a fetchAndLock request */
 export interface TopicRequest {
   topicName: string;
+  /** Lock duration in milliseconds (engine HTTP expects ms). */
   lockDuration: number;
 }
 
@@ -172,6 +183,7 @@ export interface FailureRequest {
 /** POST body for /api/service-task/:id/extendLock */
 export interface ExtendLockRequest {
   workerId: string;
+  /** New lock duration in milliseconds (engine HTTP expects ms). */
   newDuration: number;
 }
 

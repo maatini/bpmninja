@@ -1,10 +1,11 @@
 services:
   nats:
     image: nats:alpine
-    command: [ "--js", "--sd", "/data" ]
+    # Lokales Default-Auth (user/pass änderbar). Nicht für öffentliche Netze so belassen.
+    command: [ "--js", "--sd", "/data", "--user", "bpmninja", "--pass", "bpmninja" ]
     ports:
-      - "4222:4222" # Client Connections
-      - "8222:8222" # HTTP Monitoring
+      - "127.0.0.1:4222:4222" # Client Connections (nur Loopback)
+      - "127.0.0.1:8222:8222" # HTTP Monitoring (nur Loopback)
     volumes:
       - nats-data:/data
 
@@ -14,21 +15,28 @@ services:
     #   context: .
     #   dockerfile: engine-server/Dockerfile
     ports:
-      - "8081:8081"
+      - "8081:8081" # LAN-API
     environment:
       - PORT=8081
-      - NATS_URL=nats://nats:4222
+      - BIND_ADDR=0.0.0.0
+      - NATS_URL=nats://bpmninja:bpmninja@nats:4222
+      # Host-side `cargo run -p engine-server`: NATS_URL=nats://bpmninja:bpmninja@localhost:4222
       # Fail-fast: do not silently fall back to in-memory (data loss after restart)
       - REQUIRE_NATS=true
+      # Optional LAN-Härtung (engine-server Env-Namen; Werte bei Bedarf setzen):
+      # - BPMNINJA_API_KEY=
+      # - CORS_ORIGINS=
     depends_on:
       - nats
 
   cobra-nats:
     image: ghcr.io/maatini/cobra-nats:0.5.2
     ports:
-      - "3000:3000" # Dashboard erreichbar unter http://localhost:3000
+      - "127.0.0.1:3000:3000" # Dashboard nur Loopback: http://localhost:3000
     environment:
       - NODE_ENV=production
+      # Image verbindet oft per UI; NATS_URL mit denselben Credentials falls ausgewertet.
+      - NATS_URL=nats://bpmninja:bpmninja@nats:4222
     depends_on:
       - nats
     # restart: unless-stopped        # optional, aber empfehlenswert

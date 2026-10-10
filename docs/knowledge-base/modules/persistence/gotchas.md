@@ -2,7 +2,27 @@
 
 ### ⚠️ NATS requires JetStream enabled
 
-The NATS server must be started with `--js` flag: `nats-server --js` (docker-compose uses `nats:alpine` with `--js`). Without JetStream, KV stores and Object Stores are unavailable.
+The NATS server must be started with `--js` flag: `nats-server --js` (docker-compose uses `nats:alpine` with `--js --sd /data` plus user/pass). Without JetStream, KV stores and Object Stores are unavailable.
+
+### ⚠️ docker-compose: NATS auth + loopback host ports
+
+`docker-compose.yaml` does **not** publish NATS or cobra-nats on all interfaces:
+
+| Service | Host bind | Purpose |
+|---------|-----------|---------|
+| `nats` 4222 | `127.0.0.1:4222` | Client protocol (loopback only) |
+| `nats` 8222 | `127.0.0.1:8222` | HTTP monitoring (loopback only) |
+| `cobra-nats` 3000 | `127.0.0.1:3000` | Dashboard (loopback only) |
+| `engine-server` 8081 | `8081:8081` | LAN API (all interfaces) |
+
+NATS requires username/password (local default, **changeable** in compose): user `bpmninja`, pass `bpmninja` via `--user` / `--pass`.
+
+Connection URLs:
+
+- Inside Compose: `nats://bpmninja:bpmninja@nats:4222` (`engine-server` `NATS_URL`; `async-nats` accepts credentials in the URL)
+- From the host (tests, CLI, desktop on the same machine): `nats://bpmninja:bpmninja@localhost:4222`
+
+Unauthenticated `nats://localhost:4222` will fail against this stack. cobra-nats may still need the same user/pass in its UI if it ignores `NATS_URL`.
 
 ### ⚠️ In-memory fallback is opt-in (dev only)
 
@@ -45,9 +65,15 @@ The engine's `retry_queue` (not the adapter) handles transient write failures:
 
 Integration tests in `persistence-nats/src/tests.rs` cover token, history, definition/instance restore, and user-task roundtrips. Locally they skip if NATS is unreachable; in CI (`CI=true`) they fail instead. GitHub Actions starts NATS with JetStream before `cargo test --workspace`.
 
+### ⚠️ KV `keys()` errors must propagate
+
+`store.keys().await` returning `Err` is a persistence failure, not an empty bucket. `list_kv_entries` (and `load_tokens`) must use `?` after mapping the error. Swallowing it as `Ok(vec![])` makes restore look like “no data” and silently skips recovery.
+
 ### ⚠️ BPMN XML is stored separately from definitions
 
 `ProcessDefinition` (JSON) and the original BPMN XML (string) are stored in separate KV buckets (`definitions` vs `bpmn_xml`). The XML is needed for the desktop UI's bpmn-js modeler and for redeployment. They share the same UUID key.
+
+Startup restore is **JSON-first**: `list_definitions()` deploys stored `ProcessDefinition` objects without re-parsing XML. XML is loaded into `deployed_xml` for the modeler (match by definition UUID). Missing XML is a warning; the definition is still restored. XML-parse fallback runs only when the definitions KV is empty or `list_definitions` returns a persistence error. RestoreStats count actually deployed definitions, never a silent zero that hides a KV failure.
 
 ### ⚠️ Adding a new entity type
 

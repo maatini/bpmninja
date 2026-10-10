@@ -121,25 +121,25 @@ describe('TaskService', () => {
   });
 
   describe('extendLock()', () => {
-    it('Konvertiert ms korrekt in Sekunden (Math.ceil)', async () => {
-      mockFetchResponse(fetchMock, { ok: true, status: 204 });
-      await taskService.extendLock(1500); // 1.5s -> 2s
-      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(body.newDuration).toBe(2);
-    });
-
-    it('Sendet newDuration in Sekunden', async () => {
-      mockFetchResponse(fetchMock, { ok: true, status: 204 });
-      await taskService.extendLock(30000); // 30s
-      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(body.newDuration).toBe(30);
-    });
-
-    it('1500ms -> 2s (ceil)', async () => {
+    it('Sendet newDuration in Millisekunden (1500 bleibt 1500)', async () => {
       mockFetchResponse(fetchMock, { ok: true, status: 204 });
       await taskService.extendLock(1500);
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(body.newDuration).toBe(2);
+      expect(body.newDuration).toBe(1500);
+    });
+
+    it('5000ms bleibt 5000', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await taskService.extendLock(5000);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.newDuration).toBe(5000);
+    });
+
+    it('30000ms bleibt 30000', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await taskService.extendLock(30000);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.newDuration).toBe(30000);
     });
 
     it('Server-Fehler -> wirft Error', async () => {
@@ -176,6 +176,52 @@ describe('TaskService', () => {
       mockFetchResponse(fetchMock, { ok: true, status: 204 });
       await taskService.bpmnError('ERR_CODE');
       expect(mockLogger.info).toHaveBeenCalledWith("Task task-1: BPMN error 'ERR_CODE' thrown");
+    });
+  });
+
+  describe('apiKey Authorization', () => {
+    let authed: TaskService;
+
+    beforeEach(() => {
+      authed = new TaskService(
+        'http://localhost:8080',
+        { id: 'task-1' } as any,
+        'worker-1',
+        mockLogger,
+        'test-secret',
+      );
+    });
+
+    it('complete sendet Authorization Bearer', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await authed.complete();
+      const headers = fetchMock.mock.calls[0][1].headers;
+      expect(headers.Authorization).toBe('Bearer test-secret');
+      expect(headers['Content-Type']).toBe('application/json');
+    });
+
+    it('failure sendet Authorization Bearer', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await authed.failure('Err');
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-secret');
+    });
+
+    it('extendLock sendet Authorization Bearer', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await authed.extendLock(5000);
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-secret');
+    });
+
+    it('bpmnError sendet Authorization Bearer', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await authed.bpmnError('ERR');
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-secret');
+    });
+
+    it('ohne apiKey kein Authorization Header', async () => {
+      mockFetchResponse(fetchMock, { ok: true, status: 204 });
+      await taskService.complete();
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
     });
   });
 });

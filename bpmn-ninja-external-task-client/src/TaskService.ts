@@ -29,17 +29,31 @@ export class TaskService implements TaskServiceInterface {
   private readonly taskId: string;
   private readonly workerId: string;
   private readonly logger: Logger;
+  private readonly apiKey?: string;
 
   constructor(
     baseUrl: string,
     task: ExternalTask,
     workerId: string,
     logger: Logger,
+    apiKey?: string,
   ) {
     this.baseUrl = baseUrl;
     this.taskId = task.id;
     this.workerId = workerId;
     this.logger = logger;
+    this.apiKey = apiKey;
+  }
+
+  /** JSON headers plus optional `Authorization: Bearer <apiKey>`. */
+  private jsonHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    return headers;
   }
 
   /**
@@ -57,7 +71,7 @@ export class TaskService implements TaskServiceInterface {
 
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.jsonHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -95,7 +109,7 @@ export class TaskService implements TaskServiceInterface {
 
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.jsonHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -115,20 +129,19 @@ export class TaskService implements TaskServiceInterface {
    * Extends the lock on this task to prevent it from expiring
    * while processing is still in progress.
    *
-   * @param additionalDurationMs — Additional time in milliseconds.
+   * @param additionalDurationMs — New lock duration in milliseconds.
    */
   async extendLock(additionalDurationMs: number): Promise<void> {
     const url = `${this.baseUrl}/api/service-task/${this.taskId}/extendLock`;
-    // Engine expects seconds
-    const newDuration = Math.ceil(additionalDurationMs / 1000);
+    // Engine HTTP expects milliseconds
     const body: ExtendLockRequest = {
       workerId: this.workerId,
-      newDuration,
+      newDuration: additionalDurationMs,
     };
 
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.jsonHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -140,7 +153,7 @@ export class TaskService implements TaskServiceInterface {
     }
 
     this.logger.debug(
-      `Task ${this.taskId}: lock extended by ${newDuration}s`,
+      `Task ${this.taskId}: lock extended by ${additionalDurationMs}ms`,
     );
   }
 
@@ -159,7 +172,7 @@ export class TaskService implements TaskServiceInterface {
 
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.jsonHeaders(),
       body: JSON.stringify(body),
     });
 

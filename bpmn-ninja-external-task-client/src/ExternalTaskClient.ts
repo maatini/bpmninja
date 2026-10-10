@@ -5,7 +5,7 @@
  *
  * Usage pattern (analogous to Camunda External Task Client):
  * ```ts
- * const client = new ExternalTaskClient({ baseUrl: "http://localhost:8080" });
+ * const client = new ExternalTaskClient({ baseUrl: "http://localhost:8081" });
  * client.subscribe("my-topic", async (task, service) => {
  *   const result = await doWork(task.variables_snapshot);
  *   await service.complete({ result });
@@ -34,7 +34,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const DEFAULTS = {
-  baseUrl: "http://localhost:8080",
+  baseUrl: "http://localhost:8081",
   lockDuration: 30_000,
   maxTasks: 10,
   asyncResponseTimeout: 10_000,
@@ -75,6 +75,7 @@ export class ExternalTaskClient {
     this.config = {
       baseUrl: (userConfig.baseUrl ?? DEFAULTS.baseUrl).replace(/\/+$/, ""),
       workerId: userConfig.workerId ?? `worker-${randomId()}`,
+      apiKey: userConfig.apiKey,
       lockDuration: userConfig.lockDuration ?? DEFAULTS.lockDuration,
       maxTasks: userConfig.maxTasks ?? DEFAULTS.maxTasks,
       asyncResponseTimeout:
@@ -284,7 +285,7 @@ export class ExternalTaskClient {
 
     const topics = [...this.subscriptions.values()].map((sub) => ({
       topicName: sub.topic,
-      lockDuration: Math.ceil(sub.options.lockDuration / 1000), // Engine expects seconds
+      lockDuration: sub.options.lockDuration, // milliseconds — engine HTTP expects ms
     }));
 
     const body: FetchAndLockRequest = {
@@ -296,7 +297,7 @@ export class ExternalTaskClient {
 
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.jsonHeaders(),
       body: JSON.stringify(body),
       signal: this.pollAbortController?.signal,
     });
@@ -337,6 +338,7 @@ export class ExternalTaskClient {
       task,
       this.config.workerId,
       this.config.logger.child({ taskId: task.id, topic: task.topic }),
+      this.config.apiKey,
     );
 
     // Optional: automatic lock extension timer
@@ -385,6 +387,21 @@ export class ExternalTaskClient {
         clearInterval(lockExtensionTimer);
       }
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // HTTP helpers
+  // -------------------------------------------------------------------------
+
+  /** JSON headers plus optional `Authorization: Bearer <apiKey>`. */
+  private jsonHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.config.apiKey) {
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
+    }
+    return headers;
   }
 
   // -------------------------------------------------------------------------

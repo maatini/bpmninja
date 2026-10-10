@@ -1,5 +1,17 @@
 # external-task-client — Gotchas
 
+### ⚠️ Default-Port ist 8081
+
+`baseUrl` Default: `http://localhost:8081` (nicht 8080). Engine-Server lauscht auf 8081.
+
+### ⚠️ lockDuration und newDuration sind Millisekunden
+
+Der Client sendet `lockDuration` (`fetchAndLock`) und `newDuration` (`extendLock`) als Millisekunden. **Keine** Division durch 1000. Default: `30_000` (30s). Engine-HTTP erwartet ms und konvertiert intern.
+
+### ⚠️ Optionaler API-Key als Bearer
+
+`ClientConfig.apiKey` setzt auf jedem Request `Authorization: Bearer <apiKey>` — inkl. `fetchAndLock`, `complete`, `failure`, `extendLock`, `bpmnError`. Ohne `apiKey` kein Authorization-Header.
+
 ### ⚠️ Uses native fetch(), not an HTTP library
 
 The client uses `globalThis.fetch()`. This requires Node ≥ 18. No axios, got, or node-fetch dependency. For test mocking, use `vi.stubGlobal('fetch', mockFetch)`.

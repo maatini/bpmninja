@@ -160,7 +160,13 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let port = env::var("PORT").unwrap_or_else(|_| "8081".to_string());
-    let addr = format!("0.0.0.0:{}", port);
+    let host = env::var("BIND_ADDR")
+        .or_else(|_| env::var("BIND_ADDRESS"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    let addr = format!("{host}:{port}");
     tracing::info!("Server starting on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;

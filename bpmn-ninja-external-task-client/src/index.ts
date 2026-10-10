@@ -10,7 +10,7 @@
  * import { ExternalTaskClient } from "@bpmninja/external-task-client";
  *
  * const client = new ExternalTaskClient({
- *   baseUrl: "http://localhost:8080",
+ *   baseUrl: "http://localhost:8081",
  *   maxRetries: 3,
  * });
  *

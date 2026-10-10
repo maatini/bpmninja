@@ -819,6 +819,7 @@ version = "0.7.23"
 dependencies = [
  "anyhow",
  "async-nats",
+ "async-trait",
  "axum",
  "bpmn-parser",
  "chrono",

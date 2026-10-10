@@ -144,14 +144,15 @@ impl NatsPersistence {
             EngineError::PersistenceError(format!("Failed to get {bucket} KV: {}", e))
         })?;
 
+        // keys() Err is a persistence failure, not an empty bucket — must propagate.
         let mut keys = store.keys().await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to list {entity_name} keys: {}", e))
-        });
+        })?;
 
         let mut entries = Vec::new();
-        while let Ok(ref mut stream) = keys {
-            match stream.next().await {
-                Some(Ok(key)) => match store.get(&key).await {
+        while let Some(key_result) = keys.next().await {
+            match key_result {
+                Ok(key) => match store.get(&key).await {
                     Ok(Some(entry)) => match serde_json::from_slice::<T>(&entry) {
                         Ok(item) => entries.push(item),
                         Err(e) => {
@@ -161,8 +162,7 @@ impl NatsPersistence {
                     Ok(None) => {}
                     Err(e) => tracing::warn!("Failed to get {entity_name} '{key}': {}", e),
                 },
-                Some(Err(e)) => tracing::warn!("Failed to stream {entity_name} key: {}", e),
-                None => break,
+                Err(e) => tracing::warn!("Failed to stream {entity_name} key: {}", e),
             }
         }
 

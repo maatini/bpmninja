@@ -19,12 +19,28 @@ async fn main() -> anyhow::Result<()> {
     let base_url =
         std::env::var("ENGINE_API_URL").unwrap_or_else(|_| "http://localhost:8081".to_string());
 
-    let client = reqwest::Client::new();
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    if let Ok(api_key) = std::env::var("BPMNINJA_API_KEY") {
+        if !api_key.is_empty() {
+            let value = format!("Bearer {api_key}");
+            default_headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&value)
+                    .context("BPMNINJA_API_KEY enthält ungültige Header-Zeichen")?,
+            );
+            tracing::info!("Authorization: Bearer (BPMNINJA_API_KEY gesetzt)");
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .default_headers(default_headers)
+        .build()
+        .context("HTTP-Client konnte nicht erstellt werden")?;
 
     tracing::info!("Starting bpmninja agent-orchestrator (HTTP mode)...");
     tracing::info!("Engine API: {}", base_url);
 
-    // 1. Deploy example BPMN
+    // 1. Deploy example BPMN (Beispiel-BPMN nicht im Repo, Worker ist Demo)
     let bpmn_xml = std::fs::read_to_string("example.bpmn")?;
     let deploy_res: Value = client
         .post(format!("{}/api/deploy", base_url))
@@ -57,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .json(&serde_json::json!({
             "workerId": "orchestrator",
             "maxTasks": 10,
-            "topics": [{ "topicName": "InitialProcessing", "lockDuration": 10000 }]
+            "topics": [{ "topicName": "InitialProcessing", "lockDuration": 10000 }] // 10s in ms
         }))
         .send()
         .await?

@@ -1,12 +1,15 @@
-use crate::server::state::{AppError, AppState, parse_uuid};
+use crate::server::state::{AppError, AppState, MAX_XML_BYTES, parse_uuid};
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
 };
+use engine_core::error::EngineError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+const _: () = assert!(MAX_XML_BYTES == 10 * 1024 * 1024);
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct DeployRequest {
@@ -24,12 +27,12 @@ pub(crate) async fn deploy_definition(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DeployRequest>,
 ) -> Result<Json<DeployResponse>, AppError> {
-    const MAX_XML_BYTES: usize = 10 * 1024 * 1024; // 10MB
-    if payload.xml.len() > MAX_XML_BYTES {
+    // Shared with DefaultBodyLimit: default `MAX_XML_BYTES` (10 MiB); env may override.
+    if payload.xml.len() > state.max_xml_bytes {
         return Err(AppError::BadRequest(format!(
             "XML too large: {} bytes (max {})",
             payload.xml.len(),
-            MAX_XML_BYTES
+            state.max_xml_bytes
         )));
     }
     let engine = &state.engine;
@@ -41,7 +44,15 @@ pub(crate) async fn deploy_definition(
     if let Some(persistence) = &state.persistence
         && let Err(e) = persistence.save_bpmn_xml(&key_str, &payload.xml).await
     {
-        tracing::error!("Failed to save BPMN XML to persistence layer: {:?}", e);
+        tracing::error!("Failed to save BPMN XML to persistence layer: {e:?}");
+        if let Err(rollback_err) = engine.delete_definition(key, true).await {
+            tracing::error!(
+                "Failed to rollback in-memory definition after XML save failure: {rollback_err:?}"
+            );
+        }
+        return Err(AppError::Engine(EngineError::PersistenceError(format!(
+            "Failed to save BPMN XML: {e}"
+        ))));
     }
     state
         .deployed_xml

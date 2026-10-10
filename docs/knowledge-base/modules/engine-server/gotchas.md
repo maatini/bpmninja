@@ -13,13 +13,31 @@ This is especially relevant in:
 
 `GET /api/events` uses `tokio::sync::broadcast::Receiver`. If a client is slow (channel capacity 256), it **will miss events**. The protocol is: event fires → client re-fetches via REST. No retry or catch-up mechanism.
 
-### ⚠️ CORS is wide open (`Any` origin)
+### ⚠️ CORS is an allowlist (not `Any` by default)
 
-The development setup allows all origins. For production deployment behind a specific domain, replace with a restrictive CORS policy.
+`CORS_ORIGINS` is a comma-separated origin list. **Unset** → `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,https://tauri.localhost`. Explicit `CORS_ORIGINS=*` is the only way to allow any origin (dev escape hatch). `build_app()` uses the default allowlist, never silent `Any`.
 
-### ⚠️ Body size limit is 5 MB
+Allowed methods: GET, POST, PUT, DELETE, OPTIONS. Allowed headers: `Authorization`, `Content-Type`, `Accept`, `X-API-Key`.
 
-BPMN XML deployments are capped at 5 MB (`DefaultBodyLimit`). Multipart file uploads for instance variables are capped separately via `MAX_UPLOAD_BYTES` (default 5 MiB) in `files.rs` — oversized uploads return **413 Payload Too Large**.
+### ⚠️ Optional API-key auth (`BPMNINJA_API_KEY`)
+
+When `BPMNINJA_API_KEY` is set, every route except `GET /api/health` and `GET /api/ready` requires `Authorization: Bearer <key>` **or** `X-API-Key: <key>`. Missing/wrong key → **401** `{ "error": "Unauthorized" }`. Unset → no auth (E2E/`build_app()` stay green). `/metrics` and `/api/events` are protected when a key is configured. Tests must inject the key via `AppBuildConfig.api_key`, never via process env (parallel-test races).
+
+### ⚠️ Body size limit is 10 MiB for XML/JSON
+
+`DefaultBodyLimit` and the deploy-path cap share `MAX_XML_BYTES` (**10 MiB** = `10 * 1024 * 1024`, OpenAPI contract). Override with env `MAX_XML_BYTES`. Multipart instance-file uploads stay at `MAX_UPLOAD_BYTES` (default **5 MiB**) in `files.rs` — oversized uploads return **413 Payload Too Large**.
+
+### ⚠️ `lockDuration` / `newDuration` are milliseconds at the HTTP boundary
+
+Camunda/OpenAPI send milliseconds. `engine-server` converts to seconds for `engine-core` (`TimeDelta::seconds`): `ms <= 0 → 0`, otherwise `(ms + 999) / 1000` (ceil). Empty `topics` defaults to **30_000 ms** (30 s), not 30. Do not change engine-core to milliseconds.
+
+### ⚠️ Startup restore prefers Definitions-KV
+
+`StartupCoordinator.restore_definitions` loads `list_definitions()` (parsed JSON) first and deploys without XML reparse. BPMN XML is loaded only into `deployed_xml`. Empty or failed Definitions-KV falls back to XML parse. Persistence `keys()` errors propagate as `PersistenceError`, not as an empty list.
+
+### ⚠️ Deploy XML save failure is HTTP 500
+
+If persistence is configured and `save_bpmn_xml` fails, the handler rolls back the in-memory definition (`delete_definition`) and returns 500. `deployed_xml` is updated only after a successful save. Without persistence the RAM deploy still returns 200.
 
 ### ⚠️ Startup restore can take time
 

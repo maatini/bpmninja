@@ -1,8 +1,8 @@
 use crate::server::state::{AppError, AppState, parse_uuid};
 use axum::{
     Json,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Path, Query, State},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::IntoResponse,
 };
 use engine_core::ProcessInstance;
@@ -88,12 +88,35 @@ pub(crate) async fn start_timer_instance(
     }))
 }
 
+#[derive(Deserialize, Default)]
+pub(crate) struct ListInstancesQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
 pub(crate) async fn list_instances(
     State(state): State<Arc<AppState>>,
-) -> Json<Vec<ProcessInstance>> {
+    Query(query): Query<ListInstancesQuery>,
+) -> impl IntoResponse {
     let engine = &state.engine;
-    let instances = engine.list_instances().await;
-    Json(instances)
+    let paginated = query.limit.is_some() || query.offset.is_some();
+
+    if !paginated {
+        let instances = engine.list_instances().await;
+        return Json(instances).into_response();
+    }
+
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.map(|l| l.clamp(1, 1000));
+    let page = engine.list_instances_page(offset, limit).await;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-total-count"),
+        HeaderValue::from(page.total),
+    );
+
+    (headers, Json(page.items)).into_response()
 }
 
 pub(crate) async fn get_instance(

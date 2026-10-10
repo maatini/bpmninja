@@ -1,4 +1,4 @@
-use crate::server::state::{AppError, AppState, parse_uuid};
+use crate::server::state::{AppError, AppState, lock_duration_ms_to_secs, parse_uuid};
 use axum::{
     Json,
     extract::{Path, State},
@@ -69,11 +69,13 @@ pub(crate) async fn fetch_and_lock_service_tasks(
         .iter()
         .map(|t| t.topic_name.clone())
         .collect();
-    let lock_duration = payload
+    // HTTP contract is milliseconds (Camunda/OpenAPI); engine-core uses seconds.
+    let lock_duration_ms = payload
         .topics
         .first()
         .map(|t| t.lock_duration)
-        .unwrap_or(30);
+        .unwrap_or(30_000);
+    let lock_duration = lock_duration_ms_to_secs(lock_duration_ms);
     let timeout_ms = payload.async_response_timeout.unwrap_or(0);
 
     let poll_interval = tokio::time::Duration::from_millis(500);
@@ -212,7 +214,11 @@ pub(crate) async fn extend_lock(
     let task_id = parse_uuid(&id)?;
 
     engine
-        .extend_lock(task_id, &payload.worker_id, payload.new_duration)
+        .extend_lock(
+            task_id,
+            &payload.worker_id,
+            lock_duration_ms_to_secs(payload.new_duration),
+        )
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
