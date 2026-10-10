@@ -29,11 +29,33 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}/engine-server
 
 jobs:
+  # Schnelles Compile-Gate vor dem Image-Build (kein workflow_run auf CI).
+  gate:
+    name: cargo check engine-server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check engine-server
+        run: cargo check -p engine-server
+
   # Native amd64 + arm64 statt QEMU: Rust-Release-Builds unter Emulation
   # lagen bei ~47 min; die Plattformen laufen jetzt parallel auf echter Hardware.
   build:
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    needs: gate
     permissions:
       contents: read
       packages: write

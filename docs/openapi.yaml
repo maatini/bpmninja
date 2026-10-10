@@ -6,7 +6,12 @@ info:
     
     Built with Axum (Rust). Supports BPMN process deployment, instance management,
     user/service task handling, message correlation, timer processing, and file attachments.
-  version: 0.7.19
+
+    When `BPMNINJA_API_KEY` is set, all endpoints except `GET /api/health` and
+    `GET /api/ready` require `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+    Unset key means no authentication. XML/JSON bodies are capped at 10 MiB
+    (`MAX_XML_BYTES`). `lockDuration` / `newDuration` are milliseconds.
+  version: 0.7.23
   contact:
     name: bpmninja
   license:
@@ -15,6 +20,11 @@ info:
 servers:
   - url: http://localhost:8081
     description: Local development server
+
+security:
+  - bearerAuth: []
+  - apiKeyHeader: []
+  - {}
 
 tags:
   - name: Definitions
@@ -219,9 +229,32 @@ paths:
     get:
       tags: [Instances]
       summary: List all process instances
+      description: |
+        Returns a page of process instances as a JSON array.
+        Use `limit` and `offset` to paginate. The total number of instances
+        (before pagination) is returned in the `X-Total-Count` header.
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of instances to return.
+          schema:
+            type: integer
+            minimum: 1
+        - name: offset
+          in: query
+          description: Number of instances to skip.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
-          description: List of instances
+          description: List of instances (JSON array; not wrapped in an object)
+          headers:
+            X-Total-Count:
+              description: Total number of instances before pagination.
+              schema:
+                type: integer
+                minimum: 0
           content:
             application/json:
               schema:
@@ -860,7 +893,8 @@ paths:
     get:
       tags: [Monitoring]
       summary: Liveness check
-      description: Always returns 200 OK if the server is running.
+      description: Always returns 200 OK if the server is running. Public even when `BPMNINJA_API_KEY` is set.
+      security: []
       responses:
         '200':
           description: Server is alive
@@ -869,7 +903,8 @@ paths:
     get:
       tags: [Monitoring]
       summary: Readiness check
-      description: Returns 200 if the server is ready. Returns 503 if NATS is disconnected.
+      description: Returns 200 if the server is ready. Returns 503 if NATS is disconnected. Public even when `BPMNINJA_API_KEY` is set.
+      security: []
       responses:
         '200':
           description: Server is ready
@@ -1019,6 +1054,20 @@ paths:
 # ═══════════════════════════════ Components ═══════════════════════════════════
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        Shared API key via `Authorization: Bearer <key>`.
+        Required only when the server is started with `BPMNINJA_API_KEY`.
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Alternative to Bearer. Required only when `BPMNINJA_API_KEY` is set.
   parameters:
     ResourceId:
       name: id

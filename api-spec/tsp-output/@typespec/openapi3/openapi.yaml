@@ -276,10 +276,31 @@ paths:
   /api/instances:
     get:
       operationId: Api_listInstances
-      parameters: []
+      description: List process instances as a JSON array. Paginate with `limit`/`offset`; total count is in the `X-Total-Count` header.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
+          headers:
+            X-Total-Count:
+              required: true
+              schema:
+                type: integer
+                format: int32
           content:
             application/json:
               schema:

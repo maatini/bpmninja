@@ -1,0 +1,60 @@
+# cargo-deny — pragmatische Supply-Chain-Prüfung für den Workspace.
+# https://embarkstudios.github.io/cargo-deny/
+#
+# Ziel: neue Advisories deny; Yanked/Duplicates/Wildcards warn;
+# Lizenzen Allow-List (typische Rust-Lizenzen + TLS/MPL).
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+all-features = false
+
+[advisories]
+# Yanked: warn, weil der Lockfile in W5-CI nicht angefasst wird.
+yanked = "warn"
+unmaintained = "workspace"
+unsound = "workspace"
+# Bekannte Advisories bleiben deny — aktuelle Hits ignoriert, bis ein
+# Lockfile-Bump (außerhalb W5-CI) die Crates anhebt. Neue Advisories failen.
+ignore = [
+    { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch 0.9.18 via criterion/metrics-util; Lockfile-Bump außerhalb W5-CI" },
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.4.13 via hyper/axum/reqwest; Lockfile-Bump außerhalb W5-CI" },
+    { id = "RUSTSEC-2026-0285", reason = "rustls 0.23.38 Handshake-Level; Lockfile-Bump außerhalb W5-CI" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.103.12 CRL-Parse; Lockfile-Bump außerhalb W5-CI" },
+]
+
+[licenses]
+unused-allowed-license = "allow"
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    # TLS-Stack (ring / webpki-roots) — de-facto üblich in Rust
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
+    "0BSD",
+    "CC0-1.0",
+    # smartstring (rhai) — MPL-2.0+
+    "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

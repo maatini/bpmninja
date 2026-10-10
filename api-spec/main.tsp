@@ -10,6 +10,12 @@ using TypeSpec.OpenAPI;
   title: "bpmninja Engine Server API"
 })
 @server("http://localhost:8081", "Local Engine Server")
+@doc("""
+Optional API-key auth when env BPMNINJA_API_KEY is set.
+Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
+""")
+@useAuth(BearerAuth | ApiKeyAuth<"X-API-Key", "header"> | NoAuth)
 namespace MiniBpm;
 
 // --------------------------------------------------------------------------
@@ -107,6 +113,7 @@ model PendingServiceTask {
 
 model TopicRequest {
   topicName: string;
+  /** Lock duration in milliseconds (Camunda-compatible). Server converts to seconds for the engine. */
   lockDuration: int64;
 }
 
@@ -131,6 +138,7 @@ model FailServiceTaskRequest {
 
 model ExtendLockRequest {
   workerId: string;
+  /** New lock duration in milliseconds. Server converts to seconds for the engine. */
   newDuration: int64;
 }
 
@@ -266,7 +274,14 @@ namespace Api {
   // ---- Active instances ----
 
   @get @route("/instances")
-  op listInstances(): ProcessInstance[] | AppError;
+  @doc("List process instances as a JSON array. Paginate with `limit`/`offset`; total count is in the `X-Total-Count` header.")
+  op listInstances(
+    @query limit?: int32,
+    @query offset?: int32
+  ): {
+    @header("X-Total-Count") xTotalCount: int32;
+    @body body: ProcessInstance[];
+  } | AppError;
 
   @get @route("/instances/{id}")
   @doc("Returns an instance by id. Falls back to the history archive if the instance is no longer active.")
@@ -411,9 +426,11 @@ namespace Api {
   @get @route("/monitoring/buckets/{bucket}/entries/{key}")
   op getBucketEntryDetail(@path bucket: string, @path key: string): BucketEntryDetail | AppError;
 
+  @useAuth(NoAuth)
   @get @route("/health")
   op health(): { @statusCode statusCode: 200 } | AppError;
 
+  @useAuth(NoAuth)
   @get @route("/ready")
   op ready(): { @statusCode statusCode: 200 } | AppError;
 

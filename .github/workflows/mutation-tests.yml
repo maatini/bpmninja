@@ -37,12 +37,15 @@ jobs:
         # Ausführung auf das Kern-Crate limitiert. Ignoriert Unit-Tests und In-Memory-Mock.
         # -j 2 verhindert OOM-Kills auf dem CI-Runner
         # --output is forced to the workspace so the metrics parser always finds outcomes.json
+        # continue-on-error: cargo-mutants exits non-zero when mutants survive.
+        # Score ~68 % is expected; the job still publishes metrics. Tool crashes
+        # without outcomes.json fail the summary step below.
+        continue-on-error: true
         run: |
           cargo mutants -p engine-core -j 2 --timeout 120 \
             --exclude-re "persistence_in_memory|tests|stress_tests" \
             --output "${GITHUB_WORKSPACE}/mutants.out" \
             -- -- --skip stress_tests
-        continue-on-error: true
 
       - name: Upload mutation results
         if: always()
@@ -144,4 +147,7 @@ jobs:
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary_file:
               summary_file.write(summary)
+
+          if missed > 0:
+              print(f"::warning::{missed} Mutanten überlebt (survived) — Score {score:.1f}%.")
           PY

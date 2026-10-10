@@ -107,8 +107,8 @@ For full local verification, run the root checks plus module-specific checks fro
 | <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminates the process with a BPMN error code (`errorCode`). |
 | | **EscalationEndEvent** | Ends the current path and throws a BPMN escalation (`escalationCode`). Uncaught escalations are non-fatal. |
 | | **CompensationEndEvent** | Runs registered compensation handlers (optional `activityRef`, otherwise LIFO), then completes the token. |
-| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. Assignee comes from `data-assignee` (fallback `"unassigned"`). |
-| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). Topic comes from `data-topic`, then `data-handler`, then the node id. |
+| <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. Assignee comes from `data-assignee`, then `camunda:assignee` (fallback `"unassigned"`). |
+| <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). Topic comes from `data-topic`, then `data-handler`, then `camunda:topic`, then the node id. |
 | <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Executes inline scripts via the Rhai engine. |
 | <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Sends a message via throw event and continues immediately. |
 
@@ -118,7 +118,7 @@ For full local verification, run the root checks plus module-specific checks fro
 |:---:|---|---|
 | <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Exactly one path is chosen (condition evaluation). Optional default flow. |
 | <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | All paths are followed in parallel (token fork). Join waits for all tokens (JoinBarrier). |
-| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Split: all outgoing paths with a `true` condition (unconditional flows always). Join waits for all incoming sequence flows (AND-style `JoinBarrier`). |
+| <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Split: all outgoing paths with a `true` condition (unconditional flows always). Join waits for taken split branches (`expected_count` = split branch count). Unstructured joins without `find_downstream_join` fall back to `incoming_flow_count`. |
 | <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pauses until exactly one of the target catch events (timer/message) fires. |
 | | **ComplexGateway** | Split: all matching conditions, optional default flow. Join waits for all incoming tokens, or fires early when `activationCondition` is true on the merged variables of arrived tokens. |
 
@@ -166,9 +166,9 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
-- **Multi-Instance (Parallel):** Instead of opening encapsulated execution scopes per iteration, engine forking creates simple parallel tokens on the same task object within the global instance variables.
-- **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join uses the same `JoinBarrier` as ParallelGateway and waits until `incoming_flow_count` tokens have arrived (`incoming_count >= 2`). It does not wait only for tokens on paths that were taken. After a partial split the join can stall.
-- **Camunda assignee/topic attributes:** User tasks read `data-assignee` (fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then the node id. Camunda Modeler attributes `camunda:assignee` and `camunda:topic` are **not** parsed.
+- **Multi-Instance:** `multiInstanceLoopCharacteristics` is not supported; deploy fails with `InvalidDefinition`.
+- **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
+- **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
 - **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
 - **One process per file:** Only the first `<process isExecutable="true">` is deployed; if none is marked executable, the first `<process>` is used. Further processes in the same file are ignored.
 

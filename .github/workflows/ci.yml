@@ -89,6 +89,50 @@ jobs:
         working-directory: bpmn-ninja-external-task-client
         run: npm test
 
+  typespec:
+    name: TypeSpec compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api-spec/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api-spec
+        run: npm ci
+
+      - name: Compile TypeSpec
+        working-directory: api-spec
+        run: npm run compile
+
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2.87.22
+        with:
+          tool: cargo-deny
+
+      - name: Run cargo deny check
+        run: cargo deny check
+
   ci-scripts:
     name: CI helper scripts
     runs-on: ubuntu-latest

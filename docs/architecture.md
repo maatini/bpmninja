@@ -357,11 +357,14 @@ flowchart LR
     subgraph "InclusiveGateway (OR)"
         OR_IN["Token incoming"] --> OR_EVAL["Evaluate all conditions"]
         OR_EVAL --> OR_FORK["N tokens<br/>(one per match)"]
+        OR_FORK --> OR_JOIN["Join: taken-path barrier<br/>(expected = split branch count)"]
     end
 
     style XOR_ERR fill:#ff4757,color:#fff
     style AND_WAIT fill:#ff9f43,color:#fff
 ```
+
+Inclusive join is a taken-path barrier: after a matching split (`find_downstream_join`), `expected_count` is the number of branches actually taken. Unstructured joins without a matching split fall back to `incoming_flow_count`.
 
 ---
 
