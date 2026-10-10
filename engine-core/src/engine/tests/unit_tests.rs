@@ -1111,8 +1111,10 @@ async fn service_task_handle_bpmn_error() {
         .await
         .unwrap();
 
-    // Task should be removed and error logged.
-    assert_eq!(engine.get_pending_service_tasks().len(), 0);
+    // Task remains as incident (retries exhausted).
+    let pending = engine.get_pending_service_tasks();
+    assert_eq!(pending.len(), 1);
+    assert!(pending[0].retries <= 0);
 
     let log = engine.get_audit_log(tasks[0].instance_id).await.unwrap();
     assert!(log.iter().any(|l| l.contains("ERR_CODE")));
@@ -1146,6 +1148,7 @@ async fn restore_instance_loads_from_persistence() {
         join_barriers: std::collections::HashMap::new(),
         multi_instance_state: std::collections::HashMap::new(),
         compensation_log: Vec::new(),
+        outstanding_calls: HashMap::new(),
         started_at: None,
         completed_at: None,
     };
@@ -3662,6 +3665,7 @@ async fn test_instance_store_is_empty_and_clear() {
         join_barriers: HashMap::new(),
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
+        outstanding_calls: HashMap::new(),
         started_at: None,
         completed_at: None,
     };
@@ -4577,6 +4581,7 @@ async fn test_restore_instance_makes_it_accessible() {
         join_barriers: HashMap::new(),
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
+        outstanding_calls: HashMap::new(),
         started_at: None,
         completed_at: None,
     };

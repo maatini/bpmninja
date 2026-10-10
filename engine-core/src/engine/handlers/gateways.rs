@@ -152,7 +152,7 @@ impl WorkflowEngine {
                             expires_at,
                             token_id: token.id,
                             timer_def: Some(timer_def.clone()),
-                            remaining_repetitions: None,
+                            remaining_repetitions: timer_def.initial_remaining_repetitions(),
                         };
                         actions.push(NextAction::WaitForTimer(pending));
                     }

@@ -72,6 +72,17 @@ impl TimerDefinition {
             TimerDefinition::CronCycle { .. } | TimerDefinition::RepeatingInterval { .. }
         )
     }
+
+    /// Remaining repetitions when this timer is first scheduled (`None` = infinite / not repeating).
+    pub fn initial_remaining_repetitions(&self) -> Option<u32> {
+        match self {
+            TimerDefinition::RepeatingInterval { repetitions, .. } => *repetitions,
+            TimerDefinition::CronCycle {
+                max_repetitions, ..
+            } => *max_repetitions,
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -155,5 +166,53 @@ mod tests {
             interval: Duration::from_secs(60),
         };
         assert!(td.is_recurring());
+    }
+
+    #[test]
+    fn initial_remaining_repeating_interval_some() {
+        let td = TimerDefinition::RepeatingInterval {
+            repetitions: Some(3),
+            interval: Duration::from_secs(1),
+        };
+        assert_eq!(td.initial_remaining_repetitions(), Some(3));
+    }
+
+    #[test]
+    fn initial_remaining_repeating_interval_infinite() {
+        let td = TimerDefinition::RepeatingInterval {
+            repetitions: None,
+            interval: Duration::from_secs(1),
+        };
+        assert_eq!(td.initial_remaining_repetitions(), None);
+    }
+
+    #[test]
+    fn initial_remaining_cron_max() {
+        let td = TimerDefinition::CronCycle {
+            expression: "0 9 * * *".into(),
+            max_repetitions: Some(5),
+        };
+        assert_eq!(td.initial_remaining_repetitions(), Some(5));
+    }
+
+    #[test]
+    fn initial_remaining_cron_infinite() {
+        let td = TimerDefinition::CronCycle {
+            expression: "0 9 * * *".into(),
+            max_repetitions: None,
+        };
+        assert_eq!(td.initial_remaining_repetitions(), None);
+    }
+
+    #[test]
+    fn initial_remaining_duration_none() {
+        let td = TimerDefinition::Duration(Duration::from_secs(10));
+        assert_eq!(td.initial_remaining_repetitions(), None);
+    }
+
+    #[test]
+    fn initial_remaining_absolute_date_none() {
+        let td = TimerDefinition::AbsoluteDate(Utc::now());
+        assert_eq!(td.initial_remaining_repetitions(), None);
     }
 }

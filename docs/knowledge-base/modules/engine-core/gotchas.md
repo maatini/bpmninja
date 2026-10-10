@@ -86,11 +86,29 @@ The previous state is stored in `InstanceState::Suspended { previous_state: Box<
 - The merged token gets `is_merged = true` flag
 - The barrier is removed from `instance.join_barriers`
 
-### ⚠️ Inclusive gateway join is AND-style
+### ⚠️ Inclusive gateway join uses the split's taken-path count
 
-`execute_inclusive_gateway` splits on every outgoing flow whose condition is true (BPMN OR). Join uses the same `incoming_count >= 2` + `WaitForJoin` path as ParallelGateway. `arrive_at_join` waits for `incoming_flow_count(gateway)` tokens, not for the number of paths taken at the matching split. After a partial inclusive split the join can stall.
+`execute_inclusive_gateway` splits on every outgoing flow whose condition is true (BPMN OR). A join (`incoming_count >= 2`, `WaitForJoin`) still uses `JoinBarrier`. `ContinueMultiple` registers `expected_count = branch_count` on the downstream join (`find_downstream_join` + same gateway type). A 1-of-N *split* (`is_split_gateway`, outgoing ≥ 2) returns `Continue` and registers `expected_count = 1`. Join-only Inclusive nodes do not register, so a nested inner join cannot overwrite the outer join's count. `arrive_at_join` honors that count. Unstructured joins without a matching downstream join still fall back to structural `incoming_flow_count` and can stall.
+
+Re-registering a barrier updates `expected_count` and keeps `arrived_tokens` (no wipe).
 
 `ComplexGateway` uses the same barrier, plus an optional `join_condition` (`activationCondition`) evaluated on the merged variables of tokens that have already arrived — the join can fire early when that condition is true.
+
+### ⚠️ Exclusive gateway takes unconditional non-default flows
+
+XOR split: first true condition wins; then an unconditional flow whose target is not the default; then the default. A bpmn-js merge (one unconditional outgoing, no `@default`) therefore completes. Split with only failing conditions and no default still yields `NoMatchingCondition`.
+
+### ⚠️ Call-Activity tracking is `outstanding_calls`, not only `WaitingOnCallActivity`
+
+Parallel Call-Activities keep `InstanceState::ParallelExecution`. Resume looks up the child in `ProcessInstance.outstanding_calls` (keyed by child instance id). Spawn failure or missing called element marks the parent `CompletedWithError` (`CALL_ACTIVITY_SPAWN_FAILED` / `CALL_ACTIVITY_TARGET_NOT_FOUND`) instead of hanging.
+
+### ⚠️ Service-task topic index is secondary
+
+`pending_service_tasks` is SSOT. `service_task_topic_index` maps topic → task ids for `fetch_and_lock`. Insert into the map first, then the index. Orphan index entries are dropped at fetch. Incidents (`retries <= 0`) stay in the index but are not locked.
+
+### ⚠️ `list_instances_page` clones only the page
+
+Live listing sorts by `started_at` desc, then instance id. `GET /api/instances` without query still returns the full JSON array. With `limit`/`offset`, the body is the page and `X-Total-Count` is set (`limit` clamped 1..=1000).
 
 ### ⚠️ Instance migration
 

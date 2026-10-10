@@ -8,8 +8,8 @@ use crate::persistence::CompletedInstanceQuery;
 
 use super::WorkflowEngine;
 use crate::runtime::{
-    EngineStats, InstanceState, PendingMessageCatch, PendingServiceTask, PendingTimer,
-    PendingUserTask, ProcessInstance,
+    EngineStats, InstancePage, InstanceState, PendingMessageCatch, PendingServiceTask,
+    PendingTimer, PendingUserTask, ProcessInstance,
 };
 
 impl WorkflowEngine {
@@ -165,13 +165,45 @@ impl WorkflowEngine {
     }
 
     /// Returns a list of all process instances (cloned).
+    ///
+    /// Internally uses [`Self::list_instances_page`] with no limit so callers
+    /// still receive every live instance. Prefer the paged API when only a
+    /// slice is needed.
     pub async fn list_instances(&self) -> Vec<ProcessInstance> {
+        self.list_instances_page(0, None).await.items
+    }
+
+    /// Returns one page of live process instances without cloning the rest.
+    ///
+    /// `total` is the number of instances currently in the in-memory map.
+    /// Items are ordered by `started_at` descending, then instance id
+    /// ascending. `limit = None` returns every instance after `offset`.
+    pub async fn list_instances_page(&self, offset: usize, limit: Option<usize>) -> InstancePage {
         let all = self.instances.all().await;
-        let mut out = Vec::with_capacity(all.len());
-        for lk in all.values() {
-            out.push(lk.read().await.clone());
+        let total = all.len();
+
+        let mut keys: Vec<(Option<chrono::DateTime<chrono::Utc>>, Uuid)> =
+            Vec::with_capacity(total);
+        for (id, lk) in &all {
+            let started_at = lk.read().await.started_at;
+            keys.push((started_at, *id));
         }
-        out
+        keys.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+        let start = offset.min(total);
+        let end = match limit {
+            Some(n) => start.saturating_add(n).min(total),
+            None => total,
+        };
+
+        let mut items = Vec::with_capacity(end.saturating_sub(start));
+        for (_, id) in &keys[start..end] {
+            if let Some(lk) = all.get(id) {
+                items.push(lk.read().await.clone());
+            }
+        }
+
+        InstancePage { items, total }
     }
 
     /// Returns full details for a single process instance (checks archive if not in active map).
@@ -462,7 +494,7 @@ impl WorkflowEngine {
                 .map(|t| t.id)
                 .collect();
             for tid in &service_task_ids {
-                self.pending_service_tasks.remove(tid);
+                self.remove_pending_service_task(tid);
                 if let Some(p) = &self.persistence {
                     let _ = p.delete_service_task(*tid).await;
                 }
@@ -830,8 +862,7 @@ impl WorkflowEngine {
             .retain(|_, t| t.instance_id != instance_id);
 
         // Clean up pending service tasks in memory
-        self.pending_service_tasks
-            .retain(|_, t| t.instance_id != instance_id);
+        self.clear_pending_service_tasks_for_instance(instance_id);
 
         // Clean up pending timers in memory
         self.pending_timers

@@ -35,6 +35,7 @@ pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
 mod timer_processor;
+mod topic_index;
 mod user_task;
 
 pub use events::EngineEvent;
@@ -45,6 +46,8 @@ pub struct WorkflowEngine {
     pub(crate) instances: crate::engine::instance_store::InstanceStore,
     pub(crate) pending_user_tasks: Arc<DashMap<Uuid, PendingUserTask>>,
     pub(crate) pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
+    /// Secondary index topic → task IDs. SSOT remains `pending_service_tasks`.
+    pub(crate) service_task_topic_index: topic_index::TopicIndex,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
@@ -75,6 +78,7 @@ impl WorkflowEngine {
             instances: crate::engine::instance_store::InstanceStore::new(),
             pending_user_tasks: Arc::new(DashMap::new()),
             pending_service_tasks: Arc::new(DashMap::new()),
+            service_task_topic_index: DashMap::new(),
             pending_timers: Arc::new(DashMap::new()),
             pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
@@ -171,7 +175,7 @@ impl WorkflowEngine {
             task.id,
             task.instance_id
         );
-        self.pending_service_tasks.insert(task.id, task);
+        self.insert_pending_service_task(task);
     }
 
     /// Restores a pending timer from persistence (e.g. on server startup).

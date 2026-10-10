@@ -205,6 +205,7 @@ fuzz_target!(|data: &[u8]| {
         join_barriers: HashMap::new(),
         multi_instance_state: HashMap::new(),
         compensation_log: vec![],
+        outstanding_calls: HashMap::new(),
         started_at: None,
         completed_at: None,
     };

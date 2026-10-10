@@ -1,4 +1,12 @@
+use super::instance::ProcessInstance;
 use serde::Serialize;
+
+/// A page of live process instances plus the total count in the in-memory map.
+#[derive(Debug, Clone)]
+pub struct InstancePage {
+    pub items: Vec<ProcessInstance>,
+    pub total: usize,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EngineStats {

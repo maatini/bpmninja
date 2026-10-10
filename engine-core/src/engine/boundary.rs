@@ -51,8 +51,8 @@ pub(crate) fn setup_boundary_events(
             node_id,
             expires_at,
             token_id: token.id,
+            remaining_repetitions: timer_def.initial_remaining_repetitions(),
             timer_def: Some(timer_def),
-            remaining_repetitions: None,
         };
         pending_timers.push(pending);
     }

@@ -1,2 +1,10 @@
+pub mod boundary_restore;
+pub mod call_activity_parallel;
+pub mod inclusive_join;
+pub mod instance_pagination;
+pub mod recurring_and_event_timer;
+pub mod service_incidents;
 pub mod stress_tests;
+pub mod topic_index;
 pub mod unit_tests;
+pub mod xor_merge;

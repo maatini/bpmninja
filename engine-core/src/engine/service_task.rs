@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::domain::{EngineError, EngineResult};
 
 use super::WorkflowEngine;
+use super::topic_index;
 use crate::runtime::{InstanceState, PendingServiceTask};
 
 /// Verifies that the given worker holds the lock on an service task.
@@ -51,13 +52,20 @@ impl WorkflowEngine {
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
 
-        for mut task in self.pending_service_tasks.iter_mut() {
+        let candidates = topic_index::candidate_ids(&self.service_task_topic_index, topics);
+
+        for (topic, task_id) in candidates {
             if result.len() >= max_tasks {
                 break;
             }
 
-            // Skip tasks whose topic is not requested
-            if !topics.contains(&task.topic) {
+            let Some(mut task) = self.pending_service_tasks.get_mut(&task_id) else {
+                topic_index::remove(&self.service_task_topic_index, &topic, task_id);
+                continue;
+            };
+
+            // Incidents stay in the map until retry/resolve
+            if task.retries <= 0 {
                 continue;
             }
 
@@ -103,9 +111,9 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         // Atomically verify lock ownership and remove the task in one shard-lock
         // window to prevent TOCTOU race conditions between concurrent workers.
-        let task = self
-            .pending_service_tasks
-            .remove_if(&task_id, |_, t| t.worker_id.as_deref() == Some(worker_id));
+        let task = self.remove_pending_service_task_if(&task_id, |_, t| {
+            t.worker_id.as_deref() == Some(worker_id)
+        });
 
         let task = match task {
             Some((_, task)) => task,
@@ -130,7 +138,7 @@ impl WorkflowEngine {
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             if matches!(inst.state, crate::runtime::InstanceState::Suspended { .. }) {
-                self.pending_service_tasks.insert(task.id, task);
+                self.insert_pending_service_task(task);
                 return Err(EngineError::InstanceSuspended(instance_id));
             }
         }
@@ -394,9 +402,7 @@ impl WorkflowEngine {
         variables: HashMap<String, Value>,
     ) -> EngineResult<()> {
         // Atomically verify incident state (retries <= 0) and remove to prevent TOCTOU
-        let task = self
-            .pending_service_tasks
-            .remove_if(&task_id, |_, t| t.retries <= 0);
+        let task = self.remove_pending_service_task_if(&task_id, |_, t| t.retries <= 0);
 
         let task = match task {
             Some((_, task)) => task,
@@ -537,10 +543,10 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    /// Handles a BPMN error for an service task.
+    /// Handles a BPMN error for a service task.
     ///
-    /// Simple implementation: logs the error and creates an incident-style
-    /// audit entry. The task is removed from the pending queue.
+    /// A matching error boundary removes the task and continues the token.
+    /// Without a boundary the task is re-inserted as an incident (`retries = 0`).
     pub async fn handle_bpmn_error(
         &self,
         task_id: Uuid,
@@ -548,9 +554,9 @@ impl WorkflowEngine {
         error_code: &str,
     ) -> EngineResult<()> {
         // Atomically verify lock ownership and remove to prevent TOCTOU
-        let task = self
-            .pending_service_tasks
-            .remove_if(&task_id, |_, t| t.worker_id.as_deref() == Some(worker_id));
+        let task = self.remove_pending_service_task_if(&task_id, |_, t| {
+            t.worker_id.as_deref() == Some(worker_id)
+        });
 
         let task = match task {
             Some((_, task)) => task,
@@ -658,12 +664,18 @@ impl WorkflowEngine {
             return Ok(());
         }
 
-        // If no boundary event found, just log it as an unhandled error/incident.
+        // Unhandled BPMN error: re-insert as incident so the token is not a zombie.
+        let mut incident = task;
+        incident.retries = 0;
+        incident.worker_id = None;
+        incident.lock_expiration = None;
+        incident.error_message = Some(format!("Unhandled BPMN error '{error_code}'"));
+
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
             inst.push_audit_log(format!(
                 "🚨 BPMN error '{}' thrown by worker '{}' at service task '{}' (No boundary event caught it)",
-                error_code, worker_id, task.node_id
+                error_code, worker_id, incident.node_id
             ));
         }
 
@@ -671,7 +683,8 @@ impl WorkflowEngine {
             "Service task {task_id}: unhandled BPMN error '{error_code}' from worker '{worker_id}'"
         );
 
-        self.remove_persisted_service_task(task_id).await;
+        self.insert_pending_service_task(incident);
+        self.persist_service_task(task_id).await;
         self.persist_instance(instance_id).await;
 
         Ok(())

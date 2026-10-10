@@ -132,6 +132,15 @@ pub struct CompensationRecord {
     pub handler_node_id: String,
 }
 
+/// A spawned Call Activity that has not yet completed, keyed by child instance id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutstandingCall {
+    /// BPMN node id of the Call Activity on the parent.
+    pub node_id: String,
+    /// Parent token parked at the Call Activity, resumed when the child completes.
+    pub token: Token,
+}
+
 /// A live process instance tracked by the engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInstance {
@@ -161,6 +170,10 @@ pub struct ProcessInstance {
     /// LIFO log of completed compensatable activities and their handlers.
     #[serde(default)]
     pub compensation_log: Vec<CompensationRecord>,
+    /// Child Call-Activities still running, keyed by child instance id.
+    /// Independent of `InstanceState` so parallel calls can resume individually.
+    #[serde(default)]
+    pub outstanding_calls: HashMap<Uuid, OutstandingCall>,
     /// Timestamp when this instance was started.
     #[serde(default)]
     pub started_at: Option<DateTime<Utc>>,
@@ -227,6 +240,7 @@ mod tests {
             join_barriers: HashMap::new(),
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
+            outstanding_calls: HashMap::new(),
             started_at: None,
             completed_at: None,
         }

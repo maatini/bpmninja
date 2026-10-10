@@ -19,10 +19,14 @@ impl WorkflowEngine {
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
-            self.pending_timers.insert(t.id, t);
+            let id = t.id;
+            self.pending_timers.insert(id, t);
+            self.persist_timer(id).await;
         }
         for m in pending_msgs {
-            self.pending_message_catches.insert(m.id, m);
+            let id = m.id;
+            self.pending_message_catches.insert(id, m);
+            self.persist_message_catch(id).await;
         }
 
         let inst_arc = self

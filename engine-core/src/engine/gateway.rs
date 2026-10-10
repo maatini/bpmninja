@@ -43,7 +43,7 @@ pub(crate) fn execute_exclusive_gateway(
     let outgoing = def.next_nodes(current_id);
     let mut chosen_target: Option<String> = None;
 
-    // Evaluate conditions in order; first match wins
+    // Conditional flows in order; first true wins.
     for sf in outgoing {
         if let Some(ref cond) = sf.condition
             && evaluate_condition(cond, &token.variables)
@@ -53,7 +53,23 @@ pub(crate) fn execute_exclusive_gateway(
         }
     }
 
-    // Fallback to default flow if no condition matched
+    // Unconditional flow whose target is not the default (merge / unlabeled path).
+    // A flow that points at the default target is left for the fallback below.
+    if chosen_target.is_none() {
+        for sf in outgoing {
+            if sf.condition.is_none() {
+                if let Some(d) = default
+                    && sf.target == *d
+                {
+                    continue;
+                }
+                chosen_target = Some(sf.target.clone());
+                break;
+            }
+        }
+    }
+
+    // Fallback to default flow if nothing matched.
     if chosen_target.is_none()
         && let Some(default_target) = default
     {

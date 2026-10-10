@@ -10,7 +10,7 @@ use crate::runtime::{PendingMessageCatch, PendingTimer};
 use chrono::Utc;
 
 use super::WorkflowEngine;
-use crate::runtime::{InstanceState, ProcessInstance};
+use crate::runtime::{InstanceState, OutstandingCall, ProcessInstance};
 
 impl WorkflowEngine {
     /// Starts a new process instance from a deployed definition.
@@ -57,6 +57,96 @@ impl WorkflowEngine {
             .start_instance_with_variables(def_key, variables)
             .await?;
         Ok((inst_id, def_key))
+    }
+
+    async fn start_instance_with_variables_parent_and_id(
+        &self,
+        definition_key: Uuid,
+        mut variables: HashMap<String, Value>,
+        parent_instance_id: Option<Uuid>,
+        predetermined_id: Option<Uuid>,
+    ) -> EngineResult<Uuid> {
+        let (def, start_id) = self.validate_start_request(definition_key)?;
+
+        let instance_id = predetermined_id.unwrap_or_else(Uuid::new_v4);
+        let business_key = variables
+            .remove("business_key")
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let mut instance = Self::build_initial_instance(
+            definition_key,
+            instance_id,
+            &start_id,
+            variables.clone(),
+            parent_instance_id,
+        );
+        instance.business_key = business_key;
+
+        tracing::info!(
+            "Started instance {instance_id} of def key {definition_key} at node '{start_id}' with {} vars",
+            variables.len()
+        );
+
+        metrics::counter!("bpmn_instance_started_total").increment(1);
+        metrics::gauge!("bpmn_active_instances").increment(1.0);
+
+        self.instances.insert(instance_id, instance).await;
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::InstanceStarted,
+            &format!("Started instance of process '{}'", def.id),
+            crate::history::ActorType::Engine,
+            None,
+            None,
+        )
+        .await;
+
+        let token = Token::with_variables(&start_id, variables);
+
+        for listener in &def.event_listeners {
+            match listener {
+                ScopeEventListener::Timer {
+                    timer,
+                    is_interrupting: _,
+                    target_definition,
+                } => {
+                    let now = Utc::now();
+                    let expires_at = timer.next_expiry(now).unwrap_or(now);
+                    let pending = PendingTimer {
+                        id: Uuid::new_v4(),
+                        instance_id,
+                        node_id: target_definition.clone(),
+                        expires_at,
+                        token_id: Uuid::nil(),
+                        timer_def: Some(timer.clone()),
+                        remaining_repetitions: timer.initial_remaining_repetitions(),
+                    };
+                    self.pending_timers.insert(pending.id, pending);
+                }
+                ScopeEventListener::Message {
+                    message_name,
+                    is_interrupting: _,
+                    target_definition,
+                } => {
+                    let pending = PendingMessageCatch {
+                        id: Uuid::new_v4(),
+                        instance_id,
+                        node_id: target_definition.clone(),
+                        message_name: message_name.clone(),
+                        token_id: Uuid::nil(),
+                    };
+                    self.pending_message_catches.insert(pending.id, pending);
+                }
+                ScopeEventListener::Error { .. } => {}
+            }
+        }
+
+        Box::pin(self.run_instance_batch(instance_id, token)).await?;
+        self.persist_instance(instance_id).await;
+
+        Ok(instance_id)
     }
 
     /// Validates that the definition exists and has a compatible start event.
@@ -109,6 +199,7 @@ impl WorkflowEngine {
             join_barriers: std::collections::HashMap::new(),
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
+            outstanding_calls: HashMap::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }
@@ -118,94 +209,16 @@ impl WorkflowEngine {
     pub(crate) async fn start_instance_with_variables_and_parent(
         &self,
         definition_key: Uuid,
-        mut variables: HashMap<String, Value>,
+        variables: HashMap<String, Value>,
         parent_instance_id: Option<Uuid>,
     ) -> EngineResult<Uuid> {
-        let (def, start_id) = self.validate_start_request(definition_key)?;
-
-        let instance_id = Uuid::new_v4();
-        let business_key = variables
-            .remove("business_key")
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-        let mut instance = Self::build_initial_instance(
+        self.start_instance_with_variables_parent_and_id(
             definition_key,
-            instance_id,
-            &start_id,
-            variables.clone(),
+            variables,
             parent_instance_id,
-        );
-        instance.business_key = business_key;
-
-        tracing::info!(
-            "Started instance {instance_id} of def key {definition_key} at node '{start_id}' with {} vars",
-            variables.len()
-        );
-
-        metrics::counter!("bpmn_instance_started_total").increment(1);
-        metrics::gauge!("bpmn_active_instances").increment(1.0);
-
-        self.instances.insert(instance_id, instance).await;
-
-        // Record history for start
-        self.record_history_event(
-            instance_id,
-            crate::history::HistoryEventType::InstanceStarted,
-            &format!("Started instance of process '{}'", def.id),
-            crate::history::ActorType::Engine,
-            None,
             None,
         )
-        .await;
-
-        let token = Token::with_variables(&start_id, variables);
-
-        // Register Scope Event Listeners (Event Sub-Processes)
-        for listener in &def.event_listeners {
-            match listener {
-                ScopeEventListener::Timer {
-                    timer,
-                    is_interrupting: _,
-                    target_definition,
-                } => {
-                    let now = Utc::now();
-                    let expires_at = timer.next_expiry(now).unwrap_or(now);
-                    let pending = PendingTimer {
-                        id: Uuid::new_v4(),
-                        instance_id,
-                        node_id: target_definition.clone(), // Abusing node_id to store the target definition for Scope Events! Or we need a special token? Wait!
-                        expires_at,
-                        token_id: Uuid::nil(), // No specific token, applies to whole instance
-                        timer_def: Some(timer.clone()),
-                        remaining_repetitions: None,
-                    };
-                    self.pending_timers.insert(pending.id, pending);
-                }
-                ScopeEventListener::Message {
-                    message_name,
-                    is_interrupting: _,
-                    target_definition,
-                } => {
-                    let pending = PendingMessageCatch {
-                        id: Uuid::new_v4(),
-                        instance_id,
-                        node_id: target_definition.clone(),
-                        message_name: message_name.clone(),
-                        token_id: Uuid::nil(),
-                    };
-                    self.pending_message_catches.insert(pending.id, pending);
-                }
-                ScopeEventListener::Error { .. } => {
-                    // Error is checked dynamically when an ErrorEndEvent is hit or engine panics.
-                }
-            }
-        }
-
-        Box::pin(self.run_instance_batch(instance_id, token)).await?;
-        self.persist_instance(instance_id).await;
-
-        Ok(instance_id)
+        .await
     }
 
     /// Spawns a call activity sub-process
@@ -238,6 +251,67 @@ impl WorkflowEngine {
         .await;
 
         Ok(child_id)
+    }
+
+    /// Spawns a Call Activity child and tracks it on the parent before the child runs.
+    ///
+    /// Registration happens first so a synchronously completing child can resume
+    /// the parked parent token (including parallel Call Activities).
+    pub(crate) async fn spawn_call_activity_for_parent(
+        &self,
+        child_def_key: Uuid,
+        parent_instance_id: Uuid,
+        token: Token,
+    ) -> EngineResult<Uuid> {
+        let child_id = Uuid::new_v4();
+        let called_node = token.current_node.clone();
+
+        if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
+            let mut parent = inst_arc.write().await;
+            parent.outstanding_calls.insert(
+                child_id,
+                OutstandingCall {
+                    node_id: called_node.clone(),
+                    token: token.clone(),
+                },
+            );
+            if !matches!(parent.state, InstanceState::ParallelExecution { .. }) {
+                parent.state = InstanceState::WaitingOnCallActivity {
+                    sub_instance_id: child_id,
+                    token: token.clone(),
+                };
+            }
+        }
+
+        match self
+            .start_instance_with_variables_parent_and_id(
+                child_def_key,
+                token.variables.clone(),
+                Some(parent_instance_id),
+                Some(child_id),
+            )
+            .await
+        {
+            Ok(spawned_id) => {
+                self.record_history_event(
+                    parent_instance_id,
+                    crate::history::HistoryEventType::CallActivityStarted,
+                    &format!("Started Call Activity '{called_node}' (child instance {spawned_id})"),
+                    crate::history::ActorType::Engine,
+                    None,
+                    None,
+                )
+                .await;
+                Ok(spawned_id)
+            }
+            Err(e) => {
+                if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
+                    let mut parent = inst_arc.write().await;
+                    parent.outstanding_calls.remove(&child_id);
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Checks if a completed instance has a parent, and if so, resumes the parent.
@@ -273,14 +347,29 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(parent_id))?;
             let mut parent = parent_arc.write().await;
 
-            let (called_node_id, mut token_to_resume) =
-                if let InstanceState::WaitingOnCallActivity { token, .. } = &parent.state {
-                    let t = token.clone();
-                    parent.state = InstanceState::Running;
-                    (parent.current_node.clone(), Some(t))
+            let tracked = parent.outstanding_calls.remove(&completed_instance_id);
+            let remaining_calls = parent.outstanding_calls.len();
+            let was_parallel = matches!(parent.state, InstanceState::ParallelExecution { .. });
+
+            let (called_node_id, mut token_to_resume) = if let Some(call) = tracked {
+                (call.node_id, Some(call.token))
+            } else if let InstanceState::WaitingOnCallActivity { token, .. } = &parent.state {
+                (parent.current_node.clone(), Some(token.clone()))
+            } else {
+                return Ok(());
+            };
+
+            if remaining_calls > 0 {
+                if let InstanceState::ParallelExecution { active_token_count } = &mut parent.state {
+                    *active_token_count = remaining_calls;
                 } else {
-                    return Ok(());
-                };
+                    parent.state = InstanceState::ParallelExecution {
+                        active_token_count: remaining_calls,
+                    };
+                }
+            } else if !was_parallel {
+                parent.state = InstanceState::Running;
+            }
 
             parent.push_audit_log(format!(
                 "🔗 Call Activity '{called_node_id}' completed successfully"
@@ -459,6 +548,7 @@ impl WorkflowEngine {
             join_barriers: std::collections::HashMap::new(),
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
+            outstanding_calls: HashMap::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -636,6 +726,7 @@ impl WorkflowEngine {
             join_barriers: std::collections::HashMap::new(),
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
+            outstanding_calls: HashMap::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };

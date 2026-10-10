@@ -108,6 +108,7 @@ mod tests {
             join_barriers: HashMap::new(),
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
+            outstanding_calls: HashMap::new(),
             started_at: None,
             completed_at: None,
         };

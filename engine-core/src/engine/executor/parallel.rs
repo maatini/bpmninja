@@ -33,14 +33,19 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.join_barriers.insert(
-                join_id.clone(),
-                JoinBarrier {
-                    gateway_node_id: join_id.clone(),
-                    expected_count: branch_count,
-                    arrived_tokens: Vec::new(),
-                },
-            );
+            // A later registration must not drop tokens that already arrived.
+            match inst.join_barriers.entry(join_id.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                    occupied.get_mut().expected_count = branch_count;
+                }
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(JoinBarrier {
+                        gateway_node_id: join_id.clone(),
+                        expected_count: branch_count,
+                        arrived_tokens: Vec::new(),
+                    });
+                }
+            }
             tracing::debug!(
                 "Registered JoinBarrier for join '{join_id}' (expected: {branch_count})"
             );

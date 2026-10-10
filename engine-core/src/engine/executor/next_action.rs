@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use uuid::Uuid;
 
-use crate::domain::{EngineError, EngineResult, Token};
+use crate::domain::{BpmnElement, EngineError, EngineResult, Token};
 use crate::engine::WorkflowEngine;
 use crate::runtime::*;
 
@@ -19,6 +19,17 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         match action {
             NextAction::Continue(next_token) => {
+                // 1-of-N inclusive *splits* return Continue, so ContinueMultiple never
+                // publishes the downstream join barrier. Expected arrivals: 1.
+                // Join-only Inclusive gateways must not register: a nested inner join
+                // would otherwise overwrite the outer join's expected_count with 1.
+                if self
+                    .node_is_inclusive_split(instance_id, current_gateway_id)
+                    .await?
+                {
+                    self.register_join_barrier_if_needed(instance_id, current_gateway_id, 1)
+                        .await?;
+                }
                 queue.push_back(next_token);
             }
             NextAction::ContinueMultiple(forked_tokens) => {
@@ -86,7 +97,7 @@ impl WorkflowEngine {
                         inst.state = InstanceState::WaitingOnServiceTask { task_id };
                     }
                 }
-                self.pending_service_tasks.insert(task_id, svc_task);
+                self.insert_pending_service_task(svc_task);
                 self.persist_service_task(task_id).await;
                 self.persist_instance(instance_id).await;
                 self.emit_event(crate::engine::events::EngineEvent::TaskChanged);
@@ -153,57 +164,35 @@ impl WorkflowEngine {
                 }
 
                 if let Some(child_key) = child_def_key {
-                    let sub_instance_id = Uuid::new_v4();
-
-                    if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                        let mut inst = inst_arc.write().await;
-                        if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
-                            inst.state = InstanceState::WaitingOnCallActivity {
-                                sub_instance_id,
-                                token: call_token.clone(),
-                            };
-                        }
-                    }
-
                     tracing::info!(
                         "Instance {instance_id}: Triggering Call Activity '{}'",
                         called_element
                     );
 
-                    match self
-                        .spawn_call_activity(
-                            child_key,
-                            instance_id,
-                            call_token.current_node.clone(),
-                            call_token.variables.clone(),
-                        )
+                    if let Err(e) = self
+                        .spawn_call_activity_for_parent(child_key, instance_id, call_token)
                         .await
                     {
-                        Ok(spawned_id) => {
-                            if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                                let mut inst = inst_arc.write().await;
-                                if let InstanceState::WaitingOnCallActivity {
-                                    sub_instance_id: ref mut sub,
-                                    ..
-                                } = inst.state
-                                {
-                                    *sub = spawned_id;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to start call activity '{}': {}",
-                                called_element,
-                                e
-                            );
-                        }
+                        self.fail_call_activity(
+                            instance_id,
+                            "CALL_ACTIVITY_SPAWN_FAILED",
+                            &format!("Failed to start call activity '{called_element}': {e}"),
+                            queue,
+                        )
+                        .await;
                     }
                 } else {
                     tracing::error!(
                         "Call Activity target '{}' not found deployed.",
                         called_element
                     );
+                    self.fail_call_activity(
+                        instance_id,
+                        "CALL_ACTIVITY_TARGET_NOT_FOUND",
+                        &format!("Call Activity target '{called_element}' not found deployed"),
+                        queue,
+                    )
+                    .await;
                 }
                 self.persist_instance(instance_id).await;
             }
@@ -306,8 +295,7 @@ impl WorkflowEngine {
             NextAction::Terminate => {
                 self.pending_user_tasks
                     .retain(|_, t| t.instance_id != instance_id);
-                self.pending_service_tasks
-                    .retain(|_, t| t.instance_id != instance_id);
+                self.clear_pending_service_tasks_for_instance(instance_id);
                 self.pending_timers
                     .retain(|_, t| t.instance_id != instance_id);
                 self.pending_message_catches
@@ -377,5 +365,55 @@ impl WorkflowEngine {
             }
         }
         Ok(())
+    }
+
+    async fn fail_call_activity(
+        &self,
+        instance_id: Uuid,
+        error_code: &str,
+        detail: &str,
+        queue: &mut VecDeque<Token>,
+    ) {
+        tracing::error!("Instance {instance_id}: {error_code}: {detail}");
+        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let mut inst = inst_arc.write().await;
+            inst.state = InstanceState::CompletedWithError {
+                error_code: error_code.to_string(),
+            };
+            inst.completed_at = Some(chrono::Utc::now());
+            inst.push_audit_log(format!("💥 {error_code}: {detail}"));
+        }
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::Error,
+            &format!("{error_code}: {detail}"),
+            crate::history::ActorType::Engine,
+            None,
+            None,
+        )
+        .await;
+        queue.clear();
+        self.persist_instance(instance_id).await;
+    }
+
+    async fn node_is_inclusive_split(
+        &self,
+        instance_id: Uuid,
+        node_id: &str,
+    ) -> EngineResult<bool> {
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let def_key = inst_arc.read().await.definition_key;
+        let def = self
+            .definitions
+            .get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?;
+        Ok(
+            matches!(def.get_node(node_id), Some(BpmnElement::InclusiveGateway))
+                && def.is_split_gateway(node_id),
+        )
     }
 }

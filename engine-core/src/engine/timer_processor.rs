@@ -25,13 +25,13 @@ impl WorkflowEngine {
             metrics::counter!("bpmn_timer_fired_total").increment(count as u64);
         }
         for tid in expired {
-            let timer = self
-                .pending_timers
-                .remove(&tid)
-                .map(|(_, v)| v)
-                .ok_or_else(|| {
-                    EngineError::InvalidDefinition(format!("Timer {tid} disappeared"))
-                })?;
+            let Some(timer) = self.pending_timers.remove(&tid).map(|(_, v)| v) else {
+                tracing::debug!(
+                    timer_id = %tid,
+                    "Timer disappeared before processing (event-based sibling already cancelled)"
+                );
+                continue;
+            };
 
             // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
             self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
@@ -232,11 +232,13 @@ impl WorkflowEngine {
             self.remove_persisted_timer(tid).await;
             self.run_instance_batch(timer.instance_id, token).await?;
 
-            // Re-schedule recurring timers
+            // Re-schedule recurring timers.
+            // ISO R3 = exactly 3 fires: after a fire, Some(1) is the last one (do not insert).
             if let Some(ref def) = timer.timer_def
                 && def.is_recurring()
             {
-                let should_repeat = !matches!(timer.remaining_repetitions, Some(0));
+                // None = infinite; Some(1) = this fire was the last; Some(0) = already done.
+                let should_repeat = !matches!(timer.remaining_repetitions, Some(0 | 1));
                 if should_repeat {
                     let now = chrono::Utc::now();
                     if let Some(next_expiry) = def.next_expiry(now) {
@@ -251,7 +253,9 @@ impl WorkflowEngine {
                             timer_def: Some(def.clone()),
                             remaining_repetitions: new_remaining,
                         };
-                        self.pending_timers.insert(new_pending.id, new_pending);
+                        let new_id = new_pending.id;
+                        self.pending_timers.insert(new_id, new_pending);
+                        self.persist_timer(new_id).await;
                     }
                 }
             }

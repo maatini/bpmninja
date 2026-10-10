@@ -184,7 +184,7 @@ impl WorkflowEngine {
                     }
                 }
                 for id in to_remove_st {
-                    self.pending_service_tasks.remove(&id);
+                    self.remove_pending_service_task(&id);
                     self.remove_persisted_service_task(id).await;
                 }
             }
