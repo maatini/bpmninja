@@ -50,6 +50,14 @@ Dialog components require `DialogDescription` for accessibility. Some dialogs us
 
 The project uses Tailwind v4 with the `@tailwindcss/vite` plugin. Configuration is in `index.css` via `@theme` directive, NOT in a `tailwind.config.js` file. The `tailwind.config.js` in the repo is legacy/no longer used.
 
+### ⚠️ Identifier, CSP, no dummy updater
+
+Bundle identifier is `dev.bpmninja.desktop` (not the leftover `com.minibpm.dev`). Changing it creates a new macOS/Windows app-data path.
+
+CSP is set in `tauri.conf.json`: `connect-src` allows `http:`/`https:`/`ws:`/`wss:` because the engine URL is user-configurable (LAN). bpmn-js needs `style-src 'unsafe-inline'`, `script-src 'unsafe-eval' 'wasm-unsafe-eval'`, and `worker-src blob:`.
+
+The updater plugin is disabled until a real minisign key exists. The previous dummy pubkey (`A9274242…`) and `releases.minibpm.dev` endpoint are gone.
+
 ### ⚠️ Tauri plugin paths
 
 File dialogs use `@tauri-apps/plugin-dialog` and `@tauri-apps/plugin-fs`. These are Tauri v2 plugins and require corresponding Rust crate registration in `src-tauri/Cargo.toml`.
