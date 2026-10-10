@@ -7,17 +7,21 @@ impl WorkflowEngine {
         let now = chrono::Utc::now();
         let mut expired = Vec::new();
 
-        for timer in self.pending_timers.iter() {
-            if timer.expires_at <= now {
-                // Skip timers for suspended instances
-                if let Some(inst_arc) = self.instances.get(&timer.instance_id).await {
-                    let inst = inst_arc.read().await;
-                    if matches!(inst.state, InstanceState::Suspended { .. }) {
-                        continue;
-                    }
-                }
-                expired.push(timer.id);
+        for tid in self.timer_due_index.due_ids(now) {
+            let Some(timer) = self.pending_timers.get(&tid) else {
+                continue;
+            };
+            if timer.expires_at > now {
+                continue;
             }
+            // Skip timers for suspended instances
+            if let Some(inst_arc) = self.instances.get(&timer.instance_id).await {
+                let inst = inst_arc.read().await;
+                if matches!(inst.state, InstanceState::Suspended { .. }) {
+                    continue;
+                }
+            }
+            expired.push(tid);
         }
 
         let count = expired.len();
@@ -25,7 +29,7 @@ impl WorkflowEngine {
             metrics::counter!("bpmn_timer_fired_total").increment(count as u64);
         }
         for tid in expired {
-            let Some(timer) = self.pending_timers.remove(&tid).map(|(_, v)| v) else {
+            let Some(timer) = self.remove_pending_timer(&tid).map(|(_, v)| v) else {
                 tracing::debug!(
                     timer_id = %tid,
                     "Timer disappeared before processing (event-based sibling already cancelled)"
@@ -254,7 +258,7 @@ impl WorkflowEngine {
                             remaining_repetitions: new_remaining,
                         };
                         let new_id = new_pending.id;
-                        self.pending_timers.insert(new_id, new_pending);
+                        self.insert_pending_timer(new_pending);
                         self.persist_timer(new_id).await;
                     }
                 }

@@ -44,10 +44,14 @@ async fn r3_repeating_interval_stops_after_three_fires() {
     let mut fires = 0usize;
     loop {
         let now = chrono::Utc::now();
-        for mut entry in engine.pending_timers.iter_mut() {
-            if entry.node_id == "timer" {
-                entry.expires_at = now;
-            }
+        let due: Vec<_> = engine
+            .pending_timers
+            .iter()
+            .filter(|t| t.node_id == "timer")
+            .map(|t| t.id)
+            .collect();
+        for id in due {
+            engine.set_timer_expiry(id, now);
         }
         let n = engine.process_timers().await.unwrap();
         if n == 0 {

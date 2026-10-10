@@ -21,7 +21,7 @@ impl WorkflowEngine {
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
             let id = t.id;
-            self.pending_timers.insert(id, t);
+            self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {
@@ -142,7 +142,7 @@ impl WorkflowEngine {
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
             let id = t.id;
-            self.pending_timers.insert(id, t);
+            self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {

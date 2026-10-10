@@ -106,6 +106,10 @@ Parallel Call-Activities keep `InstanceState::ParallelExecution`. Resume looks u
 
 `pending_service_tasks` is SSOT. `service_task_topic_index` maps topic → task ids for `fetch_and_lock`. Insert into the map first, then the index. Orphan index entries are dropped at fetch. Incidents (`retries <= 0`) stay in the index but are not locked.
 
+### ⚠️ Timer due-index is secondary
+
+`pending_timers` is SSOT. `timer_due_index` is a `BTreeMap<(expires_at, id)>` so `process_timers` only walks due IDs. Insert/remove/retain go through `insert_pending_timer` / `remove_pending_timer` / `retain_pending_timers`. Changing `expires_at` in place without `set_timer_expiry` leaves the index stale and the timer will not fire.
+
 ### ⚠️ `list_instances_page` clones only the page
 
 Live listing sorts by `started_at` desc, then instance id. `GET /api/instances` without query still returns the full JSON array. With `limit`/`offset`, the body is the page and `X-Total-Count` is set (`limit` clamped 1..=1000).

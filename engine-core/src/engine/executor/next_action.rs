@@ -110,7 +110,7 @@ impl WorkflowEngine {
                         inst.state = InstanceState::WaitingOnTimer { timer_id };
                     }
                 }
-                self.pending_timers.insert(timer_id, pending);
+                self.insert_pending_timer(pending);
                 self.persist_timer(timer_id).await;
                 self.persist_instance(instance_id).await;
             }
@@ -137,7 +137,7 @@ impl WorkflowEngine {
                     match action {
                         NextAction::WaitForTimer(pending) => {
                             let timer_id = pending.id;
-                            self.pending_timers.insert(timer_id, pending);
+                            self.insert_pending_timer(pending);
                             self.persist_timer(timer_id).await;
                         }
                         NextAction::WaitForMessage(pending) => {
@@ -296,8 +296,7 @@ impl WorkflowEngine {
                 self.pending_user_tasks
                     .retain(|_, t| t.instance_id != instance_id);
                 self.clear_pending_service_tasks_for_instance(instance_id);
-                self.pending_timers
-                    .retain(|_, t| t.instance_id != instance_id);
+                self.retain_pending_timers(|_, t| t.instance_id != instance_id);
                 self.pending_message_catches
                     .retain(|_, t| t.instance_id != instance_id);
 

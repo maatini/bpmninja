@@ -34,6 +34,7 @@ mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+mod timer_index;
 mod timer_processor;
 mod topic_index;
 mod user_task;
@@ -49,6 +50,8 @@ pub struct WorkflowEngine {
     /// Secondary index topic → task IDs. SSOT remains `pending_service_tasks`.
     pub(crate) service_task_topic_index: topic_index::TopicIndex,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
+    /// Secondary due-time index. SSOT remains `pending_timers`.
+    pub(crate) timer_due_index: timer_index::TimerDueIndex,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
@@ -80,6 +83,7 @@ impl WorkflowEngine {
             pending_service_tasks: Arc::new(DashMap::new()),
             service_task_topic_index: DashMap::new(),
             pending_timers: Arc::new(DashMap::new()),
+            timer_due_index: timer_index::TimerDueIndex::new(),
             pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -186,7 +190,7 @@ impl WorkflowEngine {
             timer.instance_id,
             timer.node_id
         );
-        self.pending_timers.insert(timer.id, timer);
+        self.insert_pending_timer(timer);
     }
 
     /// Restores a pending message catch from persistence (e.g. on server startup).
@@ -237,8 +241,9 @@ impl WorkflowEngine {
             .map(|r| r.id)
             .collect();
 
-        self.pending_timers
-            .retain(|_, t| !(t.instance_id == instance_id && bound_timers.contains(&t.node_id)));
+        self.retain_pending_timers(|_, t| {
+            !(t.instance_id == instance_id && bound_timers.contains(&t.node_id))
+        });
 
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -358,9 +363,9 @@ impl WorkflowEngine {
             .await;
         }
 
-        // Remove from DashMap
-        self.pending_timers
-            .retain(|_, t| !(t.instance_id == instance_id && &t.token_id == token_id));
+        self.retain_pending_timers(|_, t| {
+            !(t.instance_id == instance_id && &t.token_id == token_id)
+        });
         self.pending_message_catches
             .retain(|_, m| !(m.instance_id == instance_id && &m.token_id == token_id));
 

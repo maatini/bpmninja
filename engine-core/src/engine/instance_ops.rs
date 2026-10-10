@@ -508,7 +508,7 @@ impl WorkflowEngine {
                 .map(|t| t.id)
                 .collect();
             for tid in &timer_ids {
-                self.pending_timers.remove(tid);
+                self.remove_pending_timer(tid);
                 if let Some(p) = &self.persistence {
                     let _ = p.delete_timer(*tid).await;
                 }
@@ -865,8 +865,7 @@ impl WorkflowEngine {
         self.clear_pending_service_tasks_for_instance(instance_id);
 
         // Clean up pending timers in memory
-        self.pending_timers
-            .retain(|_, t| t.instance_id != instance_id);
+        self.retain_pending_timers(|_, t| t.instance_id != instance_id);
 
         // Clean up pending message catches in memory
         self.pending_message_catches

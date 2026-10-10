@@ -123,7 +123,7 @@ impl WorkflowEngine {
                         timer_def: Some(timer.clone()),
                         remaining_repetitions: timer.initial_remaining_repetitions(),
                     };
-                    self.pending_timers.insert(pending.id, pending);
+                    self.insert_pending_timer(pending);
                 }
                 ScopeEventListener::Message {
                     message_name,
