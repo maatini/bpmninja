@@ -38,9 +38,7 @@ pub async fn get_definition_xml(
 ) -> Result<String, String> {
     let base = crate::state::get_base_url(&state)?;
     let url = format!("{}/api/definitions/{}/xml", base, definition_id);
-    let res = state
-        .client
-        .get(&url)
+    let res = crate::api_helpers::with_auth(state.client.get(&url), &state)?
         .send()
         .await
         .map_err(|e| e.to_string())?;

@@ -8,13 +8,13 @@ mod commands;
 mod sse_consumer;
 mod state;
 
-
 fn main() {
     let initial_state = state::AppState {
         client: reqwest::Client::new(),
         base_url: std::sync::Mutex::new(
             std::env::var("ENGINE_API_URL").unwrap_or_else(|_| "http://localhost:8081".to_string()),
         ),
+        api_key: std::sync::Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -25,10 +25,8 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             let app_handle = app.handle().clone();
-            let state = app.state::<state::AppState>();
-            let base_url = state.base_url.lock().map(|u: std::sync::MutexGuard<'_, String>| u.clone()).unwrap_or_else(|_| "http://localhost:8081".to_string());
-            let client = state.client.clone();
-            sse_consumer::spawn(app_handle, base_url, client);
+            let client = app.state::<state::AppState>().client.clone();
+            sse_consumer::spawn(app_handle, client);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -65,6 +63,8 @@ fn main() {
             commands::files::delete_instance_file,
             commands::monitoring::get_api_url,
             commands::monitoring::set_api_url,
+            commands::monitoring::get_api_key,
+            commands::monitoring::set_api_key,
             commands::monitoring::get_monitoring_data,
             commands::monitoring::get_bucket_entries,
             commands::monitoring::get_bucket_entry_detail,

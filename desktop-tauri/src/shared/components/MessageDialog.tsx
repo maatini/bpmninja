@@ -4,7 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { VariableEditor, serializeVariables } from './VariableEditor';
 import type { VariableRow } from './VariableEditor';
 import { correlateMessage } from '../lib/tauri';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,6 +50,9 @@ export function MessageDialog({ open, onClose }: MessageDialogProps) {
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" /> Correlate Message
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            BPMN-Nachricht an wartende Instanzen korrelieren
+          </DialogDescription>
         </DialogHeader>
         
         <div className="grid gap-4 py-4">

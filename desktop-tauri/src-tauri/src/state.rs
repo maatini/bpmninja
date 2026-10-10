@@ -1,4 +1,3 @@
-
 /// Engine + NATS metrics returned to the Monitoring page.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct MonitoringData {
@@ -40,6 +39,7 @@ pub struct StorageInfoData {
 pub struct AppState {
     pub client: reqwest::Client,
     pub base_url: std::sync::Mutex<String>,
+    pub api_key: std::sync::Mutex<Option<String>>,
 }
 
 pub fn get_base_url(state: &AppState) -> Result<String, String> {
@@ -47,5 +47,20 @@ pub fn get_base_url(state: &AppState) -> Result<String, String> {
         .base_url
         .lock()
         .map(|guard| guard.clone())
+        .map_err(|e| format!("Mutex poisoned: {e}"))
+}
+
+/// Returns a trimmed API key, or `None` if unset/blank (no auth headers).
+pub fn get_api_key(state: &AppState) -> Result<Option<String>, String> {
+    state
+        .api_key
+        .lock()
+        .map(|guard| {
+            guard
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+        })
         .map_err(|e| format!("Mutex poisoned: {e}"))
 }

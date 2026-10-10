@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getApiUrl, setApiUrl, getMonitoringData } from '../../shared/lib/tauri'
+import { getApiUrl, setApiUrl, getApiKey, setApiKey, getMonitoringData } from '../../shared/lib/tauri'
 import { Server, CheckCircle, XCircle, Palette, Monitor, Sun, Moon, Wifi, WifiOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ interface Props {
 
 export function SettingsPage({ engineStatus, onConnectionChanged }: Props) {
   const [apiUrl, setLocalApiUrl] = useState('http://localhost:8081')
+  const [apiKey, setLocalApiKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState<string | null>(null)
@@ -25,8 +26,9 @@ export function SettingsPage({ engineStatus, onConnectionChanged }: Props) {
   useEffect(() => {
     const loadInfo = async () => {
       try {
-        const currentUrl = await getApiUrl()
+        const [currentUrl, currentKey] = await Promise.all([getApiUrl(), getApiKey()])
         setLocalApiUrl(currentUrl)
+        setLocalApiKey(currentKey ?? '')
       } catch (e: any) {
         console.error('Failed to load API URL', e)
       }
@@ -40,10 +42,9 @@ export function SettingsPage({ engineStatus, onConnectionChanged }: Props) {
     setMessage(null)
 
     try {
-      // 1. URL in Tauri speichern
       await setApiUrl(apiUrl)
+      await setApiKey(apiKey)
 
-      // 2. Verbindung direkt prüfen
       await getMonitoringData()
 
       setStatus('success')
@@ -110,6 +111,19 @@ export function SettingsPage({ engineStatus, onConnectionChanged }: Props) {
                 onChange={(e: any) => setLocalApiUrl(e.target.value)}
                 placeholder="http://localhost:8081"
                 disabled={loading}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="apiKey">API Key (optional)</Label>
+              <Input
+                id="apiKey"
+                type="password"
+                value={apiKey}
+                onChange={(e: any) => setLocalApiKey(e.target.value)}
+                placeholder="BPMNINJA_API_KEY"
+                disabled={loading}
+                autoComplete="off"
               />
             </div>
 

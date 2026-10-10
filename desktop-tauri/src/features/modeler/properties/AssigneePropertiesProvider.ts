@@ -4,61 +4,60 @@ import { useService } from 'bpmn-js-properties-panel';
 // @ts-ignore
 import { is } from 'bpmn-js/lib/util/ModelUtil';
 
-function TopicProps(props: any) {
+function AssigneeProps(props: any) {
   const { element, id } = props;
-  
+
   const modeling = useService('modeling');
   const translate = useService('translate');
   const debounce = useService('debounceInput');
-  
+
   const getValue = () => {
     return (
-      element.businessObject.get('data-topic') ||
-      element.businessObject.get('camunda:topic') ||
-      element.businessObject.get('data-handler') ||
+      element.businessObject.get('camunda:assignee') ||
+      element.businessObject.get('data-assignee') ||
       ''
     );
   };
-  
+
   const setValue = (value: string) => {
     modeling.updateProperties(element, {
-      'data-topic': value,
-      'camunda:topic': value
+      'camunda:assignee': value,
+      'data-assignee': value
     });
   };
-  
+
   return TextFieldEntry({
     element,
-    id: id + '-topic',
-    label: translate('Topic Name'),
-    description: translate('e.g. process-order'),
+    id: id + '-assignee',
+    label: translate('Bearbeiter'),
+    description: translate('z.B. alice oder ${assignee}'),
     getValue,
     setValue,
     debounce
   });
 }
 
-function CustomTopicGroup(element: any, translate: any) {
-  if (!is(element, 'bpmn:ServiceTask')) {
+function CustomAssigneeGroup(element: any, translate: any) {
+  if (!is(element, 'bpmn:UserTask')) {
     return null;
   }
-  
+
   return {
-    id: 'ExternalTaskGroup',
-    label: translate('External Task Configuration'),
+    id: 'AssigneeGroup',
+    label: translate('User Task'),
     shouldOpen: true,
     entries: [
       {
-        id: 'externalTaskTopic',
+        id: 'userTaskAssignee',
         element,
-        component: TopicProps,
+        component: AssigneeProps,
         isEdited: isTextFieldEntryEdited
       }
     ]
   };
 }
 
-export class TopicPropertiesProvider {
+export class AssigneePropertiesProvider {
   static $inject = ['propertiesPanel', 'translate'];
 
   constructor(propertiesPanel: any, translate: any) {
@@ -70,9 +69,9 @@ export class TopicPropertiesProvider {
 
   getGroups(element: any) {
     return (groups: any[]) => {
-      const topicGroup = CustomTopicGroup(element, this.translate);
-      if (topicGroup) {
-        groups.push(topicGroup);
+      const group = CustomAssigneeGroup(element, this.translate);
+      if (group) {
+        groups.push(group);
       }
       return groups;
     };

@@ -6,7 +6,7 @@ import { VariableEditor, type VariableRow, parseVariables, serializeVariables } 
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -70,6 +70,9 @@ export function IncidentDetailDialog({
           <DialogTitle className="text-lg flex items-center gap-2 text-destructive">
             <AlertTriangle className="h-5 w-5" /> Incident: {incident?.node_id}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Incident-Details, Retry und manuelles Auflösen
+          </DialogDescription>
         </DialogHeader>
 
         {incident && (

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useState } from 'react';
 
 // Shared type definitions for the variable editor
@@ -463,6 +463,9 @@ export function VariableEditor({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enter Variable Name</DialogTitle>
+            <DialogDescription className="sr-only">
+              Name für die Datei-Variable festlegen
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Input 

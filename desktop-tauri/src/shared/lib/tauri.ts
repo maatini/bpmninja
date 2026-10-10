@@ -156,6 +156,14 @@ export async function setApiUrl(url: string): Promise<void> {
   return invoke('set_api_url', { url });
 }
 
+export async function getApiKey(): Promise<string> {
+  return invoke('get_api_key');
+}
+
+export async function setApiKey(key: string): Promise<void> {
+  return invoke('set_api_key', { key });
+}
+
 // ---------------------------------------------------------------------------
 // Monitoring
 // ---------------------------------------------------------------------------

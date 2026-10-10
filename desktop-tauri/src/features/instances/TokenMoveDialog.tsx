@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 // @ts-ignore
 import NavigatedViewer from 'bpmn-js/lib/NavigatedViewer';
 import 'bpmn-js/dist/assets/diagram-js.css';
@@ -222,6 +222,9 @@ export function TokenMoveDialog({ instance, xml, open, onClose, onMoved }: Token
             <ArrowRightLeft className="h-5 w-5 text-blue-500" />
             Token Move — Modify Process Instance
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Token auf einen anderen Prozessknoten verschieben
+          </DialogDescription>
         </DialogHeader>
 
         {instance && xml && (

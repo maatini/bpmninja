@@ -4,13 +4,29 @@
 
 Desktop has NO workflow logic. If the server is down, the desktop app can't do anything meaningful. The settings page allows configuring the API URL, but there's no offline mode.
 
+### ⚠️ API-Key headers (`BPMNINJA_API_KEY`)
+
+When the engine requires `BPMNINJA_API_KEY`, the desktop app must send the same key on **all** HTTP calls (REST helpers, direct `reqwest` in commands, file up/download, SSE). Headers:
+
+- `Authorization: Bearer <key>`
+- `X-API-Key: <key>`
+
+Empty/unset key → no auth headers (open engine). The key lives in `AppState.api_key` (`Mutex<Option<String>>`), is configured on the Settings page, and is **not** read from the process environment.
+
 ### ⚠️ SSE connection lifecycle
 
 The Tauri background task (Rust) maintains the SSE connection. If it drops, it reconnects. React components react to Tauri events, not directly to SSE. There's a timing window between SSE reconnect and state sync — the UI briefly shows stale data.
 
+Die SSE-Base-URL wird bei jedem Connect/Reconnect aus `AppState` gelesen (nicht die Spawn-Zeit-URL). Wechselt `set_api_url` die URL, bricht der Consumer die aktuelle Verbindung ab, setzt den Backoff zurück und verbindet mit der neuen URL. Der API-Key wird ebenfalls aus `AppState` gelesen; `set_api_key` startet den Consumer nicht neu — ein bereits offener Stream behält die Connect-Zeit-Header bis zum nächsten Reconnect (401-Backoff holt einen neu gespeicherten Key).
+
 ### ⚠️ bpmn-js requires Camunda moddle
 
-The modeler uses `camunda-bpmn-moddle` to support Camunda-specific extensions in the properties panel (execution listeners, topic names, conditions). If this dep is removed, the custom properties panel breaks.
+The modeler uses `camunda-bpmn-moddle` to support Camunda-specific extensions in the properties panel (execution listeners, topic names, assignee, conditions). If this dep is removed, the custom properties panel breaks.
+
+Custom providers write both desktop `data-*` attributes and Camunda attributes so the engine parser and Camunda Modeler XML stay interchangeable:
+
+- User Task: `AssigneePropertiesProvider` writes `camunda:assignee` and `data-assignee`
+- Service Task: `TopicPropertiesProvider` writes `data-topic` and `camunda:topic`
 
 ### ⚠️ Custom properties (ConditionPropertiesProvider)
 

@@ -31,10 +31,7 @@ pub async fn upload_instance_file(
 
     let form = reqwest::multipart::Form::new().part("file", part);
 
-    let res = state
-        .client
-        .post(&url)
-        .multipart(form)
+    let res = crate::api_helpers::with_auth(state.client.post(&url).multipart(form), &state)?
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -56,9 +53,7 @@ pub async fn download_instance_file(
     let base = crate::state::get_base_url(&state)?;
     let url = format!("{}/api/instances/{}/files/{}", base, instance_id, var_name);
 
-    let res = state
-        .client
-        .get(&url)
+    let res = crate::api_helpers::with_auth(state.client.get(&url), &state)?
         .send()
         .await
         .map_err(|e| e.to_string())?;

@@ -22,13 +22,15 @@ import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import { CustomPropertiesProvider } from './properties/ConditionPropertiesProvider';
 import { ScriptPropertiesProvider } from './properties/ScriptPropertiesProvider';
 import { TopicPropertiesProvider } from './properties/TopicPropertiesProvider';
+import { AssigneePropertiesProvider } from './properties/AssigneePropertiesProvider';
 import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'calledElementPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
   topicPropertiesProvider: ['type', TopicPropertiesProvider],
+  assigneePropertiesProvider: ['type', AssigneePropertiesProvider],
   calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
 };
 
