@@ -1058,3 +1058,356 @@ fn test_call_activity_parsed() {
         _ => panic!("Expected CallActivity, got {:?}", node),
     }
 }
+
+#[test]
+fn parse_camunda_assignee_and_topic() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:camunda="http://camunda.org/schema/1.0/bpmn">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <userTask id="ut1" camunda:assignee="alice" />
+                <serviceTask id="st1" camunda:topic="charge-card" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ut1" />
+                <sequenceFlow id="f2" sourceRef="ut1" targetRef="st1" />
+                <sequenceFlow id="f3" sourceRef="st1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("ut1").unwrap() {
+        BpmnElement::UserTask(a) => assert_eq!(a, "alice"),
+        other => panic!("Expected UserTask, got {:?}", other),
+    }
+    match def.nodes.get("st1").unwrap() {
+        BpmnElement::ServiceTask { topic, .. } => assert_eq!(topic, "charge-card"),
+        other => panic!("Expected ServiceTask, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_data_attributes_win_over_camunda() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:camunda="http://camunda.org/schema/1.0/bpmn">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <userTask id="ut1" data-assignee="desktop" camunda:assignee="camunda" />
+                <serviceTask id="st1" data-topic="data-topic" camunda:topic="camunda-topic" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ut1" />
+                <sequenceFlow id="f2" sourceRef="ut1" targetRef="st1" />
+                <sequenceFlow id="f3" sourceRef="st1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("ut1").unwrap() {
+        BpmnElement::UserTask(a) => assert_eq!(a, "desktop"),
+        other => panic!("Expected UserTask, got {:?}", other),
+    }
+    match def.nodes.get("st1").unwrap() {
+        BpmnElement::ServiceTask { topic, .. } => assert_eq!(topic, "data-topic"),
+        other => panic!("Expected ServiceTask, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_send_task_message_ref_attribute() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <message id="Message_1" name="OrderShipped" />
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <sendTask id="send1" messageRef="Message_1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="send1" />
+                <sequenceFlow id="f2" sourceRef="send1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("send1").unwrap() {
+        BpmnElement::SendTask { message_name, .. } => assert_eq!(message_name, "OrderShipped"),
+        other => panic!("Expected SendTask, got {:?}", other),
+    }
+}
+
+#[test]
+fn reject_empty_timer_event_definition() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1">
+                    <timerEventDefinition />
+                </startEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("timerEventDefinition") && msg.contains("s1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn parse_timer_formal_expression() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait">
+                    <timerEventDefinition>
+                        <timeDuration xsi:type="bpmn:tFormalExpression">PT45S</timeDuration>
+                    </timerEventDefinition>
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait" />
+                <sequenceFlow id="f2" sourceRef="wait" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("wait").unwrap() {
+        BpmnElement::TimerCatchEvent(engine_core::timer_definition::TimerDefinition::Duration(
+            d,
+        )) => assert_eq!(d.as_secs(), 45),
+        other => panic!("Expected TimerCatchEvent Duration, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_receive_task_as_message_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <message id="Message_1" name="OrderReceived" />
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <receiveTask id="recv1" messageRef="Message_1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="recv1" />
+                <sequenceFlow id="f2" sourceRef="recv1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("recv1").unwrap() {
+        BpmnElement::MessageCatchEvent { message_name } => {
+            assert_eq!(message_name, "OrderReceived")
+        }
+        other => panic!("Expected MessageCatchEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_manual_task_as_user_task() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:camunda="http://camunda.org/schema/1.0/bpmn">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <manualTask id="man1" camunda:assignee="clerk" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="man1" />
+                <sequenceFlow id="f2" sourceRef="man1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("man1").unwrap() {
+        BpmnElement::UserTask(a) => assert_eq!(a, "clerk"),
+        other => panic!("Expected UserTask, got {:?}", other),
+    }
+}
+
+#[test]
+fn reject_multi_instance_loop_characteristics() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <userTask id="ut1">
+                    <multiInstanceLoopCharacteristics isSequential="false">
+                        <loopCardinality>3</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                </userTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ut1" />
+                <sequenceFlow id="f2" sourceRef="ut1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Multi-instance is not supported") && msg.contains("ut1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_generic_task() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <task id="t1" name="Do something" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="t1" />
+                <sequenceFlow id="f2" sourceRef="t1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("task id='t1'"), "unexpected error: {msg}");
+}
+
+#[test]
+fn reject_empty_script_task() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <scriptTask id="sc1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sc1" />
+                <sequenceFlow id="f2" sourceRef="sc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("scriptTask") && msg.contains("sc1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_catch_without_trigger() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait" />
+                <sequenceFlow id="f2" sourceRef="wait" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("intermediateCatchEvent") && msg.contains("wait"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn parse_business_rule_task_with_topic() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:camunda="http://camunda.org/schema/1.0/bpmn">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <businessRuleTask id="br1" camunda:topic="decide" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="br1" />
+                <sequenceFlow id="f2" sourceRef="br1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("br1").unwrap() {
+        BpmnElement::ServiceTask { topic, .. } => assert_eq!(topic, "decide"),
+        other => panic!("Expected ServiceTask, got {:?}", other),
+    }
+}
+
+#[test]
+fn reject_business_rule_task_without_topic() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <businessRuleTask id="br1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="br1" />
+                <sequenceFlow id="f2" sourceRef="br1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("businessRuleTask") && msg.contains("br1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn flatten_subprocess_keeps_send_inclusive_event_and_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <message id="Message_1" name="InnerMsg" />
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <sendTask id="sub_send" messageRef="Message_1" />
+                    <inclusiveGateway id="sub_or" />
+                    <eventBasedGateway id="sub_eb" />
+                    <intermediateCatchEvent id="sub_wait">
+                        <messageEventDefinition messageRef="Message_1" />
+                    </intermediateCatchEvent>
+                    <intermediateCatchEvent id="sub_timer">
+                        <timerEventDefinition>
+                            <timeDuration>PT1S</timeDuration>
+                        </timerEventDefinition>
+                    </intermediateCatchEvent>
+                    <endEvent id="sub_e1" />
+                    <endEvent id="sub_e2" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_send" />
+                    <sequenceFlow id="sf2" sourceRef="sub_send" targetRef="sub_or" />
+                    <sequenceFlow id="sf3" sourceRef="sub_or" targetRef="sub_eb" />
+                    <sequenceFlow id="sf4" sourceRef="sub_or" targetRef="sub_e2" />
+                    <sequenceFlow id="sf5" sourceRef="sub_eb" targetRef="sub_wait" />
+                    <sequenceFlow id="sf6" sourceRef="sub_eb" targetRef="sub_timer" />
+                    <sequenceFlow id="sf7" sourceRef="sub_wait" targetRef="sub_e1" />
+                    <sequenceFlow id="sf8" sourceRef="sub_timer" targetRef="sub_e1" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert!(
+        matches!(
+            def.nodes.get("sub_send").unwrap(),
+            BpmnElement::SendTask { message_name, .. } if message_name == "InnerMsg"
+        ),
+        "sendTask inside subProcess must be flattened"
+    );
+    assert!(matches!(
+        def.nodes.get("sub_or").unwrap(),
+        BpmnElement::InclusiveGateway
+    ));
+    assert!(matches!(
+        def.nodes.get("sub_eb").unwrap(),
+        BpmnElement::EventBasedGateway
+    ));
+    assert!(matches!(
+        def.nodes.get("sub_wait").unwrap(),
+        BpmnElement::MessageCatchEvent { .. }
+    ));
+}

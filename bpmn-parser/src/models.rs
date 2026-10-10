@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)] // presence-only: parser rejects MI without reading fields
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct BpmnMultiInstanceLoopCharacteristics {
     #[serde(rename = "@isSequential", default)]
@@ -12,8 +13,17 @@ pub(crate) struct BpmnMultiInstanceLoopCharacteristics {
     pub element_variable: Option<String>,
 }
 
+#[allow(dead_code)] // deserialized with MI XML; fields unused after MI reject
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct BpmnLoopCardinality {
+    #[serde(rename = "$value", default)]
+    pub value: Option<String>,
+}
+
+/// Text body of a BPMN expression (`timeDuration`, `timeDate`, `timeCycle`).
+/// Accepts both plain text and `xsi:type="bpmn:tFormalExpression"` wrappers.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnTextValue {
     #[serde(rename = "$value", default)]
     pub value: Option<String>,
 }
@@ -162,11 +172,11 @@ pub(crate) struct BpmnProcess {
     #[serde(rename = "sendTask", default)]
     pub send_tasks: Vec<BpmnSendTask>,
     #[serde(rename = "receiveTask", default)]
-    pub receive_tasks: Vec<BpmnGenericTask>,
+    pub receive_tasks: Vec<BpmnReceiveTask>,
     #[serde(rename = "manualTask", default)]
-    pub manual_tasks: Vec<BpmnGenericTask>,
+    pub manual_tasks: Vec<BpmnUserTask>,
     #[serde(rename = "businessRuleTask", default)]
-    pub business_rule_tasks: Vec<BpmnGenericTask>,
+    pub business_rule_tasks: Vec<BpmnServiceTask>,
     #[serde(rename = "callActivity", default)]
     pub call_activities: Vec<BpmnCallActivity>,
 
@@ -204,11 +214,11 @@ pub(crate) struct BpmnStartEvent {
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnTimerEventDefinition {
     #[serde(rename = "timeDuration")]
-    pub time_duration: Option<String>,
+    pub time_duration: Option<BpmnTextValue>,
     #[serde(rename = "timeDate")]
-    pub time_date: Option<String>,
+    pub time_date: Option<BpmnTextValue>,
     #[serde(rename = "timeCycle")]
-    pub time_cycle: Option<String>,
+    pub time_cycle: Option<BpmnTextValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -287,6 +297,25 @@ pub(crate) struct BpmnSendTask {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "@name", default)]
     pub name: Option<String>,
+    #[serde(rename = "@messageRef", default)]
+    pub message_ref: Option<String>,
+    #[serde(rename = "messageEventDefinition")]
+    pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "multiInstanceLoopCharacteristics")]
+    pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnReceiveTask {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "extensionElements")]
+    pub extension_elements: Option<BpmnExtensionElements>,
+    #[allow(dead_code)]
+    #[serde(rename = "@name", default)]
+    pub name: Option<String>,
+    #[serde(rename = "@messageRef", default)]
+    pub message_ref: Option<String>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
@@ -317,6 +346,9 @@ pub(crate) struct BpmnServiceTask {
     pub handler: Option<String>,
     #[serde(rename = "@data-topic")]
     pub topic: Option<String>,
+    /// Camunda Modeler writes `camunda:topic`; quick-xml strips the prefix to `topic`.
+    #[serde(rename = "@topic", alias = "@camunda:topic", default)]
+    pub camunda_topic: Option<String>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
 }
@@ -329,6 +361,11 @@ pub(crate) struct BpmnUserTask {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "@data-assignee")]
     pub assignee: Option<String>,
+    /// Camunda Modeler writes `camunda:assignee`; quick-xml strips the prefix to `assignee`.
+    #[serde(rename = "@assignee", alias = "@camunda:assignee", default)]
+    pub camunda_assignee: Option<String>,
+    #[serde(rename = "multiInstanceLoopCharacteristics")]
+    pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,6 +386,7 @@ pub(crate) struct BpmnSequenceFlow {
     pub condition_expression: Option<BpmnConditionExpression>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnGenericTask {
     #[serde(rename = "@id")]
@@ -471,11 +509,11 @@ pub(crate) struct BpmnSubProcess {
     #[serde(rename = "sendTask", default)]
     pub send_tasks: Vec<BpmnSendTask>,
     #[serde(rename = "receiveTask", default)]
-    pub receive_tasks: Vec<BpmnGenericTask>,
+    pub receive_tasks: Vec<BpmnReceiveTask>,
     #[serde(rename = "manualTask", default)]
-    pub manual_tasks: Vec<BpmnGenericTask>,
+    pub manual_tasks: Vec<BpmnUserTask>,
     #[serde(rename = "businessRuleTask", default)]
-    pub business_rule_tasks: Vec<BpmnGenericTask>,
+    pub business_rule_tasks: Vec<BpmnServiceTask>,
     #[serde(rename = "callActivity", default)]
     pub call_activities: Vec<BpmnCallActivity>,
 

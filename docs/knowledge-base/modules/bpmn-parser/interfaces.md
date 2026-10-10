@@ -56,11 +56,14 @@ The parser maps these XML tags to `BpmnElement` variants:
 | `endEvent > errorEventDefinition` | `ErrorEndEvent { error_code }` |
 | `endEvent > escalationEventDefinition` | `EscalationEndEvent { escalation_code }` |
 | `endEvent > compensationEventDefinition` | `CompensationEndEvent { activity_ref }` |
-| `userTask` | `UserTask(assignee)` from `data-assignee` (fallback `"unassigned"`; `camunda:assignee` is ignored) |
-| `serviceTask` | `ServiceTask { topic, multi_instance }` from `data-topic`, then `data-handler`, then node id (`camunda:topic` is ignored) |
-| `scriptTask` | `ScriptTask { script, multi_instance }`; empty body → `ServiceTask` |
-| `sendTask` | `SendTask { message_name, multi_instance }` |
-| `receiveTask` / `manualTask` / `businessRuleTask` / `task` | `ServiceTask` (topic = `name` or node id) |
+| `userTask` | `UserTask(assignee)` from `data-assignee`, then `camunda:assignee`, then `"unassigned"` |
+| `serviceTask` | `ServiceTask { topic, multi_instance }` from `data-topic`, then `data-handler`, then `camunda:topic`, then node id |
+| `scriptTask` | `ScriptTask { script, multi_instance }`; empty body → `InvalidDefinition` |
+| `sendTask` | `SendTask { message_name, multi_instance }` from nested `messageEventDefinition/@messageRef` or `@messageRef` |
+| `receiveTask` | `MessageCatchEvent` from `@messageRef`; missing ref → `InvalidDefinition` |
+| `manualTask` | `UserTask(assignee)` (same assignee fallbacks as userTask) |
+| `businessRuleTask` | `ServiceTask` if topic is set; otherwise `InvalidDefinition` (no DMN) |
+| `task` (generic) | `InvalidDefinition` |
 | `exclusiveGateway` | `ExclusiveGateway { default }` |
 | `parallelGateway` | `ParallelGateway` |
 | `inclusiveGateway` | `InclusiveGateway` |
@@ -68,7 +71,7 @@ The parser maps these XML tags to `BpmnElement` variants:
 | `complexGateway` | `ComplexGateway { join_condition, default }` |
 | `intermediateCatchEvent > timerEventDefinition` | `TimerCatchEvent(timer_def)` |
 | `intermediateCatchEvent > messageEventDefinition` | `MessageCatchEvent { message_name }` |
-| `intermediateCatchEvent` (no timer/message) | `ServiceTask { topic: "event_passthrough" }` |
+| `intermediateCatchEvent` (no timer/message) | `InvalidDefinition` |
 | `boundaryEvent > timerEventDefinition` | `BoundaryTimerEvent { attached_to, timer, cancel_activity }` |
 | `boundaryEvent > messageEventDefinition` | `BoundaryMessageEvent { attached_to, message_name, cancel_activity }` |
 | `boundaryEvent > errorEventDefinition` | `BoundaryErrorEvent { attached_to, error_code }` |

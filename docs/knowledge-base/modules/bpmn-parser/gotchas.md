@@ -23,27 +23,46 @@ Months/years are approximated to 30/365 days. This is NOT ISO 8601 compliant for
 
 The parser supports `camunda:executionListener` (with `camunda:` namespace prefix). If standard `bpmn:extensionElements` are used, the parser also extracts them. Both are mapped to `ExecutionListener` structs.
 
-Assignee and topic are **not** read from Camunda Modeler attributes:
+Assignee and topic are read from desktop `data-*` attributes first, then Camunda Modeler attributes:
 
 | BPMN / Camunda attribute | Parser field | Fallback |
 |--------------------------|--------------|----------|
-| `data-assignee` on `userTask` | `UserTask(assignee)` | `"unassigned"` |
-| `data-topic` on `serviceTask` | `ServiceTask.topic` | then `data-handler`, then node id |
-| `camunda:assignee` | ignored | `"unassigned"` |
-| `camunda:topic` | ignored | node id |
+| `data-assignee` on `userTask` | `UserTask(assignee)` | then `camunda:assignee`, then `"unassigned"` |
+| `camunda:assignee` | `UserTask(assignee)` | `"unassigned"` if no `data-assignee` |
+| `data-topic` on `serviceTask` | `ServiceTask.topic` | then `data-handler`, then `camunda:topic`, then node id |
+| `camunda:topic` | `ServiceTask.topic` | node id if no `data-*` |
 
-The desktop modeler writes `data-assignee` / `data-topic`. XML exported from Camunda Modeler typically uses `camunda:assignee` / `camunda:topic` and will deploy with those fallbacks.
+The desktop modeler writes both `data-assignee`/`data-topic` and `camunda:assignee`/`camunda:topic`. XML exported from Camunda Modeler deploys with the Camunda attributes. `quick-xml` strips the `camunda:` prefix on attributes, so the parser binds `camunda:assignee` as `@assignee` (with alias `@camunda:assignee`).
 
-### ⚠️ Silent task and event mapping
+### ⚠️ Multi-instance is rejected at parse time
 
-Unknown or empty activity types become `ServiceTask` and enter the fetch-and-lock queue:
+`multiInstanceLoopCharacteristics` is **not supported**. The runtime never emits `MultiInstanceFork`; mapping MI to `MultiInstanceDef` used to let diagrams run silently as single-instance.
 
-| XML | Becomes | Topic / notes |
-|-----|---------|----------------|
-| `receiveTask`, `manualTask`, `businessRuleTask`, generic `task` | `ServiceTask` | `name` or node id. No DMN for business-rule tasks. |
-| `scriptTask` with empty `<script>` and no `data-script` | `ServiceTask` | `name` or node id |
-| `intermediateCatchEvent` without timer or message definition | `ServiceTask` | topic `"event_passthrough"` |
-| Sub-process internal start events (flattening) | `ServiceTask` | topic `"noop"` |
+If the element is present on a task (`userTask`, `serviceTask`, `scriptTask`, `sendTask`, `receiveTask`, `manualTask`, `businessRuleTask`), parse fails with `EngineError::InvalidDefinition`:
+
+`Multi-instance is not supported (element '<id>')`
+
+Deploy must fail. Do not reintroduce a silent single-instance fallback.
+
+### ⚠️ Unsupported tasks are rejected, not queued
+
+Unknown or empty activity types used to become `ServiceTask` and enter the fetch-and-lock queue. They now fail parse with `InvalidDefinition`:
+
+| XML | Becomes |
+|-----|---------|
+| `receiveTask` with `messageRef` | `MessageCatchEvent` |
+| `receiveTask` without `messageRef` | error |
+| `manualTask` | `UserTask` (assignee from `data-assignee` / `camunda:assignee`) |
+| `businessRuleTask` with topic | `ServiceTask` (DMN is not supported) |
+| `businessRuleTask` without topic | error |
+| generic `task` | error — convert to a concrete type |
+| `scriptTask` with empty `<script>` and no `data-script` | error |
+| `intermediateCatchEvent` without timer or message | error |
+| Sub-process internal start events (flattening) | `ServiceTask` topic `"noop"` |
+
+`sendTask` reads nested `messageEventDefinition/@messageRef` and the `sendTask/@messageRef` attribute. Empty `<timerEventDefinition/>` is rejected (no longer `Duration(0)`). Timer fields accept `xsi:type` FormalExpression wrappers.
+
+Embedded sub-process flattening includes `sendTask`, `inclusiveGateway`, `eventBasedGateway`, and intermediate catch/throw events. Missing those used to yield `NoSuchNode` at runtime.
 
 `complexGateway` is a first-class `ComplexGateway { join_condition, default }` (`activationCondition` → `join_condition`). Compensation and escalation events (`compensateEventDefinition` / `escalationEventDefinition` on throw, end, and boundary) are first-class elements, not pass-through tasks.
 
@@ -51,9 +70,9 @@ Unknown or empty activity types become `ServiceTask` and enter the fetch-and-loc
 
 `parse_bpmn_xml` keeps a single process: the first with `isExecutable="true"`, otherwise `processes[0]`. Additional `<process>` elements in the same definitions file are dropped.
 
-### ⚠️ InclusiveGateway join is AND-style at runtime
+### ⚠️ InclusiveGateway has no join metadata in the model
 
-The parser maps `inclusiveGateway` to `InclusiveGateway` with no extra join metadata. Engine-core join uses the same `JoinBarrier` as `ParallelGateway`: when the gateway has two or more incoming flows, it waits until that many tokens have arrived. Split still takes every outgoing flow whose condition is true. After a partial split the join can stall, because tokens on untaken incoming flows never arrive.
+The parser maps `inclusiveGateway` to `InclusiveGateway` with no extra join metadata. Engine-core still infers the join partner at runtime (`find_downstream_join`) and sets `JoinBarrier.expected_count` to the number of paths actually taken at the matching split (including 1-of-N). Unstructured diagrams without a same-type downstream join still wait on structural `incoming_flow_count` and can stall.
 
 ### ⚠️ Invalid XML returns EngineError, never panics
 
