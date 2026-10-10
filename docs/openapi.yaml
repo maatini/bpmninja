@@ -11,7 +11,7 @@ info:
     `GET /api/ready` require `Authorization: Bearer <key>` or `X-API-Key: <key>`.
     Unset key means no authentication. XML/JSON bodies are capped at 10 MiB
     (`MAX_XML_BYTES`). `lockDuration` / `newDuration` are milliseconds.
-  version: 0.7.23
+  version: 0.7.24
   contact:
     name: bpmninja
   license:

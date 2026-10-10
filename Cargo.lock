@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-orchestrator"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "bpmn-parser"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "anyhow",
  "chrono",
@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "async-trait",
  "chrono",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "engine-server"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -1867,7 +1867,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "persistence-memory"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "chrono",
  "engine-core",
@@ -1877,7 +1877,7 @@ dependencies = [
 
 [[package]]
 name = "persistence-nats"
-version = "0.7.23"
+version = "0.7.24"
 dependencies = [
  "async-nats",
  "async-trait",
