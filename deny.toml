@@ -14,18 +14,10 @@ targets = [
 all-features = false
 
 [advisories]
-# Yanked: warn, weil der Lockfile in W5-CI nicht angefasst wird.
 yanked = "warn"
 unmaintained = "workspace"
 unsound = "workspace"
-# Bekannte Advisories bleiben deny — aktuelle Hits ignoriert, bis ein
-# Lockfile-Bump (außerhalb W5-CI) die Crates anhebt. Neue Advisories failen.
-ignore = [
-    { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch 0.9.18 via criterion/metrics-util; Lockfile-Bump außerhalb W5-CI" },
-    { id = "RUSTSEC-2026-0258", reason = "h2 0.4.13 via hyper/axum/reqwest; Lockfile-Bump außerhalb W5-CI" },
-    { id = "RUSTSEC-2026-0285", reason = "rustls 0.23.38 Handshake-Level; Lockfile-Bump außerhalb W5-CI" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.103.12 CRL-Parse; Lockfile-Bump außerhalb W5-CI" },
-]
+ignore = []
 
 [licenses]
 unused-allowed-license = "allow"
