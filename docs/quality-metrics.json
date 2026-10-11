@@ -1,15 +1,15 @@
 {
-  "updated_at": "2026-10-11T09:40:07.340603+00:00",
+  "updated_at": "2026-10-11T11:32:24.831196+00:00",
   "mutation": {
     "source": "core-mutation-tests",
-    "generated_at": "2026-10-10T11:13:08.609514+00:00",
+    "generated_at": "2026-10-11T11:32:06.765856+00:00",
     "status": "ok",
-    "mutation_score": 68.2,
-    "caught": 381,
-    "missed": 177,
+    "mutation_score": 68.9,
+    "caught": 406,
+    "missed": 182,
     "timeout": 1,
-    "unviable": 623,
-    "total_tested": 559,
+    "unviable": 659,
+    "total_tested": 589,
     "outcomes_path": "mutants.out/mutants.out/outcomes.json"
   },
   "fuzz": {
