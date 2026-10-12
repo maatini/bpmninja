@@ -220,13 +220,48 @@ Nebenbefund: `append_history_entry` wartet nicht auf den JetStream-Ack — Histo
 | C6 | Mesh-Readiness: Helm-Chart, Graceful Drain für Sidecars, mTLS über Istio/Linkerd (optional SPIFFE), OTel (F6), HPA über Prometheus-Metriken | Medium | Medium | Low | Health/Ready existieren bereits; es fehlen Deployment-Artefakte. |
 | C7 | Research: Scripts/Connectoren als WASM-Komponenten (wasmtime); `engine-core` für Edge (Spin/wasmCloud) | Low–Med | High | High | Erst nach 4a–4c; Tokio-Abhängigkeit im Kern ist das Hauptproblem. |
 
+#### Bewertung externer Architekturvorschläge (2026-10-12)
+
+Quelle: eingebrachte Recherche (Rust-BPMN-Landschaft, Kafka/Redpanda-Saga-Log, WS-BPEL, AOT-Kompilierung nach C/FFI, Zeebe). Bewertet gegen die Messwerte aus 4a.
+
+**Kernbefund aus den Messungen:** Gateway-Routing im Speicher kostet ~14 µs pro Instanz (XOR), ein NATS-Roundtrip ~200 µs, ein Script-Task ~0,6 ms. Die Engine ist durch I/O und Script-Setup begrenzt, **nicht** durch das Interpretieren des Graphen. Optimierungen am Graph-Interpreter (bis hin zu nativem Code) können deshalb nur Mikrosekunden auf einem Millisekunden-Pfad sparen.
+
+| Vorschlag | Bewertung | Entscheidung |
+|-----------|-----------|--------------|
+| Kafka/Redpanda als append-only Event-/Saga-Log (Key = Instanz-ID, idempotenter Producer, `acks=all`) + materialisierte Sicht | Passt zu F1/F3/N3; Partitionierung nach Instanz-ID garantiert Reihenfolge je Instanz | **Übernehmen** als Ausprägung von N3: History/Domain-Events → Kafka/Redpanda; operativer Zustand bleibt in NATS KV (bzw. Q1) |
+| Kafka als *alleiniges* System of Record mit Replay (volles Event Sourcing des Kerns) | Großer Umbau des Persistenzmodells (= S3) | **Später/optional** — nur wenn Audit-Replay gefordert ist |
+| Saga-Kompensation (LIFO) | BPMNinja hat Compensation-Events mit LIFO bereits (`CompensationThrow/End`, `BoundaryCompensationEvent`) | **Ergänzen** statt neu bauen → G1 |
+| Externe Read-DB (PostgreSQL / ScyllaDB) | NATS KV kann nicht abfragen; History-/Archiv-Suche filtert heute im Speicher | **Postgres-Adapter vorschlagen** (Q1); Scylla erst bei nachgewiesenem Bedarf |
+| WS-BPEL-2.0-Unterstützung | Machbar über das bestehende Flattening: `sequence` → Flows, `flow` → Parallel-Gateway, `if` → XOR, `while` → XOR-Schleife, `pick` → Event-Gateway, `invoke` → Service Task, `scope`/`compensationHandler` → Compensation | **Entscheidung offen** — nur bei konkretem Bedarf (Legacy-SOAP-Landschaft) → B1 |
+| AOT: BPMN/BPEL → C-Quelltext → `.so`/`.dll`, Ausführung per FFI mit Raw-Pointern und pthreads | Spart Mikrosekunden auf einem I/O-gebundenen Pfad. `unsafe`-Code im Prozess hebelt die Rhai-Sandbox und die Crash-Sicherheit aus; ein Plugin-Absturz reißt den Knoten mit. Braucht eine C-Toolchain zur Deploy-Zeit (serverless-feindlich, plattformabhängige Artefakte). Die Beispiele enthalten Speicherlecks (`mem::forget`) und Datenrennen (parallele Threads mutieren denselben Kontext) | **Abgelehnt.** Stattdessen: vorkompilierte Scripts/Conditions (P6/P7), kompilierter In-Memory-Ausführungsplan (E2), WASM-Komponenten für schnellen *sandboxed* Fremdcode (C7), In-Process-Task-Handler in sicherem Rust (E1) |
+| Rayon-Pool für CPU-lastige Tasks | Nur relevant, wenn Tasks im Prozess laufen | Mit E1 umsetzen |
+| Camunda-7-External-Task-Worker / Camunda-8 (Zeebe) | Eine Camunda-7-kompatible REST-Fassade lässt vorhandene Camunda-7-Worker unverändert laufen | **Übernehmen** als K1; Zeebe-Bridge (K2) nur bei Bedarf |
+| Model-Checking (Ideen aus `rust_bpmn_analyzer`: Deadlocks, Livelocks, Safeness) | Unstrukturierte Inclusive-Joins können heute zur Laufzeit hängen (siehe engine-core Gotchas) | **Übernehmen** als Deploy-Validierung V1 |
+| Deterministisches Replay (Idee aus `bpm-engine`) | Teil von F3/S3 | Mit F3 |
+
+Neue Aufgaben aus der Bewertung:
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| E1 | In-Process-Task-Handler: `register_task_handler(topic, Arc<dyn TaskHandler>)` | High | Medium | Low | Service Tasks laufen direkt im Engine-Prozess ohne Fetch-and-Lock-Roundtrip — der sichere Weg zu „nativer“ Geschwindigkeit für eingebettete Nutzung. CPU-lastige Handler auf eigenem Pool (`spawn_blocking`/Rayon). |
+| E2 | Kompilierter Ausführungsplan beim Deploy (Knoten/Flows als Index-Arrays statt String-HashMap-Lookups pro Schritt) | Medium | High | Medium | Erst nach P6/P2 messen, ob der Interpreter überhaupt noch relevant ist. |
+| V1 | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
+| K1 | Camunda-7-kompatible REST-Fassade (`/engine-rest/external-task/fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`) | High | Medium | Low | Migrationspfad: bestehende Camunda-7-Worker funktionieren ohne Codeänderung. |
+| K2 | Zeebe-/Camunda-8-Bridge | Low | High | Medium | Nur bei konkretem Bedarf. |
+| G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige | Medium | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
+| B1 | WS-BPEL-2.0-Frontend (Parser → `ProcessDefinition`) | offen | High | Medium | Nur bei Bedarf; Abbildung siehe Tabelle oben. |
+| Q1 | `persistence-postgres` (operativer Zustand + Abfragen/Read-Model) | Medium | High | Medium | Echte Abfragen für History/Archiv statt In-Memory-Filter. |
+
+Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktive Instanzen, Schritte/s), Bedarf an WS-BPEL, Request/Response- vs. choreografierte Microservices, Postgres als zusätzliches Backend.
+
 #### Empfohlene Reihenfolge
 
 1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ 2026-10-12 → P2, P6, P7 → P8–P10
-2. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
-3. **4c**: N1 → N3 → N2, N4–N6
-4. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8
-5. **4e**: C1 → C4 → C2 → C3, C5, C6 → C7
+2. **Aus der Bewertung** (unabhängig, hoher Nutzen): V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler); B1/K2/Q1 nach Entscheidung
+3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
+4. **4c**: N1 → N3 → N2, N4–N6
+5. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8
+6. **4e**: C1 → C4 → C2 → C3, C5, C6 → C7
 
 ---
 

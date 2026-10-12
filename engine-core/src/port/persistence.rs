@@ -163,6 +163,20 @@ pub trait WorkflowPersistence: Send + Sync {
 
     /// Append a new history entry to the instance history log.
     async fn append_history_entry(&self, entry: &crate::history::HistoryEntry) -> EngineResult<()>;
+    /// Append several history entries in order (one engine batch).
+    ///
+    /// Default: one `append_history_entry` call per entry. Backends that can
+    /// pipeline writes should override it. Retries may resend entries that were
+    /// already stored, so implementations should deduplicate by `HistoryEntry::id`.
+    async fn append_history_entries(
+        &self,
+        entries: &[crate::history::HistoryEntry],
+    ) -> EngineResult<()> {
+        for entry in entries {
+            self.append_history_entry(entry).await?;
+        }
+        Ok(())
+    }
     /// Retrieve all history entries for a specific instance, ordered by time.
     async fn query_history(
         &self,

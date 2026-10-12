@@ -116,7 +116,10 @@ impl WorkflowEngine {
         }
     }
 
-    pub(crate) async fn record_history_event_from_snapshot(
+    /// Builds the history entry for one executor step (diff against the
+    /// pre-step snapshot). `None` without persistence or when a plain token
+    /// move changed nothing. The caller buffers it and flushes per batch.
+    pub(crate) async fn build_history_entry_from_snapshot(
         &self,
         instance_id: Uuid,
         event_type: crate::history::HistoryEventType,
@@ -124,8 +127,8 @@ impl WorkflowEngine {
         actor_type: crate::history::ActorType,
         actor_id: Option<String>,
         old_snapshot: Option<&crate::history::DiffSnapshot>,
-    ) {
-        if let Some(p) = &self.persistence {
+    ) -> Option<crate::history::HistoryEntry> {
+        if self.persistence.is_some() {
             let inst_arc = self.instances.get(&instance_id).await;
 
             let diff = match (old_snapshot, &inst_arc) {
@@ -145,7 +148,7 @@ impl WorkflowEngine {
             if diff.is_empty()
                 && matches!(event_type, crate::history::HistoryEventType::TokenAdvanced)
             {
-                return;
+                return None;
             }
 
             let mut entry = crate::history::HistoryEntry::new(
@@ -174,12 +177,55 @@ impl WorkflowEngine {
                 }
             }
 
-            inline_retry!(
-                self,
-                p.append_history_entry(&entry),
-                format!("record_history_event_from_snapshot({})", instance_id),
-                PersistJob::AppendHistoryEntry(Box::new(entry))
-            );
+            return Some(entry);
+        }
+        None
+    }
+
+    /// Writes the history entries buffered during one `run_instance_batch` in a
+    /// single backend call (inline retries as everywhere else). On final failure
+    /// every entry is queued for background retry; retries are idempotent
+    /// because backends deduplicate by entry id.
+    pub(crate) async fn flush_history(
+        &self,
+        instance_id: Uuid,
+        entries: Vec<crate::history::HistoryEntry>,
+    ) {
+        let Some(p) = &self.persistence else {
+            return;
+        };
+        if entries.is_empty() {
+            return;
+        }
+        let desc = format!(
+            "append_history_entries({instance_id}, {} entries)",
+            entries.len()
+        );
+        let mut last_err = None;
+        for attempt in 0..=INLINE_RETRIES {
+            match p.append_history_entries(&entries).await {
+                Ok(()) => return,
+                Err(e) if attempt < INLINE_RETRIES => {
+                    let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
+                    tracing::warn!(
+                        "{} retry {}/{}: {} — backoff {}ms",
+                        desc,
+                        attempt + 1,
+                        INLINE_RETRIES,
+                        e,
+                        delay
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                    last_err = Some(e);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if let Some(e) = last_err {
+            self.log_persistence_error(&desc, &e);
+            for entry in entries {
+                self.enqueue_retry(PersistJob::AppendHistoryEntry(Box::new(entry)));
+            }
         }
     }
 

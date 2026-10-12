@@ -441,21 +441,45 @@ impl WorkflowPersistence for NatsPersistence {
         &self,
         entry: &engine_core::history::HistoryEntry,
     ) -> EngineResult<()> {
-        let subject = format!("history.instance.{}", entry.instance_id);
-        let payload = serde_json::to_vec(entry).map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to serialize history entry: {}", e))
-        })?;
-
-        self.js
-            .publish(subject, payload.into())
+        self.append_history_entries(std::slice::from_ref(entry))
             .await
-            .map_err(|e| {
+    }
+
+    /// Publishes all entries first, then awaits every JetStream ack: one
+    /// round trip for the batch instead of one per entry. `Nats-Msg-Id` =
+    /// entry id lets JetStream drop duplicates when a failed batch is retried.
+    async fn append_history_entries(
+        &self,
+        entries: &[engine_core::history::HistoryEntry],
+    ) -> EngineResult<()> {
+        let mut acks = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let subject = format!("history.instance.{}", entry.instance_id);
+            let payload = serde_json::to_vec(entry).map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to serialize history entry: {}", e))
+            })?;
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", entry.id.to_string().as_str());
+            let ack = self
+                .js
+                .publish_with_headers(subject, headers, payload.into())
+                .await
+                .map_err(|e| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to publish history entry to JetStream: {}",
+                        e
+                    ))
+                })?;
+            acks.push(ack);
+        }
+        for ack in acks {
+            ack.await.map_err(|e| {
                 EngineError::PersistenceError(format!(
-                    "Failed to publish history entry to JetStream: {}",
+                    "History entry not acknowledged by JetStream: {}",
                     e
                 ))
             })?;
-
+        }
         Ok(())
     }
 

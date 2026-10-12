@@ -26,6 +26,25 @@ impl WorkflowEngine {
         instance_id: Uuid,
         initial_token: Token,
     ) -> EngineResult<()> {
+        // History of this batch is buffered and written in one call — also when
+        // the batch fails, so no recorded step is lost.
+        let mut history = Vec::new();
+        let driven = self
+            .drive_instance_batch(instance_id, initial_token, &mut history)
+            .await;
+        self.flush_history(instance_id, history).await;
+        driven?;
+
+        self.finish_instance_batch(instance_id).await
+    }
+
+    /// Runs tokens until the queue is empty; collects history entries.
+    async fn drive_instance_batch(
+        &self,
+        instance_id: Uuid,
+        initial_token: Token,
+        history: &mut Vec<crate::history::HistoryEntry>,
+    ) -> EngineResult<()> {
         let mut queue = VecDeque::new();
         queue.push_back(initial_token);
         let mut step_count: u32 = 0;
@@ -64,12 +83,15 @@ impl WorkflowEngine {
                 )));
             }
 
-            let old_snapshot = if let Some(lk) = self.instances.get(&instance_id).await {
-                Some(crate::history::DiffSnapshot::from_instance(
-                    &*lk.read().await,
-                ))
-            } else {
-                None
+            // The pre-step snapshot only feeds history, which needs persistence.
+            let old_snapshot = match &self.persistence {
+                Some(_) => match self.instances.get(&instance_id).await {
+                    Some(lk) => Some(crate::history::DiffSnapshot::from_instance(
+                        &*lk.read().await,
+                    )),
+                    None => None,
+                },
+                None => None,
             };
             let current_gateway_id = token.current_node.clone();
 
@@ -142,15 +164,19 @@ impl WorkflowEngine {
                 ),
             };
 
-            self.record_history_event_from_snapshot(
-                instance_id,
-                event_type,
-                &description,
-                crate::history::ActorType::Engine,
-                None,
-                old_snapshot.as_ref(),
-            )
-            .await;
+            if let Some(entry) = self
+                .build_history_entry_from_snapshot(
+                    instance_id,
+                    event_type,
+                    &description,
+                    crate::history::ActorType::Engine,
+                    None,
+                    old_snapshot.as_ref(),
+                )
+                .await
+            {
+                history.push(entry);
+            }
 
             let token_id = token.id;
             self.handle_next_action(
@@ -163,6 +189,11 @@ impl WorkflowEngine {
             .await?;
         } // end while
 
+        Ok(())
+    }
+
+    /// Persists the instance after a batch and handles completion.
+    async fn finish_instance_batch(&self, instance_id: Uuid) -> EngineResult<()> {
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
 
