@@ -32,6 +32,10 @@ If NATS is unreachable, `engine-server` behavior depends on **`REQUIRE_NATS`**:
 
 `/api/ready` returns **503** when `require_nats` is set but no persistence is attached, or when the backend storage check fails.
 
+### ⚠️ Bucket handles are cached
+
+`NatsPersistence` caches KV / object-store handles (`HandleCache`, one `OnceCell` per bucket created in `connect`). Use `self.kv("bucket")` / `self.object_store("bucket")` in `trait_impl.rs` — calling `self.js.get_key_value(..)` per operation adds a JetStream API round trip. Unknown bucket names (monitoring) fall through to an uncached lookup. A failed lookup is not cached.
+
 ### ⚠️ KV bucket names cannot change after creation
 
 NATS bucket names are hardcoded in `client.rs` / `trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. Current KV buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `messages`, `tokens`, `history_instances`. Object stores: `bpmn_xml`, `instance_files`. See [dependencies.md](dependencies.md) for the full map.

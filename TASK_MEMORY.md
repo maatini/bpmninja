@@ -36,4 +36,7 @@ Vermeidbare Wartezeiten und NATS-Roundtrips aus dem Hot Path entfernen — gemes
 Auffällig: Script-Tasks ~0.6 ms/Stück (Engine-Neubau + spawn_blocking) → P6 lohnt sich.
 
 ## Letzter Stand
-P0 erledigt (Benches + Baseline). Beginn P1.
+P0, P1, P3, P4 erledigt (Tests grün; P3/P4-Tests gegen Alt-Variante verifiziert: schlagen dort fehl).
+Nebenbefund (nicht geändert): `fail_service_task`/`retry_incident` halten DashMap-`get_mut` über `.await`.
+Retry-Worker bewusst unverändert (sein Read-Lock über save ordnet ihn gegen persist_instance).
+Beginn P5.

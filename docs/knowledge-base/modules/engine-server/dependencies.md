@@ -36,7 +36,7 @@
 | `REQUIRE_NATS` | `true` | main.rs: fail-fast if NATS unavailable; ready fails without persistence. Opt out with `false` |
 | `MAX_UPLOAD_BYTES` | `5242880` (5 MiB) | files.rs: multipart upload size limit |
 | `PORT` | `8081` | main.rs: HTTP listen port |
-| `TIMER_INTERVAL_MS` | `1000` | main.rs: timer scheduler interval |
+| `TIMER_INTERVAL_MS` | `1000` | main.rs: timer scheduler max idle wait (timers fire at due time) |
 | `RUST_LOG` | `info` | main.rs: log level filter |
 | `LOG_FORMAT` | `text` | main.rs: `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | main.rs: log file path, `off` to disable |

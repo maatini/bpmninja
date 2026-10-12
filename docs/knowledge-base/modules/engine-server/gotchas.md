@@ -55,6 +55,12 @@ Oldest entries are dropped when the buffer exceeds 5,000. NATS persistence (`ENG
 
 The timer background task is spawned via `tokio::spawn`. If the main event loop panics, timer processing stops. The task is gracefully shut down on `Ctrl+C` via a `watch::channel`.
 
+It is event-driven (`engine.wait_for_timer_work`): `TIMER_INTERVAL_MS` is the **maximum idle wait**, not a polling period — timers fire at their due time.
+
+### ⚠️ fetchAndLock long polling is notification-driven
+
+`server/tasks.rs` delegates to `engine.fetch_and_lock_service_tasks_long_poll`. Waiting workers are woken as soon as a task becomes fetchable; the 500 ms `LONG_POLL_FALLBACK_TICK` only covers expired locks. `asyncResponseTimeout` is capped at 30 s.
+
 ### ⚠️ Prometheus handle is optional
 
 The `/metrics` endpoint is only mounted if `prometheus_handle` is `Some`. No handle = no `/metrics` route at all (not even a 404).

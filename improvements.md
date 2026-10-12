@@ -147,12 +147,12 @@ Befunde aus dem Code (Stand v0.7.24):
 
 | # | Maßnahme | Impact | Effort | Risiko | Befund / Warum |
 |---|----------|--------|--------|--------|----------------|
-| P0 | Messbasis: Criterion-Benches erweitern (Gateways, Scripts, Timer, mit NATS) + HTTP-Lasttest (z. B. `oha`/k6) + Flamegraph; Regressions-Gate in CI | High | Low | None | `engine_bench.rs` misst nur lineare Prozesse ohne Persistenz. Ohne Baseline sind „schneller“-Ziele nicht überprüfbar. |
-| P1 | NATS-Bucket-Handles beim Connect cachen | High | Low | Low | `trait_impl.rs` ruft vor **jeder** Operation `js.get_key_value(..)` / `get_object_store(..)` auf (34 Stellen) — ein zusätzlicher JetStream-API-Roundtrip pro Schreib-/Lesezugriff. |
+| P0 (✅ teilweise) | Messbasis: Criterion-Benches erweitern (Gateways, Scripts, Timer, mit NATS) + HTTP-Lasttest (z. B. `oha`/k6) + Flamegraph; Regressions-Gate in CI — **erledigt:** Benches (`engine_bench.rs`, `persistence-nats/benches/nats_bench.rs`); **offen:** HTTP-Lasttest, Flamegraph, CI-Gate | High | Low | None | `engine_bench.rs` misst nur lineare Prozesse ohne Persistenz. Ohne Baseline sind „schneller“-Ziele nicht überprüfbar. |
+| P1 ✅ | NATS-Bucket-Handles beim Connect cachen | High | Low | Low | `trait_impl.rs` rief vor **jeder** Operation `js.get_key_value(..)` / `get_object_store(..)` auf (24 Stellen + `list_kv_entries`) — ein zusätzlicher JetStream-API-Roundtrip pro Schreib-/Lesezugriff. |
 | P2 | History pro Batch statt pro Schritt schreiben (gesammelt am Ende von `run_instance_batch` bzw. asynchron über bounded Channel) | High | Medium | Medium | `run_instance_batch` klont pro Schritt alle Variablen (`DiffSnapshot::from_instance`) und wartet pro Schritt auf `append_history_entry` (JetStream-Publish inkl. Inline-Retry). |
-| P3 | `persist_instance`: einmal serialisieren, Lock vor dem Netzwerk-Await freigeben | High | Low | Low | Serialisiert zweimal (Größenprüfung + Save) und hält den Instanz-Write-Lock während `save_instance` inkl. Retry-Backoff. |
-| P4 | Long-Polling auf `tokio::sync::Notify` pro Topic umstellen | High | Low | Low | `fetchAndLock` pollt in einer 500-ms-Sleep-Schleife (`server/tasks.rs`) → bis zu 500 ms Latenz pro Service-Task-Übergabe. |
-| P5 | Timer-Scheduler ereignisgesteuert: bis zum nächsten Fälligkeitszeitpunkt aus `TimerDueIndex` schlafen, bei neuem Timer per `Notify` wecken | Medium | Low | Low | Fester 1-s-Takt (`TIMER_INTERVAL_MS`) → bis zu 1 s Verspätung, CPU-Wakeups im Leerlauf. |
+| P3 ✅ | `persist_instance`: Lock vor dem Netzwerk-Await freigeben (Snapshot + gestreifte `PersistLocks`); Größenprüfung ohne Puffer. Doppelte Serialisierung bleibt bis P8 (braucht Trait-Änderung) | High | Low | Low | Serialisiert zweimal (Größenprüfung + Save) und hält den Instanz-Write-Lock während `save_instance` inkl. Retry-Backoff. |
+| P4 ✅ | Long-Polling auf `tokio::sync::Notify` umstellen (umgesetzt: ein globaler Notify; pro Topic = Folgeschritt bei vielen Workern) | High | Low | Low | `fetchAndLock` pollt in einer 500-ms-Sleep-Schleife (`server/tasks.rs`) → bis zu 500 ms Latenz pro Service-Task-Übergabe. |
+| P5 ✅ | Timer-Scheduler ereignisgesteuert: bis zum nächsten Fälligkeitszeitpunkt aus `TimerDueIndex` schlafen, bei neuem Timer per `Notify` wecken | Medium | Low | Low | Fester 1-s-Takt (`TIMER_INTERVAL_MS`) → bis zu 1 s Verspätung, CPU-Wakeups im Leerlauf. |
 | P6 | Rhai: eine `Engine` wiederverwenden (Feature `sync` ist aktiv) + AST pro (Definition, Knoten) beim Deploy vorkompilieren | Medium | Medium | Low | `execute_script_safe` baut pro Aufruf eine neue `rhai::Engine` und kompiliert das Script jedes Mal neu. |
 | P7 | Bedingungen beim Deploy vorparsen | Low–Med | Low | Low | `condition.rs` parst den Ausdruck bei jeder Auswertung. |
 | P8 | Kompaktes Persistenzformat (z. B. `postcard`/`rmp-serde`) hinter Feature-Flag; `audit_log` aus dem Instanz-Dokument lösen; Delta- statt Voll-Dokument-Writes | Medium | High | Medium | Jeder Save schreibt die komplette `ProcessInstance` als JSON (bis 900 KiB Limit). |
@@ -208,7 +208,7 @@ Befunde aus dem Code (Stand v0.7.24):
 
 #### Empfohlene Reihenfolge
 
-1. **4a**: P0 → P1, P3, P4, P5 (Quick Wins) → P2, P6, P7 → P8–P10
+1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ 2026-10-12 → P2, P6, P7 → P8–P10
 2. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
 3. **4c**: N1 → N3 → N2, N4–N6
 4. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8

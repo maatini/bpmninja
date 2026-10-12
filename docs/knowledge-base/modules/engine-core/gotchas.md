@@ -24,7 +24,9 @@ let snapshot = {
 self.persistence.save_instance(&snapshot).await; // SAFE
 ```
 
-> **Known exception:** `persist_instance` (`engine/persistence_ops.rs`) currently awaits `save_instance` — including inline-retry backoff — while holding the instance write lock. It is not a deadlock, but it serializes all access to that instance for the duration of the NATS round trip.
+`persist_instance` (`engine/persistence_ops.rs`) follows this: it snapshots the instance under a short write lock and saves the clone afterwards. Saves of the same instance are serialized by striped `PersistLocks` (256 stripes, held across the save) so an older snapshot can never overwrite a newer one.
+
+> **Known exceptions:** the retry worker (`retry_queue.rs`, `PersistJob::SaveInstance`) holds the instance *read* lock across `save_instance` — this is intentional, it orders the retry against `persist_instance`'s snapshot. `fail_service_task` and `retry_incident` hold a `pending_service_tasks` DashMap guard across `.await` (not yet fixed).
 
 ### ⚠️ Tokens live in ONE place
 
@@ -107,6 +109,14 @@ Parallel Call-Activities keep `InstanceState::ParallelExecution`. Resume looks u
 ### ⚠️ Service-task topic index is secondary
 
 `pending_service_tasks` is SSOT. `service_task_topic_index` maps topic → task ids for `fetch_and_lock`. Insert into the map first, then the index. Orphan index entries are dropped at fetch. Incidents (`retries <= 0`) stay in the index but are not locked.
+
+### ⚠️ Long-poll wake-ups need `notify_service_tasks_available()`
+
+`fetch_and_lock_service_tasks_long_poll` waits on `service_task_notify`. Anything that makes a task fetchable must call `notify_service_tasks_available()` **after** releasing DashMap guards: `insert_pending_service_task` does it, as do the unlock in `fail_service_task` and `retry_incident`. Lock expiry is time-based and not signalled — callers pass a fallback tick (server: 500 ms). A new unlock path without a notify still works, but only at fallback-tick latency.
+
+### ⚠️ Timer scheduler is event-driven
+
+`wait_for_timer_work(max_idle)` sleeps until `TimerDueIndex::next_due_after(now)`, a timer insert (`timer_notify`, fired by `insert_pending_timer`), or `max_idle`. Overdue timers are excluded from the wait computation on purpose: a timer that stays overdue without firing (suspended instance) would otherwise cause a busy loop. Always insert timers through `insert_pending_timer` / `restore_timer`, or the scheduler is not woken.
 
 ### ⚠️ Timer due-index is secondary
 

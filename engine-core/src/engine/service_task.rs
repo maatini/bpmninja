@@ -41,6 +41,44 @@ impl WorkflowEngine {
     /// Returns up to `max_tasks` unlocked tasks whose topic appears in
     /// `topics`. Each returned task is locked for `lock_duration` seconds
     /// and assigned to `worker_id`.
+    /// Long-polling variant of [`Self::fetch_and_lock_service_tasks`].
+    ///
+    /// Returns as soon as at least one task is locked, or empty once `timeout`
+    /// elapses. Waiters are woken immediately when tasks become fetchable;
+    /// `fallback_tick` only covers lock expiries, which are time-based and
+    /// not signalled.
+    pub async fn fetch_and_lock_service_tasks_long_poll(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[String],
+        lock_duration: i64,
+        timeout: std::time::Duration,
+        fallback_tick: std::time::Duration,
+    ) -> Vec<PendingServiceTask> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            // Register interest before fetching so no notification is lost.
+            let notified = self.service_tasks_changed();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let tasks = self
+                .fetch_and_lock_service_tasks(worker_id, max_tasks, topics, lock_duration)
+                .await;
+            let now = tokio::time::Instant::now();
+            if !tasks.is_empty() || now >= deadline {
+                return tasks;
+            }
+
+            let wait = (deadline - now).min(fallback_tick);
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = tokio::time::sleep(wait) => {}
+            }
+        }
+    }
+
     pub async fn fetch_and_lock_service_tasks(
         &self,
         worker_id: &str,
@@ -314,6 +352,8 @@ impl WorkflowEngine {
             }
             instance_id
         };
+        // Lock released: the task is fetchable again (unless it became an incident).
+        self.notify_service_tasks_available();
 
         self.record_history_event(
             instance_id,
@@ -375,6 +415,8 @@ impl WorkflowEngine {
 
             instance_id
         };
+        // Incident reset: the task is fetchable again.
+        self.notify_service_tasks_available();
 
         self.record_history_event(
             instance_id,

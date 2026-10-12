@@ -169,7 +169,9 @@ pub fn bench_gateways_and_scripts(c: &mut Criterion) {
 
     for branches in [4usize, 16] {
         let engine = WorkflowEngine::new();
-        let def_key = rt.block_on(engine.deploy_definition(parallel_definition(branches))).0;
+        let def_key = rt
+            .block_on(engine.deploy_definition(parallel_definition(branches)))
+            .0;
         group.bench_with_input(
             BenchmarkId::new("Parallel fork/join (script branches)", branches),
             &branches,
@@ -181,7 +183,9 @@ pub fn bench_gateways_and_scripts(c: &mut Criterion) {
     }
 
     let engine = WorkflowEngine::new();
-    let def_key = rt.block_on(engine.deploy_definition(script_chain_definition(10))).0;
+    let def_key = rt
+        .block_on(engine.deploy_definition(script_chain_definition(10)))
+        .0;
     group.bench_function("Script chain (10 tasks)", |b| {
         b.to_async(&rt).iter(|| async {
             let vars = std::collections::HashMap::from([("counter".to_string(), json!(0))]);
@@ -207,5 +211,9 @@ pub fn bench_gateways_and_scripts(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_execution_throughput, bench_gateways_and_scripts);
+criterion_group!(
+    benches,
+    bench_execution_throughput,
+    bench_gateways_and_scripts
+);
 criterion_main!(benches);

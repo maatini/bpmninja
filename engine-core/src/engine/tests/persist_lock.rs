@@ -3,7 +3,7 @@
 
 use super::super::*;
 use crate::adapter::InMemoryPersistence;
-use crate::domain::{EngineError, EngineResult, ProcessDefinitionBuilder, Token};
+use crate::domain::{EngineResult, ProcessDefinitionBuilder, Token};
 use crate::history::HistoryEntry;
 use crate::port::{
     BucketEntry, BucketEntryDetail, CompletedInstanceQuery, HistoryQuery, StorageInfo,
@@ -238,8 +238,7 @@ async fn concurrent_saves_persist_the_latest_state() {
         .unwrap()
         .into_iter()
         .find(|i| i.id == id)
-        .ok_or_else(|| EngineError::NoSuchInstance(id))
-        .unwrap();
+        .expect("instance was persisted");
     assert_eq!(live.variables.get("x"), Some(&json!(2)));
     assert_eq!(persisted.variables.get("x"), live.variables.get("x"));
     engine.shutdown().await;

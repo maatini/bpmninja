@@ -36,7 +36,10 @@ async fn sample_instance() -> ProcessInstance {
         ("amount".to_string(), json!(4711)),
         ("items".to_string(), json!(["a", "b", "c"])),
     ]);
-    let id = engine.start_instance_with_variables(key, vars).await.unwrap();
+    let id = engine
+        .start_instance_with_variables(key, vars)
+        .await
+        .unwrap();
     engine.get_instance_details(id).await.unwrap()
 }
 

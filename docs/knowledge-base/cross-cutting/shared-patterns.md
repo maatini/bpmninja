@@ -84,7 +84,7 @@ Reusable patterns and conventions that span multiple modules.
 | `REQUIRE_NATS` | `true` | Fail-fast without NATS; readiness requires persistence |
 | `MAX_UPLOAD_BYTES` | `5242880` | Multipart file upload limit (bytes) |
 | `PORT` | `8081` | HTTP listen port |
-| `TIMER_INTERVAL_MS` | `1000` | Timer check interval |
+| `TIMER_INTERVAL_MS` | `1000` | Timer scheduler max idle wait |
 | `RUST_LOG` | `info` | Log level filter |
 | `LOG_FORMAT` | `text` | `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | Log file path (or `off`) |

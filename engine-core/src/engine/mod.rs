@@ -49,9 +49,13 @@ pub struct WorkflowEngine {
     pub(crate) pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
     /// Secondary index topic → task IDs. SSOT remains `pending_service_tasks`.
     pub(crate) service_task_topic_index: topic_index::TopicIndex,
+    /// Wakes long-polling `fetchAndLock` callers when tasks become fetchable.
+    pub(crate) service_task_notify: tokio::sync::Notify,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
+    /// Wakes the timer scheduler when a timer is added.
+    pub(crate) timer_notify: tokio::sync::Notify,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
@@ -84,8 +88,10 @@ impl WorkflowEngine {
             pending_user_tasks: Arc::new(DashMap::new()),
             pending_service_tasks: Arc::new(DashMap::new()),
             service_task_topic_index: DashMap::new(),
+            service_task_notify: tokio::sync::Notify::new(),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
+            timer_notify: tokio::sync::Notify::new(),
             pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),

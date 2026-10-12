@@ -42,6 +42,17 @@ impl TimerDueIndex {
         self.lock().range(..=end).map(|((_, id), _)| *id).collect()
     }
 
+    /// Earliest `expires_at` strictly after `now`. Overdue timers are excluded:
+    /// they are handled by the next `process_timers` round, and timers that stay
+    /// overdue without firing (suspended instances) must not cause a busy loop.
+    pub(crate) fn next_due_after(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let after = (now, Uuid::from_u128(u128::MAX));
+        self.lock()
+            .range((std::ops::Bound::Excluded(after), std::ops::Bound::Unbounded))
+            .next()
+            .map(|((due, _), _)| *due)
+    }
+
     #[cfg(test)]
     pub(crate) fn contains(&self, id: Uuid, expires_at: DateTime<Utc>) -> bool {
         self.lock().contains_key(&(expires_at, id))
@@ -59,6 +70,32 @@ impl WorkflowEngine {
         let expires_at = timer.expires_at;
         self.pending_timers.insert(id, timer);
         self.timer_due_index.insert(id, expires_at);
+        // The new timer may be due earlier than what the scheduler sleeps on.
+        self.timer_notify.notify_waiters();
+    }
+
+    /// Waits until the earliest pending timer is due, a timer is added, or
+    /// `max_idle` passes — whichever comes first. Call `process_timers` after it.
+    ///
+    /// Replaces fixed-interval polling: timers fire on time instead of up to one
+    /// interval late, and an idle engine wakes only every `max_idle`.
+    pub async fn wait_for_timer_work(&self, max_idle: std::time::Duration) {
+        // Register before reading the index so an insert in between is not lost.
+        let notified = self.timer_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        let now = Utc::now();
+        let wait = self
+            .timer_due_index
+            .next_due_after(now)
+            .and_then(|due| (due - now).to_std().ok())
+            .map_or(max_idle, |until| until.min(max_idle));
+
+        tokio::select! {
+            _ = &mut notified => {}
+            _ = tokio::time::sleep(wait) => {}
+        }
     }
 
     pub(crate) fn remove_pending_timer(&self, timer_id: &Uuid) -> Option<(Uuid, PendingTimer)> {

@@ -35,7 +35,10 @@ impl HandleCache {
     fn new() -> Self {
         Self {
             kv: KV_BUCKETS.iter().map(|b| (*b, OnceCell::new())).collect(),
-            object_stores: OBJECT_STORES.iter().map(|b| (*b, OnceCell::new())).collect(),
+            object_stores: OBJECT_STORES
+                .iter()
+                .map(|b| (*b, OnceCell::new()))
+                .collect(),
         }
     }
 }

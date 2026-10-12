@@ -60,6 +60,9 @@ pub(crate) struct FetchAndLockRequest {
     pub async_response_timeout: Option<u64>,
 }
 
+/// Re-check interval while long-polling, for locks that expire by time.
+const LONG_POLL_FALLBACK_TICK: tokio::time::Duration = tokio::time::Duration::from_millis(500);
+
 pub(crate) async fn fetch_and_lock_service_tasks(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<FetchAndLockRequest>,
@@ -76,35 +79,22 @@ pub(crate) async fn fetch_and_lock_service_tasks(
         .map(|t| t.lock_duration)
         .unwrap_or(30_000);
     let lock_duration = lock_duration_ms_to_secs(lock_duration_ms);
-    let timeout_ms = payload.async_response_timeout.unwrap_or(0);
+    let timeout_ms = payload.async_response_timeout.unwrap_or(0).min(30_000);
 
-    let poll_interval = tokio::time::Duration::from_millis(500);
-    let max_timeout = tokio::time::Duration::from_millis(timeout_ms.min(30_000));
-
-    let start = tokio::time::Instant::now();
-    loop {
-        let tasks = {
-            let engine = &state.engine;
-            engine
-                .fetch_and_lock_service_tasks(
-                    &payload.worker_id,
-                    payload.max_tasks,
-                    &topics,
-                    lock_duration,
-                )
-                .await
-        };
-
-        if !tasks.is_empty() || timeout_ms == 0 {
-            return Json(tasks);
-        }
-
-        if start.elapsed() >= max_timeout {
-            return Json(vec![]);
-        }
-
-        tokio::time::sleep(poll_interval).await;
-    }
+    // Woken immediately when tasks become fetchable; the tick only covers
+    // lock expiries (time-based, not signalled).
+    let tasks = state
+        .engine
+        .fetch_and_lock_service_tasks_long_poll(
+            &payload.worker_id,
+            payload.max_tasks,
+            &topics,
+            lock_duration,
+            tokio::time::Duration::from_millis(timeout_ms),
+            LONG_POLL_FALLBACK_TICK,
+        )
+        .await;
+    Json(tasks)
 }
 
 #[derive(Serialize, Deserialize)]
