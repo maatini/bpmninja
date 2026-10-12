@@ -43,8 +43,8 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
-- **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
-- **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
+- **Event-driven timer scheduler** — sleeps until the next timer is due (or a new timer is added) instead of polling; `TIMER_INTERVAL_MS` caps the idle wait
+- **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling; waiting workers are woken the moment a task becomes available
 - **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout)
 - **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported
 - **Suspend / resume** — pause and continue instances (timers and tasks blocked)
@@ -272,10 +272,18 @@ The server runs at `http://localhost:8081`.
 | `REQUIRE_NATS` | `true` | Fail-closed: refuse to start without NATS (no silent in-memory fallback). Set `false` for ephemeral local runs; `/api/ready` requires persistence when enabled |
 | `MAX_UPLOAD_BYTES` | `5242880` | Max multipart file upload size (bytes) for instance files |
 | `PORT` | `8081` | HTTP server port |
-| `TIMER_INTERVAL_MS` | `1000` | Timer scheduler polling interval (ms) |
+| `TIMER_INTERVAL_MS` | `1000` | Maximum idle wait of the timer scheduler (ms). Timers fire at their due time; this only bounds how long an idle scheduler sleeps |
 | `RUST_LOG` | `info` | Log level filter (e.g. `debug`, `warn`, `engine_server=trace`) |
 | `LOG_FORMAT` | `text` | Log output format: `text` (human-readable) or `json` (structured) |
 | `LOG_FILE` | `engine_logs.jsonl` | Path for the file-based log fallback; set to `off` to disable file persistence |
+| `BIND_ADDR` (alias `BIND_ADDRESS`) | `0.0.0.0` | Listen address (combined with `PORT`) |
+| `BPMNINJA_API_KEY` | unset | Optional shared API key. When set, every route except `/api/health` and `/api/ready` requires `Authorization: Bearer <key>` or `X-API-Key: <key>` |
+| `CORS_ORIGINS` | localhost:1420 + Tauri origins | Comma-separated CORS allowlist; `*` allows any origin (dev only) |
+| `MAX_XML_BYTES` | `10485760` | Max JSON / BPMN XML request body (bytes) |
+| `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded background retry queue for failed persistence writes |
+| `RHAI_MAX_OPERATIONS` | `50000` | Script operation budget |
+| `RHAI_MAX_MEMORY_BYTES` | `2097152` | Script memory budget (derives string/array/map size caps) |
+| `RHAI_TIMEOUT_MS` | `1000` | Script wall-clock timeout |
 
 
 ---
@@ -386,8 +394,11 @@ All errors follow a uniform JSON format:
 | HTTP code | Meaning |
 |-----------|---------|
 | `400` | Bad request (bad XML, invalid UUID, missing fields) |
+| `401` | Missing or wrong API key (only when `BPMNINJA_API_KEY` is set) |
 | `404` | Resource not found (definition, instance, task, node) |
 | `409` | Conflict (task not pending, already locked, already completed) |
+| `413` | Upload larger than `MAX_UPLOAD_BYTES` |
+| `422` | Migration would orphan a token (node missing in target definition) |
 | `500` | Internal server error |
 
 ---
@@ -468,7 +479,7 @@ process.on("SIGINT", async () => {
 cd bpmn-ninja-external-task-client
 npm install
 npm run lint     # tsc --noEmit
-npm run test     # vitest run  (68 tests)
+npm run test     # vitest run  (76 tests)
 npm run example  # tsx example/simple-worker.ts
 ```
 
@@ -563,7 +574,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 ## Test Metrics
 
-> Snapshot from 2026-04-17. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
+> Snapshot from 2026-10-12 (counted test functions). The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
 - Letztes Update (UTC): `2026-10-11T11:32:24.831196+00:00`
@@ -573,40 +584,49 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 ### Workspace Overview
 
-| Package | Unit | E2E | Total |
+| Package | Unit | E2E / Integration | Total |
 |---------|------|-----|-------|
-| **engine-core** | 217 | 5 | 222 |
-| **bpmn-parser** | 32 | — | 32 |
+| **engine-core** | 254 | 5 | 259 |
+| **bpmn-parser** | 46 | — | 46 |
 | **persistence-nats** | 4 | — | 4 |
-| **engine-server** | 1 | ~56 | ~57 |
-| **desktop-tauri** | — | 48 | 48 |
-| **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Total** | **~322** | **~109** | **~431** ✅ |
+| **engine-server** | 15 | 70 | 85 |
+| **desktop-tauri** | — | 52 | 52 |
+| **bpmn-ninja-external-task-client** | 76 | — | 76 |
+| **Total** | **395** | **127** | **522** ✅ |
 
-> Authoritative: `cargo test --workspace` (last full run green after production-hardening work).
+> Authoritative: `cargo test --workspace` (NATS integration tests need a JetStream server; they skip locally without one and fail in CI).
 
-### engine-core Breakdown (~222 tests)
+### engine-core Breakdown (259 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `engine::unit_tests` | 80 | State machine, gateways, user/service tasks, boundary events, call activities, EventBasedGateway, timers, messages, lock ownership, message correlation |
-| `engine::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
-| `domain::tests` | 28 | ProcessDefinition builder, token serialization, validation, timer definitions |
-| `history::tests` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
-| `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
-| `runtime::instance::tests` | 11 | Audit log limits, file variables, file references |
-| `adapter::in_memory::tests` | 8 | Storage info, history query filters, completed instance archival, pagination, date range, business key, state filter |
-| `retry_queue::tests` | 4 | Display, shutdown, skip missing entities, full-queue drop |
-| `boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
-| Integration tests | 5 | BPMN compliance, complex gateways |
+| `engine::tests::instance_admin` | 33 | Suspend/resume, delete, variables, token move, admin operations |
+| `engine::tests::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, infinite loops |
+| `engine::tests::timers_messages` | 22 | Timers, messages, boundary events, correlation races |
+| `engine::tests::gateways` | 18 | XOR / AND / OR / event-based / complex gateways |
+| `engine::tests::call_errors` | 17 | Call activities, BPMN errors, escalation, compensation |
+| `engine::tests::start_tasks` | 12 | Start variants, user and service tasks |
+| `engine::tests::topic_index` | 8 | Topic index for fetch-and-lock, long-poll wake-up |
+| `engine::tests::migration` | 6 | Instance migration and node mapping |
+| `engine::tests::scripting` | 6 | Rhai scripts and listeners, sandbox limits |
+| `engine::tests::timer_due_index` | 5 | Timer due index, event-driven scheduler |
+| other `engine::tests::*` | 18 | Inclusive joins, XOR merge, parallel call activities, pagination, incidents, recurring timers, boundary restore, persistence locking |
+| `history` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
+| `domain` (`tests.rs` + `timer.rs`) | 36 | ProcessDefinition builder, token serialization, validation, ISO 8601 timers |
+| `runtime::instance` | 11 | Audit log limits, file variables, file references |
+| `condition` | 5 | Condition evaluation, numeric comparisons, truthy checks |
+| `retry_queue` | 4 | Display, shutdown, skip missing entities, full-queue drop |
+| `boundary` | 3 | No-events, timer and message boundary setup |
+| `adapter::in_memory` | 2 | Storage info, history query filters |
+| Integration tests (`tests/`) | 5 | BPMN compliance, complex gateways |
 
-### bpmn-parser Tests (32 tests)
+### bpmn-parser Tests (46 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
 | Basic parsing | 6 | Simple BPMN, conditional flows, XOR gateway, timer start, interleaved output, execution listeners |
 | Gateways | 4 | Parallel, inclusive, event-based, complex |
-| Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, BoundaryTimer |
+| Events | 4 | MessageStart, MessageCatch, ErrorEnd, TimerCatch |
 | Boundary events | 2 | BoundaryTimer, BoundaryError |
 | ISO 8601 timers | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
 | Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
@@ -614,17 +634,23 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | Advanced | 3 | TerminateEndEvent, CompensationEvents, EscalationEvents |
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
+| Task mapping & attributes | 7 | Camunda assignee/topic, `data-*` precedence, sendTask `messageRef`, receiveTask, manualTask, businessRuleTask with topic, timer FormalExpression |
+| Rejected definitions | 6 | Empty timer, multi-instance, generic task, empty script, catch without trigger, businessRuleTask without topic |
+| Process selection & flattening | 2 | Executable-process selection, sub-process flattening of send/inclusive/event nodes |
 
-### engine-server E2E Tests (55 tests, 15 files)
+### engine-server E2E Tests (70 tests, 18 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
+| `e2e_auth_cors.rs` | 10 | API-key auth (Bearer / `X-API-Key`), public health/ready, CORS allowlist |
 | `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, nested processes |
 | `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
+| `e2e_deploy_persist.rs` | 2 | Deploy fails closed when the XML save fails |
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
 | `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
 | `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
 | `e2e_history.rs` | 4 | History generation, querying, completed instances listing, business key filter, pagination |
+| `e2e_instances_page.rs` | 2 | Paginated instance listing (`limit`/`offset`, `X-Total-Count`) |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration to a new definition version (compatible, renamed nodes, incompatible, dry-run) |
 | `e2e_monitoring.rs` | 5 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
@@ -635,40 +661,49 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `e2e_variables.rs` | 1 | Variable updates mid-execution |
 | `e2e_versioning.rs` | 3 | Version increment, start-latest, instance isolation |
 
-### desktop-tauri E2E Tests (48 tests, 1 file)
+### desktop-tauri E2E Tests (52 tests, 1 file)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
-| `app.spec.ts` | 48 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
+| `app.spec.ts` | 52 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
 
-### bpmn-ninja-external-task-client Tests (68 tests, 3 files)
+### bpmn-ninja-external-task-client Tests (76 tests, 3 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
 | `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
-| `TaskService.test.ts` | 20 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
-| `ExternalTaskClient.test.ts` | 35 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
+| `TaskService.test.ts` | 25 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
+| `ExternalTaskClient.test.ts` | 38 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
 
 Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
 
 ### Code Statistics
 
+> Measured 2026-10-12 with `wc -l`; Rust figures include inline test modules.
+
 | Area | Files | LoC |
 |------|-------|-----|
-| engine-core (lib) | 49 | ~11,500 |
-| engine-core (tests) | 3 | ~6,800 |
-| bpmn-parser | 4 | ~2,500 |
-| persistence-nats | 5 | 1,282 |
-| persistence-memory | 2 | ~450 |
-| engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 15 | ~2,700 |
-| desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
-| desktop-tauri (Rust backend) | 11 | ~900 |
-| external-task-client (lib) | 11 | 1,997 |
-| external-task-client (tests) | 6 | 1,285 |
-| fuzz targets | 9 | 704 |
-| **Rust workspace** | **~112** | **~27,950** |
-| **Project total** | **~177** | **~38,750** |
+| engine-core | 74 | ~19,100 |
+| bpmn-parser | 4 | ~3,040 |
+| persistence-nats | 5 | ~1,440 |
+| persistence-memory | 1 | ~120 |
+| engine-server (lib + E2E tests) | 37 | ~6,740 |
+| agent-orchestrator | 1 | ~130 |
+| desktop-tauri (TypeScript) | 63 | ~9,250 |
+| desktop-tauri (Rust backend) | — | ~1,130 |
+| external-task-client (lib) | — | ~1,070 |
+| fuzz targets | 9 | ~710 |
+
+### Benchmarks
+
+Criterion benchmarks cover the engine hot path and the NATS adapter:
+
+```bash
+cargo bench -p engine-core --bench engine_bench      # linear flows, parallel fork/join, script chains, XOR routing
+cargo bench -p persistence-nats --bench nats_bench   # save_instance, save_token, history append, engine run with NATS
+```
+
+`nats_bench` needs a JetStream-enabled NATS (`NATS_URL`, default `nats://localhost:4222`) and skips otherwise. Use `-- --save-baseline <name>` / `-- --baseline <name>` to compare runs.
 
 ### Mutation Score
 CI workflow **Core Mutation Tests** runs `cargo-mutants` on `engine-core` and publishes metrics via `docs/quality-metrics.json` / the Mutation Score badge. The metrics parser reads `outcomes.json` (`summary: CaughtMutant|MissedMutant|…`), nested summary counters, and `caught.txt`/`missed.txt` fallbacks. Empty mutation artifacts no longer overwrite a previous successful score with 0.0%. A historical full run (2026-04-13) scored **72.4%**; the auto-updated QUALITY_METRICS block above reflects the latest successful CI merge. Artifacts are retained 30 days.
@@ -714,6 +749,9 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | NATS JetStream log persistence (`ENGINE_LOGS` stream + file fallback) | ✅ Implemented |
 | Token move (modify process instance) | ✅ Implemented |
 | Multi-node cluster (NATS-based token locking) | 🔲 Planned |
+| Optional API-key auth + CORS allowlist | ✅ Implemented |
+| Event-driven timer scheduler + instant long-poll wake-up | ✅ Implemented |
+| Performance & cloud-native roadmap (NATS/Kafka/Redpanda, Dapr, serverless, mesh) — see [improvements.md](improvements.md) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
 
 ---
