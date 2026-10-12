@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
 <div align="center">
-<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/655daaa6-a13a-4ad0-850a-e7097471ed69" />
+<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/4dfe659e-f762-4d44-b932-d3b49ab83e7d" />
 </div>
 
 **A BPMN 2.0 workflow engine written in Rust** — token-based execution, NATS persistence, REST API and desktop UI.
