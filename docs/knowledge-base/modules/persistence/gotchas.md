@@ -34,7 +34,7 @@ If NATS is unreachable, `engine-server` behavior depends on **`REQUIRE_NATS`**:
 
 ### ⚠️ KV bucket names cannot change after creation
 
-NATS KV bucket names are hardcoded in `trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `message_catches`, `tokens`, `bpmn_xml`, `history`.
+NATS bucket names are hardcoded in `client.rs` / `trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. Current KV buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `messages`, `tokens`, `history_instances`. Object stores: `bpmn_xml`, `instance_files`. See [dependencies.md](dependencies.md) for the full map.
 
 ### ⚠️ Token keys include instance ID for scoping
 
@@ -46,7 +46,7 @@ Token KV keys use `token-{instance_id}-{token_id}` format. The `load_tokens` met
 
 ### ⚠️ Completed instances are archived, not deleted
 
-When an instance reaches `Completed` state, it's saved to the `history_completed_instances` bucket via `save_completed_instance`, then deleted from the active `instances` bucket. The archived copy has a different storage location.
+When an instance reaches `Completed` state, it's saved to the `history_instances` KV bucket via `save_completed_instance`, then deleted from the active `instances` bucket. The archived copy has a different storage location.
 
 ### ⚠️ Object Store file naming convention
 
@@ -54,7 +54,7 @@ File object keys follow: `file:{instance_id}-{var_name}-{filename}`. The separat
 
 ### ⚠️ History entries are append-only
 
-History is stored as a KV bucket (not a stream, despite the `WORKFLOW_EVENTS` stream name). Each entry is a separate KV key. Querying history scans all entries for the instance.
+History entries are published to the JetStream stream `WORKFLOW_HISTORY` (subject `history.instance.{instance_id}`). `query_history` creates an ephemeral pull consumer filtered on that subject and replays all entries for the instance — cost grows with history length.
 
 ### ⚠️ Transient NATS failures use a bounded retry queue
 
@@ -71,7 +71,7 @@ Integration tests in `persistence-nats/src/tests.rs` cover token, history, defin
 
 ### ⚠️ BPMN XML is stored separately from definitions
 
-`ProcessDefinition` (JSON) and the original BPMN XML (string) are stored in separate KV buckets (`definitions` vs `bpmn_xml`). The XML is needed for the desktop UI's bpmn-js modeler and for redeployment. They share the same UUID key.
+`ProcessDefinition` (JSON, KV `definitions`) and the original BPMN XML (object store `bpmn_xml`) are stored separately. The XML is needed for the desktop UI's bpmn-js modeler and for redeployment. They share the same UUID key.
 
 Startup restore is **JSON-first**: `list_definitions()` deploys stored `ProcessDefinition` objects without re-parsing XML. XML is loaded into `deployed_xml` for the modeler (match by definition UUID). Missing XML is a warning; the definition is still restored. XML-parse fallback runs only when the definitions KV is empty or `list_definitions` returns a persistence error. RestoreStats count actually deployed definitions, never a silent zero that hides a KV failure.
 

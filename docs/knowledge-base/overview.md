@@ -15,7 +15,7 @@ BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible 
 | Web Framework | Axum 0.8 | REST API, SSE |
 | XML Parser | quick-xml 0.39 + serde | BPMN 2.0 parsing |
 | Scripting | Rhai 1.25 | Execution listeners, script tasks; sandboxed via ops/memory budget/timeout |
-| Persistence | NATS JetStream (async-nats 0.49) | KV stores, Object Store, Streams |
+| Persistence | NATS JetStream (async-nats 0.50) | KV stores, Object Store, Streams |
 | Concurrency | DashMap 6.x | Lock-free wait-state queues |
 | Desktop | Tauri 2.10, React 19, bpmn-js 18 | Tailwind CSS 4 |
 | External Client | TypeScript, ESM, Node ≥ 18 | Vitest tests |
@@ -38,7 +38,6 @@ bpmninja/                          # Cargo workspace root (6 crates)
 ├── api-spec/                      # TypeSpec → OpenAPI
 ├── fuzz/                          # cargo-fuzz workspace (separate)
 ├── docs/                          # Architecture docs, OpenAPI, knowledge-base
-└── test-results/                  # CI test artifacts
 ```
 
 ## Architecture Summary
@@ -100,15 +99,15 @@ flowchart LR
 
 | Crate | Unit | E2E | Total |
 |-------|------|-----|-------|
-| engine-core | 217 | 5 | 222 |
-| bpmn-parser | 32 | — | 32 |
+| engine-core | ~247 | 5 | ~252 |
+| bpmn-parser | ~46 | — | ~46 |
 | persistence-nats | 4 | — | 4 |
-| engine-server | 1 | ~56 | ~57 |
-| desktop-tauri | — | 48 | 48 |
-| external-task-client | 68 | — | 68 |
-| **Total** | **~322** | **~109** | **~431** |
+| engine-server | ~15 | ~70 | ~85 |
+| desktop-tauri | — | 52 | 52 |
+| external-task-client | 76 | — | 76 |
+| **Total** | **~388** | **~127** | **~515** |
 
-> Counts approximate; `cargo test --workspace` is the source of truth.
+> Counts approximate (test attributes counted on 2026-10-12); `cargo test --workspace` is the source of truth.
 
 ## Production Hardening (env)
 

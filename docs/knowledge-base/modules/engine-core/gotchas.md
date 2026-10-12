@@ -9,20 +9,22 @@
 let inst = instance_arc.write().await;
 self.some_async_persistence_call().await; // DEADLOCK!
 
-// ✅ CORRECT
-let persistence_call;
+// ❌ ALSO WRONG — the guard is still alive while awaiting
 {
-    let mut inst = instance_arc.write().await;
-    persistence_call = self.persistence.save_instance(&inst).await; // ALSO WRONG — still inside lock
+    let inst = instance_arc.write().await;
+    self.persistence.save_instance(&inst).await;
 }
-// MUST drop lock first, THEN await:
-let persistence_call;
-{
+
+// ✅ CORRECT — mutate (or clone what you need) inside the scope, await after it
+let snapshot = {
     let mut inst = instance_arc.write().await;
     inst.state = InstanceState::Running;
-} // Lock dropped here
-self.persistence.save_instance(&updated_inst).await; // SAFE
+    inst.clone()
+}; // Lock dropped here
+self.persistence.save_instance(&snapshot).await; // SAFE
 ```
+
+> **Known exception:** `persist_instance` (`engine/persistence_ops.rs`) currently awaits `save_instance` — including inline-retry backoff — while holding the instance write lock. It is not a deadlock, but it serializes all access to that instance for the duration of the NATS round trip.
 
 ### ⚠️ Tokens live in ONE place
 

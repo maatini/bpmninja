@@ -1,63 +1,27 @@
-# TASK_MEMORY — E2E-Test-Fixes
+# TASK_MEMORY — Doku-Sync + Performance/Cloud-native-Vorschläge
 
-## Aufgabe
-11 fehlschlagende Playwright-E2E-Tests in `desktop-tauri/tests/e2e/app.spec.ts` reparieren
-sowie React-Warnungen (fehlende `key`-Props, fehlende `DialogDescription`) beheben.
+## Ziel
+Doku-Drift gegenüber dem Code beseitigen, erledigte Backlog-Punkte schließen und einen
+Aufgaben-Backlog für Performance, Messaging (NATS/Redpanda/Kafka), Dapr und Serverless/Mesh vorschlagen.
 
-## Identifizierte Fehlergruppen
+## Graph
+- God Nodes: `deploy_definition()`, `start_instance()`, `parse_bpmn_xml()`, `NatsPersistence`
+- graphify/devbox lokal nicht installiert → Graph nicht neu gebaut (Report vom 2026-10-10)
 
-### Gruppe 1 — ConditionPropertiesProvider-Bug (1 Test-Fix + 1 Komponenten-Fix)
+## Checkliste
+- [ ] CLAUDE.md: Multi-Instance-Aussage, Dependency-Versionen, Workspace-Liste
+- [ ] KB architecture/dependencies.md: Versionen, Mermaid-Knoten `ET`
+- [ ] KB architecture/data-flows.md: doppelte „7“, verwaistes Mermaid-Fragment
+- [ ] KB cross-cutting/tags.md: Duplikat, fehlende Tags
+- [ ] KB cross-cutting/shared-patterns.md: InstanceStore ist DashMap
+- [ ] KB overview.md + index.md-Dateien: Versionen, Testzahlen
+- [ ] KB engine-core/gotchas.md: Lock-Beispiel
+- [ ] KB engine-server/interfaces.md: offener Codeblock
+- [ ] KB persistence/*: echte Bucket-Namen + Streams
+- [ ] docs/architecture.md: Modulbaum, InstanceStore, Buckets, Statistik
+- [ ] improvements.md: M1/Q4/M4/M5/M6 als erledigt, Phase 4 (Vorschläge) ergänzen
+- [ ] implementation_plan.md löschen (erledigt)
+- [ ] Abschluss: TASK_MEMORY.md löschen
 
-**Problem A (Komponenten-Bug in `ConditionPropertiesProvider.ts`):**  
-`CustomConditionGroup` zeigt die Condition-Gruppe auch für Default-Flows (`Flow_Default`),
-obwohl laut Camunda-7-Kompatibilität Default-Flows keine Condition haben sollen.
-
-**Fix:** `if (isDefaultFlow(element)) return null;` in `CustomConditionGroup` nach dem SequenceFlow-Check einfügen.
-
-**Problem B (Test-Locator-Bug in `app.spec.ts`):**  
-Tests 4+5 (`expression mode`, `script mode`) klicken den Condition-Header per `conditionHeader.click()`.
-Da `shouldOpen: true` gesetzt ist, startet die Gruppe OFFEN. Ein Klick SCHLIESST sie →
-Entries danach nicht auffindbar.
-
-**Fix:** `conditionHeader.click()` + `waitForTimeout` aus Tests 4+5 entfernen.
-
-### Gruppe 2 — Suspend/Resume-Tests (2 Failures)
-
-**Problem:** Tests navigieren zum Instances-Tab und suchen `table tbody tr`.  
-`InstancesPage.tsx` rendert aber `div.instance-list-item`-Karten, keine Tabelle.
-
-**Fix in `app.spec.ts`:** `page.locator('table tbody tr').first()` → `page.locator('.instance-list-item').first()`
-
-### Gruppe 3 — Migration-Dialog-Tests (3 Failures)
-
-**Problem:** Gleicher Selektor-Fehler: `table tbody tr` statt `.instance-list-item`.
-
-**Fix in `app.spec.ts`:** Gleiche Änderung wie Gruppe 2.
-
-### Gruppe 4 — DataViewer/Base64-Tests (2 Failures)
-
-**Problem:** Unklar — Logik in `DataViewer.tsx` und `MonitoringPage.tsx` ist korrekt.  
-Mögliche Ursache: `DialogContent` ohne `DialogDescription` (Radix-UI-Warnung),
-oder Timing beim Dialog-Wechsel (Bucket-Entries-Dialog → Entry-Detail-Dialog).
-
-**Zu prüfen:** Tests tatsächlich ausführen und Fehlerausgabe auswerten.
-
-## Zusätzliche React-Warnungen
-
-### A — Fehlende `key`-Props in OverviewPage
-Skeleton-Cards in `OverviewPage.tsx` nutzen `i` als Key — ggf. bereits vorhanden, nochmals prüfen.
-
-### B — Fehlende `DialogDescription` / `aria-describedby`
-Mehrere `<DialogContent>`-Komponenten ohne `<DialogDescription>`:
-- `MonitoringPage.tsx`: Bucket-Entries-Dialog und Entry-Detail-Dialog
-- `MigrationDialog.tsx`: Haupt-Dialog
-- `InstanceDetailDialog.tsx`: Haupt-Dialog
-
-**Fix:** `<DialogDescription className="sr-only">...</DialogDescription>` hinzufügen.
-
-## Betroffene Dateien
-1. `desktop-tauri/src/features/modeler/properties/ConditionPropertiesProvider.ts`
-2. `desktop-tauri/tests/e2e/app.spec.ts`
-3. `desktop-tauri/src/features/monitoring/MonitoringPage.tsx`
-4. `desktop-tauri/src/features/instances/MigrationDialog.tsx`
-5. `desktop-tauri/src/features/instances/InstanceDetailDialog.tsx`
+## Letzter Stand
+Analyse abgeschlossen, Edits beginnen.

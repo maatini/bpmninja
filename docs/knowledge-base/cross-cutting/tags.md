@@ -4,7 +4,10 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 
 | Tag | Meaning |
 |-----|---------|
+| `@tag:api-auth` | Optional shared API key (`BPMNINJA_API_KEY`, Bearer or `X-API-Key`) |
+| `@tag:api-spec` | OpenAPI 3.0 spec (TypeSpec source in `api-spec/`, published `docs/openapi.yaml`) |
 | `@tag:bpmn-domain-model` | BPMN domain types: BpmnElement, ProcessDefinition, Token |
+| `@tag:bpmn-error-throwing` | Worker-side `bpmnError(code)` routed to a `BoundaryErrorEvent` |
 | `@tag:bpmn-xml-parsing` | Parsing BPMN 2.0 XML → typed structs |
 | `@tag:bpmn-js-modeler` | bpmn-js integration in the desktop app |
 | `@tag:camunda-compatible` | Camunda-style fetch-and-lock service task API |
@@ -14,7 +17,6 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:element-mapping` | XML element → BpmnElement variant mapping |
 | `@tag:engine-events` | Broadcast engine state changes via SSE |
 | `@tag:engine-state` | Runtime state: definitions, instances, wait-state queues |
-| `@tag:fault-tolerant-retry` | Two-stage persistence retry (inline + background worker) |
 | `@tag:gateway-routing` | XOR/AND/OR/EventBased/Complex gateway evaluation |
 | `@tag:graceful-shutdown` | Clean shutdown with queue flush |
 | `@tag:health-endpoints` | /api/health (liveness) and /api/ready (readiness) |
@@ -30,6 +32,7 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:iso8601-timer-parsing` | Parsing Duration, AbsoluteDate, CronCycle, RepeatingInterval |
 | `@tag:listener-extraction` | Extracting execution listeners from Camunda extension elements |
 | `@tag:lock-extension` | Automatic lock extension for long-running service tasks |
+| `@tag:lock-duration-ms` | HTTP `lockDuration`/`newDuration` are ms; converted to seconds at the server boundary |
 | `@tag:lock-free-concurrency` | DashMap for wait-state queues; per-instance RwLock |
 | `@tag:log-buffer` | Rolling 5000-entry in-memory log buffer |
 | `@tag:long-polling` | fetchAndLock with asyncResponseTimeout |
@@ -39,7 +42,7 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:namespace-handling` | Camunda namespace prefix on BPMN extension elements |
 | `@tag:persistence-port` | WorkflowPersistence trait in engine-core/src/port |
 | `@tag:prometheus-metrics` | /metrics endpoint with counters and gauges |
-| `@tag:request-size-limit` | 5 MB body limit for BPMN XML deployment |
+| `@tag:request-size-limit` | 10 MiB JSON/XML body limit (`MAX_XML_BYTES`); multipart files via `MAX_UPLOAD_BYTES` (5 MiB) |
 | `@tag:rest-api` | Complete REST API surface: 46 endpoints |
 | `@tag:retry-backoff` | Exponential backoff (1s → 2s → 4s → ..., max 30s) |
 | `@tag:retry-queue` | Background persistence retry worker |

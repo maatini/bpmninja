@@ -32,8 +32,8 @@ Reusable patterns and conventions that span multiple modules.
 **Used by:** `InstanceStore` in engine-core
 
 **How to follow:**
-- `InstanceStore` has one `RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>`
-- The outer lock protects the map (insert/remove)
+- `InstanceStore` wraps `Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>`
+- The DashMap shards the map (insert/remove/lookup without a global lock)
 - The inner lock protects the individual instance
 - Two concurrent operations on different instances don't block each other
 

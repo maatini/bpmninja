@@ -68,8 +68,8 @@
 | `definition_ops.rs` | `src/engine/definition_ops.rs` | Definition CRUD, list, versioning, deploy |
 | `instance_ops.rs` | `src/engine/instance_ops.rs` | Instance CRUD, suspend, resume, migrate, move token |
 | `persistence_ops.rs` | `src/engine/persistence_ops.rs` | Save/restore orchestrator (dispatches PersistJobs) |
-| `registry.rs` | `src/engine/registry.rs` | `DefinitionRegistry` — immutable definition store (`Arc<RwLock<HashMap>>`) |
-| `instance_store.rs` | `src/engine/instance_store.rs` | `InstanceStore` — per-instance locking (`Arc<RwLock<HashMap>>`) |
+| `registry.rs` | `src/engine/registry.rs` | `DefinitionRegistry` — immutable definition store (`Arc<DashMap<Uuid, Arc<ProcessDefinition>>>`) |
+| `instance_store.rs` | `src/engine/instance_store.rs` | `InstanceStore` — `Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>` (per-instance locking) |
 | `retry_queue.rs` | `src/engine/retry_queue.rs` | Bounded retry: `PersistJob`, `create_retry_queue_with_capacity`, background worker, drop metrics |
 | `events.rs` | `src/engine/events.rs` | `EngineEvent` enum + broadcast sender |
 | `history/mod.rs` | `src/history/mod.rs` | `HistoryEntry`, `HistoryDiff`, `VariableDiff`, `calculate_diff`, `calculate_diff_from_snapshot` |

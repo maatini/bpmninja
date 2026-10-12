@@ -158,6 +158,7 @@ sequenceDiagram
         SC->>SC: restore_service_tasks(engine)
         SC->>SC: restore_timers(engine)
         SC->>SC: restore_message_catches(engine)
+        SC-->>Main: RestoreStats (counts)
     else Connect fail + REQUIRE_NATS=true
         Main-->>Main: exit (fail-fast)
     else Connect fail + REQUIRE_NATS=false
@@ -184,10 +185,8 @@ sequenceDiagram
         API-->>LB: 200 Ready
     end
 ```
-    SC-->>Main: RestoreStats (counts)
-```
 
-## 7. Persistence Retry (Fault-Tolerant)
+## 8. Persistence Retry (Fault-Tolerant)
 
 ```mermaid
 sequenceDiagram

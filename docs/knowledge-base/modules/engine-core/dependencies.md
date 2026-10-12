@@ -78,5 +78,5 @@ dashmap = "6"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-rhai = "1.19"
+rhai = { version = "1.25.1", features = ["serde", "sync"] }
 ```

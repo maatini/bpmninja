@@ -29,9 +29,9 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | `lib.rs` | 8 | Public exports: `parse_bpmn_xml` |
-| `parser.rs` | ~1,800 | Main parsing logic: element dispatch, timer parsing, sub-process flattening, listener extraction |
+| `parser.rs` | ~1,080 | Main parsing logic: element dispatch, timer parsing, sub-process flattening, listener extraction |
 | `models.rs` | ~150 | Intermediate XML deserialization structs (`BpmnDefinitions`, `BpmnExtensionElements`, etc.) |
-| `tests.rs` | ~900 | 32 tests covering all element types, gateways, timers, listeners, namespaces |
+| `tests.rs` | ~1,410 | ~46 tests covering all element types, gateways, timers, listeners, namespaces |
 
 ## What It Does NOT Own
 

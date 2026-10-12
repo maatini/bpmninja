@@ -29,7 +29,7 @@ graph TD
     ES --> PN
     ES --> PM
     AO --> EC
-    ET --> ES
+    ETC -->|HTTP REST| ES
     DT -->|HTTP REST| ES
 
     style EC fill:#4a9eff,stroke:#333,color:#fff
@@ -47,7 +47,7 @@ graph TD
 | **bpmn-parser** | engine-core | quick-xml, serde, chrono | Uses engine-core's `ProcessDefinition`, `BpmnElement`, `TimerDefinition`, `EngineError` |
 | **persistence-nats** | engine-core | async-nats, serde_json, futures | Implements `WorkflowPersistence` trait from engine-core |
 | **persistence-memory** | engine-core | serde_json, async-trait | Implements `WorkflowPersistence` trait from engine-core |
-| **engine-server** | engine-core, bpmn-parser, persistence-nats, persistence-memory | axum, tokio, tower-http, uuid, metrics, metrics-exporter-prometheus, tracing, tracing-subscriber | Server binary; depends on all crates |
+| **engine-server** | engine-core, bpmn-parser, persistence-nats, persistence-memory | axum, tokio, tower-http 0.7, async-nats, uuid, metrics, metrics-exporter-prometheus, tracing, tracing-subscriber | Server binary; depends on all crates |
 | **agent-orchestrator** | engine-core | tokio, reqwest | Example worker; uses engine-core for public types |
 | **desktop-tauri** | (none — HTTP client) | @tauri-apps/api, bpmn-js, React, Tailwind | Thin HTTP client to engine-server |
 | **external-task-client** | (none — HTTP client) | pino (logging) | Pure TypeScript HTTP client |
@@ -82,10 +82,10 @@ graph TD
 |-----------|---------|---------|---------|
 | tokio | 1.52 | engine-core, engine-server | Async runtime |
 | axum | 0.8 | engine-server | HTTP framework |
-| quick-xml | 0.39 | bpmn-parser | XML deserialization |
-| rhai | 1.19 | engine-core | Script evaluation |
+| quick-xml | 0.42 | bpmn-parser | XML deserialization |
+| rhai | 1.25 | engine-core | Script evaluation |
 | dashmap | 6.x | engine-core | Lock-free concurrent maps |
-| async-nats | 0.47 | persistence-nats | NATS client |
+| async-nats | 0.50 | persistence-nats | NATS client |
 | serde / serde_json | 1.0 | all crates | Serialization |
 | chrono | — | engine-core, bpmn-parser, persistence-nats | Date/time handling |
 | uuid | — | engine-core, engine-server | Identifier generation |

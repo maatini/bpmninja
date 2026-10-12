@@ -123,7 +123,9 @@ pub fn build_app_with_config(..., config: AppBuildConfig) -> Router
 | `BPMNINJA_API_KEY` | unset (auth off) | Bearer or `X-API-Key`. Health/ready stay public. |
 | `MAX_XML_BYTES` | `10485760` (10 MiB) | JSON/XML body + deploy cap. |
 
-// Public exports
+## Startup Restore
+
+```rust
 pub struct StartupCoordinator { ... }
 impl StartupCoordinator {
     pub fn new(nats: Arc<NatsPersistence>) -> Self

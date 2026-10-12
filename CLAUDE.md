@@ -18,9 +18,9 @@ Ziel: Eine Camunda-kompatible, aber deutlich schlankere Alternative mit Fokus au
 | Rust Edition       | 2024 (Tauri: 2021)                   | stable       |
 | Async Runtime      | Tokio                                | 1.x          |
 | Web Framework      | Axum                                 | 0.8          |
-| XML Parser         | quick-xml                            | 0.39         |
-| Scripting          | Rhai                                 | 1.19         |
-| Persistence        | NATS JetStream (async-nats)          | 0.47         |
+| XML Parser         | quick-xml                            | 0.42         |
+| Scripting          | Rhai                                 | 1.25         |
+| Persistence        | NATS JetStream (async-nats)          | 0.50         |
 | Concurrency        | DashMap                              | 6.x          |
 | Desktop            | Tauri 2.10 + React 19 + bpmn-js 18  | -            |
 | Styling            | Tailwind CSS 4                       | -            |
@@ -32,6 +32,7 @@ Ziel: Eine Camunda-kompatible, aber deutlich schlankere Alternative mit Fokus au
 engine-core/                  # Kern-Engine (Token-Execution, Gateways, Events, Rhai)
 bpmn-parser/                  # BPMN 2.0 XML → ProcessDefinition
 persistence-nats/             # NATS JetStream Adapter (KV, Object Store, Streams)
+persistence-memory/           # Re-Export des In-Memory-Adapters aus engine-core (Tests/Dev)
 engine-server/                # Axum REST API + Incident Management
 agent-orchestrator/           # Beispiel External Task Worker
 desktop-tauri/                # Tauri Desktop-App (React + bpmn-js + Live-Tracking)
@@ -176,7 +177,8 @@ cargo run -p engine-server
 - `NextAction` Enum steuert den Executor-Loop
 - Rhai-Scripte: `let x = 1;` für neue Variablen, `x = 2;` für bestehende
 - Compensation- und Escalation-Events voll unterstützt
-- Multi-Instance Tasks und Incident Management implementiert
+- Incident Management implementiert
+- Multi-Instance (`multiInstanceLoopCharacteristics`) wird **nicht** unterstützt: Deploy schlägt mit `InvalidDefinition` fehl (`NextAction::MultiInstanceFork` existiert, wird aber nie erzeugt)
 
 ## Coding-Konventionen
 
