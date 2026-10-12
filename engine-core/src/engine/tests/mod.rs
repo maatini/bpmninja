@@ -3,6 +3,7 @@ pub mod call_activity_parallel;
 pub mod call_errors;
 pub mod gateways;
 pub mod helpers;
+pub mod history_batch;
 pub mod inclusive_join;
 pub mod instance_admin;
 pub mod instance_pagination;
