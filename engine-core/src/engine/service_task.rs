@@ -256,7 +256,7 @@ impl WorkflowEngine {
                 ..
             } = &mut *inst;
             crate::scripting::run_end_scripts(
-                &self.script_config,
+                &self.scripts,
                 instance_id,
                 &mut token,
                 &def,
@@ -310,7 +310,7 @@ impl WorkflowEngine {
         error_message: Option<String>,
         error_details: Option<String>,
     ) -> EngineResult<()> {
-        let instance_id = {
+        let (instance_id, node_id, new_retries) = {
             let mut task = self
                 .pending_service_tasks
                 .get_mut(&task_id)
@@ -329,31 +329,29 @@ impl WorkflowEngine {
             task.worker_id = None;
             task.lock_expiration = None;
 
-            let instance_id = task.instance_id;
-            let node_id = task.node_id.clone();
-
-            if new_retries <= 0 {
-                metrics::counter!("bpmn_errors_total", "type" => "incident").increment(1);
-                // Incident: log and record on the instance
-                if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                    let mut inst = inst_arc.write().await;
-                    let msg = error_message.unwrap_or_else(|| "Unknown error".into());
-                    inst.push_audit_log(format!(
-                        "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
-                        node_id, msg
-                    ));
-                }
-                tracing::warn!("Service task {task_id}: incident created (retries exhausted)");
-            } else {
-                tracing::info!(
-                    "Service task {task_id}: failed, {} retries remaining",
-                    new_retries
-                );
-            }
-            instance_id
-        };
+            (task.instance_id, task.node_id.clone(), new_retries)
+        }; // DashMap guard released before any `.await`.
         // Lock released: the task is fetchable again (unless it became an incident).
         self.notify_service_tasks_available();
+
+        if new_retries <= 0 {
+            metrics::counter!("bpmn_errors_total", "type" => "incident").increment(1);
+            // Incident: log and record on the instance
+            if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                let mut inst = inst_arc.write().await;
+                let msg = error_message.unwrap_or_else(|| "Unknown error".into());
+                inst.push_audit_log(format!(
+                    "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
+                    node_id, msg
+                ));
+            }
+            tracing::warn!("Service task {task_id}: incident created (retries exhausted)");
+        } else {
+            tracing::info!(
+                "Service task {task_id}: failed, {} retries remaining",
+                new_retries
+            );
+        }
 
         self.record_history_event(
             instance_id,
@@ -380,7 +378,7 @@ impl WorkflowEngine {
         task_id: Uuid,
         new_retries: Option<i32>,
     ) -> EngineResult<()> {
-        let instance_id = {
+        let (instance_id, node_id, retries) = {
             let mut task = self
                 .pending_service_tasks
                 .get_mut(&task_id)
@@ -399,24 +397,21 @@ impl WorkflowEngine {
             task.worker_id = None;
             task.lock_expiration = None;
 
-            let instance_id = task.instance_id;
-            let node_id = task.node_id.clone();
-
-            tracing::info!("Service task {task_id}: incident retried with {retries} retries");
-
-            // Update audit log on the instance
-            if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                let mut inst = inst_arc.write().await;
-                inst.push_audit_log(format!(
-                    "🔄 Incident on service task '{}' retried ({} retries)",
-                    node_id, retries
-                ));
-            }
-
-            instance_id
-        };
+            (task.instance_id, task.node_id.clone(), retries)
+        }; // DashMap guard released before any `.await`.
         // Incident reset: the task is fetchable again.
         self.notify_service_tasks_available();
+
+        tracing::info!("Service task {task_id}: incident retried with {retries} retries");
+
+        // Update audit log on the instance
+        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let mut inst = inst_arc.write().await;
+            inst.push_audit_log(format!(
+                "🔄 Incident on service task '{}' retried ({} retries)",
+                node_id, retries
+            ));
+        }
 
         self.record_history_event(
             instance_id,

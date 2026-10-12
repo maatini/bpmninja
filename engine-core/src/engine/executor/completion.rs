@@ -63,7 +63,7 @@ impl WorkflowEngine {
             ..
         } = &mut *inst;
         scripting::run_end_scripts(
-            &self.script_config,
+            &self.scripts,
             instance_id,
             token,
             def,

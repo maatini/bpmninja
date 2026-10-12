@@ -64,7 +64,7 @@ pub struct WorkflowEngine {
     /// Serializes `save_instance` per instance without holding the instance lock.
     pub(crate) persist_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
-    pub(crate) script_config: crate::scripting::ScriptConfig,
+    pub(crate) scripts: crate::scripting::ScriptRunner,
     /// Broadcast channel — feuert bei jeder relevanten Zustandsänderung.
     pub(crate) event_tx: tokio::sync::broadcast::Sender<EngineEvent>,
 }
@@ -98,7 +98,7 @@ impl WorkflowEngine {
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
             persist_locks: persistence_ops::PersistLocks::new(),
-            script_config,
+            scripts: crate::scripting::ScriptRunner::new(script_config),
             event_tx,
         }
     }

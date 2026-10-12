@@ -253,7 +253,7 @@ impl WorkflowEngine {
 
         let mut start_audits = Vec::new();
         scripting::run_node_scripts(
-            &self.script_config,
+            &self.scripts,
             instance_id,
             token,
             &def_clone,

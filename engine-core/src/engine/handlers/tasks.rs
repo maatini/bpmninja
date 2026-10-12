@@ -73,9 +73,7 @@ impl WorkflowEngine {
         current_id: &str,
         script: &str,
     ) -> EngineResult<NextAction> {
-        let result =
-            crate::scripting::execute_script_safe(&self.script_config, script, &token.variables)
-                .await?;
+        let result = self.scripts.execute(script, &token.variables).await?;
         token.variables = result;
 
         self.run_end_scripts(instance_id, token, def_clone, current_id)
