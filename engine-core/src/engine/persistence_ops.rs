@@ -42,6 +42,47 @@ macro_rules! inline_retry {
     };
 }
 
+const PERSIST_LOCK_STRIPES: usize = 256;
+
+/// Striped async locks that serialize `save_instance` per instance.
+///
+/// `persist_instance` snapshots the instance under a short write lock and saves
+/// the snapshot after releasing it. Without this lock two concurrent saves of
+/// the same instance could land out of order (older snapshot written last).
+/// Striping keeps memory bounded — no per-instance entries to clean up.
+pub(crate) struct PersistLocks {
+    stripes: Vec<tokio::sync::Mutex<()>>,
+}
+
+impl PersistLocks {
+    pub(crate) fn new() -> Self {
+        Self {
+            stripes: (0..PERSIST_LOCK_STRIPES)
+                .map(|_| tokio::sync::Mutex::new(()))
+                .collect(),
+        }
+    }
+
+    async fn lock(&self, instance_id: Uuid) -> tokio::sync::MutexGuard<'_, ()> {
+        let idx = (instance_id.as_u128() % PERSIST_LOCK_STRIPES as u128) as usize;
+        self.stripes[idx].lock().await
+    }
+}
+
+/// `io::Write` sink that only counts bytes (size guard without a payload buffer).
+struct ByteCounter(usize);
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl WorkflowEngine {
     /// Logs and counts a persistence error.
     pub(crate) fn log_persistence_error(&self, context: &str, err: impl std::fmt::Display) {
@@ -226,18 +267,27 @@ impl WorkflowEngine {
         if let (Some(p), Some(inst_arc)) =
             (&self.persistence, self.instances.get(&instance_id).await)
         {
-            let mut inst = inst_arc.write().await;
-            if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
-                let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
-                inst.audit_log = inst.audit_log.split_off(overflow);
-                inst.audit_log.insert(
-                    0,
-                    format!("... ({} older entries trimmed, see History API)", overflow),
-                );
-            }
+            // Held across the save: keeps saves of this instance in order.
+            let _persist_guard = self.persist_locks.lock(instance_id).await;
+
+            let inst = {
+                let mut inst = inst_arc.write().await;
+                if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
+                    let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
+                    inst.audit_log = inst.audit_log.split_off(overflow);
+                    inst.audit_log.insert(
+                        0,
+                        format!("... ({} older entries trimmed, see History API)", overflow),
+                    );
+                }
+                inst.clone()
+            }; // Instance lock released before any network I/O.
 
             // Size guard: check serialized payload before NATS write
-            let estimated_size = serde_json::to_vec(&*inst).map(|v| v.len()).unwrap_or(0);
+            let mut counter = ByteCounter(0);
+            let estimated_size = serde_json::to_writer(&mut counter, &inst)
+                .map(|()| counter.0)
+                .unwrap_or(0);
             if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
                 tracing::error!(
                     "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",

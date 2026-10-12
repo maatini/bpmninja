@@ -21,8 +21,19 @@ Vermeidbare Wartezeiten und NATS-Roundtrips aus dem Hot Path entfernen — gemes
 - [ ] KB + improvements.md aktualisieren
 - [ ] TASK_MEMORY.md löschen
 
-## Baseline
-(folgt)
+## Baseline (criterion `--save-baseline before`, lokal Windows, NATS lokal)
+| Bench | Median |
+|---|---|
+| Linear 10 / 50 / 100 Service-Tasks (in-memory) | 328 µs / 2.45 ms / 7.43 ms |
+| Parallel fork/join 4 / 16 Script-Branches | 2.54 ms / 10.5 ms |
+| Script chain (10) | 6.61 ms |
+| XOR routing | 15.6 µs |
+| NATS save_instance | 496 µs |
+| NATS save_token | 467 µs |
+| NATS append_history_entry | 16.6 µs (Publish ohne Ack-Await!) |
+| NATS engine: start → 5 Scripts → end | 7.78 ms |
+
+Auffällig: Script-Tasks ~0.6 ms/Stück (Engine-Neubau + spawn_blocking) → P6 lohnt sich.
 
 ## Letzter Stand
-NATS gestartet, Beginn P0.
+P0 erledigt (Benches + Baseline). Beginn P1.

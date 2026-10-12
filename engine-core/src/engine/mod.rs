@@ -57,6 +57,8 @@ pub struct WorkflowEngine {
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
     pub(crate) retry_worker_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Serializes `save_instance` per instance without holding the instance lock.
+    pub(crate) persist_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
     pub(crate) script_config: crate::scripting::ScriptConfig,
     /// Broadcast channel — feuert bei jeder relevanten Zustandsänderung.
@@ -89,6 +91,7 @@ impl WorkflowEngine {
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
+            persist_locks: persistence_ops::PersistLocks::new(),
             script_config,
             event_tx,
         }

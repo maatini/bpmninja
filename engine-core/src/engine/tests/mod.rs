@@ -7,6 +7,7 @@ pub mod inclusive_join;
 pub mod instance_admin;
 pub mod instance_pagination;
 pub mod migration;
+pub mod persist_lock;
 pub mod recurring_and_event_timer;
 pub mod scripting;
 pub mod service_incidents;
