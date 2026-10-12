@@ -4,6 +4,7 @@
 use super::super::*;
 use super::helpers::InstrumentedPersistence;
 use crate::domain::ProcessDefinitionBuilder;
+use crate::history::HistoryEntry;
 use crate::port::HistoryQuery;
 use serde_json::json;
 use std::collections::HashMap;
