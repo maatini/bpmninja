@@ -19,6 +19,10 @@
 | [cross-cutting/](cross-cutting/) | Cross-module patterns, tag registry, shared conventions |
 | [maintenance.md](maintenance.md) | When and how to update the knowledge base |
 
+## Cross-Cutting Topics
+
+- [BPMN model checking and state-space reduction](cross-cutting/model-checking.md) — POR, complementary techniques, and BPMNinja's deploy-time checker
+
 ## Module Quick Index
 
 | Module | What it does | Key entry points |

@@ -95,6 +95,9 @@ Reusable patterns and conventions that span multiple modules.
 | `MODEL_CHECK` | `warn` | Deploy-time model checking: `off` / `warn` / `enforce` |
 | `MODEL_CHECK_TIMEOUT_MS` | `2000` | Max wait for the model check during deploy |
 
+See [model-checking.md](model-checking.md) for the implemented checks and
+background on partial order reduction and related state-space techniques.
+
 ## Thin Client Pattern (Desktop App)
 
 **Pattern:** The desktop app is a pure presentation layer. All logic, state, and persistence live in engine-server.
