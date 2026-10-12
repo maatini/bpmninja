@@ -254,3 +254,47 @@ async fn test_user_task_restore_roundtrip() {
     let after = persistence.list_user_tasks().await.unwrap();
     assert!(after.iter().all(|t| t.task_id != task.task_id));
 }
+
+/// Batched history appends are acknowledged, kept in order, and a retried
+/// batch does not duplicate entries (`Nats-Msg-Id` = entry id).
+#[tokio::test]
+async fn test_history_batch_is_ordered_and_deduplicated() {
+    let persistence = match setup_nats_test().await {
+        Some(p) => p,
+        None => return,
+    };
+
+    let instance_id = Uuid::new_v4();
+    let entries: Vec<_> = (0..3)
+        .map(|i| {
+            engine_core::history::HistoryEntry::new(
+                instance_id,
+                engine_core::history::HistoryEventType::TokenAdvanced,
+                format!("step {i}"),
+                engine_core::history::ActorType::Engine,
+                None,
+            )
+        })
+        .collect();
+
+    persistence
+        .append_history_entries(&entries)
+        .await
+        .expect("batch must be acknowledged");
+    // Simulated retry of the same batch.
+    persistence
+        .append_history_entries(&entries)
+        .await
+        .expect("retried batch must be acknowledged");
+
+    let loaded = persistence
+        .query_history(engine_core::persistence::HistoryQuery {
+            instance_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let ids: Vec<_> = loaded.iter().map(|e| e.id).collect();
+    let expected: Vec<_> = entries.iter().map(|e| e.id).collect();
+    assert_eq!(ids, expected, "entries must be stored once, in order");
+}
