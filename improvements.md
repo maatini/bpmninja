@@ -220,6 +220,38 @@ Nebenbefund: `append_history_entry` wartet nicht auf den JetStream-Ack — Histo
 | C6 | Mesh-Readiness: Helm-Chart, Graceful Drain für Sidecars, mTLS über Istio/Linkerd (optional SPIFFE), OTel (F6), HPA über Prometheus-Metriken | Medium | Medium | Low | Health/Ready existieren bereits; es fehlen Deployment-Artefakte. |
 | C7 | Research: Scripts/Connectoren als WASM-Komponenten (wasmtime); `engine-core` für Edge (Spin/wasmCloud) | Low–Med | High | High | Erst nach 4a–4c; Tokio-Abhängigkeit im Kern ist das Hauptproblem. |
 
+#### 4f — BPMN-2.0.2-Vollabdeckung (Vorschlag, 2026-10-12)
+
+> Ziel: alle Elemente der BPMN-2.0.2-Spezifikation (OMG) — Flow Objects, Connecting Objects, Swimlanes, Artifacts, Data — werden **geparst**, und alle Elemente mit Ausführungssemantik werden **ausgeführt**. Rein visuelle Elemente (Lanes, Groups, Text Annotations, Associations) werden akzeptiert, beim Re-Export erhalten und im Modeler angezeigt, ändern aber den Ablauf nicht (so verlangt es auch die Spezifikation).
+> Hinweis: Die oft zitierte Zahl „116 Elemente“ ließ sich nicht belastbar gegen die Spezifikation prüfen; maßgeblich ist die Element-Matrix unten, abgeleitet aus dem BPMN-2.0.2-Metamodell und dem aktuellen Parser (`bpmn-parser/src/models.rs`, `parser.rs`).
+
+**Ist-Stand (v0.7.24):** 29 ausführbare `BpmnElement`-Varianten (Start/End inkl. Timer, Message, Error, Escalation, Compensation, Terminate; User/Service/Script/Send-Task, Receive/Manual/BusinessRule gemappt; XOR/AND/OR/Event-based/Complex-Gateway; Timer-/Message-Catch; Boundary Timer/Message/Error/Escalation/Compensation; Call Activity; Embedded Sub-Process (geflattet); Event-Sub-Process für Timer/Message/Error). **Fehlend:** Signal-, Conditional-, Link-, Cancel-, Multiple-/Parallel-Multiple-Events; Transaction- und Ad-hoc-Sub-Process; Multi-Instance (wird abgelehnt) und Standard-Loop; Data Inputs/Outputs, Data Associations, Properties; mehrere Pools mit Message Flows; Laufzeit-Scopes für Sub-Prozesse (Boundary-Events auf Sub-Prozessen wirken wegen Flattening nicht spezifikationsgemäß).
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| X0 | Element-Matrix + Konformitäts-Testsuite | High | Medium | None | Jede BPMN-2.0.2-Elementart mit Status (ausgeführt / akzeptiert / abgelehnt) als Tabelle in Knowledge Base + README; Parse-Tests gegen die BPMN-MIWG-Referenzmodelle (Model Interchange Working Group); fehlende Elemente müssen beim Deploy **klar abgelehnt** statt still ignoriert werden. |
+| X1 | Signal-Events: Start, Intermediate Catch/Throw, Boundary (unterbrechend/nicht), End; Broadcast an alle wartenden Instanzen; `POST /api/signal` | High | Medium | Medium | Häufig genutzt; heute nicht parsebar. |
+| X2 | Conditional Events: Start, Intermediate, Boundary, Event-Sub-Process; Neubewertung bei Variablenänderung | Medium | High | Medium | Braucht einen Trigger bei jeder Variablenänderung (`update_instance_variables`, Task-Abschluss). |
+| X3 | Link Events (Intermediate Throw/Catch, „Sprungmarke“) | Low | Low | Low | Beim Parsen in direkte Sequence Flows auflösen. |
+| X4 | Multi-Instance parallel + sequenziell (`loopCardinality`, `collection`/`elementVariable`, `completionCondition`) für Tasks, Sub-Process, Call Activity | High | High | Medium | `NextAction::MultiInstanceFork/Next` existieren bereits, werden aber nie erzeugt; heute Deploy-Fehler. |
+| X5 | Standard-Loop (`standardLoopCharacteristics`: `loopCondition`, `testBefore`, `loopMaximum`) | Medium | Medium | Low | Wiederholung ohne explizite Gateway-Schleife. |
+| X6 | Laufzeit-Scopes für Sub-Prozesse (Anpassung ADR-003) | High | High | High | Voraussetzung für spezifikationsgemäße Boundary-Events auf Sub-Prozessen, Transaction/Cancel und Kompensation pro Scope. Flattening bleibt als Optimierung für scope-lose Sub-Prozesse. |
+| X7 | Transaction-Sub-Process + Cancel End/Boundary Event (Cancel löst Kompensation aus) | Medium | High | Medium | Setzt X6 voraus; ergänzt G1 (Saga). |
+| X8 | Ad-hoc-Sub-Process (Aktivitäten in beliebiger Reihenfolge, `completionCondition`, `ordering`) | Low–Med | Medium | Medium | Setzt X6 voraus. |
+| X9 | Event-Sub-Process vollständig: Error/Escalation/Compensation/Signal/Conditional-Start, unterbrechend und nicht unterbrechend | Medium | Medium | Medium | Heute nur Timer/Message/Error. |
+| X10 | Multiple / Parallel-Multiple Events (mehrere Event-Definitionen an einem Event) | Low | Medium | Low | Selten, aber Teil der Spezifikation. |
+| X11 | Daten: `dataObject`/`property` als Prozessvariablen mit Defaults, Data Input/Output Associations, `ioSpecification`, Camunda `inputOutput`-Mappings für Tasks und Call Activities | High | Medium | Medium | Heute nur ein globaler Variablen-Scope; Mappings sind für Camunda-Kompatibilität wichtig. |
+| X12 | Kollaboration: mehrere Pools (jeder ausführbare Prozess wird deployt), Message Flows zwischen Pools → engine-interne Zustellung | Medium | Medium | Medium | Heute wird nur der erste Prozess deployt. |
+| X13 | Instanziierende Receive Task, Event-based Gateway mit `instantiate` und Typ `Parallel` | Low | Low | Low | Kleine Lücken im Gateway-/Task-Mapping. |
+| X14 | Business Rule Task mit DMN-Entscheidungstabellen (eigener DMN-1.x-Evaluator mit FEEL-Teilmenge) | Medium | High | Medium | Hängt mit S4 (FEEL) zusammen; heute nur als Service Task. |
+| X15 | Swimlanes & Artefakte: Pools/Lanes, Groups, Text Annotations, Associations, Data Stores werden akzeptiert, beim Export erhalten, im Modeler angezeigt; optional Lane → Kandidatengruppe für User Tasks | Low–Med | Low | Low | Nicht ausführungsrelevant, darf aber nicht verloren gehen. |
+| X16 | User-Task-Details: `candidateUsers`/`candidateGroups`, Fälligkeit, Priorität, `formKey`; Claim/Unclaim-API | Medium | Medium | Low | Camunda-Kompatibilität für Task-Listen. |
+| X17 | Modeler (desktop-tauri): Properties-Panel für alle neuen Attribute; Playwright-Tests je Element | Medium | Medium | Low | Jede Engine-Erweiterung braucht die passende UI. |
+
+**Empfohlene Reihenfolge:** X0 (+ V1-Modellprüfung) → X3, X13, X15 (klein) → X1 Signal → X4 Multi-Instance + X5 Loop → X11 Daten-Mappings → X9 Event-Sub-Process → X2 Conditional → X12 Kollaboration → X6 Laufzeit-Scopes (ADR) → X7 Transaction/Cancel, X8 Ad-hoc → X10 → X14 DMN, X16 → X17 laufend parallel.
+
+**Abnahmekriterium je Element:** Parser-Test, Engine-Test (inkl. Persistenz-Roundtrip und Restart), E2E-Test über REST, Modeler-Unterstützung, Eintrag in der Element-Matrix.
+
 #### Bewertung externer Architekturvorschläge (2026-10-12)
 
 Quelle: eingebrachte Recherche (Rust-BPMN-Landschaft, Kafka/Redpanda-Saga-Log, WS-BPEL, AOT-Kompilierung nach C/FFI, Zeebe). Bewertet gegen die Messwerte aus 4a.
@@ -251,6 +283,19 @@ Neue Aufgaben aus der Bewertung:
 | G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige | Medium | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
 | B1 | WS-BPEL-2.0-Frontend (Parser → `ProcessDefinition`) | offen | High | Medium | Nur bei Bedarf; Abbildung siehe Tabelle oben. |
 | Q1 | `persistence-postgres` (operativer Zustand + Abfragen/Read-Model) | Medium | High | Medium | Echte Abfragen für History/Archiv statt In-Memory-Filter. |
+| J1 | JSON-Definitionsformat: `ProcessDefinition` als JSON deployen/exportieren (neben BPMN-XML) | Low–Med | Low | Low | Code-first-Definitionen ohne Modeler; Idee aus `bpmn-engine`. |
+| SIM1 | Prozess-Simulation (Pfadwahrscheinlichkeiten, Durchlaufzeiten) | Low | High | Low | Optional, z. B. auf Basis von `ebi_bpmn`. |
+
+**Rust-BPMN-Werkzeuge** (geprüft am 2026-10-12 auf crates.io/GitHub: Existenz, Lizenz, Aktivität):
+
+| Werkzeug | Befund | Einbindung in BPMNinja |
+|----------|--------|------------------------|
+| `rust_bpmn_analyzer` (GitHub, MIT, aktiv; Library-Crate `core`, nicht auf crates.io) | Echter Model-Checker: Safeness, Option to Complete, Proper Completion, No Dead Activities; Partial Order Reduction | **Als Abhängigkeit** (gepinnte Git-Revision, `deny.toml` `allow-git`) für V1: Prüfung beim Deploy in `spawn_blocking` mit Timeout, Modus per Env `MODEL_CHECK=off|warn|enforce` (Default `warn`) |
+| `bpmncheck` (crates.io, Apache-2.0, 1 Stern) | BPMN → Petri-Netz → Model-Checking | Nicht eingebunden: überschneidet sich mit `rust_bpmn_analyzer`, zusätzlicher XML-/Petri-Stack |
+| `snurr` (crates.io, MIT) | Prozess-Runner mit Closures als Task-Handlern, Thread-Parallelität | Kein Fremd-Runtime im Kern; Idee übernommen als **E1** (In-Process-Task-Handler) |
+| `bpm-engine` (crates.io, MIT) | Deterministisches Replay, Crash-Sicherheit, Saga | Ideen übernommen in **F3** (Outbox/Replay) und **G1** (Saga) |
+| `bpmn-engine` (crates.io 0.1.0, Apache-2.0) | Repository-Link liefert 404, kaum Nutzung | Nicht eingebunden; Idee „JSON-Definitionsformat“ als **J1**: Deploy/Export von `ProcessDefinition` als JSON neben BPMN-XML |
+| `ebi_bpmn` (crates.io, MIT OR Apache-2.0, aktiv) | Parser/Writer/Executor inkl. stochastischem BPMN | Nicht im Kern; Kandidat für **SIM1** (Prozess-Simulation mit Wahrscheinlichkeiten/Durchlaufzeiten) nach Bedarf |
 
 Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktive Instanzen, Schritte/s), Bedarf an WS-BPEL, Request/Response- vs. choreografierte Microservices, Postgres als zusätzliches Backend.
 
@@ -258,6 +303,7 @@ Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktiv
 
 1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ 2026-10-12 → P2, P6, P7 → P8–P10
 2. **Aus der Bewertung** (unabhängig, hoher Nutzen): V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler); B1/K2/Q1 nach Entscheidung
+2b. **4f BPMN-Vollabdeckung**: X0 + V1 → X3, X13, X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
 3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
 4. **4c**: N1 → N3 → N2, N4–N6
 5. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8

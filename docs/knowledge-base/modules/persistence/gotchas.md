@@ -58,7 +58,7 @@ File object keys follow: `file:{instance_id}-{var_name}-{filename}`. The separat
 
 ### ⚠️ History entries are append-only
 
-History entries are published to the JetStream stream `WORKFLOW_HISTORY` (subject `history.instance.{instance_id}`). `query_history` creates an ephemeral pull consumer filtered on that subject and replays all entries for the instance — cost grows with history length.
+History entries are published to the JetStream stream `WORKFLOW_HISTORY` (subject `history.instance.{instance_id}`). Every publish **awaits the JetStream ack**; `append_history_entries` publishes a whole batch first and then awaits all acks (one round trip). Each message carries `Nats-Msg-Id` = entry id, so a retried batch is deduplicated by JetStream (duplicate window, default 2 min). `query_history` creates an ephemeral pull consumer filtered on that subject and replays all entries for the instance — cost grows with history length.
 
 ### ⚠️ Transient NATS failures use a bounded retry queue
 

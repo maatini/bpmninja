@@ -37,10 +37,7 @@ fn script_chain(failing_script: Option<&str>) -> ProcessDefinition {
 async fn engine_with(
     def: ProcessDefinition,
 ) -> (WorkflowEngine, Arc<InstrumentedPersistence>, Uuid) {
-    let persistence = Arc::new(InstrumentedPersistence::new(
-        Duration::ZERO,
-        Duration::ZERO,
-    ));
+    let persistence = Arc::new(InstrumentedPersistence::new(Duration::ZERO, Duration::ZERO));
     let engine =
         WorkflowEngine::new().with_persistence(persistence.clone() as Arc<dyn WorkflowPersistence>);
     let (key, _) = engine.deploy_definition(def).await;
@@ -63,7 +60,10 @@ async fn batch_history_is_written_in_one_call() {
     let (engine, persistence, key) = engine_with(script_chain(None)).await;
     let vars = HashMap::from([("counter".to_string(), json!(0))]);
 
-    let id = engine.start_instance_with_variables(key, vars).await.unwrap();
+    let id = engine
+        .start_instance_with_variables(key, vars)
+        .await
+        .unwrap();
 
     assert_eq!(
         persistence.history_batches.load(Ordering::SeqCst),
@@ -81,8 +81,7 @@ async fn batch_history_is_written_in_one_call() {
 
 #[tokio::test]
 async fn history_is_flushed_when_the_batch_fails() {
-    let (engine, persistence, key) =
-        engine_with(script_chain(Some("throw \"boom\";"))).await;
+    let (engine, persistence, key) = engine_with(script_chain(Some("throw \"boom\";"))).await;
     let vars = HashMap::from([("counter".to_string(), json!(0))]);
 
     let result = engine.start_instance_with_variables(key, vars).await;
@@ -111,7 +110,10 @@ async fn no_history_work_without_persistence() {
     let engine = WorkflowEngine::new();
     let (key, _) = engine.deploy_definition(script_chain(None)).await;
     let vars = HashMap::from([("counter".to_string(), json!(0))]);
-    let id = engine.start_instance_with_variables(key, vars).await.unwrap();
+    let id = engine
+        .start_instance_with_variables(key, vars)
+        .await
+        .unwrap();
     assert_eq!(
         engine.get_instance_state(id).await.unwrap(),
         InstanceState::Completed

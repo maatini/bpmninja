@@ -45,7 +45,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Event-driven timer scheduler** — sleeps until the next timer is due (or a new timer is added) instead of polling; `TIMER_INTERVAL_MS` caps the idle wait
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling; waiting workers are woken the moment a task becomes available
-- **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout)
+- **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout); one shared engine with a cache of compiled scripts
 - **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported
 - **Suspend / resume** — pause and continue instances (timers and tasks blocked)
 - **Incident management** — handle failed service tasks with retry/resolve directly from the UI
@@ -154,7 +154,7 @@ For full local verification, run the root checks plus module-specific checks fro
 | **File Variables** | Upload/download of files as process variables via NATS Object Store. |
 | **Message Correlation** | Matching via `messageName` + optional `businessKey`. |
 | **BPMN Error Handling** | ServiceTasks report errors via `bpmnError`. Routing to the matching `BoundaryErrorEvent`. |
-| **Detailed History** | Gap-free event log with diffs, snapshots and actors (`User`, `Engine`, `Timer`, `ServiceWorker`). |
+| **Detailed History** | Gap-free event log with diffs, snapshots and actors (`User`, `Engine`, `Timer`, `ServiceWorker`). Written once per execution batch; NATS writes are acknowledged and deduplicated. |
 | **Instance Archival** | Completed instances are archived to a dedicated store. Searchable by definition key, business key, date range, status with pagination. |
 | **Persistent Wait States** | Timers, messages, user/service tasks survive server restarts via NATS KV. |
 | **Structured JSON Logging** | Configurable via `tracing-subscriber` with the JSON feature and `RUST_LOG` filter. |

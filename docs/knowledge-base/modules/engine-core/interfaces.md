@@ -99,6 +99,7 @@ pub trait WorkflowPersistence: Send + Sync {
     
     // History
     async fn append_history_entry(&self, entry: &HistoryEntry) -> EngineResult<()>;
+    async fn append_history_entries(&self, entries: &[HistoryEntry]) -> EngineResult<()>; // default: loop
     async fn query_history(&self, query: HistoryQuery) -> EngineResult<Vec<HistoryEntry>>;
     
     // Archive
@@ -130,7 +131,8 @@ pub enum EngineEvent {
 | Type / Function | Purpose |
 |-----------------|---------|
 | `ScriptConfig` | `max_operations`, `max_memory` (budget), `timeout_ms`; `from_env()`, `build_engine()`, `derived_collection_limits()` |
-| `execute_script_safe(config, script, vars)` | Hardened entry: `spawn_blocking` + wall-clock timeout + Rhai limits |
+| `ScriptRunner` | Shared engine + compiled-script cache: `new(config)`, `execute(script, vars)`; used by `WorkflowEngine` |
+| `execute_script_safe(config, script, vars)` | One-off hardened entry (fresh engine per call): `spawn_blocking` + wall-clock timeout + Rhai limits |
 | Env | `RHAI_MAX_OPERATIONS` (50 000), `RHAI_MAX_MEMORY_BYTES` (2 MiB), `RHAI_TIMEOUT_MS` (1000) |
 
 `max_memory` does **not** call a Rhai heap API (none exists). It scales `set_max_string_size` / `set_max_array_size` / `set_max_map_size` relative to the 2 MiB default.

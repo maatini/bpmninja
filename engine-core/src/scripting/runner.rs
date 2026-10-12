@@ -269,21 +269,22 @@ pub async fn run_node_scripts(
     if let Some(listeners) = def.listeners.get(node_id) {
         for l in listeners {
             if l.event == event {
-                let result = runner
-                    .execute(&l.script, &token.variables)
-                    .await
-                    .map_err(|e| match e {
-                        EngineError::ScriptError(msg) => EngineError::ScriptError(format!(
-                            "Knoten '{}' ({}-Listener): {}",
-                            node_id,
-                            match event {
-                                ListenerEvent::Start => "start",
-                                ListenerEvent::End => "end",
-                            },
-                            msg
-                        )),
-                        other => other,
-                    })?;
+                let result =
+                    runner
+                        .execute(&l.script, &token.variables)
+                        .await
+                        .map_err(|e| match e {
+                            EngineError::ScriptError(msg) => EngineError::ScriptError(format!(
+                                "Knoten '{}' ({}-Listener): {}",
+                                node_id,
+                                match event {
+                                    ListenerEvent::Start => "start",
+                                    ListenerEvent::End => "end",
+                                },
+                                msg
+                            )),
+                            other => other,
+                        })?;
                 token.variables = result;
 
                 let event_name = match event {

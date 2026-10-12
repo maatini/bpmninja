@@ -26,7 +26,7 @@ self.persistence.save_instance(&snapshot).await; // SAFE
 
 `persist_instance` (`engine/persistence_ops.rs`) follows this: it snapshots the instance under a short write lock and saves the clone afterwards. Saves of the same instance are serialized by striped `PersistLocks` (256 stripes, held across the save) so an older snapshot can never overwrite a newer one.
 
-> **Known exceptions:** the retry worker (`retry_queue.rs`, `PersistJob::SaveInstance`) holds the instance *read* lock across `save_instance` — this is intentional, it orders the retry against `persist_instance`'s snapshot. `fail_service_task` and `retry_incident` hold a `pending_service_tasks` DashMap guard across `.await` (not yet fixed).
+> **Known exceptions:** the retry worker (`retry_queue.rs`, `PersistJob::SaveInstance`) holds the instance *read* lock across `save_instance` — this is intentional, it orders the retry against `persist_instance`'s snapshot. `run_end_scripts` (`executor/completion.rs`) holds the instance write lock while end-listener scripts run (not yet fixed).
 
 ### ⚠️ Tokens live in ONE place
 
@@ -53,6 +53,14 @@ Rhai scripts are sandboxed with limits:
 - `timeout_ms: 1,000` (default) — configurable via `RHAI_TIMEOUT_MS`
 
 Heavy scripts will be killed by timeout or collection-size limits. The error is recoverable — just means the script didn't complete.
+
+### ⚠️ Executor history is buffered per batch
+
+`run_instance_batch` collects the history entries of all steps (`build_history_entry_from_snapshot`) and writes them with **one** `append_history_entries` call at the end — also when the batch fails part-way (`flush_history`). Entries outside the executor (`record_history_event`) are still written immediately. Without persistence no pre-step snapshot is taken at all. On final failure every entry is queued for background retry; backends must deduplicate by `HistoryEntry::id` (NATS: `Nats-Msg-Id`).
+
+### ⚠️ Scripts share one Rhai engine
+
+`WorkflowEngine.scripts` is a `ScriptRunner`: one `rhai::Engine` built from `ScriptConfig` plus a cache of compiled scripts (keyed by script text, max 1024, cleared when full). Limits apply per evaluation as before. `execute_script_safe(&ScriptConfig, …)` still exists for one-off use but builds a fresh engine each call — don't use it on hot paths.
 
 ### ⚠️ History snapshots
 
