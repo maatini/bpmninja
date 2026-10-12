@@ -242,11 +242,11 @@ Befunde aus dem Code (Stand v0.7.24):
 
 ### Performance-Hotspots
 
-1. `fetch_and_lock_service_tasks` — Full-Scan `pending_service_tasks`
-2. `process_timers` — Full-Scan aller Timer pro Intervall (default 1s)
-3. `list_instances` / Startup-Restore — große Mengen in Memory
+1. ~~`fetch_and_lock_service_tasks` — Full-Scan `pending_service_tasks`~~ ✅ `TopicIndex` (M4)
+2. ~~`process_timers` — Full-Scan aller Timer pro Intervall (default 1s)~~ ✅ `TimerDueIndex` (M4); fester Takt bleibt → P5
+3. `list_instances` / Startup-Restore — große Mengen in Memory (→ Phase 4b F5)
 4. History-Queries — Filter/Sort in Memory
-5. Unbounded Retry-Queue
+5. ~~Unbounded Retry-Queue~~ ✅ bounded (M3)
 6. SSE Broadcast Capacity 256 — langsame Clients verlieren Events (by design)
 
 ### Was das Audit nicht vollständig bewiesen hat
