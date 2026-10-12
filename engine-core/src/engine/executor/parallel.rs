@@ -1,6 +1,5 @@
 use uuid::Uuid;
 
-use crate::condition::evaluate_condition;
 use crate::domain::{BpmnElement, EngineError, EngineResult, Token};
 use crate::engine::WorkflowEngine;
 use crate::runtime::{ActiveToken, JoinBarrier};
@@ -135,7 +134,7 @@ impl WorkflowEngine {
                     temp_vars.extend(t.variables.clone());
                 }
             }
-            if evaluate_condition(cond, &temp_vars) {
+            if def.evaluate_condition(cond, &temp_vars) {
                 condition_met = true;
                 inst.audit_log.push(format!(
                     "⟡ Complex gateway join condition met early at '{gateway_id}'"

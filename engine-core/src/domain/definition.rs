@@ -22,6 +22,8 @@ pub struct ProcessDefinition {
     pub event_listeners: Vec<ScopeEventListener>,
     #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
+    #[serde(skip)]
+    compiled_conditions: HashMap<String, crate::condition::CompiledCondition>,
 }
 
 impl ProcessDefinition {
@@ -196,7 +198,39 @@ impl ProcessDefinition {
             listeners,
             event_listeners,
             sub_processes,
+            compiled_conditions: HashMap::new(),
         })
+    }
+
+    /// Rebuild derived data whenever a definition is deployed or restored.
+    pub(crate) fn compile_conditions(&mut self) {
+        self.compiled_conditions = self
+            .flows
+            .values()
+            .flatten()
+            .filter_map(|flow| flow.condition.as_ref())
+            .chain(self.nodes.values().filter_map(|node| match node {
+                BpmnElement::ComplexGateway { join_condition, .. } => join_condition.as_ref(),
+                _ => None,
+            }))
+            .map(|expr| {
+                (
+                    expr.clone(),
+                    crate::condition::CompiledCondition::parse(expr),
+                )
+            })
+            .collect();
+    }
+
+    pub(crate) fn evaluate_condition(
+        &self,
+        expr: &str,
+        variables: &HashMap<String, serde_json::Value>,
+    ) -> bool {
+        self.compiled_conditions
+            .get(expr)
+            .map(|condition| condition.evaluate(variables))
+            .unwrap_or_else(|| crate::condition::evaluate_condition(expr, variables))
     }
 
     /// Returns the (id, element) of the start event.
@@ -393,3 +427,52 @@ impl ProcessDefinitionBuilder {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod condition_cache_tests {
+    use super::*;
+    use crate::engine::WorkflowEngine;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn conditions_are_compiled_on_deploy_and_restore() {
+        let definition = ProcessDefinitionBuilder::new("cached")
+            .node("start", BpmnElement::StartEvent)
+            .node(
+                "gateway",
+                BpmnElement::ComplexGateway {
+                    default: None,
+                    join_condition: Some("ready".into()),
+                },
+            )
+            .node("yes", BpmnElement::EndEvent)
+            .node("no", BpmnElement::EndEvent)
+            .flow("start", "gateway")
+            .conditional_flow("gateway", "yes", "amount >= 100")
+            .flow("gateway", "no")
+            .build()
+            .unwrap();
+        let engine = WorkflowEngine::new();
+        let (key, _) = engine.deploy_definition(definition).await;
+        let deployed = engine.get_definition(&key).await.unwrap();
+        assert_eq!(deployed.compiled_conditions.len(), 2);
+        let mut variables =
+            HashMap::from([("amount".into(), json!(150)), ("ready".into(), json!(true))]);
+        assert!(deployed.evaluate_condition("amount >= 100", &variables));
+        assert!(deployed.evaluate_condition("ready", &variables));
+        variables.insert("amount".into(), json!(50));
+        assert!(!deployed.evaluate_condition("amount >= 100", &variables));
+
+        let encoded = serde_json::to_value(&*deployed).unwrap();
+        assert!(encoded.get("compiled_conditions").is_none());
+        let restored: ProcessDefinition = serde_json::from_value(encoded.clone()).unwrap();
+        assert!(restored.compiled_conditions.is_empty());
+        let restarted = WorkflowEngine::new();
+        let (restored_key, _) = restarted.deploy_definition(restored).await;
+        let restored = restarted.get_definition(&restored_key).await.unwrap();
+        assert_eq!(restored.compiled_conditions.len(), 2);
+        assert_eq!(serde_json::to_value(&*restored).unwrap(), encoded);
+        assert!(!restored.evaluate_condition("amount >= 100", &variables));
+        assert!(restored.evaluate_condition("ready", &variables));
+    }
+}

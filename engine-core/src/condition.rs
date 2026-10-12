@@ -17,45 +17,87 @@ use serde_json::Value;
 ///
 /// Returns `false` if the variable is missing or the expression is malformed.
 pub fn evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool {
-    let expr = expr.trim();
-    if expr.is_empty() {
-        return false;
-    }
+    CompiledCondition::parse(expr).evaluate(variables)
+}
 
-    // Try comparison operators (longest first to avoid prefix conflicts)
-    for op in ["==", "!=", ">=", "<=", ">", "<"] {
-        if let Some(idx) = expr.find(op) {
-            let var_name = expr[..idx].trim();
-            let rhs_str = expr[idx + op.len()..].trim();
+/// Parsed condition kept with a deployed definition, never serialized.
+#[derive(Debug, Clone)]
+pub(crate) enum CompiledCondition {
+    Empty,
+    Truthy(String),
+    Comparison {
+        variable: String,
+        operator: Operator,
+        rhs: Value,
+    },
+}
 
-            let lhs = match variables.get(var_name) {
-                Some(v) => v,
-                None => return false,
-            };
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Operator {
+    Eq,
+    Ne,
+    Ge,
+    Le,
+    Gt,
+    Lt,
+}
 
-            // Parse RHS as a JSON value for comparison
-            let rhs = parse_rhs(rhs_str);
-
-            return match op {
-                "==" => values_eq(lhs, &rhs),
-                "!=" => !values_eq(lhs, &rhs),
-                ">" => values_cmp(lhs, &rhs) == Some(Ordering::Greater),
-                "<" => values_cmp(lhs, &rhs) == Some(Ordering::Less),
-                ">=" => values_cmp(lhs, &rhs).is_some_and(|o| o != Ordering::Less),
-                "<=" => values_cmp(lhs, &rhs).is_some_and(|o| o != Ordering::Greater),
-                _ => false,
-            };
+impl CompiledCondition {
+    pub(crate) fn parse(expr: &str) -> Self {
+        let expr = expr.trim();
+        if expr.is_empty() {
+            return Self::Empty;
         }
+        for (op, operator) in [
+            ("==", Operator::Eq),
+            ("!=", Operator::Ne),
+            (">=", Operator::Ge),
+            ("<=", Operator::Le),
+            (">", Operator::Gt),
+            ("<", Operator::Lt),
+        ] {
+            if let Some(idx) = expr.find(op) {
+                return Self::Comparison {
+                    variable: expr[..idx].trim().to_string(),
+                    operator,
+                    rhs: parse_rhs(expr[idx + op.len()..].trim()),
+                };
+            }
+        }
+        Self::Truthy(expr.to_string())
     }
 
-    // Fallback: truthy check on a single variable name
-    match variables.get(expr) {
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Null) | None => false,
-        // Arrays and objects are truthy
-        Some(_) => true,
+    pub(crate) fn evaluate(&self, variables: &HashMap<String, Value>) -> bool {
+        match self {
+            Self::Empty => false,
+            Self::Truthy(expr) => {
+                match variables.get(expr) {
+                    Some(Value::Bool(b)) => *b,
+                    Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+                    Some(Value::String(s)) => !s.is_empty(),
+                    Some(Value::Null) | None => false,
+                    // Arrays and objects are truthy
+                    Some(_) => true,
+                }
+            }
+            Self::Comparison {
+                variable,
+                operator,
+                rhs,
+            } => {
+                let Some(lhs) = variables.get(variable) else {
+                    return false;
+                };
+                match operator {
+                    Operator::Eq => values_eq(lhs, rhs),
+                    Operator::Ne => !values_eq(lhs, rhs),
+                    Operator::Gt => values_cmp(lhs, rhs) == Some(Ordering::Greater),
+                    Operator::Lt => values_cmp(lhs, rhs) == Some(Ordering::Less),
+                    Operator::Ge => values_cmp(lhs, rhs).is_some_and(|o| o != Ordering::Less),
+                    Operator::Le => values_cmp(lhs, rhs).is_some_and(|o| o != Ordering::Greater),
+                }
+            }
+        }
     }
 }
 

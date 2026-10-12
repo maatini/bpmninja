@@ -1968,15 +1968,15 @@
     "semantic_hash": ""
   },
   "docs/knowledge-base/cross-cutting/index.md": {
-    "mtime": 1791788199.7145264,
-    "seen": 1791806103.481633,
-    "ast_hash": "056923cfb56cf69e502d14902900ddb1",
+    "mtime": 1791827148.5393028,
+    "seen": 1791827337.8365767,
+    "ast_hash": "f64c283b57f1c329e97c1fdc7faa35ab",
     "semantic_hash": ""
   },
   "docs/knowledge-base/cross-cutting/shared-patterns.md": {
-    "mtime": 1791797369.3916075,
-    "seen": 1791806103.481633,
-    "ast_hash": "904aeb278cc020772e2aab1d25b19e55",
+    "mtime": 1791827148.5523055,
+    "seen": 1791827337.8365767,
+    "ast_hash": "dc87522e95a66cbb4838ce5f16dad1d5",
     "semantic_hash": ""
   },
   "docs/knowledge-base/cross-cutting/tags.md": {
@@ -1986,9 +1986,9 @@
     "semantic_hash": ""
   },
   "docs/knowledge-base/index.md": {
-    "mtime": 1791788199.7155268,
-    "seen": 1791806103.481633,
-    "ast_hash": "202bad6ca0afef2cd385cd3bed9849b6",
+    "mtime": 1791827148.5663037,
+    "seen": 1791827337.8365767,
+    "ast_hash": "3ba2a6e87004c0f03575a2b342c71e5a",
     "semantic_hash": ""
   },
   "docs/knowledge-base/maintenance.md": {
@@ -2733,6 +2733,24 @@
     "mtime": 1791806975.1271727,
     "seen": 1791826805.0862153,
     "ast_hash": "b2a3beb945b83667fef3a73daee5d6dd",
+    "semantic_hash": ""
+  },
+  "docs/Chat/new 123.txt": {
+    "mtime": 1791826974.6786246,
+    "seen": 1791827337.8365767,
+    "ast_hash": "a7ba4d8ee2d509ded6950fe8762546e7",
+    "semantic_hash": ""
+  },
+  "docs/knowledge-base/cross-cutting/model-checking.md": {
+    "mtime": 1791827148.523305,
+    "seen": 1791827814.8145673,
+    "ast_hash": "9678b926fc3f999eebcf579228fa4632",
+    "semantic_hash": "9678b926fc3f999eebcf579228fa4632"
+  },
+  "package.json": {
+    "mtime": 1791827893.5372498,
+    "seen": 1791828278.6316624,
+    "ast_hash": "362df4fb59ac1b4fc46734753d60acde",
     "semantic_hash": ""
   }
 }
