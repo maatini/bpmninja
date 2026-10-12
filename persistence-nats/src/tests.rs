@@ -171,6 +171,290 @@ async fn test_definition_instance_restore_roundtrip() {
     };
 
     persistence.save_instance(&instance).await.unwrap();
+    let mut serialized_instance = instance.clone();
+    serialized_instance.id = Uuid::new_v4();
+    serialized_instance
+        .variables
+        .insert("unicode".into(), serde_json::json!("مرحبا\n世界"));
+    let payload = serde_json::to_vec(&serialized_instance).unwrap();
+    persistence
+        .save_instance_json(&serialized_instance, &payload)
+        .await
+        .unwrap();
+    let prepared = persistence
+        .prepare_instance_payload(&serialized_instance, payload.clone())
+        .unwrap();
+    persistence
+        .save_instance_payload(&serialized_instance, &prepared)
+        .await
+        .unwrap();
+    persistence
+        .save_instance_payload(&serialized_instance, &prepared)
+        .await
+        .unwrap();
+    let store = persistence.kv("instances").await.unwrap();
+    let stored = store
+        .get(serialized_instance.id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    #[cfg(not(feature = "separate-audit-log"))]
+    assert_eq!(stored.as_ref(), prepared.as_slice());
+    #[cfg(feature = "separate-audit-log")]
+    {
+        let (record, audit) = crate::codec::split_prepared(&prepared).unwrap();
+        assert_eq!(stored.as_ref(), record);
+        let (state, key) = crate::codec::decode_instance_record(record).unwrap();
+        assert!(state.audit_log.is_empty());
+        let key = key.unwrap();
+        let audit_store = persistence.kv("instance_audit").await.unwrap();
+        let entry = audit_store.entry(&key).await.unwrap().unwrap();
+        assert_eq!(entry.value.as_ref(), audit);
+        let revision = entry.revision;
+        // Reusing a snapshot never rewrites the immutable audit object.
+        persistence
+            .save_instance_payload(&serialized_instance, &prepared)
+            .await
+            .unwrap();
+        assert_eq!(
+            audit_store.entry(&key).await.unwrap().unwrap().revision,
+            revision
+        );
+        // Crash between the audit write and state write: the old document
+        // still references the old log, even though a newer audit exists.
+        let mut changed = serialized_instance.clone();
+        changed
+            .audit_log
+            .push("new entry before interrupted state save".into());
+        let pending = crate::codec::prepare_detached(&changed).unwrap();
+        let (pending_record, pending_audit) = crate::codec::split_prepared(&pending).unwrap();
+        let (_, pending_key) = crate::codec::decode_instance_record(pending_record).unwrap();
+        audit_store
+            .create(pending_key.as_ref().unwrap(), pending_audit.to_vec().into())
+            .await
+            .unwrap();
+        let prior = persistence.restore_instance_record(&stored).await.unwrap();
+        assert_eq!(prior.audit_log, serialized_instance.audit_log);
+        // Missing/corrupt audit snapshots fail loudly; do not restore an empty log.
+        audit_store.purge(&key).await.unwrap();
+        assert!(
+            persistence
+                .restore_instance_record(&stored)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Missing audit")
+        );
+        audit_store
+            .create(&key, b"[\"corrupt\"]".to_vec().into())
+            .await
+            .unwrap();
+        assert!(
+            persistence
+                .restore_instance_record(&stored)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("digest mismatch")
+        );
+        audit_store.purge(&key).await.unwrap();
+        audit_store
+            .create(&key, audit.to_vec().into())
+            .await
+            .unwrap();
+    }
+    let decoded = persistence.restore_instance_record(&stored).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap(),
+        serde_json::to_value(&serialized_instance).unwrap()
+    );
+    #[cfg(not(any(feature = "compact-instances", feature = "separate-audit-log")))]
+    assert_eq!(stored.as_ref(), payload.as_slice());
+    let detail = persistence
+        .get_bucket_entry_detail("instances", &serialized_instance.id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(detail.encoding, "utf8");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&detail.data).unwrap(),
+        serde_json::to_value(&serialized_instance).unwrap()
+    );
+    // A legacy JSON record must restore beside compact records.
+    let mut legacy_instance = instance.clone();
+    legacy_instance.id = Uuid::new_v4();
+    store
+        .put(
+            legacy_instance.id.to_string(),
+            serde_json::to_vec(&legacy_instance).unwrap().into(),
+        )
+        .await
+        .unwrap();
+    // Exercise version-2 hydration even with detached writes disabled.
+    let mut detached_fixture = instance.clone();
+    detached_fixture.id = Uuid::new_v4();
+    detached_fixture.audit_log.push("detached fixture".into());
+    let detached_payload = crate::codec::prepare_detached(&detached_fixture).unwrap();
+    let (detached_record, detached_audit) =
+        crate::codec::split_prepared(&detached_payload).unwrap();
+    let (_, detached_key) = crate::codec::decode_instance_record(detached_record).unwrap();
+    persistence
+        .kv("instance_audit")
+        .await
+        .unwrap()
+        .create(
+            detached_key.as_ref().unwrap(),
+            detached_audit.to_vec().into(),
+        )
+        .await
+        .unwrap();
+    store
+        .put(
+            detached_fixture.id.to_string(),
+            detached_record.to_vec().into(),
+        )
+        .await
+        .unwrap();
+
+    // A current state and archive may select different audit versions.
+    let mut cleanup_archive = detached_fixture.clone();
+    cleanup_archive.state = InstanceState::Completed;
+    cleanup_archive
+        .audit_log
+        .push("archive-specific audit".into());
+    let archived_payload = crate::codec::prepare_detached(&cleanup_archive).unwrap();
+    let (archived_record, archived_audit) =
+        crate::codec::split_prepared(&archived_payload).unwrap();
+    let (_, archived_audit_key) = crate::codec::decode_instance_record(archived_record).unwrap();
+    let audits = persistence.kv("instance_audit").await.unwrap();
+    audits
+        .create(
+            archived_audit_key.as_ref().unwrap(),
+            archived_audit.to_vec().into(),
+        )
+        .await
+        .unwrap();
+    persistence
+        .kv("history_instances")
+        .await
+        .unwrap()
+        .put(
+            cleanup_archive.id.to_string(),
+            archived_record.to_vec().into(),
+        )
+        .await
+        .unwrap();
+    let orphan_audit = serde_json::to_vec(&vec!["interrupted save"]).unwrap();
+    let orphan_key = crate::codec::audit_key(detached_fixture.id, &orphan_audit);
+    audits
+        .create(&orphan_key, orphan_audit.into())
+        .await
+        .unwrap();
+    // Seed the cache as if audit publication succeeded but the state save failed.
+    persistence
+        .audit_cache
+        .lock()
+        .await
+        .insert(orphan_key.clone());
+    let dry_run = persistence
+        .prune_instance_audits(detached_fixture.id, true)
+        .await
+        .unwrap();
+    assert_eq!(dry_run.retained.len(), 2);
+    assert_eq!(dry_run.candidates, vec![orphan_key.clone()]);
+    assert_eq!(dry_run.purged, 0);
+    assert!(audits.get(&orphan_key).await.unwrap().is_some());
+    // Bad live references abort before any candidate can be purged.
+    audits.purge(detached_key.as_ref().unwrap()).await.unwrap();
+    assert!(
+        persistence
+            .prune_instance_audits(detached_fixture.id, false)
+            .await
+            .is_err()
+    );
+    assert!(audits.get(&orphan_key).await.unwrap().is_some());
+    audits
+        .create(
+            detached_key.as_ref().unwrap(),
+            detached_audit.to_vec().into(),
+        )
+        .await
+        .unwrap();
+    let applied = persistence
+        .prune_instance_audits(detached_fixture.id, false)
+        .await
+        .unwrap();
+    assert_eq!(applied.purged, 1);
+    assert!(audits.get(&orphan_key).await.unwrap().is_none());
+    assert!(!persistence.audit_cache.lock().await.contains(&orphan_key));
+    assert!(
+        audits
+            .get(detached_key.as_ref().unwrap())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        audits
+            .get(archived_audit_key.as_ref().unwrap())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        persistence
+            .prune_instance_audits(detached_fixture.id, false)
+            .await
+            .unwrap()
+            .purged,
+        0
+    );
+
+    // A process-wide gate excludes cleanup from an in-flight local save,
+    // even when cleanup uses a separate connection.
+    let other = Arc::new(NatsPersistence::connect(&url, &stream).await.unwrap());
+    let access = crate::audit::AUDIT_ACCESS.read().await;
+    let target = detached_fixture.id;
+    let mut cleanup = tokio::spawn(async move { other.prune_instance_audits(target, true).await });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut cleanup)
+            .await
+            .is_err()
+    );
+    drop(access);
+    cleanup.await.unwrap().unwrap();
+    let exclusive = crate::audit::AUDIT_ACCESS.write().await;
+    let writer = persistence.clone();
+    let snapshot = detached_fixture.clone();
+    let mut save = tokio::spawn(async move { writer.save_instance(&snapshot).await });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut save)
+            .await
+            .is_err()
+    );
+    drop(exclusive);
+    save.await.unwrap().unwrap();
+    // The write above may switch format in a default build; restore remains exact.
+    let updated = store
+        .get(detached_fixture.id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        persistence
+            .restore_instance_record(&updated)
+            .await
+            .unwrap()
+            .audit_log,
+        detached_fixture.audit_log
+    );
+
+    let mut archived = serialized_instance.clone();
+    archived.state = InstanceState::Completed;
+    archived.completed_at = Some(chrono::Utc::now());
+    persistence
+        .save_completed_instance(&archived)
+        .await
+        .unwrap();
 
     // Simulate crash recovery: new connection, reload from KV.
     let restored = match NatsPersistence::connect(&url, &stream).await {
@@ -203,6 +487,130 @@ async fn test_definition_instance_restore_roundtrip() {
         Some("bar")
     );
     assert_eq!(found.state, InstanceState::Running);
+
+    let found_serialized = instances
+        .iter()
+        .find(|i| i.id == serialized_instance.id)
+        .expect("serialized instance must be restored");
+    assert_eq!(
+        serde_json::to_value(found_serialized).unwrap(),
+        serde_json::to_value(&serialized_instance).unwrap()
+    );
+    restored
+        .delete_instance(&serialized_instance.id.to_string())
+        .await
+        .unwrap();
+
+    let found_detached = instances
+        .iter()
+        .find(|i| i.id == detached_fixture.id)
+        .expect("detached record must hydrate in every build");
+    assert_eq!(
+        serde_json::to_value(found_detached).unwrap(),
+        serde_json::to_value(&detached_fixture).unwrap()
+    );
+    restored
+        .kv("history_instances")
+        .await
+        .unwrap()
+        .delete(detached_fixture.id.to_string())
+        .await
+        .unwrap();
+    restored
+        .delete_instance(&detached_fixture.id.to_string())
+        .await
+        .unwrap();
+    assert!(
+        restored
+            .kv("instance_audit")
+            .await
+            .unwrap()
+            .get(detached_key.as_ref().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let found_legacy = instances
+        .iter()
+        .find(|i| i.id == legacy_instance.id)
+        .expect("legacy JSON must restore");
+    assert_eq!(
+        serde_json::to_value(found_legacy).unwrap(),
+        serde_json::to_value(&legacy_instance).unwrap()
+    );
+    let found_archived = restored
+        .get_completed_instance(&archived.id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(found_archived).unwrap(),
+        serde_json::to_value(&archived).unwrap()
+    );
+    let queried = restored
+        .query_completed_instances(engine_core::persistence::CompletedInstanceQuery {
+            definition_key: Some(def_key),
+            state_filter: Some("completed".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(queried.iter().any(|i| i.id == archived.id));
+    let archive_detail = restored
+        .get_bucket_entry_detail("history_instances", &archived.id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&archive_detail.data).unwrap(),
+        serde_json::to_value(&archived).unwrap()
+    );
+    restored
+        .delete_instance(&legacy_instance.id.to_string())
+        .await
+        .unwrap();
+    restored
+        .kv("history_instances")
+        .await
+        .unwrap()
+        .delete(archived.id.to_string())
+        .await
+        .unwrap();
+
+    // After removing the archive, a repeated active deletion removes audit versions too.
+    restored
+        .delete_instance(&serialized_instance.id.to_string())
+        .await
+        .unwrap();
+    let audit_key = crate::codec::audit_key(
+        serialized_instance.id,
+        &serde_json::to_vec(&serialized_instance.audit_log).unwrap(),
+    );
+    assert!(
+        restored
+            .kv("instance_audit")
+            .await
+            .unwrap()
+            .get(&audit_key)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Recognized unsupported records must fail restore rather than be skipped.
+    let invalid_key = Uuid::new_v4().to_string();
+    store
+        .put(&invalid_key, b"\x89BPMNI\xff".to_vec().into())
+        .await
+        .unwrap();
+    let invalid_restore = restored.list_instances().await;
+    store.delete(&invalid_key).await.unwrap();
+    assert!(
+        invalid_restore
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported")
+    );
 
     // Delete and verify gone
     restored

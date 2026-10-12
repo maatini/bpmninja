@@ -1,4 +1,7 @@
+mod audit;
+pub use audit::AuditPruneReport;
 pub mod client;
+mod codec;
 pub(crate) mod models;
 pub mod trait_impl;
 

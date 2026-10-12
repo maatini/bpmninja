@@ -98,6 +98,38 @@ pub trait WorkflowPersistence: Send + Sync {
 
     /// Persist the current state of a process instance.
     async fn save_instance(&self, instance: &ProcessInstance) -> EngineResult<()>;
+    /// Persist an instance using its already serialized JSON snapshot.
+    ///
+    /// `json` must be the serialization of `instance`. The engine checks this
+    /// payload's size before calling and reuses it for inline retries. Backends
+    /// storing JSON can override this to avoid serializing the snapshot again.
+    /// The default preserves compatibility with existing backends.
+    async fn save_instance_json(
+        &self,
+        instance: &ProcessInstance,
+        _json: &[u8],
+    ) -> EngineResult<()> {
+        self.save_instance(instance).await
+    }
+    /// Prepare backend-specific bytes once, before inline retries. The input
+    /// JSON has already passed the engine size guard. Alternative encoders must
+    /// also enforce the limit on their resulting payload.
+    fn prepare_instance_payload(
+        &self,
+        _instance: &ProcessInstance,
+        json: Vec<u8>,
+    ) -> EngineResult<Vec<u8>> {
+        Ok(json)
+    }
+    /// Save bytes returned by `prepare_instance_payload` for this snapshot.
+    /// Backends overriding preparation must also override this method.
+    async fn save_instance_payload(
+        &self,
+        instance: &ProcessInstance,
+        payload: &[u8],
+    ) -> EngineResult<()> {
+        self.save_instance_json(instance, payload).await
+    }
     /// Load all persisted process instances.
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>>;
 

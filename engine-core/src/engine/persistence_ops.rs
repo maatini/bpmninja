@@ -69,12 +69,18 @@ impl PersistLocks {
     }
 }
 
-/// `io::Write` sink that only counts bytes (size guard without a payload buffer).
-struct ByteCounter(usize);
+/// JSON buffer that stops serialization at the instance payload limit.
+struct InstancePayload(Vec<u8>);
 
-impl std::io::Write for ByteCounter {
+impl std::io::Write for InstancePayload {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0 += buf.len();
+        if buf.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES.saturating_sub(self.0.len()) {
+            return Err(std::io::Error::other(format!(
+                "Instance payload exceeds limit {} bytes",
+                crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
+            )));
+        }
+        self.0.extend_from_slice(buf);
         Ok(buf.len())
     }
 
@@ -329,32 +335,34 @@ impl WorkflowEngine {
                 inst.clone()
             }; // Instance lock released before any network I/O.
 
-            // Size guard: check serialized payload before NATS write
-            let mut counter = ByteCounter(0);
-            let estimated_size = serde_json::to_writer(&mut counter, &inst)
-                .map(|()| counter.0)
-                .unwrap_or(0);
-            if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
-                tracing::error!(
-                    "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",
-                    instance_id,
-                    estimated_size,
-                    crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                );
-                self.log_persistence_error(
-                    &format!("save_instance({})", instance_id),
-                    format!(
-                        "Payload size {} exceeds limit {}",
-                        estimated_size,
-                        crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                    ),
-                );
+            // Serialize once, enforcing the size limit as bytes are produced.
+            // Keep the same payload for every inline attempt.
+            let mut payload = InstancePayload(Vec::new());
+            if let Err(error) = serde_json::to_writer(&mut payload, &inst) {
+                self.log_persistence_error(&format!("save_instance({})", instance_id), error);
                 return;
             }
 
+            let payload = match p.prepare_instance_payload(&inst, payload.0) {
+                Ok(payload) if payload.len() <= crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES => {
+                    payload
+                }
+                Ok(_) => {
+                    self.log_persistence_error(
+                        &format!("save_instance({})", instance_id),
+                        "Prepared payload exceeds instance size limit",
+                    );
+                    return;
+                }
+                Err(error) => {
+                    self.log_persistence_error(&format!("save_instance({})", instance_id), error);
+                    return;
+                }
+            };
+
             inline_retry!(
                 self,
-                p.save_instance(&inst),
+                p.save_instance_payload(&inst, &payload),
                 format!("save_instance({})", instance_id),
                 PersistJob::SaveInstance(instance_id)
             );
@@ -497,5 +505,28 @@ impl WorkflowEngine {
         }
         // Deliberately NOT deleting from active persistence bucket or DashMap.
         // Completed instances stay available via list_instances() and GET /api/instances/{id}.
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::InstancePayload;
+    use std::io::Write;
+
+    #[test]
+    fn payload_accepts_exact_limit_and_rejects_the_next_byte() {
+        let limit = crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES;
+        let mut payload = InstancePayload(Vec::new());
+        payload.write_all(&vec![b'x'; limit]).unwrap();
+        assert!(payload.write_all(b"x").is_err());
+        assert_eq!(payload.0.len(), limit);
+    }
+
+    #[test]
+    fn serialization_bounds_escaped_json_bytes() {
+        let mut payload = InstancePayload(Vec::new());
+        let input = "\n".repeat(crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES / 2);
+        assert!(serde_json::to_writer(&mut payload, &input).is_err());
+        assert!(payload.0.len() <= crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES);
     }
 }

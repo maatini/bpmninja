@@ -176,6 +176,8 @@ pub(super) struct InstrumentedPersistence {
     first_delay: Duration,
     later_delay: Duration,
     pub(super) history_batches: AtomicUsize,
+    pub(super) serialized_payloads: std::sync::Mutex<Vec<Vec<u8>>>,
+    pub(super) save_failures: AtomicUsize,
 }
 
 impl InstrumentedPersistence {
@@ -187,6 +189,8 @@ impl InstrumentedPersistence {
             first_delay,
             later_delay,
             history_batches: AtomicUsize::new(0),
+            serialized_payloads: std::sync::Mutex::new(Vec::new()),
+            save_failures: AtomicUsize::new(0),
         }
     }
 }
@@ -213,6 +217,23 @@ impl WorkflowPersistence for InstrumentedPersistence {
             tokio::time::sleep(delay).await;
         }
         self.inner.save_instance(instance).await
+    }
+    async fn save_instance_json(
+        &self,
+        instance: &ProcessInstance,
+        json: &[u8],
+    ) -> EngineResult<()> {
+        self.serialized_payloads.lock().unwrap().push(json.to_vec());
+        if self
+            .save_failures
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(crate::domain::EngineError::PersistenceError(
+                "injected save failure".into(),
+            ));
+        }
+        self.save_instance(instance).await
     }
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {
         self.inner.list_instances().await

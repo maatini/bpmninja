@@ -75,4 +75,4 @@
 | `history/mod.rs` | `src/history/mod.rs` | `HistoryEntry`, `HistoryDiff`, `VariableDiff`, `calculate_diff`, `calculate_diff_from_snapshot` |
 | `scripting/` | `src/scripting/` | `ScriptConfig`, `build_engine`, `derived_collection_limits`, `execute_script_safe` / listeners |
 | `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `NextAction`, pending types, `ActiveToken`, `JoinBarrier` |
-| `condition.rs` | `src/condition.rs` | Gateway condition evaluation: `evaluate_condition(expr, vars) -> bool` |
+| `condition.rs` | `src/condition.rs` | Gateway condition evaluation: `evaluate_condition(expr, vars) -> bool`; deployed/restored definitions cache parsed sequence-flow and complex-join conditions |

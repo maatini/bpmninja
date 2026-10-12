@@ -91,3 +91,57 @@ async fn concurrent_saves_persist_the_latest_state() {
     assert_eq!(persisted.variables.get("x"), live.variables.get("x"));
     engine.shutdown().await;
 }
+
+#[tokio::test]
+async fn inline_retries_reuse_the_checked_json_snapshot() {
+    let (engine, persistence, id) = setup(Duration::ZERO, Duration::ZERO).await;
+    persistence.serialized_payloads.lock().unwrap().clear();
+    persistence.save_failures.store(2, Ordering::SeqCst);
+    engine.persist_instance(id).await;
+    let payloads = persistence.serialized_payloads.lock().unwrap().clone();
+    assert_eq!(payloads.len(), 3);
+    assert!(payloads.windows(2).all(|pair| pair[0] == pair[1]));
+    let snapshot: crate::ProcessInstance = serde_json::from_slice(&payloads[0]).unwrap();
+    assert_eq!(snapshot.id, id);
+    let saved = persistence
+        .inner
+        .list_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.id == id)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(saved).unwrap(),
+        serde_json::to_value(snapshot).unwrap()
+    );
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn oversized_snapshot_never_reaches_the_backend() {
+    let (engine, persistence, id) = setup(Duration::ZERO, Duration::ZERO).await;
+    persistence.serialized_payloads.lock().unwrap().clear();
+    let errors_before = engine.persistence_error_count.load(Ordering::Relaxed);
+    let instance = engine.instances.get(&id).await.unwrap();
+    instance.write().await.variables.insert(
+        "oversized".into(),
+        json!("x".repeat(crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES)),
+    );
+    engine.persist_instance(id).await;
+    assert!(persistence.serialized_payloads.lock().unwrap().is_empty());
+    assert_eq!(
+        engine.persistence_error_count.load(Ordering::Relaxed),
+        errors_before + 1
+    );
+    let saved = persistence
+        .inner
+        .list_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.id == id)
+        .unwrap();
+    assert!(!saved.variables.contains_key("oversized"));
+    engine.shutdown().await;
+}

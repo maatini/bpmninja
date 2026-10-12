@@ -9,7 +9,7 @@ use futures::StreamExt;
 use tokio::sync::OnceCell;
 
 /// KV buckets created on connect; their handles are cached after first use.
-const KV_BUCKETS: [&str; 8] = [
+const KV_BUCKETS: [&str; 9] = [
     "tokens",
     "instances",
     "definitions",
@@ -18,6 +18,7 @@ const KV_BUCKETS: [&str; 8] = [
     "timers",
     "messages",
     "history_instances",
+    "instance_audit",
 ];
 
 /// Object stores created on connect; their handles are cached after first use.
@@ -48,6 +49,7 @@ pub struct NatsPersistence {
     pub(crate) client: Client,
     pub(crate) js: Context,
     pub(crate) handles: Arc<HandleCache>,
+    pub(crate) audit_cache: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl NatsPersistence {
@@ -167,10 +169,30 @@ impl NatsPersistence {
             })
             .await;
 
+        // Readers always need this bucket, including after disabling detached writes.
+        if js.get_key_value("instance_audit").await.is_err() {
+            if let Err(create_error) = js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: "instance_audit".into(),
+                    description: "Immutable instance audit snapshots".into(),
+                    ..Default::default()
+                })
+                .await
+            {
+                // A concurrent connection may have created the same bucket.
+                js.get_key_value("instance_audit").await.map_err(|_| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to initialize audit bucket: {create_error}"
+                    ))
+                })?;
+            }
+        }
+
         Ok(Self {
             client,
             js,
             handles: Arc::new(HandleCache::new()),
+            audit_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
         })
     }
 
@@ -210,6 +232,7 @@ impl NatsPersistence {
         bucket: &str,
         entity_name: &str,
     ) -> EngineResult<Vec<T>> {
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
         let store = self.kv(bucket).await?;
 
         // keys() Err is a persistence failure, not an empty bucket — must propagate.
@@ -221,8 +244,18 @@ impl NatsPersistence {
         while let Some(key_result) = keys.next().await {
             match key_result {
                 Ok(key) => match store.get(&key).await {
-                    Ok(Some(entry)) => match serde_json::from_slice::<T>(&entry) {
+                    Ok(Some(entry)) => match if crate::codec::detached(&entry) {
+                        let restored = self.restore_instance_record(&entry).await?;
+                        serde_json::to_value(restored)
+                            .and_then(serde_json::from_value::<T>)
+                            .map_err(|e| EngineError::PersistenceError(e.to_string()))
+                    } else {
+                        crate::codec::decode::<T>(&entry)
+                    } {
                         Ok(item) => entries.push(item),
+                        // A recognized compact record must not disappear from
+                        // restore on corruption or an unsupported version.
+                        Err(e) if crate::codec::is_compact(&entry) => return Err(e),
                         Err(e) => {
                             tracing::warn!("Failed to deserialize {entity_name} '{}': {}", key, e)
                         }
