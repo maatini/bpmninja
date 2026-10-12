@@ -143,3 +143,36 @@ async fn deploy_invalid_xml_returns_400() {
         "deploying invalid XML should return 400 BAD REQUEST"
     );
 }
+
+/// Regression: an embedded sub-process from BPMN XML used to park every
+/// instance on a "noop" service task at the sub-process start.
+#[tokio::test]
+async fn xml_embedded_subprocess_runs_to_completion() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+      <process id="sub_flow" isExecutable="true">
+        <startEvent id="s" />
+        <subProcess id="sp">
+          <startEvent id="sp_s" />
+          <scriptTask id="inner" scriptFormat="rhai"><script>let visited = true;</script></scriptTask>
+          <endEvent id="sp_e" />
+          <sequenceFlow id="a" sourceRef="sp_s" targetRef="inner" />
+          <sequenceFlow id="b" sourceRef="inner" targetRef="sp_e" />
+        </subProcess>
+        <endEvent id="e" />
+        <sequenceFlow id="f1" sourceRef="s" targetRef="sp" />
+        <sequenceFlow id="f2" sourceRef="sp" targetRef="e" />
+      </process>
+    </definitions>"#;
+    let def = bpmn_parser::parse_bpmn_xml(xml).unwrap();
+    let engine = engine_core::WorkflowEngine::new();
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+
+    assert_eq!(
+        engine.get_instance_state(id).await.unwrap(),
+        engine_core::InstanceState::Completed
+    );
+    assert!(engine.get_pending_service_tasks().is_empty());
+    let inst = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(inst.variables.get("visited"), Some(&serde_json::json!(true)));
+}

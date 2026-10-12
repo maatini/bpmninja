@@ -578,7 +578,7 @@ fn parse_event_based_gateway() {
 }
 
 #[test]
-fn parse_event_subprocess_accepted() {
+fn parse_event_subprocess_rejected_until_supported() {
     let xml = r#"
         <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <error id="err1" errorCode="VALIDATION_FAILED" />
@@ -597,13 +597,10 @@ fn parse_event_subprocess_accepted() {
         </definitions>
     "#;
 
-    // Event sub-processes (triggeredByEvent="true") must NOT cause a parse error
-    let result = parse_bpmn_xml(xml);
-    assert!(
-        result.is_ok(),
-        "Event sub-process should be accepted: {:?}",
-        result.err()
-    );
+    // Event sub-processes were parsed but never triggered at runtime (X0/X9):
+    // deploy must fail clearly instead of silently ignoring them.
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(err.contains("event sub-process 'sub1'"), "{err}");
 }
 
 #[test]
@@ -1410,4 +1407,121 @@ fn flatten_subprocess_keeps_send_inclusive_event_and_catch() {
         def.nodes.get("sub_wait").unwrap(),
         BpmnElement::MessageCatchEvent { .. }
     ));
+}
+
+// --- X0: unsupported elements are rejected, visual elements accepted ---------
+
+fn process_xml(body: &str) -> String {
+    format!(
+        r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+             <signal id="sig" name="go" />
+             <message id="msg" name="m" />
+             <process id="p" isExecutable="true">{body}</process>
+           </definitions>"#
+    )
+}
+
+fn rejection(body: &str) -> String {
+    parse_bpmn_xml(&process_xml(body))
+        .expect_err("must be rejected")
+        .to_string()
+}
+
+#[test]
+fn x0_rejects_signal_start_event_instead_of_plain_start() {
+    let err = rejection(
+        r#"<startEvent id="s"><signalEventDefinition signalRef="sig"/></startEvent>
+           <endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
+    );
+    assert!(err.contains("signalEventDefinition on startEvent 's'"), "{err}");
+}
+
+#[test]
+fn x0_rejects_message_end_event_instead_of_plain_end() {
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"><messageEventDefinition messageRef="msg"/></endEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
+    );
+    assert!(err.contains("messageEventDefinition on endEvent 'e'"), "{err}");
+}
+
+#[test]
+fn x0_rejects_multiple_event_definitions() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateCatchEvent id="c">
+             <messageEventDefinition messageRef="msg"/>
+             <timerEventDefinition><timeDuration>PT1M</timeDuration></timerEventDefinition>
+           </intermediateCatchEvent>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="c"/><sequenceFlow id="f2" sourceRef="c" targetRef="e"/>"#,
+    );
+    assert!(err.contains("multiple event definitions on intermediateCatchEvent 'c'"), "{err}");
+}
+
+#[test]
+fn x0_rejects_transaction_and_loops() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <userTask id="t"><standardLoopCharacteristics/></userTask>
+           <transaction id="tx"><startEvent id="ts"/><endEvent id="te"/>
+             <sequenceFlow id="tf" sourceRef="ts" targetRef="te"/></transaction>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="t"/><sequenceFlow id="f2" sourceRef="t" targetRef="tx"/>
+           <sequenceFlow id="f3" sourceRef="tx" targetRef="e"/>"#,
+    );
+    assert!(err.contains("standardLoopCharacteristics 't'"), "{err}");
+    assert!(err.contains("transaction 'tx'"), "{err}");
+}
+
+#[test]
+fn x0_accepts_visual_and_data_elements() {
+    let xml = format!(
+        r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+             <collaboration id="c"><participant id="pool" processRef="p"/></collaboration>
+             <process id="p" isExecutable="true">
+               <laneSet id="ls"><lane id="lane1"><flowNodeRef>s</flowNodeRef></lane></laneSet>
+               <startEvent id="s"/><endEvent id="e"/>
+               <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+               <dataObject id="do1"/><dataObjectReference id="dor1" dataObjectRef="do1"/>
+               <textAnnotation id="ta"><text>note</text></textAnnotation>
+               <association id="as" sourceRef="s" targetRef="ta"/>
+               <group id="g"/>
+             </process>
+           </definitions>"#
+    );
+    parse_bpmn_xml(&xml).expect("visual/data elements must be accepted");
+}
+
+#[test]
+fn x0_ignores_elements_of_processes_that_are_not_deployed() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+        <process id="p" isExecutable="true">
+          <startEvent id="s"/><endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+        </process>
+        <process id="other" isExecutable="false">
+          <startEvent id="os"><signalEventDefinition/></startEvent>
+        </process>
+      </definitions>"#;
+    parse_bpmn_xml(xml).expect("only the deployed process is checked");
+}
+
+#[test]
+fn embedded_subprocess_enters_at_start_successor_without_noop_task() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/><userTask id="inner"/><endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="inner"/>
+             <sequenceFlow id="b" sourceRef="inner" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("sp"),
+        Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "inner"
+    ));
+    assert!(def.get_node("sp_s").is_none(), "internal start must not be a node");
 }

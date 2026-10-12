@@ -211,9 +211,27 @@ pub fn bench_gateways_and_scripts(c: &mut Criterion) {
     group.finish();
 }
 
+/// Cost of a single gateway condition evaluation (decides whether P7 —
+/// pre-parsing conditions at deploy — is worth it).
+pub fn bench_condition(c: &mut Criterion) {
+    let vars = std::collections::HashMap::from([
+        ("amount".to_string(), json!(500)),
+        ("status".to_string(), json!("approved")),
+    ]);
+    c.bench_function("Condition: amount > 100", |b| {
+        b.iter(|| engine_core::evaluate_condition(std::hint::black_box("amount > 100"), &vars))
+    });
+    c.bench_function("Condition: status == 'approved'", |b| {
+        b.iter(|| {
+            engine_core::evaluate_condition(std::hint::black_box("status == 'approved'"), &vars)
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_execution_throughput,
-    bench_gateways_and_scripts
+    bench_gateways_and_scripts,
+    bench_condition
 );
 criterion_main!(benches);

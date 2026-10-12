@@ -316,6 +316,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
+    reject_unsupported_elements(xml, &process_id)?;
     let mut builder = ProcessDefinitionBuilder::new(process_id.clone());
 
     // Lookup maps for messages and errors
@@ -755,6 +756,143 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     builder.build()
 }
 
+/// Event definitions the engine executes, per event kind. Anything else on
+/// that kind of event is rejected by [`reject_unsupported_elements`].
+fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
+    match event_kind {
+        "startEvent" => &["timerEventDefinition", "messageEventDefinition"],
+        "endEvent" => &[
+            "terminateEventDefinition",
+            "errorEventDefinition",
+            "escalationEventDefinition",
+            "compensateEventDefinition",
+        ],
+        "intermediateCatchEvent" => &["timerEventDefinition", "messageEventDefinition"],
+        "intermediateThrowEvent" => &[
+            "messageEventDefinition",
+            "escalationEventDefinition",
+            "compensateEventDefinition",
+        ],
+        "boundaryEvent" => &[
+            "timerEventDefinition",
+            "messageEventDefinition",
+            "errorEventDefinition",
+            "escalationEventDefinition",
+            "compensateEventDefinition",
+        ],
+        _ => &[],
+    }
+}
+
+const EVENT_KINDS: [&str; 5] = [
+    "startEvent",
+    "endEvent",
+    "intermediateCatchEvent",
+    "intermediateThrowEvent",
+    "boundaryEvent",
+];
+
+/// Elements with execution semantics the engine does not implement yet
+/// (see the BPMN element matrix in the knowledge base).
+const UNSUPPORTED_ELEMENTS: [&str; 3] = ["transaction", "adHocSubProcess", "standardLoopCharacteristics"];
+
+/// X0: fails the deploy when the selected process uses BPMN elements whose
+/// execution semantics are not implemented, instead of silently dropping them
+/// (e.g. a signal start event used to become a plain start event).
+/// Visual and data elements (lanes, groups, annotations, data objects) stay
+/// accepted — they do not change the flow.
+fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> {
+    use quick_xml::events::{BytesStart, Event};
+
+    fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
+        e.attributes()
+            .flatten()
+            .find(|a| a.key.local_name().as_ref() == name)
+            .and_then(|a| {
+                a.normalized_value(quick_xml::XmlVersion::default())
+                    .ok()
+                    .map(|v| v.into_owned())
+            })
+    }
+
+    // (element local name, id, number of event definitions seen)
+    let mut stack: Vec<(String, Option<String>, usize)> = Vec::new();
+    let mut in_process = false;
+    let mut violations: Vec<String> = Vec::new();
+    let mut reader = quick_xml::Reader::from_str(xml);
+
+    loop {
+        let event = reader.read_event().map_err(|e| {
+            EngineError::InvalidDefinition(format!("BPMN XML parsing failed: {e}"))
+        })?;
+        let (e, is_empty) = match &event {
+            Event::Start(e) => (e, false),
+            Event::Empty(e) => (e, true),
+            Event::End(e) => {
+                if e.local_name().as_ref() == "process" {
+                    in_process = false;
+                }
+                stack.pop();
+                continue;
+            }
+            Event::Eof => break,
+            _ => continue,
+        };
+        let name = e.local_name().as_ref().to_string();
+        let id = attr(e, "id");
+
+        if name == "process" {
+            in_process = id.as_deref() == Some(process_id);
+        } else if in_process {
+            let at = id
+                .clone()
+                .or_else(|| stack.iter().rev().find_map(|(_, id, _)| id.clone()))
+                .unwrap_or_else(|| "?".to_string());
+
+            if UNSUPPORTED_ELEMENTS.contains(&name.as_str()) {
+                violations.push(format!("{name} '{at}'"));
+            } else if name == "subProcess" && attr(e, "triggeredByEvent").as_deref() == Some("true") {
+                violations.push(format!("event sub-process '{at}'"));
+            } else if name == "receiveTask" && attr(e, "instantiate").as_deref() == Some("true") {
+                violations.push(format!("instantiating receiveTask '{at}'"));
+            } else if name == "eventBasedGateway"
+                && (attr(e, "instantiate").as_deref() == Some("true")
+                    || attr(e, "eventGatewayType").as_deref() == Some("Parallel"))
+            {
+                violations.push(format!("instantiating or parallel eventBasedGateway '{at}'"));
+            } else if name.ends_with("EventDefinition")
+                && let Some((kind, event_id, count)) = stack
+                    .iter_mut()
+                    .rev()
+                    .find(|(kind, _, _)| EVENT_KINDS.contains(&kind.as_str()))
+            {
+                *count += 1;
+                let event_id = event_id.clone().unwrap_or_else(|| "?".to_string());
+                if *count > 1 {
+                    violations.push(format!(
+                        "multiple event definitions on {kind} '{event_id}'"
+                    ));
+                } else if !supported_event_definitions(kind).contains(&name.as_str()) {
+                    violations.push(format!("{name} on {kind} '{event_id}'"));
+                }
+            }
+        }
+
+        if !is_empty {
+            stack.push((name, id, 0));
+        }
+    }
+
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(EngineError::InvalidDefinition(format!(
+            "Unsupported BPMN element(s) in process '{process_id}': {}",
+            violations.join("; ")
+        )))
+    }
+}
+
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_subprocess(
     sp: crate::models::BpmnSubProcess,
@@ -766,26 +904,47 @@ fn flatten_subprocess(
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
 
-    let start_node_id = sp
-        .start_events
-        .first()
-        .map(|s| s.id.clone())
-        .unwrap_or_else(|| format!("{}_start", sub_process_id));
+    // The internal start event is not a node: entering the sub-process jumps
+    // straight to the start event's successor. (It used to become a
+    // `ServiceTask` with topic "noop", which parked every instance until an
+    // external worker completed it.)
+    let start = match sp.start_events.as_slice() {
+        [start] => start,
+        [] => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "subProcess '{sub_process_id}' has no start event"
+            )));
+        }
+        _ => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "subProcess '{sub_process_id}' has more than one start event"
+            )));
+        }
+    };
+    let start_id = start.id.clone();
+    let start_targets: Vec<&str> = sp
+        .sequence_flows
+        .iter()
+        .filter(|f| f.source_ref == start_id)
+        .map(|f| f.target_ref.as_str())
+        .collect();
+    let start_node_id = match start_targets.as_slice() {
+        [target] => (*target).to_string(),
+        [] => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "start event '{start_id}' of subProcess '{sub_process_id}' has no outgoing sequence flow"
+            )));
+        }
+        _ => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "start event '{start_id}' of subProcess '{sub_process_id}' has several outgoing sequence flows (implicit fork) — use a parallel gateway"
+            )));
+        }
+    };
     builder = builder.node(
         sub_process_id.clone(),
         BpmnElement::EmbeddedSubProcess { start_node_id },
     );
-
-    for start in sp.start_events {
-        // Internal start events are just pass-throughs, execution jumps here from the EmbeddedSubProcess node
-        builder = builder.node(
-            start.id,
-            BpmnElement::ServiceTask {
-                topic: "noop".into(),
-                multi_instance: None,
-            },
-        );
-    }
 
     for end in sp.end_events {
         builder = builder.node(
@@ -1053,6 +1212,10 @@ fn flatten_subprocess(
     }
 
     for flow in sp.sequence_flows {
+        // Flows leaving the internal start event are replaced by the jump above.
+        if flow.source_ref == start_id {
+            continue;
+        }
         if let Some(cond) = flow.condition_expression {
             builder = builder.conditional_flow(
                 flow.source_ref,

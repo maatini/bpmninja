@@ -295,7 +295,7 @@ Neue Aufgaben aus der Bewertung:
 | V1 ✅ (Modellprüfung) | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
 | K1 | Camunda-7-kompatible REST-Fassade (`/engine-rest/external-task/fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`) | High | Medium | Low | Migrationspfad: bestehende Camunda-7-Worker funktionieren ohne Codeänderung. |
 | K2 | Zeebe-/Camunda-8-Bridge | Low | High | Medium | Nur bei konkretem Bedarf. |
-| G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige | Medium | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
+| G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige; **zuerst:** Compensation-Handler über die BPMN-Standard-**Association** auflösen (heute nur über einen nicht-standardkonformen Sequence Flow — mit bpmn-js modellierte Kompensation läuft ins Leere) | High | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
 | B1 | WS-BPEL-2.0-Frontend (Parser → `ProcessDefinition`) | offen | High | Medium | Nur bei Bedarf; Abbildung siehe Tabelle oben. |
 | Q1 | `persistence-postgres` (operativer Zustand + Abfragen/Read-Model) | Medium | High | Medium | Echte Abfragen für History/Archiv statt In-Memory-Filter. |
 | J1 | JSON-Definitionsformat: `ProcessDefinition` als JSON deployen/exportieren (neben BPMN-XML) | Low–Med | Low | Low | Code-first-Definitionen ohne Modeler; Idee aus `bpmn-engine`. |
