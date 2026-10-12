@@ -657,10 +657,10 @@ Every state transition is stored as a `HistoryEntry`:
 
 | Crate | Unit | E2E / Integration | Total |
 |---|---|---|---|
-| engine-core | ~247 | 5 | ~252 |
-| bpmn-parser | ~46 | — | ~46 |
-| persistence-nats | 4 | — | 4 |
-| engine-server | ~15 | ~70 | ~85 |
+| engine-core | 259 | 5 | 264 |
+| bpmn-parser | 46 | — | 46 |
+| persistence-nats | 5 | — | 5 |
+| engine-server | 17 | 74 | 91 |
 | desktop-tauri (Playwright) | — | 52 | 52 |
 | external-task-client (Vitest) | 76 | — | 76 |
 

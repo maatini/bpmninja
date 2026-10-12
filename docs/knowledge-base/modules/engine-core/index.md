@@ -4,7 +4,7 @@ The heart of BPMNinja — a **pure state machine** with no network or I/O code. 
 
 **Crate path:** `engine-core/`  
 **Source:** `engine-core/src/` (74 files, ~19,100 LoC incl. tests in `src/engine/tests/`)  
-**Tests:** ~247 lib tests (split by domain under `src/engine/tests/`) + 5 integration (BPMN compliance / complex gateways); includes Rhai memory + bounded retry tests
+**Tests:** 259 lib tests (split by domain under `src/engine/tests/`) + 5 integration (BPMN compliance / complex gateways); includes Rhai memory + bounded retry tests
 
 - [responsibility.md](responsibility.md) — What engine-core owns, invariants, entry points
 - [dependencies.md](dependencies.md) — Inbound/outbound dependencies, trait relationships

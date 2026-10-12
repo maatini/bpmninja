@@ -590,17 +590,17 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 | Package | Unit | E2E / Integration | Total |
 |---------|------|-----|-------|
-| **engine-core** | 254 | 5 | 259 |
+| **engine-core** | 259 | 5 | 264 |
 | **bpmn-parser** | 46 | — | 46 |
-| **persistence-nats** | 4 | — | 4 |
-| **engine-server** | 15 | 70 | 85 |
+| **persistence-nats** | 5 | — | 5 |
+| **engine-server** | 17 | 74 | 91 |
 | **desktop-tauri** | — | 52 | 52 |
 | **bpmn-ninja-external-task-client** | 76 | — | 76 |
-| **Total** | **395** | **127** | **522** ✅ |
+| **Total** | **403** | **131** | **534** ✅ |
 
 > Authoritative: `cargo test --workspace` (NATS integration tests need a JetStream server; they skip locally without one and fail in CI).
 
-### engine-core Breakdown (259 tests)
+### engine-core Breakdown (264 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -612,9 +612,9 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `engine::tests::start_tasks` | 12 | Start variants, user and service tasks |
 | `engine::tests::topic_index` | 8 | Topic index for fetch-and-lock, long-poll wake-up |
 | `engine::tests::migration` | 6 | Instance migration and node mapping |
-| `engine::tests::scripting` | 6 | Rhai scripts and listeners, sandbox limits |
+| `engine::tests::scripting` | 8 | Rhai scripts and listeners, sandbox limits, shared engine + compiled-script cache |
 | `engine::tests::timer_due_index` | 5 | Timer due index, event-driven scheduler |
-| other `engine::tests::*` | 18 | Inclusive joins, XOR merge, parallel call activities, pagination, incidents, recurring timers, boundary restore, persistence locking |
+| other `engine::tests::*` | 21 | Inclusive joins, XOR merge, parallel call activities, pagination, incidents, recurring timers, boundary restore, persistence locking, batched history |
 | `history` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
 | `domain` (`tests.rs` + `timer.rs`) | 36 | ProcessDefinition builder, token serialization, validation, ISO 8601 timers |
 | `runtime::instance` | 11 | Audit log limits, file variables, file references |
@@ -642,7 +642,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | Rejected definitions | 6 | Empty timer, multi-instance, generic task, empty script, catch without trigger, businessRuleTask without topic |
 | Process selection & flattening | 2 | Executable-process selection, sub-process flattening of send/inclusive/event nodes |
 
-### engine-server E2E Tests (70 tests, 18 files)
+### engine-server E2E Tests (74 tests, 19 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -656,6 +656,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `e2e_history.rs` | 4 | History generation, querying, completed instances listing, business key filter, pagination |
 | `e2e_instances_page.rs` | 2 | Paginated instance listing (`limit`/`offset`, `X-Total-Count`) |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
+| `e2e_model_check.rs` | 4 | Deploy-time model checking: passed, deadlock reported (warn), rejected (enforce), off |
 | `e2e_migration.rs` | 5 | Instance migration to a new definition version (compatible, renamed nodes, incompatible, dry-run) |
 | `e2e_monitoring.rs` | 5 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
 | `e2e_service_tasks.rs` | 7 | List service tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN error, lock conflict |
@@ -768,6 +769,8 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 |---|---|---|
 | 👤 | **Yasir Karam** ([@yasir2000](https://github.com/yasir2000)) | Maintainer |
 | 🤖 | **[Claude Code](https://claude.com/claude-code)** | AI coding agent, co-author |
+
+Based on the original project **[maatini/bpmninja](https://github.com/maatini/bpmninja)** by [@maatini](https://github.com/maatini).
 
 Project website: **https://yasir2000.github.io/bpmninja/**
 

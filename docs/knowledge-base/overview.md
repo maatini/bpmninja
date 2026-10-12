@@ -99,13 +99,13 @@ flowchart LR
 
 | Crate | Unit | E2E | Total |
 |-------|------|-----|-------|
-| engine-core | ~247 | 5 | ~252 |
-| bpmn-parser | ~46 | — | ~46 |
-| persistence-nats | 4 | — | 4 |
-| engine-server | ~15 | ~70 | ~85 |
+| engine-core | 259 | 5 | 264 |
+| bpmn-parser | 46 | — | 46 |
+| persistence-nats | 5 | — | 5 |
+| engine-server | 17 | 74 | 91 |
 | desktop-tauri | — | 52 | 52 |
 | external-task-client | 76 | — | 76 |
-| **Total** | **~388** | **~127** | **~515** |
+| **Total** | **403** | **131** | **534** |
 
 > Counts approximate (test attributes counted on 2026-10-12); `cargo test --workspace` is the source of truth.
 
