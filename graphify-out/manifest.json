@@ -36,9 +36,9 @@
     "semantic_hash": ""
   },
   ".claude/settings.json": {
-    "mtime": 1791788199.3609934,
-    "seen": 1791806103.4806325,
-    "ast_hash": "b63d500bcc8bf06cbc00895385a52b24",
+    "mtime": 1791807149.6702752,
+    "seen": 1791826805.085211,
+    "ast_hash": "f780a934ca19d893e829f470e9cdce55",
     "semantic_hash": ""
   },
   ".github/scripts/build_mutation_metrics.py": {
@@ -774,9 +774,9 @@
     "semantic_hash": ""
   },
   "devbox.json": {
-    "mtime": 1791788199.7085273,
-    "seen": 1791806103.4806325,
-    "ast_hash": "808ca5f2c42a683a00546356eb13906d",
+    "mtime": 1791807106.7197113,
+    "seen": 1791826805.0862153,
+    "ast_hash": "d9784e1c90c6a12f657159c251bb8c42",
     "semantic_hash": ""
   },
   "docs/quality-badges.json": {
@@ -1614,15 +1614,15 @@
     "semantic_hash": ""
   },
   ".agent/rules/02_GRAPH_FIRST_NAVIGATION.md": {
-    "mtime": 1791788199.33972,
-    "seen": 1791806103.481633,
-    "ast_hash": "a330e1aee0ee14b646b3b6f61a9693ac",
+    "mtime": 1791807106.4145079,
+    "seen": 1791826805.0862153,
+    "ast_hash": "281cb8515dd38ba62320350bd04f0f7e",
     "semantic_hash": ""
   },
   ".agent/rules/03_GRAPH_MAINTENANCE.md": {
-    "mtime": 1791788199.33972,
-    "seen": 1791806103.481633,
-    "ast_hash": "69bd0cbac38eb3848fb5112aba762a26",
+    "mtime": 1791807279.4069738,
+    "seen": 1791826805.0862153,
+    "ast_hash": "c73363c8ae8f8293087dce556ded0898",
     "semantic_hash": ""
   },
   ".agent/rules/04_TASK_MEMORY_PROTOCOL.md": {
@@ -1866,9 +1866,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1791789220.894338,
-    "seen": 1791806103.481633,
-    "ast_hash": "b575a4182463f64a85ee7d4fe567e586",
+    "mtime": 1791807106.430506,
+    "seen": 1791826805.0862153,
+    "ast_hash": "5379a631a308a80272f22d58545f2285",
     "semantic_hash": ""
   },
   "README.md": {
@@ -2715,6 +2715,24 @@
     "mtime": 1791788200.0862837,
     "seen": 1791806103.481633,
     "ast_hash": "f6488c4d0e575c7efd3533ba0fc41a28",
+    "semantic_hash": ""
+  },
+  ".codex/hooks.json": {
+    "mtime": 1791807152.6975832,
+    "seen": 1791826805.085211,
+    "ast_hash": "5ebef3dd159986e465ab65e4014107ec",
+    "semantic_hash": ""
+  },
+  ".github/copilot-instructions.md": {
+    "mtime": 1791806975.4367774,
+    "seen": 1791826805.0862153,
+    "ast_hash": "2b23503628bf2ec71d067a85ca8948ab",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1791806975.1271727,
+    "seen": 1791826805.0862153,
+    "ast_hash": "b2a3beb945b83667fef3a73daee5d6dd",
     "semantic_hash": ""
   }
 }
