@@ -35,6 +35,16 @@ Camunda/OpenAPI send milliseconds. `engine-server` converts to seconds for `engi
 
 `StartupCoordinator.restore_definitions` loads `list_definitions()` (parsed JSON) first and deploys without XML reparse. BPMN XML is loaded only into `deployed_xml`. Empty or failed Definitions-KV falls back to XML parse. Persistence `keys()` errors propagate as `PersistenceError`, not as an empty list.
 
+### ⚠️ Deploy runs a model check (`MODEL_CHECK`)
+
+`server/model_check.rs` runs `rust_bpmn_analyzer` (safeness, option to complete, proper completion, no dead activities; partial order reduction) after parsing and before `deploy_definition`. Modes: `off`, `warn` (default — `model_check` report in the deploy response, `tracing::warn!`), `enforce` (violations → 400). Details:
+
+- The analysis runs in `spawn_blocking`; **at most one at a time** (others report `skipped`), and the deploy waits at most `MODEL_CHECK_TIMEOUT_MS` (default 2000 → `inconclusive`). A timed-out analysis keeps its permit until it really ends — state-space exploration cannot be cancelled.
+- The analyzer **panics** on input it does not understand; the panic is contained (`skipped: analyzer failed`), never a failed deploy.
+- Its reader drops self-closing events/gateways (`<startEvent id="s"/>`), so the XML is expanded into start/end pairs first (`expand_empty_elements`). bpmn-js output is unaffected.
+- Unsupported elements (timer/error/escalation/compensation/signal events, call activities, inclusive/complex gateways, event sub-processes) → `skipped` with the element ids.
+- Git dependency pinned by `rev`; `deny.toml` has an explicit `allow-git` entry. `build_app()` uses `Off`; tests set `AppBuildConfig.model_check`.
+
 ### ⚠️ Deploy XML save failure is HTTP 500
 
 If persistence is configured and `save_bpmn_xml` fails, the handler rolls back the in-memory definition (`delete_definition`) and returns 500. `deployed_xml` is updated only after a successful save. Without persistence the RAM deploy still returns 200.

@@ -37,6 +37,7 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:log-buffer` | Rolling 5000-entry in-memory log buffer |
 | `@tag:long-polling` | fetchAndLock with asyncResponseTimeout |
 | `@tag:migration-dialog` | Instance migration UI with node mapping |
+| `@tag:model-check` | Deploy-time BPMN model checking (rust_bpmn_analyzer, `MODEL_CHECK`) |
 | `@tag:monitoring-dashboard` | Storage info, KV browser, engine stats, log stream |
 | `@tag:multi-topic-subscription` | Multiple topic handlers in parallel |
 | `@tag:namespace-handling` | Camunda namespace prefix on BPMN extension elements |

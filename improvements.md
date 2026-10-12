@@ -149,11 +149,11 @@ Befunde aus dem Code (Stand v0.7.24):
 |---|----------|--------|--------|--------|----------------|
 | P0 (✅ teilweise) | Messbasis: Criterion-Benches erweitern (Gateways, Scripts, Timer, mit NATS) + HTTP-Lasttest (z. B. `oha`/k6) + Flamegraph; Regressions-Gate in CI — **erledigt:** Benches (`engine_bench.rs`, `persistence-nats/benches/nats_bench.rs`); **offen:** HTTP-Lasttest, Flamegraph, CI-Gate | High | Low | None | `engine_bench.rs` misst nur lineare Prozesse ohne Persistenz. Ohne Baseline sind „schneller“-Ziele nicht überprüfbar. |
 | P1 ✅ | NATS-Bucket-Handles beim Connect cachen | High | Low | Low | `trait_impl.rs` rief vor **jeder** Operation `js.get_key_value(..)` / `get_object_store(..)` auf (24 Stellen + `list_kv_entries`) — ein zusätzlicher JetStream-API-Roundtrip pro Schreib-/Lesezugriff. |
-| P2 | History pro Batch statt pro Schritt schreiben (gesammelt am Ende von `run_instance_batch` bzw. asynchron über bounded Channel) | High | Medium | Medium | `run_instance_batch` klont pro Schritt alle Variablen (`DiffSnapshot::from_instance`) und wartet pro Schritt auf `append_history_entry` (JetStream-Publish inkl. Inline-Retry). |
+| P2 ✅ | History pro Batch statt pro Schritt schreiben (gesammelt am Ende von `run_instance_batch` bzw. asynchron über bounded Channel) | High | Medium | Medium | `run_instance_batch` klont pro Schritt alle Variablen (`DiffSnapshot::from_instance`) und wartet pro Schritt auf `append_history_entry` (JetStream-Publish inkl. Inline-Retry). |
 | P3 ✅ | `persist_instance`: Lock vor dem Netzwerk-Await freigeben (Snapshot + gestreifte `PersistLocks`); Größenprüfung ohne Puffer. Doppelte Serialisierung bleibt bis P8 (braucht Trait-Änderung) | High | Low | Low | Serialisiert zweimal (Größenprüfung + Save) und hält den Instanz-Write-Lock während `save_instance` inkl. Retry-Backoff. |
 | P4 ✅ | Long-Polling auf `tokio::sync::Notify` umstellen (umgesetzt: ein globaler Notify; pro Topic = Folgeschritt bei vielen Workern) | High | Low | Low | `fetchAndLock` pollt in einer 500-ms-Sleep-Schleife (`server/tasks.rs`) → bis zu 500 ms Latenz pro Service-Task-Übergabe. |
 | P5 ✅ | Timer-Scheduler ereignisgesteuert: bis zum nächsten Fälligkeitszeitpunkt aus `TimerDueIndex` schlafen, bei neuem Timer per `Notify` wecken | Medium | Low | Low | Fester 1-s-Takt (`TIMER_INTERVAL_MS`) → bis zu 1 s Verspätung, CPU-Wakeups im Leerlauf. |
-| P6 | Rhai: eine `Engine` wiederverwenden (Feature `sync` ist aktiv) + AST pro (Definition, Knoten) beim Deploy vorkompilieren | Medium | Medium | Low | `execute_script_safe` baut pro Aufruf eine neue `rhai::Engine` und kompiliert das Script jedes Mal neu. |
+| P6 ✅ | Rhai: eine `Engine` wiederverwenden (Feature `sync` ist aktiv) + kompilierte Scripts cachen (umgesetzt: `ScriptRunner`, Cache nach Script-Text beim ersten Lauf statt beim Deploy) | Medium | Medium | Low | `execute_script_safe` baut pro Aufruf eine neue `rhai::Engine` und kompiliert das Script jedes Mal neu. |
 | P7 | Bedingungen beim Deploy vorparsen | Low–Med | Low | Low | `condition.rs` parst den Ausdruck bei jeder Auswertung. |
 | P8 | Kompaktes Persistenzformat (z. B. `postcard`/`rmp-serde`) hinter Feature-Flag; `audit_log` aus dem Instanz-Dokument lösen; Delta- statt Voll-Dokument-Writes | Medium | High | Medium | Jeder Save schreibt die komplette `ProcessInstance` als JSON (bis 900 KiB Limit). |
 | P9 | Globaler Allocator `mimalloc` im Server; `lto = "fat"` + PGO für Release evaluieren | Low–Med | Low | Low | Allokationslastiger Hot Path (Clones, JSON). |
@@ -172,6 +172,21 @@ Befunde aus dem Code (Stand v0.7.24):
 P4/P5 verbessern **Latenz**, nicht Durchsatz: Service-Task-Übergabe vorher bis 500 ms, jetzt sofort (Notify); Timer vorher bis 1 s verspätet, jetzt zum Fälligkeitszeitpunkt (durch Tests belegt, nicht durch Benches).
 
 Nebenbefund: `append_history_entry` wartet nicht auf den JetStream-Ack — History-Einträge können bei NATS-Problemen unbemerkt verloren gehen. Gehört zu P2/F3.
+
+**Messergebnis P2 + P6 + Korrekturen (2026-10-12, Median gegen Baseline `before2`):**
+
+| Bench | Vorher | Nachher | Änderung |
+|---|---|---|---|
+| Script chain (10 Script-Tasks, in-memory) | 6,54 ms | 0,46 ms | −93 % (P6) |
+| Parallel fork/join, 16 Script-Zweige | 10,3 ms | 0,81 ms | −92 % (P6) |
+| Engine mit NATS: start → 5 Script-Tasks → end | 4,95 ms | 2,11 ms | −57 % (P2 + P6) |
+| Linear 100 Service-Tasks (in-memory) | 10,1 ms | 6,38 ms | −37 % (P2: kein Snapshot ohne Persistenz) |
+| XOR routing | 16,6 µs | 12,4 µs | −25 % |
+| NATS `append_history_entry` (einzeln) | 15,9 µs | 170 µs | **langsamer, gewollt:** wartet jetzt auf den JetStream-Ack. Im Engine-Pfad fällt das einmal pro Batch an, nicht pro Schritt |
+
+Korrekturen in diesem Schritt: History-Publish wartet auf den JetStream-Ack und setzt `Nats-Msg-Id` (Retry ohne Duplikate); `fail_service_task`/`retry_incident` halten keinen DashMap-Guard mehr über `.await`. Die Rhai-Engine wird erst beim ersten Script gebaut (sonst kostet jeder `WorkflowEngine::new()` ~0,6 ms). Die engine-core-Unit-Tests laufen dadurch in ~3 s statt ~38 s.
+
+Neu bekannt (nicht behoben): `run_end_scripts` hält den Instanz-Write-Lock während Listener-Scripts laufen.
 
 #### 4b — Fundament für Verteilung (Voraussetzung für 4c–4e)
 
@@ -277,7 +292,7 @@ Neue Aufgaben aus der Bewertung:
 |---|----------|--------|--------|--------|----------------------|
 | E1 | In-Process-Task-Handler: `register_task_handler(topic, Arc<dyn TaskHandler>)` | High | Medium | Low | Service Tasks laufen direkt im Engine-Prozess ohne Fetch-and-Lock-Roundtrip — der sichere Weg zu „nativer“ Geschwindigkeit für eingebettete Nutzung. CPU-lastige Handler auf eigenem Pool (`spawn_blocking`/Rayon). |
 | E2 | Kompilierter Ausführungsplan beim Deploy (Knoten/Flows als Index-Arrays statt String-HashMap-Lookups pro Schritt) | Medium | High | Medium | Erst nach P6/P2 messen, ob der Interpreter überhaupt noch relevant ist. |
-| V1 | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
+| V1 ✅ (Modellprüfung) | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
 | K1 | Camunda-7-kompatible REST-Fassade (`/engine-rest/external-task/fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`) | High | Medium | Low | Migrationspfad: bestehende Camunda-7-Worker funktionieren ohne Codeänderung. |
 | K2 | Zeebe-/Camunda-8-Bridge | Low | High | Medium | Nur bei konkretem Bedarf. |
 | G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige | Medium | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
@@ -301,7 +316,7 @@ Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktiv
 
 #### Empfohlene Reihenfolge
 
-1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ 2026-10-12 → P2, P6, P7 → P8–P10
+1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ → ~~P2, P6~~ ✅ 2026-10-12 → P7 → P8–P10
 2. **Aus der Bewertung** (unabhängig, hoher Nutzen): V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler); B1/K2/Q1 nach Entscheidung
 2b. **4f BPMN-Vollabdeckung**: X0 + V1 → X3, X13, X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
 3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)

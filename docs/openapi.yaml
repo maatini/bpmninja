@@ -73,7 +73,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeployResponse'
         '400':
-          description: Invalid BPMN XML or XML too large
+          description: Invalid BPMN XML, XML too large, or model check failed (`MODEL_CHECK=enforce`)
           content:
             application/json:
               schema:
@@ -1105,6 +1105,33 @@ components:
           format: uuid
         version:
           type: integer
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+
+    ModelCheckReport:
+      type: object
+      description: >-
+        Deploy-time model checking (rust_bpmn_analyzer). Absent when `MODEL_CHECK=off`.
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [passed, violations, skipped, inconclusive]
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              property:
+                type: string
+                enum: [safeness, option_to_complete, proper_completion, no_dead_activities]
+              elements:
+                type: array
+                items:
+                  type: string
+        reason:
+          type: string
+          description: Why the check was skipped or inconclusive
 
     StartRequest:
       type: object

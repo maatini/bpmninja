@@ -47,7 +47,7 @@ graph TD
 | **bpmn-parser** | engine-core | quick-xml, serde, chrono | Uses engine-core's `ProcessDefinition`, `BpmnElement`, `TimerDefinition`, `EngineError` |
 | **persistence-nats** | engine-core | async-nats, serde_json, futures | Implements `WorkflowPersistence` trait from engine-core |
 | **persistence-memory** | engine-core | serde_json, async-trait | Implements `WorkflowPersistence` trait from engine-core |
-| **engine-server** | engine-core, bpmn-parser, persistence-nats, persistence-memory | axum, tokio, tower-http 0.7, async-nats, uuid, metrics, metrics-exporter-prometheus, tracing, tracing-subscriber | Server binary; depends on all crates |
+| **engine-server** | engine-core, bpmn-parser, persistence-nats, persistence-memory | axum, tokio, tower-http 0.7, async-nats, rust_bpmn_analyzer (git), quick-xml, uuid, metrics, metrics-exporter-prometheus, tracing, tracing-subscriber | Server binary; depends on all crates |
 | **agent-orchestrator** | engine-core | tokio, reqwest | Example worker; uses engine-core for public types |
 | **desktop-tauri** | (none — HTTP client) | @tauri-apps/api, bpmn-js, React, Tailwind | Thin HTTP client to engine-server |
 | **external-task-client** | (none — HTTP client) | pino (logging) | Pure TypeScript HTTP client |

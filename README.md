@@ -42,6 +42,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
+- **Deploy-time model checking** — every deployed model is checked for deadlocks, livelocks, unsafe parallelism and dead activities with [rust_bpmn_analyzer](https://github.com/timKraeuter/rust_bpmn_analyzer) (partial order reduction); `MODEL_CHECK=warn` reports findings in the deploy response, `enforce` rejects the deploy
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Event-driven timer scheduler** — sleeps until the next timer is due (or a new timer is added) instead of polling; `TIMER_INTERVAL_MS` caps the idle wait
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling; waiting workers are woken the moment a task becomes available
@@ -281,6 +282,8 @@ The server runs at `http://localhost:8081`.
 | `CORS_ORIGINS` | localhost:1420 + Tauri origins | Comma-separated CORS allowlist; `*` allows any origin (dev only) |
 | `MAX_XML_BYTES` | `10485760` | Max JSON / BPMN XML request body (bytes) |
 | `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded background retry queue for failed persistence writes |
+| `MODEL_CHECK` | `warn` | Deploy-time model checking: `off`, `warn` (report in deploy response + log) or `enforce` (reject models with violations, HTTP 400) |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | Maximum time a deploy waits for the model check (then `inconclusive`) |
 | `RHAI_MAX_OPERATIONS` | `50000` | Script operation budget |
 | `RHAI_MAX_MEMORY_BYTES` | `2097152` | Script memory budget (derives string/array/map size caps) |
 | `RHAI_TIMEOUT_MS` | `1000` | Script wall-clock timeout |
@@ -296,7 +299,7 @@ The server runs at `http://localhost:8081`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB) |
+| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB); response includes a `model_check` report unless `MODEL_CHECK=off` |
 | `GET` | `/api/definitions` | List all definitions |
 | `GET` | `/api/definitions/:id/xml` | Retrieve the BPMN XML of a definition |
 | `DELETE` | `/api/definitions/:id` | Delete a definition (`?cascade=true` to also delete instances) |
@@ -751,6 +754,8 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Multi-node cluster (NATS-based token locking) | 🔲 Planned |
 | Optional API-key auth + CORS allowlist | ✅ Implemented |
 | Event-driven timer scheduler + instant long-poll wake-up | ✅ Implemented |
+| Deploy-time model checking (rust_bpmn_analyzer) | ✅ Implemented |
+| Full BPMN 2.0.2 element coverage (signal, multi-instance, loops, transactions, data, pools …) — see [improvements.md](improvements.md) 4f | 🔲 Planned |
 | Performance & cloud-native roadmap (NATS/Kafka/Redpanda, Dapr, serverless, mesh) — see [improvements.md](improvements.md) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
 

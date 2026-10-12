@@ -54,8 +54,21 @@ model DeployRequest {
   name: string;
 }
 
+model ModelCheckViolation {
+  property: "safeness" | "option_to_complete" | "proper_completion" | "no_dead_activities";
+  elements?: string[];
+}
+
+model ModelCheckReport {
+  status: "passed" | "violations" | "skipped" | "inconclusive";
+  violations?: ModelCheckViolation[];
+  reason?: string;
+}
+
 model DeployResponse {
   definition_key: string;
+  version: int32;
+  model_check?: ModelCheckReport;
 }
 
 model StartRequest {

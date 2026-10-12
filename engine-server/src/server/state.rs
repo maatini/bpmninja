@@ -112,6 +112,8 @@ pub struct AppState {
     pub(crate) api_key: Option<String>,
     /// Configured CORS origins (`*` means allow any — dev escape hatch only).
     pub(crate) cors_origins: Vec<String>,
+    /// Deploy-time model checking (`MODEL_CHECK`, `MODEL_CHECK_TIMEOUT_MS`).
+    pub(crate) model_checker: crate::server::model_check::ModelChecker,
 }
 
 /// `REQUIRE_NATS` is fail-closed: unset defaults to **true**.

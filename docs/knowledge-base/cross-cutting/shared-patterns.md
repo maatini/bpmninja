@@ -92,6 +92,8 @@ Reusable patterns and conventions that span multiple modules.
 | `RHAI_MAX_MEMORY_BYTES` | `2097152` | Rhai memory budget (derives collection caps) |
 | `RHAI_TIMEOUT_MS` | `1000` | Rhai timeout |
 | `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded background retry queue size |
+| `MODEL_CHECK` | `warn` | Deploy-time model checking: `off` / `warn` / `enforce` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | Max wait for the model check during deploy |
 
 ## Thin Client Pattern (Desktop App)
 

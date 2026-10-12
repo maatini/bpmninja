@@ -16,6 +16,8 @@
 | metrics / metrics-exporter-prometheus | External crate | Prometheus metrics endpoint |
 | serde / serde_json | External crate | JSON request/response serialization |
 | futures | External crate | Stream extensions for SSE |
+| rust_bpmn_analyzer | Git dependency (pinned rev, MIT) | Deploy-time model checking (`server/model_check.rs`) |
+| quick-xml | External crate | Normalizes deploy XML for the analyzer |
 
 ## Inbound
 
@@ -40,4 +42,6 @@
 | `RUST_LOG` | `info` | main.rs: log level filter |
 | `LOG_FORMAT` | `text` | main.rs: `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | main.rs: log file path, `off` to disable |
+| `MODEL_CHECK` | `warn` | deploy: `off` / `warn` / `enforce` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | deploy: max wait for the model check |
 

@@ -132,19 +132,19 @@ const MAX_CACHED_SCRIPTS: usize = 1024;
 /// Building a `rhai::Engine` registers all standard packages and compiling a
 /// script parses it — both used to happen on every evaluation. The engine is
 /// immutable after construction and `Send + Sync` (Rhai `sync` feature), so
-/// one instance serves all evaluations.
+/// one instance serves all evaluations. It is built on first use, so workflow
+/// engines that never run a script do not pay for it.
 pub struct ScriptRunner {
     config: ScriptConfig,
-    engine: std::sync::Arc<rhai::Engine>,
+    engine: std::sync::OnceLock<std::sync::Arc<rhai::Engine>>,
     compiled: dashmap::DashMap<String, std::sync::Arc<rhai::AST>>,
 }
 
 impl ScriptRunner {
     pub fn new(config: ScriptConfig) -> Self {
-        let engine = std::sync::Arc::new(config.build_engine());
         Self {
             config,
-            engine,
+            engine: std::sync::OnceLock::new(),
             compiled: dashmap::DashMap::new(),
         }
     }
@@ -166,7 +166,10 @@ impl ScriptRunner {
         script: &str,
         variables: &HashMap<String, Value>,
     ) -> EngineResult<ScriptResult> {
-        let engine = std::sync::Arc::clone(&self.engine);
+        let engine = std::sync::Arc::clone(
+            self.engine
+                .get_or_init(|| std::sync::Arc::new(self.config.build_engine())),
+        );
         let cached = self.compiled.get(script).map(|ast| ast.value().clone());
         let source = script.to_owned();
         let timeout = std::time::Duration::from_millis(self.config.timeout_ms);

@@ -6,6 +6,10 @@ license = "MIT OR Apache-2.0"
 rust-version.workspace = true
 
 [dependencies]
+# Deploy-time model checking (V1). Not on crates.io → pinned git revision (MIT).
+rust_bpmn_analyzer = { git = "https://github.com/timKraeuter/rust_bpmn_analyzer", rev = "3d3eede32409d70e6818d8344d480de8d76a6d8b" }
+# Same version as bpmn-parser; used to normalize XML for the analyzer.
+quick-xml = "0.42"
 axum = { version = "0.8", features = ["multipart", "tokio"] }
 tokio = { workspace = true }
 serde = { workspace = true }

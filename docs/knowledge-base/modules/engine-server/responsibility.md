@@ -14,6 +14,7 @@
 10. **@tag:request-size-limit** — JSON/XML body limit via `DefaultBodyLimit` = `MAX_XML_BYTES` (10 MiB, OpenAPI). Multipart instance files remain `MAX_UPLOAD_BYTES` (5 MiB).
 11. **@tag:api-auth** — Optional shared API key (`BPMNINJA_API_KEY`): Bearer or `X-API-Key`. Public: `GET /api/health`, `GET /api/ready`.
 12. **@tag:lock-duration-ms** — HTTP `lockDuration`/`newDuration` are milliseconds; converted to seconds at the engine-server boundary.
+13. **@tag:model-check** — Deploy-time model checking with `rust_bpmn_analyzer` (`MODEL_CHECK` off/warn/enforce).
 
 ## Invariants
 
@@ -50,3 +51,4 @@
 | `server/timers.rs` | `src/server/timers.rs` | List pending timers + manual timer processing |
 | `server/monitoring.rs` | `src/server/monitoring.rs` | Health, ready, info, monitoring stats, KV bucket browser |
 | `server/logs.rs` | `src/server/logs.rs` | Query log buffer with level/text filters |
+| `server/model_check.rs` | `src/server/model_check.rs` | Deploy-time model checking (analyzer, XML normalization, single-analysis guard) |

@@ -7,6 +7,7 @@ pub(crate) mod history;
 pub(crate) mod instances;
 pub(crate) mod logs;
 pub(crate) mod messages;
+pub mod model_check;
 pub(crate) mod monitoring;
 pub(crate) mod state;
 pub(crate) mod tasks;
@@ -43,6 +44,10 @@ pub struct AppBuildConfig {
     pub max_xml_bytes: Option<usize>,
     pub api_key: Option<Option<String>>,
     pub cors_origins: Option<Vec<String>>,
+    /// `None` → env `MODEL_CHECK` (default `warn`).
+    pub model_check: Option<model_check::ModelCheckMode>,
+    /// `None` → env `MODEL_CHECK_TIMEOUT_MS` (default 2000).
+    pub model_check_timeout_ms: Option<u64>,
 }
 
 /// Builds the Axum router with all routes and middleware.
@@ -64,6 +69,8 @@ pub fn build_app() -> Router {
             max_xml_bytes: Some(MAX_XML_BYTES),
             api_key: Some(None),
             cors_origins: Some(default_cors_origins()),
+            model_check: Some(model_check::ModelCheckMode::Off),
+            model_check_timeout_ms: None,
         },
     )
 }
@@ -136,6 +143,14 @@ pub fn build_app_with_config(
         max_xml_bytes,
         api_key,
         cors_origins: cors_origins.clone(),
+        model_checker: model_check::ModelChecker::new(
+            config
+                .model_check
+                .unwrap_or_else(model_check::ModelCheckMode::from_env),
+            config
+                .model_check_timeout_ms
+                .unwrap_or_else(model_check::timeout_ms_from_env),
+        ),
     });
 
     tracing::info!(
