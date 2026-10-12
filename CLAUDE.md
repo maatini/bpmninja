@@ -104,7 +104,7 @@ Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
 
 ## Claude Workflow (unbedingt einhalten)
 
-1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `graphify-out/GRAPH_REPORT.md` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
+1. **Graphify zuerst:** Bei Fragen zu Code, Architektur, Abhängigkeiten oder Abläufen zuerst `graphify query "<Frage>"` ausführen; `GRAPH_REPORT.md` nur für breite Architekturübersichten nutzen. Quellcode danach gezielt zur Verifikation oder Implementierung lesen. Den Graphen nach Codeänderungen inkrementell mit `devbox run graphify` aktualisieren; der Git-Hook aktualisiert ihn zusätzlich nach Commit und Branch-Wechsel. Keinen vollständigen Rebuild vor jeder Anfrage ausführen. Falls Graphify fehlt: `devbox run graphify:install`.
 2. **Plan nur bei Bedarf:** Plan verpflichtend bei unklaren Anforderungen, Architekturentscheidungen oder Multi-Crate-Änderungen. Bei klaren, kleinen Tasks direkte Umsetzung. Wenn ein Plan erstellt wurde: Vor Implementierung auf `GO` warten.
 3. **Task Memory anlegen:** Bei Aufgaben die ≥2 Crates oder ≥3 Dateien berühren → `TASK_MEMORY.md` im Projekt-Root anlegen (siehe `.agent/rules/04_TASK_MEMORY_PROTOCOL.md`).
 4. Nach jeder großen Task: `/clear` oder neue Session

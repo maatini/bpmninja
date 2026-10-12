@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Pr\u00fcfe ob .agent/manifest.json und graphify-out/GRAPH_REPORT.md existieren. Wenn ja, erinnere an den Graph-First-Workflow: 1) GRAPH_REPORT.md lesen, 2) Relevante Communities identifizieren, 3) Graph MCP Tools zur Navigation nutzen, 4) Erst dann Code lesen. Bei regelwidrigen God Nodes oder isolierten Nodes: Issue vorschlagen."
+            "prompt": "Bei Fragen zu Code, Architektur, Abhängigkeiten oder Abläufen zuerst graphify query zur gezielten Navigation verwenden; GRAPH_REPORT.md nur für breite Architekturübersichten lesen. Quellcode danach gezielt verifizieren. Keine fest codierten Community-IDs voraussetzen."
           }
         ]
       }
@@ -43,7 +43,7 @@
           {
             "type": "prompt",
             "if": "Bash(git commit*)",
-            "prompt": "Pr\u00fcfe den letzten Bash-Befehl. Wenn es ein git commit war: Erinnere daran, dass laut .agent/rules/03_GRAPH_MAINTENANCE.md nach jedem Commit 'devbox run graphify' laufen muss. Frag den User, ob du das jetzt ansto\u00dfen sollst."
+            "prompt": "Der post-commit Git-Hook aktualisiert den Graphen automatisch. Nur wenn der Hook nicht verfügbar war oder fehlschlug, Graphify-Update manuell ausführen und den Fehler sichtbar melden."
           }
         ]
       },
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/yasir/.local/bin/graphify.EXE hook-guard search",
+            "command": "graphify hook-guard search",
             "timeout": 10
           }
         ]
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/yasir/.local/bin/graphify.EXE hook-guard read",
+            "command": "graphify hook-guard read",
             "timeout": 10
           }
         ]
