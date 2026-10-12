@@ -27,6 +27,7 @@
 - [Docker Compose](#docker-compose)
 - [Test Metrics](#test-metrics)
 - [Roadmap](#roadmap)
+- [Contributors](#contributors)
 - [License](#license)
 
 ---
@@ -293,7 +294,7 @@ The server runs at `http://localhost:8081`.
 
 ## REST API
 
-> Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](docs/openapi.yaml)** | 🌐 **[API Portal (Redoc)](https://maatini.github.io/bpmninja/)** *(requires an active GitHub Pages deploy via /docs)*
+> Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](docs/openapi.yaml)** | 🌐 **[API Portal (Redoc)](https://yasir2000.github.io/bpmninja/api.html)** · **[Project website](https://yasir2000.github.io/bpmninja/)** *(published from `/docs` by `.github/workflows/pages.yml`)*
 
 ### Definitions
 
@@ -758,6 +759,17 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Full BPMN 2.0.2 element coverage (signal, multi-instance, loops, transactions, data, pools …) — see [improvements.md](improvements.md) 4f | 🔲 Planned |
 | Performance & cloud-native roadmap (NATS/Kafka/Redpanda, Dapr, serverless, mesh) — see [improvements.md](improvements.md) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
+
+---
+
+## Contributors
+
+| | Contributor | Role |
+|---|---|---|
+| 👤 | **Yasir Karam** ([@yasir2000](https://github.com/yasir2000)) | Maintainer |
+| 🤖 | **[Claude Code](https://claude.com/claude-code)** | AI coding agent, co-author |
+
+Project website: **https://yasir2000.github.io/bpmninja/**
 
 ---
 
