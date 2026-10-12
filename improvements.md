@@ -159,6 +159,20 @@ Befunde aus dem Code (Stand v0.7.24):
 | P9 | Globaler Allocator `mimalloc` im Server; `lto = "fat"` + PGO für Release evaluieren | Low–Med | Low | Low | Allokationslastiger Hot Path (Clones, JSON). |
 | P10 | Feingranulare SSE-Events (Instanz-/Task-ID + Delta) statt „alles neu laden“ | Medium | Medium | Low | Grobe Events lösen bei jedem Client einen vollen REST-Refetch aus. |
 
+**Messergebnis 4a-Quick-Wins (2026-10-12, Criterion, lokal Windows + lokaler NATS, Median vorher → nachher):**
+
+| Bench | Vorher | Nachher | Änderung |
+|---|---|---|---|
+| NATS `save_instance` | 496 µs | 203 µs | −60 % (P1) |
+| NATS `save_token` | 467 µs | 192 µs | −59 % (P1) |
+| Engine mit NATS: start → 5 Script-Tasks → end | 7.78 ms | 4.95 ms | −36 % (P1 + P3) |
+| NATS `append_history_entry` | 16.6 µs | 15.7 µs | keine signifikante Änderung (Publish wartet nicht auf Ack) |
+| In-Memory-Benches (linear, Gateways, Scripts, XOR) | — | — | −2 % bis −19 %; der In-Memory-Pfad wurde kaum verändert, daher größtenteils Laufzeit-Varianz |
+
+P4/P5 verbessern **Latenz**, nicht Durchsatz: Service-Task-Übergabe vorher bis 500 ms, jetzt sofort (Notify); Timer vorher bis 1 s verspätet, jetzt zum Fälligkeitszeitpunkt (durch Tests belegt, nicht durch Benches).
+
+Nebenbefund: `append_history_entry` wartet nicht auf den JetStream-Ack — History-Einträge können bei NATS-Problemen unbemerkt verloren gehen. Gehört zu P2/F3.
+
 #### 4b — Fundament für Verteilung (Voraussetzung für 4c–4e)
 
 | # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
