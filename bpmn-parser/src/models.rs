@@ -334,6 +334,14 @@ pub(crate) struct BpmnIntermediateThrowEvent {
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnLinkEventDefinition {
+    #[serde(rename = "@name", default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -449,6 +457,8 @@ pub(crate) struct BpmnIntermediateCatchEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]

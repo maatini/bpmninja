@@ -72,7 +72,11 @@ where
 async fn wait_for_completion(engine: &WorkflowEngine, instance_id: Uuid) -> ProcessInstance {
     wait_until(|| async {
         matches!(
-            engine.get_instance_details(instance_id).await.unwrap().state,
+            engine
+                .get_instance_details(instance_id)
+                .await
+                .unwrap()
+                .state,
             InstanceState::Completed
         )
     })

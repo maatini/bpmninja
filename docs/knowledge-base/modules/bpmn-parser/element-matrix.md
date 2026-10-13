@@ -23,7 +23,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Compensation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
 | Conditional | ❌ [X2] | ❌ [X2] | — | ❌ [X2] | — |
 | Signal | ❌ [X1] | ❌ [X1] | ❌ [X1] | ❌ [X1] | ❌ [X1] |
-| Link | — | ❌ [X3] | ❌ [X3] | — | — |
+| Link | — | ✅ (resolved at parse time) | ✅ (resolved at parse time) | — | — |
 | Cancel | — | — | — | ❌ [X7] | ❌ [X7] |
 | Terminate | — | — | — | — | ✅ |
 | Multiple / Parallel multiple | ❌ [X10] | ❌ [X10] | ❌ [X10] | ❌ [X10] | ❌ [X10] |

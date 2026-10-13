@@ -1536,3 +1536,122 @@ fn embedded_subprocess_enters_at_start_successor_without_noop_task() {
         "internal start must not be a node"
     );
 }
+
+// --- X3: link events are resolved into direct sequence flows -----------------
+
+fn targets(def: &engine_core::model::ProcessDefinition, from: &str) -> Vec<String> {
+    def.next_nodes(from)
+        .iter()
+        .map(|f| f.target.clone())
+        .collect()
+}
+
+#[test]
+fn x3_link_throw_jumps_to_successor_of_matching_catch() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="a"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="next"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc"><linkEventDefinition name="next"/></intermediateCatchEvent>
+           <userTask id="b"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="a"/>
+           <sequenceFlow id="f2" sourceRef="a" targetRef="lt"/>
+           <sequenceFlow id="f3" sourceRef="lc" targetRef="b"/>
+           <sequenceFlow id="f4" sourceRef="b" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert_eq!(targets(&def, "a"), ["b"]);
+    assert!(def.get_node("lt").is_none() && def.get_node("lc").is_none());
+}
+
+#[test]
+fn x3_keeps_conditions_and_gateway_defaults_through_links() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><exclusiveGateway id="gw" default="f_def"/>
+           <intermediateThrowEvent id="lt1"><linkEventDefinition name="L1"/></intermediateThrowEvent>
+           <intermediateThrowEvent id="lt2"><linkEventDefinition name="L2"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc1"><linkEventDefinition name="L1"/></intermediateCatchEvent>
+           <intermediateCatchEvent id="lc2"><linkEventDefinition name="L2"/></intermediateCatchEvent>
+           <endEvent id="big"/><endEvent id="small"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="gw"/>
+           <sequenceFlow id="f_big" sourceRef="gw" targetRef="lt1"><conditionExpression>amount &gt; 100</conditionExpression></sequenceFlow>
+           <sequenceFlow id="f_def" sourceRef="gw" targetRef="lt2"/>
+           <sequenceFlow id="f2" sourceRef="lc1" targetRef="big"/>
+           <sequenceFlow id="f3" sourceRef="lc2" targetRef="small"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    let flows = def.next_nodes("gw");
+    assert!(
+        flows
+            .iter()
+            .any(|f| f.target == "big" && f.condition.as_deref() == Some("amount > 100"))
+    );
+    assert!(matches!(
+        def.get_node("gw"),
+        Some(BpmnElement::ExclusiveGateway { default: Some(d) }) if d == "small"
+    ));
+}
+
+#[test]
+fn x3_resolves_links_inside_sub_process_scope() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/>
+             <intermediateThrowEvent id="lt"><linkEventDefinition name="x"/></intermediateThrowEvent>
+             <intermediateCatchEvent id="lc"><linkEventDefinition name="x"/></intermediateCatchEvent>
+             <userTask id="inner"/><endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="lt"/>
+             <sequenceFlow id="b" sourceRef="lc" targetRef="inner"/>
+             <sequenceFlow id="c" sourceRef="inner" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("sp"),
+        Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "inner"
+    ));
+}
+
+#[test]
+fn x3_rejects_link_throw_without_matching_catch() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="nowhere"/></intermediateThrowEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("no link catch event named 'nowhere'"), "{err}");
+}
+
+#[test]
+fn x3_rejects_duplicate_catch_names_and_missing_names() {
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"/>
+           <intermediateCatchEvent id="c1"><linkEventDefinition name="dup"/></intermediateCatchEvent>
+           <intermediateCatchEvent id="c2"><linkEventDefinition name="dup"/></intermediateCatchEvent>
+           <sequenceFlow id="f0" sourceRef="s" targetRef="e"/>
+           <sequenceFlow id="f1" sourceRef="c1" targetRef="e"/>
+           <sequenceFlow id="f2" sourceRef="c2" targetRef="e"/>"#,
+    );
+    assert!(err.contains("share the name 'dup'"), "{err}");
+
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition/></intermediateThrowEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("link event 'lt' has no name"), "{err}");
+}
+
+#[test]
+fn x3_rejects_link_cycle_without_activities() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="loop"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc"><linkEventDefinition name="loop"/></intermediateCatchEvent>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="lt"/>
+           <sequenceFlow id="f2" sourceRef="lc" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("form a cycle"), "{err}");
+}

@@ -137,6 +137,17 @@ pub enum EngineEvent {
 
 `max_memory` does **not** call a Rhai heap API (none exists). It scales `set_max_string_size` / `set_max_array_size` / `set_max_map_size` relative to the 2 MiB default.
 
+### In-Process-Task-Handler (`engine/task_handler.rs`)
+
+| Item | Detail |
+|------|--------|
+| `TaskHandler` | `#[async_trait]`-Trait: `async fn handle(&self, task: &PendingServiceTask) -> TaskOutcome` |
+| `TaskOutcome` | `Complete(vars)`, `Fail { message, details, retries, retry_timeout_ms }`, `BpmnError { code, message, variables }` |
+| `register_task_handler(topic, Arc<dyn TaskHandler>)` / `unregister_task_handler(topic)` | Handler pro Topic (ersetzt vorhandenen) |
+| `spawn_task_handler_dispatcher(self: &Arc<Self>) -> JoinHandle<()>` | Long-Poll über `fetch_and_lock_service_tasks` mit Worker-ID `IN_PROCESS_WORKER_ID`, Lock 300 s, max. 64 parallele Handler; Ergebnis über `complete_service_task` / `fail_service_task_with_retry_timeout` / `handle_bpmn_error_with_variables` |
+
+Locks, Retries, Incidents, Error-Boundaries und Persistenz verhalten sich wie bei externen Workern; Topics ohne Handler bleiben für REST-/Camunda-Worker abrufbar. Panik im Handler = `Fail` mit `retries: None`. CPU-lastige Handler gehören in `spawn_blocking`. Der Server registriert keine Handler (Library-Feature für eingebettete Nutzung).
+
 ### Retry queue (internal)
 
 | Item | Detail |

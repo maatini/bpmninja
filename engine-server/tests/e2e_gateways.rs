@@ -111,3 +111,68 @@ async fn deploy_and_execute_parallel_gateway() {
     let details: Value = details_res.json().await.unwrap();
     assert_eq!(details["state"], "Completed");
 }
+
+const LINK_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="Definitions_1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <process id="LinkProcess" isExecutable="true">
+    <startEvent id="start" />
+    <exclusiveGateway id="gw" default="f_small" />
+    <intermediateThrowEvent id="to_big"><linkEventDefinition name="big" /></intermediateThrowEvent>
+    <intermediateThrowEvent id="to_small"><linkEventDefinition name="small" /></intermediateThrowEvent>
+    <intermediateCatchEvent id="from_big"><linkEventDefinition name="big" /></intermediateCatchEvent>
+    <intermediateCatchEvent id="from_small"><linkEventDefinition name="small" /></intermediateCatchEvent>
+    <endEvent id="end_big" />
+    <endEvent id="end_small" />
+
+    <sequenceFlow id="f1" sourceRef="start" targetRef="gw" />
+    <sequenceFlow id="f_big" sourceRef="gw" targetRef="to_big">
+      <conditionExpression>amount &gt; 100</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f_small" sourceRef="gw" targetRef="to_small" />
+    <sequenceFlow id="f2" sourceRef="from_big" targetRef="end_big" />
+    <sequenceFlow id="f3" sourceRef="from_small" targetRef="end_small" />
+  </process>
+</definitions>"#;
+
+#[tokio::test]
+async fn link_events_route_to_matching_catch() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{}/api/deploy", base))
+        .json(&serde_json::json!({ "xml": LINK_XML, "name": "Link" }))
+        .send()
+        .await
+        .expect("deploy request failed");
+    let text = res.text().await.unwrap();
+    assert!(text.contains("definition_key"), "deploy failed: {text}");
+    let body: Value = serde_json::from_str(&text).unwrap();
+    let def_key = body["definition_key"].as_str().unwrap().to_string();
+
+    for (amount, expected_end) in [(500, "end_big"), (5, "end_small")] {
+        let res = client
+            .post(format!("{}/api/start", base))
+            .json(&serde_json::json!({
+                "definition_key": def_key,
+                "variables": { "amount": amount }
+            }))
+            .send()
+            .await
+            .expect("start failed");
+        assert_eq!(res.status(), 200, "start instance failed");
+        let body: Value = res.json().await.unwrap();
+        let instance_id = body["instance_id"].as_str().unwrap();
+
+        let details: Value = client
+            .get(format!("{}/api/instances/{}", base, instance_id))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(details["state"], "Completed");
+        assert_eq!(details["current_node"], expected_end, "amount={amount}");
+    }
+}

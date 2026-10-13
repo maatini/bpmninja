@@ -6,7 +6,10 @@ use quick_xml::de::from_str;
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessDefinitionBuilder};
 
-use crate::models::{BpmnDefinitions, BpmnExtensionElements};
+use crate::models::{
+    BpmnDefinitions, BpmnExtensionElements, BpmnIntermediateCatchEvent, BpmnIntermediateThrowEvent,
+    BpmnLinkEventDefinition, BpmnSequenceFlow,
+};
 
 /// Helper to attach parsed listeners to the builder
 fn add_listeners(
@@ -313,10 +316,16 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         .iter()
         .position(|p| p.is_executable == Some(true))
         .unwrap_or(0);
-    let process = defs.processes.remove(executable_idx);
+    let mut process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
     reject_unsupported_elements(xml, &process_id)?;
+    resolve_link_events(
+        &process_id,
+        &mut process.intermediate_throw_events,
+        &mut process.intermediate_catch_events,
+        &mut process.sequence_flows,
+    )?;
     let mut builder = ProcessDefinitionBuilder::new(process_id.clone());
 
     // Lookup maps for messages and errors
@@ -756,6 +765,90 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     builder.build()
 }
 
+/// X3: link events are go-to markers inside one scope (process or
+/// sub-process). They are resolved into direct sequence flows: flows into a
+/// link throw lead to the successor of the link catch with the same name.
+/// Neither event becomes a node.
+fn resolve_link_events(
+    scope_id: &str,
+    throws: &mut Vec<BpmnIntermediateThrowEvent>,
+    catches: &mut Vec<BpmnIntermediateCatchEvent>,
+    flows: &mut Vec<BpmnSequenceFlow>,
+) -> EngineResult<()> {
+    fn link_name(id: &str, def: &BpmnLinkEventDefinition) -> EngineResult<String> {
+        match def.name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => Ok(name.to_string()),
+            _ => Err(EngineError::InvalidDefinition(format!(
+                "link event '{id}' has no name"
+            ))),
+        }
+    }
+
+    // Each link node jumps to exactly one other node: throw → catch, catch → successor.
+    let mut jump: HashMap<String, String> = HashMap::new();
+    let mut catch_by_name: HashMap<String, String> = HashMap::new();
+    for catch in catches.iter() {
+        let Some(def) = &catch.link_event_definition else {
+            continue;
+        };
+        let name = link_name(&catch.id, def)?;
+        if let Some(other) = catch_by_name.insert(name.clone(), catch.id.clone()) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch events '{other}' and '{}' share the name '{name}' in scope '{scope_id}'",
+                catch.id
+            )));
+        }
+        let outgoing: Vec<&BpmnSequenceFlow> =
+            flows.iter().filter(|f| f.source_ref == catch.id).collect();
+        let [flow] = outgoing.as_slice() else {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' must have exactly one outgoing sequence flow",
+                catch.id
+            )));
+        };
+        jump.insert(catch.id.clone(), flow.target_ref.clone());
+    }
+    for throw in throws.iter() {
+        let Some(def) = &throw.link_event_definition else {
+            continue;
+        };
+        let name = link_name(&throw.id, def)?;
+        let Some(catch_id) = catch_by_name.get(&name) else {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link throw event '{}' has no link catch event named '{name}' in scope '{scope_id}'",
+                throw.id
+            )));
+        };
+        if flows.iter().any(|f| f.source_ref == throw.id) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link throw event '{}' must not have outgoing sequence flows",
+                throw.id
+            )));
+        }
+        jump.insert(throw.id.clone(), catch_id.clone());
+    }
+    if jump.is_empty() {
+        return Ok(());
+    }
+
+    flows.retain(|f| !jump.contains_key(&f.source_ref));
+    for flow in flows.iter_mut() {
+        let mut hops = 0;
+        while let Some(next) = jump.get(&flow.target_ref) {
+            hops += 1;
+            if hops > jump.len() {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "link events in scope '{scope_id}' form a cycle without activities"
+                )));
+            }
+            flow.target_ref = next.clone();
+        }
+    }
+    throws.retain(|t| t.link_event_definition.is_none());
+    catches.retain(|c| c.link_event_definition.is_none());
+    Ok(())
+}
+
 /// Event definitions the engine executes, per event kind. Anything else on
 /// that kind of event is rejected by [`reject_unsupported_elements`].
 fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
@@ -767,9 +860,14 @@ fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
             "escalationEventDefinition",
             "compensateEventDefinition",
         ],
-        "intermediateCatchEvent" => &["timerEventDefinition", "messageEventDefinition"],
+        "intermediateCatchEvent" => &[
+            "timerEventDefinition",
+            "messageEventDefinition",
+            "linkEventDefinition",
+        ],
         "intermediateThrowEvent" => &[
             "messageEventDefinition",
+            "linkEventDefinition",
             "escalationEventDefinition",
             "compensateEventDefinition",
         ],
@@ -900,7 +998,7 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
 
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_subprocess(
-    sp: crate::models::BpmnSubProcess,
+    mut sp: crate::models::BpmnSubProcess,
     _parent_id: &str,
     mut builder: ProcessDefinitionBuilder,
     message_lookup: &HashMap<String, String>,
@@ -908,6 +1006,12 @@ fn flatten_subprocess(
     escalation_lookup: &HashMap<String, String>,
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
+    resolve_link_events(
+        &sub_process_id,
+        &mut sp.intermediate_throw_events,
+        &mut sp.intermediate_catch_events,
+        &mut sp.sequence_flows,
+    )?;
 
     // The internal start event is not a node: entering the sub-process jumps
     // straight to the start event's successor. (It used to become a

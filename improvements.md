@@ -244,10 +244,10 @@ Neu bekannt (nicht behoben): `run_end_scripts` hält den Instanz-Write-Lock wäh
 
 | # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
 |---|----------|--------|--------|--------|----------------------|
-| X0 | Element-Matrix + Konformitäts-Testsuite | High | Medium | None | Jede BPMN-2.0.2-Elementart mit Status (ausgeführt / akzeptiert / abgelehnt) als Tabelle in Knowledge Base + README; Parse-Tests gegen die BPMN-MIWG-Referenzmodelle (Model Interchange Working Group); fehlende Elemente müssen beim Deploy **klar abgelehnt** statt still ignoriert werden. |
+| X0 (✅ teilweise) | Element-Matrix + Konformitäts-Testsuite | High | Medium | None | Jede BPMN-2.0.2-Elementart mit Status (ausgeführt / akzeptiert / abgelehnt) als Tabelle in Knowledge Base + README; Parse-Tests gegen die BPMN-MIWG-Referenzmodelle (Model Interchange Working Group); fehlende Elemente müssen beim Deploy **klar abgelehnt** statt still ignoriert werden. **Erledigt:** [Element-Matrix](docs/knowledge-base/modules/bpmn-parser/element-matrix.md) und Deploy-Ablehnung (`reject_unsupported_elements`). **Offen:** MIWG-Referenzmodelle als Parse-Tests, Matrix-Verweis im README. |
 | X1 | Signal-Events: Start, Intermediate Catch/Throw, Boundary (unterbrechend/nicht), End; Broadcast an alle wartenden Instanzen; `POST /api/signal` | High | Medium | Medium | Häufig genutzt; heute nicht parsebar. |
 | X2 | Conditional Events: Start, Intermediate, Boundary, Event-Sub-Process; Neubewertung bei Variablenänderung | Medium | High | Medium | Braucht einen Trigger bei jeder Variablenänderung (`update_instance_variables`, Task-Abschluss). |
-| X3 | Link Events (Intermediate Throw/Catch, „Sprungmarke“) | Low | Low | Low | Beim Parsen in direkte Sequence Flows auflösen. |
+| X3 ✅ (2026-10-13) | Link Events (Intermediate Throw/Catch, „Sprungmarke“) | Low | Low | Low | Beim Parsen in direkte Sequence Flows auflösen. **Umgesetzt:** `resolve_link_events` pro Scope (Prozess / Sub-Prozess): Flows in einen Link-Throw führen direkt zum Nachfolger des gleichnamigen Link-Catch; Bedingungen und XOR-Defaults bleiben erhalten, Ketten werden aufgelöst. Abgelehnt: fehlender/doppelter Name, Throw ohne Catch, Throw mit ausgehendem Flow, Catch ohne genau einen ausgehenden Flow, Link-Zyklus ohne Aktivität. Parser- und REST-E2E-Tests; der V1-Model-Checker versteht Links nativ. Link-Knoten erscheinen nicht im Live-Tracking (kein Laufzeitknoten). |
 | X4 | Multi-Instance parallel + sequenziell (`loopCardinality`, `collection`/`elementVariable`, `completionCondition`) für Tasks, Sub-Process, Call Activity | High | High | Medium | `NextAction::MultiInstanceFork/Next` existieren bereits, werden aber nie erzeugt; heute Deploy-Fehler. |
 | X5 | Standard-Loop (`standardLoopCharacteristics`: `loopCondition`, `testBefore`, `loopMaximum`) | Medium | Medium | Low | Wiederholung ohne explizite Gateway-Schleife. |
 | X6 | Laufzeit-Scopes für Sub-Prozesse (Anpassung ADR-003) | High | High | High | Voraussetzung für spezifikationsgemäße Boundary-Events auf Sub-Prozessen, Transaction/Cancel und Kompensation pro Scope. Flattening bleibt als Optimierung für scope-lose Sub-Prozesse. |
@@ -290,7 +290,7 @@ Neue Aufgaben aus der Bewertung:
 
 | # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
 |---|----------|--------|--------|--------|----------------------|
-| E1 | In-Process-Task-Handler: `register_task_handler(topic, Arc<dyn TaskHandler>)` | High | Medium | Low | Service Tasks laufen direkt im Engine-Prozess ohne Fetch-and-Lock-Roundtrip — der sichere Weg zu „nativer“ Geschwindigkeit für eingebettete Nutzung. CPU-lastige Handler auf eigenem Pool (`spawn_blocking`/Rayon). |
+| E1 ✅ (2026-10-13) | In-Process-Task-Handler: `register_task_handler(topic, Arc<dyn TaskHandler>)` | High | Medium | Low | Service Tasks laufen direkt im Engine-Prozess ohne Fetch-and-Lock-Roundtrip — der sichere Weg zu „nativer“ Geschwindigkeit für eingebettete Nutzung. CPU-lastige Handler auf eigenem Pool (`spawn_blocking`/Rayon). **Umgesetzt:** `TaskHandler`/`TaskOutcome` + `spawn_task_handler_dispatcher` (`engine/task_handler.rs`): Dispatcher nutzt Fetch-and-Lock intern (Notify, kein HTTP) mit reservierter Worker-ID, damit Locks, Retries, Incidents, Error-Boundaries und Restart-Recovery unverändert gelten; Panik = Failure; max. 64 parallele Handler. Topics ohne Handler bleiben für externe Worker. **Offen:** direkte Ausführung im Executor ohne Pending-Task-Persistenz nur nach Benchmark-Nachweis; kein Rayon-Pool (`spawn_blocking` dokumentiert). |
 | E2 | Kompilierter Ausführungsplan beim Deploy (Knoten/Flows als Index-Arrays statt String-HashMap-Lookups pro Schritt) | Medium | High | Medium | Erst nach P6/P2 messen, ob der Interpreter überhaupt noch relevant ist. |
 | V1 ✅ (Modellprüfung) | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
 | K1 ✅ (Worker-Fassade) | Camunda-7-Worker-REST (`fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`) | High | Medium | Low | Implementiert: CamelCase-DTOs, typisierte JSON-/Primitive-/Date-Variablen, Millisekunden-Locks und persistierter Retry-Delay; Core-/REST-/Persistenztests. [Vertrag und Grenzen](docs/camunda7-workers.md): keine Java-Serialisierung, lokalen Scopes oder zusätzlichen Camunda-APIs. |
@@ -317,8 +317,8 @@ Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktiv
 #### Empfohlene Reihenfolge
 
 1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ → ~~P2, P6~~ ✅ 2026-10-12 → ~~P7~~ ✅ 2026-10-12 → ~~P8~~ ✅ (opt-in) → P9–P10
-2. **Aus der Bewertung** (unabhängig, hoher Nutzen): V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler); B1/K2/Q1 nach Entscheidung
-2b. **4f BPMN-Vollabdeckung**: X0 + V1 → X3, X13, X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
+2. **Aus der Bewertung** (unabhängig, hoher Nutzen): ~~V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler)~~ ✅; B1/K2/Q1 nach Entscheidung
+2b. **4f BPMN-Vollabdeckung**: X0 (✅ teilweise) + V1 ✅ → ~~X3~~ ✅, X13, X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
 3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
 4. **4c**: N1 → N3 → N2, N4–N6
 5. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8
