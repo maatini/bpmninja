@@ -1,12 +1,12 @@
 # Graph Report - bpmninja  (2026-10-13)
 
 ## Corpus Check
-- 356 files · ~399,510 words
+- 357 files · ~401,754 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 8, .toml 2, .xml 2)
 
 ## Summary
-- 3798 nodes · 8087 edges · 230 communities (174 shown, 56 thin omitted)
+- 3831 nodes · 8174 edges · 246 communities (190 shown, 56 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 234 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
@@ -19,16 +19,16 @@
 - persistence_ops.rs
 - WorkflowPersistence
 - retry_queue.rs
-- Button
+- InstanceDetailDialog.tsx
 - model_check.rs
 - InstrumentedPersistence
-- InstanceDetailDialog.tsx
+- journal.rs
 - json
 - stress_tests.rs
 - desktop-tauri/package.json
 - server/instances.rs
 - react
-- tests/helpers.rs
+- tests/gateways.rs
 - bpmn-parser/src/models.rs
 - persistence — Gotchas
 - dependencies
@@ -51,7 +51,7 @@
 - timer.rs
 - Uuid
 - cn
-- service_task.rs
+- .record_history_event
 - BPMNinja External Task Client Skill
 - runner.rs
 - BPMNinja Knowledge Base
@@ -86,7 +86,7 @@
 - serialize
 - desktop-tauri — Gotchas
 - tauri.conf.json
-- .record_history_event
+- Uuid
 - ScriptPropertiesProvider.ts
 - server/mod.rs
 - tests/topic_index.rs
@@ -99,7 +99,7 @@
 - CLAUDE.md — BPMNinja Project Guide
 - bpmninja — Architecture Documentation
 - HistoryEntry
-- StartupCoordinator
+- EngineError
 - log_nats.rs
 - BPMNinja Parser Skill
 - fuzz_history_diff.rs
@@ -120,20 +120,20 @@
 - @bpmninja/external-task-client
 - ExternalTaskClient.test.ts
 - ConditionPropertiesProvider.ts
-- engine/mod.rs
+- duration
 - persistence-nats/src/tests.rs
 - codec.rs
-- parallel.rs
+- .handle_next_action
 - server/events.rs
 - assert-typescript-peer.mjs
 - Key Architectural Decisions
 - WorkflowEngine
 - commands/tasks.rs
-- trait_impl.rs
+- audit.rs
 - engine/topic_index.rs
 - api-spec/index.md
 - BPMN 2.0.2 Element Matrix
-- persistence.rs
+- Token
 - instance_pagination.rs
 - e2e_suspend_resume.rs
 - BPMNinja
@@ -155,16 +155,16 @@
 - pending.rs
 - logs.rs
 - timers.rs
-- .handle_next_action
+- DataViewer.tsx
 - calculate_diff
-- Token
+- e2e_auth_cors.rs
 - BPMNinja Desktop (Tauri + React + bpmn-js)
-- engine-core — Dependencies
+- engine-core/index.md
 - MessageVisitor
 - Maintenance
 - EngineEvent
 - bpmn_compliance.rs
-- e2e_deploy.rs
+- REST API
 - e2e_history.rs
 - e2e_instances_page.rs
 - e2e_monitoring.rs
@@ -188,21 +188,21 @@
 - Parser Agent
 - RTK - Rust Token Killer (Google Antigravity)
 - TopicPropertiesProvider.ts
-- Phase 4 — Performance & Cloud-native (Vorschlag, 2026-10-12)
+- scripts
 - BPMN Model Checking and State-Space Reduction
 - e2e_stress.rs
 - package.json
 - fuzz/index.md
-- README.md
-- inclusive_join.rs
+- Supported BPMN Elements
+- UI/Desktop Agent (Frontend)
 - ActorType
 - 6. REST API (engine-server)
-- Weitere Audit-Befunde (Kontext)
+- ModelCheckMode
 - Global Agent Directives & Workflow
 - Rust Best Practices for BPMNinja
 - Versioning Convention
 - vite.config.ts
-- 4. Execution Architecture
+- constants.rs
 - AGENTS.md
 - copilot-instructions.md
 - desktop-tauri — Dependencies
@@ -221,6 +221,19 @@
 - commit-and-push-quality-metrics_test.sh
 - agent-orchestrator
 - bpmninja-desktop
+- handlers/tasks.rs
+- StartupCoordinator
+- e2e_deploy.rs
+- .arrive_at_join
+- engine-core — Dependencies
+- Empfohlener Aktionsplan (phasiert)
+- Weitere Audit-Befunde (Kontext)
+- External Task Client (TypeScript)
+- 4. Execution Architecture
+- Desktop Application (UI)
+- Quick Start
+- 2. engine-core — Core Architecture
+- 3. Data Model
 
 ## God Nodes (most connected - your core abstractions)
 1. `ProcessDefinition` - 111 edges
@@ -241,15 +254,15 @@
   .agent/rules/TAURI_REACT_UI_AGENT.md → desktop-tauri/src/features/instances/InstanceStateUtils.ts
 - `⚠️ Playwright tests use specific selectors` --references--> `InstancesPage()`  [INFERRED]
   docs/knowledge-base/modules/desktop-tauri/gotchas.md → desktop-tauri/src/features/instances/InstancesPage.tsx
-- `ADR-002: Token-Based Execution Model` --references--> `ProcessInstance`  [INFERRED]
-  docs/knowledge-base/architecture/decisions.md → desktop-tauri/src/shared/types/engine.ts
-- `Fine-Grained Per-Instance Locking` --references--> `ProcessInstance`  [INFERRED]
-  docs/knowledge-base/cross-cutting/shared-patterns.md → desktop-tauri/src/shared/types/engine.ts
+- `CSS & Theming Conventions` --references--> `cn()`  [INFERRED]
+  .agent/rules/TAURI_REACT_UI_AGENT.md → desktop-tauri/src/lib/utils.ts
+- `Key Files` --references--> `cn()`  [INFERRED]
+  .agent/rules/TAURI_REACT_UI_AGENT.md → desktop-tauri/src/lib/utils.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (230 total, 56 thin omitted)
+## Communities (246 total, 56 thin omitted)
 
 ### Community 1 - "InMemoryPersistence"
 Cohesion: 0.05
@@ -257,7 +270,7 @@ Nodes (7): InMemoryPersistence, test_get_storage_info_arithmetic(), test_query_h
 
 ### Community 3 - "ProcessInstance"
 Cohesion: 0.07
-Nodes (50): 1. Model Layer (`model.rs`), 2. Engine Core (`engine/` submodule), 3. External Tasks (`service_task.rs`), 4. Condition Evaluator (`condition.rs`), 5. Script Runner (`script_runner.rs`), 6. Persistence (`persistence.rs`), 7. Error Handling (`error.rs`), 8. History Module (`history.rs`) (+42 more)
+Nodes (52): 1. Model Layer (`model.rs`), 2. Engine Core (`engine/` submodule), 3. External Tasks (`service_task.rs`), 4. Condition Evaluator (`condition.rs`), 5. Script Runner (`script_runner.rs`), 6. Persistence (`persistence.rs`), 7. Error Handling (`error.rs`), 8. History Module (`history.rs`) (+44 more)
 
 ### Community 4 - "FailSaveXmlPersistence"
 Cohesion: 0.07
@@ -271,21 +284,25 @@ Nodes (55): parse_bpmn_xml(), embedded_subprocess_enters_at_start_successor_with
 Cohesion: 0.14
 Nodes (5): InstancePayload, payload_accepts_exact_limit_and_rejects_the_next_byte(), PERSIST_LOCK_STRIPES, PersistLocks, serialization_bounds_escaped_json_bytes()
 
+### Community 7 - "WorkflowPersistence"
+Cohesion: 0.08
+Nodes (7): BucketEntry, BucketEntryDetail, BucketInfo, CompletedInstanceQuery, HistoryQuery, StorageInfo, WorkflowPersistence
+
 ### Community 8 - "retry_queue.rs"
 Cohesion: 0.06
 Nodes (28): InstanceStore, create_retry_queue(), create_retry_queue_with_capacity(), DEFAULT_RETRY_QUEUE_CAPACITY, execute_job(), INITIAL_BACKOFF_MS, INLINE_BACKOFF_MS, INLINE_RETRIES (+20 more)
 
-### Community 9 - "Button"
-Cohesion: 0.17
-Nodes (36): Button, DialogContent, DialogDescription, DialogFooter(), DialogHeader(), DialogOverlay, DialogTitle, Input (+28 more)
+### Community 9 - "InstanceDetailDialog.tsx"
+Cohesion: 0.14
+Nodes (47): Button, DialogContent, DialogDescription, DialogFooter(), DialogHeader(), DialogOverlay, DialogTitle, Input (+39 more)
 
 ### Community 10 - "model_check.rs"
-Cohesion: 0.07
-Nodes (40): AppBuildConfig, analyze(), DEFAULT_MODEL_CHECK_TIMEOUT_MS, expand_empty_elements(), expands_self_closing_elements(), ModelChecker, ModelCheckMode, Enforce (+32 more)
+Cohesion: 0.15
+Nodes (13): analyze(), DEFAULT_MODEL_CHECK_TIMEOUT_MS, expand_empty_elements(), expands_self_closing_elements(), ModelChecker, ModelCheckReport, ModelCheckStatus, Inconclusive (+5 more)
 
-### Community 12 - "InstanceDetailDialog.tsx"
-Cohesion: 0.16
-Nodes (17): TabsContent, TabsList, TabsTrigger, InstanceDetailDialog(), InstanceDetailHeader(), HistoryTab(), HistoryTabProps, extractEmoji() (+9 more)
+### Community 12 - "journal.rs"
+Cohesion: 0.17
+Nodes (21): CachedSnapshot, choose_node(), decode_head(), DELTA, encode_head(), failure(), FULL, Head (+13 more)
 
 ### Community 13 - "json"
 Cohesion: 0.10
@@ -297,19 +314,19 @@ Nodes (14): correctness_inclusive_gateway_partial_match(), correctness_mixed_xor
 
 ### Community 15 - "desktop-tauri/package.json"
 Cohesion: 0.05
-Nodes (40): @types/node, typescript, license, name, private, type, version, autoprefixer (+32 more)
+Nodes (41): @types/node, typescript, license, name, private, type, version, autoprefixer (+33 more)
 
 ### Community 16 - "server/instances.rs"
 Cohesion: 0.21
 Nodes (20): delete_instance(), get_instance(), list_instances(), ListInstancesQuery, migrate_instance(), MigrateInstanceRequest, move_token(), MoveTokenRequest (+12 more)
 
 ### Community 17 - "react"
-Cohesion: 0.10
-Nodes (42): Card, CardContent, CardFooter, CardHeader, CardTitle, ScrollArea, ScrollBar, Separator (+34 more)
+Cohesion: 0.11
+Nodes (32): Card, CardContent, CardFooter, CardHeader, CardTitle, TabsContent, TabsList, TabsTrigger (+24 more)
 
-### Community 18 - "tests/helpers.rs"
-Cohesion: 0.07
-Nodes (20): exclusive_gateway_takes_matching_path(), exclusive_gateway_uses_default_when_no_match(), inclusive_gateway_forks_multiple_paths(), inclusive_gateway_single_match_no_fork(), test_same_gateway_type_detects_mismatch(), xor_gateway_negative_x_routes_to_user_task_2(), xor_gateway_positive_x_routes_to_user_task_1(), xor_gateway_user_task_merges_variables() (+12 more)
+### Community 18 - "tests/gateways.rs"
+Cohesion: 0.08
+Nodes (18): exclusive_gateway_takes_matching_path(), exclusive_gateway_uses_default_when_no_match(), inclusive_gateway_forks_multiple_paths(), inclusive_gateway_single_match_no_fork(), test_same_gateway_type_detects_mismatch(), xor_gateway_negative_x_routes_to_user_task_2(), xor_gateway_positive_x_routes_to_user_task_1(), xor_gateway_user_task_merges_variables() (+10 more)
 
 ### Community 19 - "bpmn-parser/src/models.rs"
 Cohesion: 0.19
@@ -317,7 +334,7 @@ Nodes (35): BpmnBoundaryEvent, BpmnCallActivity, BpmnCompensateEventDefinition, 
 
 ### Community 20 - "persistence — Gotchas"
 Cohesion: 0.05
-Nodes (34): Inbound, Outbound, persistence — Dependencies, Trait Implementation Diagram, ⚠️ Adding a new entity type, ⚠️ BPMN XML is stored separately from definitions, ⚠️ Bucket handles are cached, ⚠️ Completed instances are archived, not deleted (+26 more)
+Nodes (35): Inbound, Outbound, persistence — Dependencies, Trait Implementation Diagram, ⚠️ Adding a new entity type, ⚠️ BPMN XML is stored separately from definitions, ⚠️ Bucket handles are cached, ⚠️ Completed instances are archived, not deleted (+27 more)
 
 ### Community 21 - "dependencies"
 Cohesion: 0.06
@@ -328,8 +345,8 @@ Cohesion: 0.13
 Nodes (3): WorkflowEngine, EngineStats, InstancePage
 
 ### Community 23 - "bpmn-ninja-external-task-client/package.json"
-Cohesion: 0.06
-Nodes (33): author, dependencies, pino, pino-pretty, description, devDependencies, tsx, @types/node (+25 more)
+Cohesion: 0.08
+Nodes (25): author, dependencies, pino, pino-pretty, description, devDependencies, tsx, @types/node (+17 more)
 
 ### Community 24 - "log_buffer.rs"
 Cohesion: 0.09
@@ -360,48 +377,52 @@ Cohesion: 0.11
 Nodes (16): connect_and_consume(), ConsumeOutcome, StreamEnded, UrlChanged, run_consumer(), sleep_or_url_change(), spawn(), sse_url_from_state() (+8 more)
 
 ### Community 32 - "MonitoringPage.tsx"
-Cohesion: 0.09
-Nodes (42): Badge(), BadgeProps, badgeVariants, Table, TableBody, TableCell, TableHead, TableHeader (+34 more)
+Cohesion: 0.11
+Nodes (33): Badge(), BadgeProps, badgeVariants, Table, TableBody, TableCaption, TableCell, TableFooter (+25 more)
 
 ### Community 33 - "use-toast.ts"
 Cohesion: 0.11
-Nodes (24): Toast, ToastAction, ToastActionElement, ToastClose, ToastDescription, ToastProps, ToastTitle, toastVariants (+16 more)
+Nodes (25): Toast, ToastAction, ToastActionElement, ToastClose, ToastDescription, ToastProps, ToastTitle, toastVariants (+17 more)
 
 ### Community 34 - "server/state.rs"
 Cohesion: 0.08
 Nodes (14): api_key_from_env(), AppState, cors_origins_from_env(), cors_unset_is_allowlist_not_any(), DEFAULT_CORS_ORIGINS, DEFAULT_MAX_UPLOAD_BYTES, max_upload_bytes_from_env(), MAX_XML_BYTES (+6 more)
 
 ### Community 35 - "engine-server — Gotchas"
-Cohesion: 0.08
-Nodes (21): ⚠️ Adding a new route, ⚠️ Body size limit is 10 MiB for XML/JSON, ⚠️ CORS is an allowlist (not `Any` by default), ⚠️ Deploy XML save failure is HTTP 500, engine-server — Gotchas, ⚠️ fetchAndLock long polling is notification-driven, ⚠️ In-memory fallback is opt-in (dev), ⚠️ `lockDuration` / `newDuration` are milliseconds at the HTTP boundary (+13 more)
+Cohesion: 0.12
+Nodes (16): ⚠️ Adding a new route, ⚠️ Body size limit is 10 MiB for XML/JSON, ⚠️ CORS is an allowlist (not `Any` by default), ⚠️ Deploy XML save failure is HTTP 500, engine-server — Gotchas, ⚠️ fetchAndLock long polling is notification-driven, ⚠️ In-memory fallback is opt-in (dev), ⚠️ `lockDuration` / `newDuration` are milliseconds at the HTTP boundary (+8 more)
 
 ### Community 36 - "instance.rs"
-Cohesion: 0.08
-Nodes (30): ActiveToken, append_audit_log_enforces_limit(), append_audit_log_exactly_at_limit_does_not_trim(), append_audit_log_under_limit(), CompensationRecord, file_variable_names_returns_correct_list(), file_variable_names_returns_empty_when_no_files(), get_file_reference_returns_none_for_non_file() (+22 more)
+Cohesion: 0.07
+Nodes (32): inclusive_split_join_definition(), start_inclusive(), ActiveToken, append_audit_log_enforces_limit(), append_audit_log_exactly_at_limit_does_not_trim(), append_audit_log_under_limit(), CompensationRecord, file_variable_names_returns_correct_list() (+24 more)
 
 ### Community 37 - "server/tasks.rs"
 Cohesion: 0.19
 Nodes (21): lock_duration_ms_to_secs(), bpmn_error(), BpmnErrorRequest, complete_service_task(), complete_task(), CompleteRequest, CompleteServiceTaskRequest, extend_lock() (+13 more)
 
 ### Community 38 - "index.ts"
-Cohesion: 0.17
-Nodes (16): DEFAULTS, noopLogger(), randomId(), BpmnErrorRequest, ClientConfig, CompleteRequest, ExtendLockRequest, ExternalTask (+8 more)
+Cohesion: 0.15
+Nodes (17): DEFAULTS, noopLogger(), randomId(), BpmnErrorRequest, ClientConfig, CompleteRequest, ExtendLockRequest, ExternalTask (+9 more)
 
 ### Community 39 - "timer.rs"
 Cohesion: 0.11
 Nodes (12): initial_remaining_absolute_date_none(), is_recurring_absolute_false(), next_expiry_absolute_date_exact_now_returns_none(), next_expiry_absolute_date_future_returns_some(), next_expiry_absolute_date_past_returns_none(), next_expiry_duration_adds_to_now(), next_expiry_repeating_interval(), TimerDefinition (+4 more)
 
 ### Community 40 - "Uuid"
-Cohesion: 0.21
+Cohesion: 0.19
 Nodes (4): WorkflowEngine, inline_retry!, WorkflowEngine, WorkflowEngine
 
 ### Community 41 - "cn"
-Cohesion: 0.11
-Nodes (39): CSS & Theming Conventions, Key Files, Rules, Tech Stack (NEVER deviate), UI/Desktop Agent (Frontend), UI Patterns, AccordionContent, AccordionItem (+31 more)
+Cohesion: 0.13
+Nodes (35): AccordionContent, AccordionItem, AccordionTrigger, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter() (+27 more)
+
+### Community 42 - ".record_history_event"
+Cohesion: 0.20
+Nodes (3): verify_lock_ownership(), WorkflowEngine, WorkflowEngine
 
 ### Community 43 - "BPMNinja External Task Client Skill"
-Cohesion: 0.12
-Nodes (16): API Contract (BPMNinja Engine, Rust/Axum), Architecture, BPMNinja External Task Client Skill, Co-Evolutionary Verification (EvoSkills, arXiv 2604.01687), Configuration & Example, Domain Rules & Patterns, Evolution Log, Scope & File Map (+8 more)
+Cohesion: 0.09
+Nodes (21): API Contract (BPMNinja Engine, Rust/Axum), Architecture, BPMNinja External Task Client Skill, Co-Evolutionary Verification (EvoSkills, arXiv 2604.01687), Common Pitfalls, Configuration & Example, Critical Implementation Details, Domain Rules & Patterns (+13 more)
 
 ### Community 44 - "runner.rs"
 Cohesion: 0.16
@@ -444,16 +465,16 @@ Cohesion: 0.09
 Nodes (21): HistoryEventType, BranchCompleted, CallActivityCompleted, CallActivityStarted, CompensationTriggered, Error, EscalationThrown, GatewayTaken (+13 more)
 
 ### Community 58 - "tauri.ts"
-Cohesion: 0.11
-Nodes (28): App(), CardDescription, InstanceViewerProps, customProviderModule, generateEmptyBpmn(), generateProcessId(), ModelerPage, ModelerPageProps (+20 more)
+Cohesion: 0.10
+Nodes (30): App(), CardDescription, extractEmoji(), formatTs(), LogsTab(), LogsTabProps, customProviderModule, generateEmptyBpmn() (+22 more)
 
 ### Community 60 - "hashmap"
 Cohesion: 0.15
 Nodes (8): correlate_message(), ConditionInput, FuzzValue, Bool, Float, Int, Null, Str
 
 ### Community 61 - "TaskService"
-Cohesion: 0.14
-Nodes (11): TaskService, Logger, RetryOptions, Environment-Driven Configuration, engine-server — Dependencies, Inbound, Key Environment Variables, Outbound (+3 more)
+Cohesion: 0.24
+Nodes (6): TaskService, Environment-Driven Configuration, Key Environment Variables, ⚠️ Deploy runs a model check (`MODEL_CHECK`), Bewertung externer Architekturvorschläge (2026-10-12), Environment Variables
 
 ### Community 62 - "devDependencies"
 Cohesion: 0.10
@@ -492,8 +513,8 @@ Cohesion: 0.12
 Nodes (4): call_activity_propagates_error_to_matching_boundary_event(), call_activity_propagates_error_to_wildcard_boundary_event(), call_activity_unhandled_error_becomes_incident(), build_child_error_process()
 
 ### Community 71 - "scripting.rs"
-Cohesion: 0.13
-Nodes (5): setup_migration_engine_same_ids(), migrate_instance_same_node_ids_succeeds(), migrate_instance_suspended_rejected(), migrate_instance_unknown_target_definition_fails(), test_script_start_vs_end_listener_distinction()
+Cohesion: 0.12
+Nodes (7): build_script_test_definition(), setup_migration_engine_same_ids(), migrate_instance_same_node_ids_succeeds(), migrate_instance_suspended_rejected(), migrate_instance_unknown_target_definition_fails(), script_mutates_state_and_executes_logic(), test_script_start_vs_end_listener_distinction()
 
 ### Community 72 - "history/mod.rs"
 Cohesion: 0.15
@@ -512,7 +533,7 @@ Cohesion: 0.18
 Nodes (6): auth_middleware(), extract_api_key(), HEALTH_PATH, READY_PATH, strip_bearer(), api_keys_equal()
 
 ### Community 76 - "serialize"
-Cohesion: 0.17
+Cohesion: 0.19
 Nodes (3): FileReference, MultiInstanceDef, NatsInfo
 
 ### Community 77 - "desktop-tauri — Gotchas"
@@ -548,8 +569,8 @@ Cohesion: 0.33
 Nodes (13): delete_instance(), get_completed_instance(), get_instance_details(), get_instance_history(), list_instances(), migrate_instance(), move_token(), query_completed_instances() (+5 more)
 
 ### Community 86 - "boundary.rs"
-Cohesion: 0.24
-Nodes (5): setup_boundary_events(), test_setup_boundary_message_event(), test_setup_boundary_no_events(), test_setup_boundary_timer_event(), WorkflowEngine
+Cohesion: 0.43
+Nodes (4): setup_boundary_events(), test_setup_boundary_message_event(), test_setup_boundary_no_events(), test_setup_boundary_timer_event()
 
 ### Community 87 - "server/deploy.rs"
 Cohesion: 0.29
@@ -564,12 +585,16 @@ Cohesion: 0.12
 Nodes (16): Agenten-System, Architektur-Regeln, CLAUDE.md — BPMNinja Project Guide, Claude Workflow (unbedingt einhalten), Coding-Konventionen, Git & Release Workflow, graphify, KI-Verhaltensrichtlinien (Behavioral Guidelines) (+8 more)
 
 ### Community 90 - "bpmninja — Architecture Documentation"
-Cohesion: 0.10
-Nodes (21): 10. Code Statistics, 1. Workspace Overview, 2.1 Module Structure, 2.2 WorkflowEngine — Component Breakdown (K2), 2. engine-core — Core Architecture, 3.1 ProcessInstance (after K4 refactoring), 3.2 BPMN Element Types, 3. Data Model (+13 more)
+Cohesion: 0.13
+Nodes (15): 10. Code Statistics, 1. Workspace Overview, 5.1 WorkflowPersistence Trait, 5.3 Fault-Tolerant Retry Queue (K6), 5. Persistence Architecture, 7.1 Frontend Components, 7.2 Thin-Client Architecture, 7. Desktop App (Tauri) (+7 more)
 
 ### Community 91 - "HistoryEntry"
 Cohesion: 0.18
 Nodes (5): HistoryDiff, HistoryEntry, test_with_diff_empty_does_not_set(), test_with_diff_non_empty_sets_description(), VariableDiff
+
+### Community 92 - "EngineError"
+Cohesion: 0.11
+Nodes (18): EngineError, AlreadyCompleted, DefinitionHasInstances, ExecutionLimitExceeded, InstanceSuspended, InvalidDefinition, NoMatchingCondition, NoSuchDefinition (+10 more)
 
 ### Community 93 - "log_nats.rs"
 Cohesion: 0.21
@@ -592,7 +617,7 @@ Cohesion: 0.14
 Nodes (9): desktop-tauri, desktop-tauri — Interfaces, SSE Event Flow, Tauri Command Wrappers (lib/tauri.ts), UI Tab Structure, desktop-tauri — Responsibilities, Invariants, Key Frontend Components (+1 more)
 
 ### Community 98 - "client.rs"
-Cohesion: 0.14
+Cohesion: 0.13
 Nodes (4): HandleCache, KV_BUCKETS, NatsPersistence, OBJECT_STORES
 
 ### Community 99 - "e2e_call_activity.rs"
@@ -604,8 +629,8 @@ Cohesion: 0.18
 Nodes (6): deploy_and_execute_parallel_gateway(), PARALLEL_XML, start_server(), start_server(), test_update_variables_mid_execution_persists(), USER_TASK_BPMN_XML
 
 ### Community 101 - "BPMNinja — Priorisierte Verbesserungen"
-Cohesion: 0.13
-Nodes (15): Appendix — Größen-Snapshot, BPMNinja — Priorisierte Verbesserungen, Details, Empfohlener Aktionsplan (phasiert), Executive Summary, Kritische Issues (Kurzreferenz), Medium-term Improvements, Phase 0 — Sofort (1–3 Tage) — ✅ erledigt (2026-07) (+7 more)
+Cohesion: 0.15
+Nodes (10): Appendix — Größen-Snapshot, BPMNinja — Priorisierte Verbesserungen, Details, Executive Summary, Kritische Issues (Kurzreferenz), Medium-term Improvements, Quick Wins, Strategic / Larger Refactors (+2 more)
 
 ### Community 102 - "commands/monitoring.rs"
 Cohesion: 0.36
@@ -644,20 +669,20 @@ Cohesion: 0.17
 Nodes (12): @bpmninja/external-task-client, Configuration, Example, Features, Graceful Shutdown, Installation, License, Per-topic override: (+4 more)
 
 ### Community 111 - "ExternalTaskClient.test.ts"
-Cohesion: 0.18
-Nodes (11): Common Pitfalls, Critical Implementation Details, client, shutdown(), stopClientAndFlush(), createMockTask(), createMockFetch(), mockFetchResponse (+3 more)
+Cohesion: 0.35
+Nodes (6): createMockTask(), createMockFetch(), mockFetchResponse, setupGlobalFetchMock(), createMockLogger(), vitest
 
 ### Community 112 - "ConditionPropertiesProvider.ts"
 Cohesion: 0.35
 Nodes (9): ConditionTypeEntry(), CustomConditionGroup(), CustomPropertiesProvider, ExpressionEntry(), getConditionType(), isDefaultFlow(), SCRIPT_LANGUAGES, ScriptBodyEntry() (+1 more)
 
 ### Community 114 - "persistence-nats/src/tests.rs"
-Cohesion: 0.42
-Nodes (9): connect_nats(), nats_required(), nats_url(), setup_nats_test(), test_definition_instance_restore_roundtrip(), test_history_append_and_load(), test_history_batch_is_ordered_and_deduplicated(), test_save_and_load_token() (+1 more)
+Cohesion: 0.26
+Nodes (11): RestoreStats, connect_nats(), nats_required(), nats_url(), setup_nats_test(), test_definition_instance_restore_roundtrip(), test_history_append_and_load(), test_history_batch_is_ordered_and_deduplicated() (+3 more)
 
 ### Community 115 - "codec.rs"
-Cohesion: 0.07
-Nodes (40): EngineError, AlreadyCompleted, DefinitionHasInstances, ExecutionLimitExceeded, InstanceSuspended, InvalidDefinition, NoMatchingCondition, NoSuchDefinition (+32 more)
+Cohesion: 0.14
+Nodes (22): audit_key(), CompactBuffer, decode(), decode_instance_record(), detached(), detached_records_keep_audit_bytes_out_of_the_document(), DetachedInstance, encode_compact() (+14 more)
 
 ### Community 118 - "assert-typescript-peer.mjs"
 Cohesion: 0.22
@@ -671,8 +696,8 @@ Nodes (11): ADR-001: Hexagonal Architecture (Ports & Adapters), ADR-002: Token-B
 Cohesion: 0.42
 Nodes (9): complete_service_task(), complete_task(), fetch_and_lock_service_tasks(), get_pending_message_catches(), get_pending_service_tasks(), get_pending_tasks(), get_pending_timers(), resolve_incident() (+1 more)
 
-### Community 122 - "trait_impl.rs"
-Cohesion: 0.14
+### Community 122 - "audit.rs"
+Cohesion: 0.18
 Nodes (4): AUDIT_ACCESS, AuditPruneReport, failure(), NatsPersistence
 
 ### Community 123 - "engine/topic_index.rs"
@@ -687,9 +712,9 @@ Nodes (7): api-spec, api-spec — Interfaces, Deployed Artifacts, TypeSpec Sourc
 Cohesion: 0.20
 Nodes (9): Artifacts, BPMN 2.0.2 Element Matrix, Connecting Objects, Data, Flow Objects — Activities, Flow Objects — Events, Flow Objects — Gateways, Maintenance (+1 more)
 
-### Community 127 - "persistence.rs"
-Cohesion: 0.27
-Nodes (6): BucketEntry, BucketEntryDetail, BucketInfo, CompletedInstanceQuery, HistoryQuery, StorageInfo
+### Community 127 - "Token"
+Cohesion: 0.28
+Nodes (4): Token, resolve_next_target(), WorkflowEngine, WorkflowEngine
 
 ### Community 128 - "instance_pagination.rs"
 Cohesion: 0.38
@@ -700,8 +725,8 @@ Cohesion: 0.42
 Nodes (8): deploy_and_start(), move_token_to_existing_node_returns_204(), move_token_to_nonexistent_node_returns_404(), resume_suspended_instance_returns_204(), start_server(), suspend_instance_returns_204(), suspend_reflects_suspended_state(), TWO_TASK_BPMN
 
 ### Community 130 - "BPMNinja"
-Cohesion: 0.05
-Nodes (42): 1. Run the backend prerequisites, 2. Install the desktop app binary release, 3. Running from source (for developers), Activities & Sub-Processes, Additional Concepts, Architecture, Basic Elements, BPMNinja (+34 more)
+Cohesion: 0.20
+Nodes (10): Architecture, BPMNinja, Contributors, Crates (Modules), Docker Compose, License, Overview, Roadmap (+2 more)
 
 ### Community 131 - "Test Metrics"
 Cohesion: 0.20
@@ -760,28 +785,32 @@ Cohesion: 0.48
 Nodes (5): concurrent_saves_persist_the_latest_state(), inline_retries_reuse_the_checked_json_snapshot(), instance_stays_readable_while_save_is_in_flight(), oversized_snapshot_never_reaches_the_backend(), setup()
 
 ### Community 146 - "pending.rs"
-Cohesion: 0.25
-Nodes (8): MAX_AUDIT_LOG_ENTRIES, MAX_EXECUTION_STEPS, MAX_INSTANCE_PAYLOAD_BYTES, YIELD_EVERY_N_STEPS, PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask
+Cohesion: 0.61
+Nodes (4): PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask
 
 ### Community 148 - "timers.rs"
 Cohesion: 0.54
 Nodes (3): get_pending_timers(), process_timers(), ProcessTimersResponse
 
+### Community 149 - "DataViewer.tsx"
+Cohesion: 0.15
+Nodes (17): DataFormat, DataViewer(), DataViewerProps, decodeBase64Text(), detectFormat(), detectMimeType(), EXT_MIME, FORMAT_LABELS (+9 more)
+
 ### Community 150 - "calculate_diff"
 Cohesion: 0.27
 Nodes (9): calculate_diff(), calculate_diff_from_snapshot(), DiffSnapshot, test_calculate_diff(), test_calculate_diff_empty(), test_calculate_diff_file_upload_human_text(), test_calculate_diff_only_removed(), test_calculate_diff_only_variables_changed() (+1 more)
 
-### Community 151 - "Token"
-Cohesion: 0.28
-Nodes (4): Token, resolve_next_target(), WorkflowEngine, WorkflowEngine
+### Community 151 - "e2e_auth_cors.rs"
+Cohesion: 0.29
+Nodes (14): AppBuildConfig, auth_off(), auth_off_info_is_200_without_header(), auth_on(), auth_on_bearer_and_x_api_key_succeed(), auth_on_info_without_header_is_401(), auth_on_wrong_key_is_401(), cors_allowlist_echoes_known_origin() (+6 more)
 
 ### Community 152 - "BPMNinja Desktop (Tauri + React + bpmn-js)"
 Cohesion: 0.29
 Nodes (6): BPMNinja Desktop (Tauri + React + bpmn-js), Entwicklung, Flow Conditions (Camunda-7-kompatibel), Qualitätssicherung, Voraussetzungen, Zentrale Features
 
-### Community 153 - "engine-core — Dependencies"
-Cohesion: 0.20
-Nodes (6): engine-core — Dependencies, Key Cargo.toml Excerpt, Outbound (What engine-core Depends On), Trait Relationship Diagram, engine-core — Gotchas, engine-core
+### Community 153 - "engine-core/index.md"
+Cohesion: 0.25
+Nodes (3): engine-core — Gotchas, engine-core, engine-core — Interfaces
 
 ### Community 155 - "Maintenance"
 Cohesion: 0.29
@@ -795,9 +824,9 @@ Nodes (4): EngineEvent, DefinitionChanged, InstanceChanged, TaskChanged
 Cohesion: 0.52
 Nodes (5): complete_task_for_node(), compliance_complex_gateway_activation(), compliance_exclusive_gateway_routing(), compliance_parallel_gateway_sync(), create_engine()
 
-### Community 158 - "e2e_deploy.rs"
-Cohesion: 0.43
-Nodes (5): deploy_and_start_minimal_workflow_completes_immediately(), deploy_invalid_xml_returns_400(), deploy_minimal_workflow_returns_definition_id(), MINIMAL_BPMN_XML, start_server()
+### Community 158 - "REST API"
+Cohesion: 0.18
+Nodes (11): Definitions, Error Handling, Events & Messages, Files, History & Archival, Instances, Monitoring & Health, Observability (+3 more)
 
 ### Community 159 - "e2e_history.rs"
 Cohesion: 0.48
@@ -844,8 +873,8 @@ Cohesion: 0.25
 Nodes (3): Architecture, Quick Reference, Tag Registry
 
 ### Community 170 - "ExternalTaskClient"
-Cohesion: 0.09
-Nodes (18): ExternalTaskClient, Module Quick Index, agent-orchestrator, Route Map (46 endpoints), ⚠️ `bpmnError()` is not retried, ⚠️ Default-Port ist 8081, ⚠️ ESM only, ⚠️ Example worker path (+10 more)
+Cohesion: 0.07
+Nodes (26): ExternalTaskClient, Module Quick Index, agent-orchestrator, Route Map (46 endpoints), ⚠️ `bpmnError()` is not retried, ⚠️ Default-Port ist 8081, ⚠️ ESM only, ⚠️ Example worker path (+18 more)
 
 ### Community 171 - "commands/files.rs"
 Cohesion: 0.67
@@ -856,12 +885,12 @@ Cohesion: 0.33
 Nodes (5): compilerOptions, baseUrl, paths, files, references
 
 ### Community 174 - "engine-server — Interfaces"
-Cohesion: 0.20
-Nodes (10): AppError → HTTP Status Mapping, AppState (shared state for all route handlers), Auth & CORS env, Builder Functions, engine-server — Interfaces, Health vs Readiness, HTTP lock duration, Log Buffer Query (+2 more)
+Cohesion: 0.09
+Nodes (18): engine-server — Dependencies, Inbound, Outbound, engine-server, AppError → HTTP Status Mapping, AppState (shared state for all route handlers), Auth & CORS env, Builder Functions (+10 more)
 
 ### Community 175 - "retry.ts"
-Cohesion: 0.53
-Nodes (7): When to Activate, calculateBackoff(), RetryResult, sleep(), withRetry(), Key Files, bpmn-ninja-external-task-client Tests (76 tests, 3 files)
+Cohesion: 0.44
+Nodes (8): When to Activate, calculateBackoff(), RetryOptions, RetryResult, sleep(), withRetry(), Key Files, bpmn-ninja-external-task-client Tests (76 tests, 3 files)
 
 ### Community 176 - "server/messages.rs"
 Cohesion: 0.47
@@ -887,9 +916,9 @@ Nodes (4): Meta Commands, RTK - Rust Token Killer (Google Antigravity), Rule, Wh
 Cohesion: 0.47
 Nodes (3): CustomTopicGroup(), TopicPropertiesProvider, TopicProps()
 
-### Community 182 - "Phase 4 — Performance & Cloud-native (Vorschlag, 2026-10-12)"
+### Community 182 - "scripts"
 Cohesion: 0.25
-Nodes (8): 4a — Engine-Performance (Hot Path), 4b — Fundament für Verteilung (Voraussetzung für 4c–4e), 4c — Native Messaging: NATS, Redpanda, Kafka, 4d — Microservices & Dapr, 4e — Serverless & Service Mesh, 4f — BPMN-2.0.2-Vollabdeckung (Vorschlag, 2026-10-12), Empfohlene Reihenfolge, Phase 4 — Performance & Cloud-native (Vorschlag, 2026-10-12)
+Nodes (8): scripts, build, clean, dev, example, lint, test, test:watch
 
 ### Community 183 - "BPMN Model Checking and State-Space Reduction"
 Cohesion: 0.17
@@ -907,6 +936,14 @@ Nodes (3): dependencies, @typespec/compiler, @typespec/compiler
 Cohesion: 0.40
 Nodes (3): fuzz, fuzz — Responsibilities, What It Owns
 
+### Community 187 - "Supported BPMN Elements"
+Cohesion: 0.25
+Nodes (8): Activities & Sub-Processes, Additional Concepts, Basic Elements, Currently Unsupported BPMN Elements, Deviations from the BPMN 2.0 Standard, Gateways, Intermediate Events, Supported BPMN Elements
+
+### Community 188 - "UI/Desktop Agent (Frontend)"
+Cohesion: 0.29
+Nodes (6): CSS & Theming Conventions, Key Files, Rules, Tech Stack (NEVER deviate), UI/Desktop Agent (Frontend), UI Patterns
+
 ### Community 189 - "ActorType"
 Cohesion: 0.33
 Nodes (6): ActorType, Engine, Listener, ServiceWorker, Timer, User
@@ -915,9 +952,9 @@ Nodes (6): ActorType, Engine, Listener, ServiceWorker, Timer, User
 Cohesion: 0.40
 Nodes (5): 6.1 Route Overview (46 endpoints), 6.2 Server Architecture, 6.3 Background Timer Scheduler, 6.4 Health & Readiness, 6. REST API (engine-server)
 
-### Community 191 - "Weitere Audit-Befunde (Kontext)"
-Cohesion: 0.40
-Nodes (5): Performance-Hotspots, Score-Dimensionen (Audit), Stärken (kurz), Was das Audit nicht vollständig bewiesen hat, Weitere Audit-Befunde (Kontext)
+### Community 191 - "ModelCheckMode"
+Cohesion: 0.19
+Nodes (13): ModelCheckMode, Enforce, Off, Warn, timeout_ms_from_env(), config(), DEADLOCK_BPMN, deadlock_is_rejected_in_enforce_mode() (+5 more)
 
 ### Community 192 - "Global Agent Directives & Workflow"
 Cohesion: 0.50
@@ -935,37 +972,77 @@ Nodes (3): Files to Update, Rules, Versioning Convention
 Cohesion: 0.40
 Nodes (3): @tailwindcss/vite, vite, @vitejs/plugin-react
 
-### Community 196 - "4. Execution Architecture"
-Cohesion: 0.50
-Nodes (4): 4.1 Token Lifecycle (K4), 4.2 Execution Loop (run_instance_batch), 4.3 Gateway Routing, 4. Execution Architecture
+### Community 196 - "constants.rs"
+Cohesion: 0.33
+Nodes (4): MAX_AUDIT_LOG_ENTRIES, MAX_EXECUTION_STEPS, MAX_INSTANCE_PAYLOAD_BYTES, YIELD_EVERY_N_STEPS
 
 ### Community 199 - "desktop-tauri — Dependencies"
 Cohesion: 0.40
 Nodes (5): Architecture Diagram, desktop-tauri — Dependencies, Inbound, Key npm Dependencies, Outbound
 
 ### Community 203 - "ProcessDefinition"
-Cohesion: 0.11
+Cohesion: 0.12
 Nodes (8): ProcessDefinition, find_any_boundary_escalation_event(), find_boundary_error_event(), find_boundary_escalation_event(), find_compensation_handler(), find_downstream_join(), same_gateway_type(), DefinitionRegistry
 
+### Community 233 - "e2e_deploy.rs"
+Cohesion: 0.43
+Nodes (5): deploy_and_start_minimal_workflow_completes_immediately(), deploy_invalid_xml_returns_400(), deploy_minimal_workflow_returns_definition_id(), MINIMAL_BPMN_XML, start_server()
+
+### Community 235 - "engine-core — Dependencies"
+Cohesion: 0.40
+Nodes (4): engine-core — Dependencies, Key Cargo.toml Excerpt, Outbound (What engine-core Depends On), Trait Relationship Diagram
+
+### Community 236 - "Empfohlener Aktionsplan (phasiert)"
+Cohesion: 0.40
+Nodes (5): Empfohlener Aktionsplan (phasiert), Phase 0 — Sofort (1–3 Tage) — ✅ erledigt (2026-07), Phase 1 — Production Minimum Bar (1–2 Wochen) — ✅ erledigt, Phase 2 — Scale & Maintainability (2–6 Wochen), Phase 3 — Platform (Quartal+)
+
+### Community 237 - "Weitere Audit-Befunde (Kontext)"
+Cohesion: 0.40
+Nodes (5): Performance-Hotspots, Score-Dimensionen (Audit), Stärken (kurz), Was das Audit nicht vollständig bewiesen hat, Weitere Audit-Befunde (Kontext)
+
+### Community 238 - "External Task Client (TypeScript)"
+Cohesion: 0.40
+Nodes (5): Development & Tests, External Task Client (TypeScript), Features, Quick Start, TaskService (per handler)
+
+### Community 239 - "4. Execution Architecture"
+Cohesion: 0.50
+Nodes (4): 4.1 Token Lifecycle (K4), 4.2 Execution Loop (run_instance_batch), 4.3 Gateway Routing, 4. Execution Architecture
+
+### Community 240 - "Desktop Application (UI)"
+Cohesion: 0.50
+Nodes (4): 1. Run the backend prerequisites, 2. Install the desktop app binary release, 3. Running from source (for developers), Desktop Application (UI)
+
+### Community 241 - "Quick Start"
+Cohesion: 0.50
+Nodes (4): Build, Test & Lint, Prerequisites, Quick Start, Starting the Engine Server
+
+### Community 242 - "2. engine-core — Core Architecture"
+Cohesion: 0.67
+Nodes (3): 2.1 Module Structure, 2.2 WorkflowEngine — Component Breakdown (K2), 2. engine-core — Core Architecture
+
+### Community 245 - "3. Data Model"
+Cohesion: 0.67
+Nodes (3): 3.1 ProcessInstance (after K4 refactoring), 3.2 BPMN Element Types, 3. Data Model
+
 ## Knowledge Gaps
-- **176 isolated node(s):** `agent-orchestrator`, `@typespec/compiler`, `@typespec/http`, `@typespec/rest`, `@typespec/openapi3` (+171 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1502 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **177 isolated node(s):** `agent-orchestrator`, `@typespec/compiler`, `@typespec/http`, `@typespec/rest`, `@typespec/openapi3` (+172 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1511 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **56 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ProcessInstance` connect `ProcessInstance` to `MonitoringPage.tsx`, `Shared Patterns`, `cn`, `Button`, `InstanceDetailDialog.tsx`, `react`, `Critical Rules`, `Key Architectural Decisions`, `tauri.ts`?**
-  _High betweenness centrality (0.050) - this node is a cross-community bridge._
+- **Why does `Value` connect `Value` to `arc`, `FailSaveXmlPersistence`, `commands/deploy.rs`, `InstrumentedPersistence`, `server/instances.rs`, `tests/gateways.rs`, `pending.rs`, `.persist_instance`, `calculate_diff`, `condition.rs`, `bpmn_compliance.rs`, `instance.rs`, `server/tasks.rs`, `Uuid`, `.record_history_event`, `commands/files.rs`, `runner.rs`, `server/messages.rs`, `hashmap`, `ModelCheckMode`, `history/mod.rs`, `serialize`, `Uuid`, `api_helpers.rs`, `commands/instances.rs`, `HistoryEntry`, `fuzz_history_diff.rs`, `commands/monitoring.rs`, `engine/mod.rs`, `commands/tasks.rs`, `Token`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `cn()` (e.g. with `CSS & Theming Conventions` and `Key Files`) actually correct?**
   _`cn()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `agent-orchestrator`, `@typespec/compiler`, `@typespec/http` to the rest of the system?**
-  _176 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `NatsPersistence` be split into smaller, more focused modules?**
-  _Cohesion score 0.14439946018893388 - nodes in this community are weakly interconnected._
-- **Why does `Value` connect `Value` to `arc`, `.run_instance_batch`, `commands/deploy.rs`, `FailSaveXmlPersistence`, `model_check.rs`, `server/instances.rs`, `tests/helpers.rs`, `pending.rs`, `.persist_instance`, `Token`, `calculate_diff`, `condition.rs`, `bpmn_compliance.rs`, `instance.rs`, `server/tasks.rs`, `Uuid`, `service_task.rs`, `commands/files.rs`, `runner.rs`, `server/messages.rs`, `inclusive_join.rs`, `hashmap`, `history/mod.rs`, `serialize`, `.record_history_event`, `api_helpers.rs`, `commands/instances.rs`, `HistoryEntry`, `fuzz_history_diff.rs`, `commands/monitoring.rs`, `commands/tasks.rs`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+  _177 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `InMemoryPersistence` be split into smaller, more focused modules?**
-  _Cohesion score 0.05427905427905428 - nodes in this community are weakly interconnected._
-- **Why does `ProcessDefinition` connect `ProcessDefinition` to `NatsPersistence`, `InMemoryPersistence`, `arc`, `FailSaveXmlPersistence`, `parse_bpmn_xml`, `WorkflowPersistence`, `history_batch.rs`, `InstrumentedPersistence`, `stress_tests.rs`, `tests/helpers.rs`, `Token`, `condition.rs`, `NextAction`, `BpmnElement`, `runner.rs`, `completion.rs`, `parser.rs`, `Value`, `inclusive_join.rs`, `ProcessDefinitionBuilder`, `super`, `call_errors.rs`, `.record_history_event`, `boundary.rs`, `StartupCoordinator`, `engine_bench.rs`, `WorkflowEngine`, `trait_impl.rs`, `.list_kv_entries`, `persistence.rs`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+  _Cohesion score 0.05322947095098994 - nodes in this community are weakly interconnected._
+- **Why does `ProcessInstance` connect `ProcessInstance` to `MonitoringPage.tsx`, `Shared Patterns`, `cn`, `InstanceDetailDialog.tsx`, `react`, `Critical Rules`, `Key Architectural Decisions`, `tauri.ts`?**
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
+- **Should `arc` be split into smaller, more focused modules?**
+  _Cohesion score 0.09672830725462304 - nodes in this community are weakly interconnected._
+- **Why does `ProcessDefinition` connect `ProcessDefinition` to `NatsPersistence`, `InMemoryPersistence`, `arc`, `FailSaveXmlPersistence`, `parse_bpmn_xml`, `WorkflowPersistence`, `history_batch.rs`, `InstrumentedPersistence`, `stress_tests.rs`, `tests/gateways.rs`, `condition.rs`, `NextAction`, `BpmnElement`, `instance.rs`, `runner.rs`, `completion.rs`, `parser.rs`, `Value`, `ProcessDefinitionBuilder`, `super`, `call_errors.rs`, `scripting.rs`, `Uuid`, `boundary.rs`, `handlers/tasks.rs`, `StartupCoordinator`, `engine_bench.rs`, `persistence-nats/src/tests.rs`, `EngineResult`, `WorkflowEngine`, `.list_kv_entries`, `Token`?**
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
