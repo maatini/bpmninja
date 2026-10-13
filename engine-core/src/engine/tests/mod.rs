@@ -15,6 +15,7 @@ pub mod recurring_and_event_timer;
 pub mod scripting;
 pub mod service_incidents;
 pub mod start_tasks;
+pub mod task_handler;
 pub mod stress_tests;
 pub mod timer_due_index;
 pub mod timers_messages;

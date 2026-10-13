@@ -34,12 +34,14 @@ mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+mod task_handler;
 mod timer_index;
 mod timer_processor;
 mod topic_index;
 mod user_task;
 
 pub use events::{EngineEvent, InstanceDelta, InstanceStatus};
+pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
@@ -51,6 +53,8 @@ pub struct WorkflowEngine {
     pub(crate) service_task_topic_index: topic_index::TopicIndex,
     /// Wakes long-polling `fetchAndLock` callers when tasks become fetchable.
     pub(crate) service_task_notify: tokio::sync::Notify,
+    /// In-process handlers per topic, executed by the task-handler dispatcher.
+    pub(crate) task_handlers: DashMap<String, Arc<dyn TaskHandler>>,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
@@ -89,6 +93,7 @@ impl WorkflowEngine {
             pending_service_tasks: Arc::new(DashMap::new()),
             service_task_topic_index: DashMap::new(),
             service_task_notify: tokio::sync::Notify::new(),
+            task_handlers: DashMap::new(),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
             timer_notify: tokio::sync::Notify::new(),

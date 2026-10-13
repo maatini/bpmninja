@@ -10,7 +10,7 @@ pub mod scripting;
 pub use condition::evaluate_condition;
 
 pub use domain::*;
-pub use engine::WorkflowEngine;
+pub use engine::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome, WorkflowEngine};
 pub use history::{HistoryDiff, HistoryEntry, HistoryEventType, VariableDiff};
 pub use port::*;
 pub use runtime::*;
