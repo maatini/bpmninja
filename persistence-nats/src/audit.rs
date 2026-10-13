@@ -44,12 +44,13 @@ impl NatsPersistence {
         let mut referenced = HashSet::new();
         for bucket in ["instances", "history_instances"] {
             if let Some(bytes) = self.kv(bucket).await?.get(&id).await.map_err(failure)? {
-                let (instance, audit_key) = crate::codec::decode_instance_record(&bytes)?;
+                let record = self.resolve_snapshot(&bytes).await?;
+                let (instance, audit_key) = crate::codec::decode_instance_record(&record)?;
                 if instance.id != instance_id {
                     return Err(failure("instance document ID mismatch"));
                 }
                 if let Some(key) = audit_key {
-                    self.restore_instance_record(&bytes).await?;
+                    self.restore_instance_record(&record).await?;
                     referenced.insert(key);
                 }
             }

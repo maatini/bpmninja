@@ -198,12 +198,13 @@ async fn test_definition_instance_restore_roundtrip() {
         .await
         .unwrap()
         .unwrap();
+    let stored_document = persistence.resolve_snapshot(&stored).await.unwrap();
     #[cfg(not(feature = "separate-audit-log"))]
-    assert_eq!(stored.as_ref(), prepared.as_slice());
+    assert_eq!(stored_document.as_slice(), prepared.as_slice());
     #[cfg(feature = "separate-audit-log")]
     {
         let (record, audit) = crate::codec::split_prepared(&prepared).unwrap();
-        assert_eq!(stored.as_ref(), record);
+        assert_eq!(stored_document.as_slice(), record);
         let (state, key) = crate::codec::decode_instance_record(record).unwrap();
         assert!(state.audit_log.is_empty());
         let key = key.unwrap();
@@ -269,7 +270,7 @@ async fn test_definition_instance_restore_roundtrip() {
         serde_json::to_value(&serialized_instance).unwrap()
     );
     #[cfg(not(any(feature = "compact-instances", feature = "separate-audit-log")))]
-    assert_eq!(stored.as_ref(), payload.as_slice());
+    assert_eq!(stored_document.as_slice(), payload.as_slice());
     let detail = persistence
         .get_bucket_entry_detail("instances", &serialized_instance.id.to_string())
         .await
@@ -705,4 +706,260 @@ async fn test_history_batch_is_ordered_and_deduplicated() {
     let ids: Vec<_> = loaded.iter().map(|e| e.id).collect();
     let expected: Vec<_> = entries.iter().map(|e| e.id).collect();
     assert_eq!(ids, expected, "entries must be stored once, in order");
+}
+
+/// Checkpoints/deltas are immutable, bounded, and readable without the write feature.
+#[tokio::test]
+async fn test_instance_journal_roundtrip_and_checkpointing() {
+    use engine_core::{
+        WorkflowEngine,
+        domain::{BpmnElement, ProcessDefinitionBuilder},
+        runtime::InstanceState,
+    };
+    let Some(persistence) = setup_nats_test().await else {
+        return;
+    };
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("journal_fixture")
+        .node("start", BpmnElement::StartEvent)
+        .node("wait", BpmnElement::UserTask("tester".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "wait")
+        .flow("wait", "end")
+        .build()
+        .unwrap();
+    let (definition, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(definition).await.unwrap();
+    let mut instance = engine.get_instance_details(id).await.unwrap();
+    instance
+        .variables
+        .insert("counter".into(), serde_json::json!(0));
+    instance.variables.insert(
+        "large_unchanged_value".into(),
+        serde_json::json!("x".repeat(16 * 1024)),
+    );
+    let snapshot = serde_json::to_vec(&instance).unwrap();
+    let (checkpoint, depth) = crate::journal::choose_node(&snapshot, None).unwrap();
+    let head = crate::journal::Head {
+        id,
+        key: crate::journal::key(id, &checkpoint),
+        depth,
+    };
+    let head_bytes = crate::journal::encode_head(&head).unwrap();
+    let nodes = persistence.kv("instance_states").await.unwrap();
+    let instances = persistence.kv("instances").await.unwrap();
+    nodes
+        .create(&head.key, checkpoint.clone().into())
+        .await
+        .unwrap();
+    instances
+        .put(id.to_string(), head_bytes.clone().into())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            persistence
+                .restore_instance_record(&head_bytes)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&instance).unwrap()
+    );
+    let listed = persistence.list_instances().await.unwrap();
+    assert!(
+        listed
+            .iter()
+            .any(|found| found.id == id && found.variables == instance.variables)
+    );
+    let detail = persistence
+        .get_bucket_entry_detail("instances", &id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&detail.data).unwrap(),
+        serde_json::to_value(&instance).unwrap()
+    );
+
+    // A journal write interrupted before publishing the head leaves the old state readable.
+    let mut pending = instance.clone();
+    pending
+        .variables
+        .insert("counter".into(), serde_json::json!(99));
+    let (pending_node, _) =
+        crate::journal::choose_node(&serde_json::to_vec(&pending).unwrap(), None).unwrap();
+    nodes
+        .create(crate::journal::key(id, &pending_node), pending_node.into())
+        .await
+        .unwrap();
+    assert_eq!(
+        persistence
+            .restore_instance_record(&head_bytes)
+            .await
+            .unwrap()
+            .variables["counter"],
+        serde_json::json!(0)
+    );
+    // Missing/corrupt nodes and inconsistent depth fail restore.
+    nodes.purge(&head.key).await.unwrap();
+    assert!(
+        persistence
+            .restore_instance_record(&head_bytes)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("missing journal")
+    );
+    nodes
+        .create(&head.key, b"BC1\0corrupt".to_vec().into())
+        .await
+        .unwrap();
+    assert!(
+        persistence
+            .restore_instance_record(&head_bytes)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("digest mismatch")
+    );
+    nodes.purge(&head.key).await.unwrap();
+    nodes.create(&head.key, checkpoint.into()).await.unwrap();
+    let invalid_depth = crate::journal::Head {
+        depth: 1,
+        ..head.clone()
+    };
+    assert!(
+        persistence
+            .resolve_snapshot(&crate::journal::encode_head(&invalid_depth).unwrap())
+            .await
+            .is_err()
+    );
+
+    persistence.save_instance(&instance).await.unwrap();
+    #[cfg(feature = "delta-instances")]
+    {
+        for counter in 1..=u32::from(crate::journal::MAX_DEPTH) + 2 {
+            instance
+                .variables
+                .insert("counter".into(), serde_json::json!(counter));
+            persistence.save_instance(&instance).await.unwrap();
+            let stored = instances.get(id.to_string()).await.unwrap().unwrap();
+            let head = crate::journal::decode_head(&stored).unwrap();
+            assert_eq!(
+                u32::from(head.depth),
+                counter % (u32::from(crate::journal::MAX_DEPTH) + 1)
+            );
+            let node = nodes.get(&head.key).await.unwrap().unwrap();
+            if head.depth > 0 {
+                assert!(node.len() < 4096, "small edit should store a small delta");
+            }
+            assert_eq!(
+                serde_json::to_value(persistence.restore_instance_record(&stored).await.unwrap())
+                    .unwrap(),
+                serde_json::to_value(&instance).unwrap()
+            );
+        }
+    }
+    #[cfg(not(feature = "delta-instances"))]
+    assert!(!crate::journal::is_head(
+        &instances.get(id.to_string()).await.unwrap().unwrap()
+    ));
+    #[cfg(feature = "delta-instances")]
+    {
+        let prior = instances.get(id.to_string()).await.unwrap().unwrap();
+        let prior_head = crate::journal::decode_head(&prior).unwrap();
+        let base = persistence.resolve_snapshot(&prior).await.unwrap();
+        let prior_counter = instance.variables["counter"].clone();
+        instance.variables.insert(
+            "counter".into(),
+            serde_json::json!(u32::from(crate::journal::MAX_DEPTH) + 3),
+        );
+        let prepared = persistence
+            .prepare_instance_payload(&instance, serde_json::to_vec(&instance).unwrap())
+            .unwrap();
+        let target = if crate::codec::is_prepared(&prepared) {
+            crate::codec::split_prepared(&prepared).unwrap().0
+        } else {
+            prepared.as_slice()
+        };
+        let (pending_node, _) =
+            crate::journal::choose_node(target, Some((&prior_head, &base))).unwrap();
+        let pending_key = crate::journal::key(id, &pending_node);
+        // A concurrent revision change makes the cached CAS fail after the node write.
+        instances.put(id.to_string(), prior.clone()).await.unwrap();
+        assert!(persistence.save_instance(&instance).await.is_err());
+        assert_eq!(instances.get(id.to_string()).await.unwrap().unwrap(), prior);
+        assert_eq!(
+            persistence
+                .restore_instance_record(&prior)
+                .await
+                .unwrap()
+                .variables["counter"],
+            prior_counter
+        );
+        let pending_revision = nodes.entry(&pending_key).await.unwrap().unwrap().revision;
+        // Retry rereads the committed head and reuses the existing immutable node.
+        persistence.save_instance(&instance).await.unwrap();
+        assert_eq!(
+            nodes.entry(&pending_key).await.unwrap().unwrap().revision,
+            pending_revision
+        );
+        let committed = instances.get(id.to_string()).await.unwrap().unwrap();
+        assert_eq!(
+            crate::journal::decode_head(&committed).unwrap().key,
+            pending_key
+        );
+        let detail = persistence
+            .get_bucket_entry_detail("instance_states", &pending_key)
+            .await
+            .unwrap();
+        assert_eq!(detail.encoding, "base64");
+    }
+    // Reconnect without any writer cache and reconstruct from persisted data.
+    let fresh = NatsPersistence::connect(&nats_url(), &format!("TEST_JOURNAL_{}", Uuid::new_v4()))
+        .await
+        .unwrap();
+    let restored = fresh
+        .list_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|found| found.id == id)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(restored).unwrap(),
+        serde_json::to_value(&instance).unwrap()
+    );
+    let mut archived = instance.clone();
+    archived.state = InstanceState::Completed;
+    persistence
+        .save_completed_instance(&archived)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            fresh
+                .get_completed_instance(&id.to_string())
+                .await
+                .unwrap()
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&archived).unwrap()
+    );
+    persistence.delete_instance(&id.to_string()).await.unwrap();
+    assert!(
+        nodes.get(&head.key).await.unwrap().is_some(),
+        "archive must retain journal data"
+    );
+    persistence
+        .kv("history_instances")
+        .await
+        .unwrap()
+        .delete(id.to_string())
+        .await
+        .unwrap();
+    persistence.delete_instance(&id.to_string()).await.unwrap();
+    assert!(nodes.get(&head.key).await.unwrap().is_none());
+    engine.shutdown().await;
 }

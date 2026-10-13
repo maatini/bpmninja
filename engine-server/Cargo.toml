@@ -10,6 +10,8 @@ default = []
 compact-instances = ["persistence-nats/compact-instances"]
 separate-audit-log = ["persistence-nats/separate-audit-log"]
 
+delta-instances = ["persistence-nats/delta-instances"]
+
 [dependencies]
 # Deploy-time model checking (V1). Not on crates.io → pinned git revision (MIT).
 rust_bpmn_analyzer = { git = "https://github.com/timKraeuter/rust_bpmn_analyzer", rev = "3d3eede32409d70e6818d8344d480de8d76a6d8b" }

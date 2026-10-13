@@ -9,7 +9,7 @@ use futures::StreamExt;
 use tokio::sync::OnceCell;
 
 /// KV buckets created on connect; their handles are cached after first use.
-const KV_BUCKETS: [&str; 9] = [
+const KV_BUCKETS: [&str; 10] = [
     "tokens",
     "instances",
     "definitions",
@@ -19,6 +19,7 @@ const KV_BUCKETS: [&str; 9] = [
     "messages",
     "history_instances",
     "instance_audit",
+    "instance_states",
 ];
 
 /// Object stores created on connect; their handles are cached after first use.
@@ -49,6 +50,8 @@ pub struct NatsPersistence {
     pub(crate) client: Client,
     pub(crate) js: Context,
     pub(crate) handles: Arc<HandleCache>,
+    #[cfg(feature = "delta-instances")]
+    pub(crate) snapshot_cache: Arc<tokio::sync::Mutex<crate::journal::SnapshotCache>>,
     pub(crate) audit_cache: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
@@ -188,10 +191,29 @@ impl NatsPersistence {
             }
         }
 
+        if js.get_key_value("instance_states").await.is_err() {
+            if let Err(error) = js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: "instance_states".into(),
+                    description: "Immutable checkpoints and deltas".into(),
+                    ..Default::default()
+                })
+                .await
+            {
+                js.get_key_value("instance_states").await.map_err(|_| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to initialize state journal: {error}"
+                    ))
+                })?;
+            }
+        }
+
         Ok(Self {
             client,
             js,
             handles: Arc::new(HandleCache::new()),
+            #[cfg(feature = "delta-instances")]
+            snapshot_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             audit_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
         })
     }
@@ -244,7 +266,9 @@ impl NatsPersistence {
         while let Some(key_result) = keys.next().await {
             match key_result {
                 Ok(key) => match store.get(&key).await {
-                    Ok(Some(entry)) => match if crate::codec::detached(&entry) {
+                    Ok(Some(entry)) => match if crate::codec::detached(&entry)
+                        || crate::journal::is_head(&entry)
+                    {
                         let restored = self.restore_instance_record(&entry).await?;
                         serde_json::to_value(restored)
                             .and_then(serde_json::from_value::<T>)

@@ -10,6 +10,8 @@ default = []
 compact-instances = []
 separate-audit-log = []
 
+delta-instances = []
+
 [dependencies]
 engine-core = { path = "../engine-core" }
 async-nats = "0.50"

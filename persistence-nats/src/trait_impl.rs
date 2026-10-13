@@ -111,6 +111,11 @@ impl WorkflowPersistence for NatsPersistence {
 
     async fn delete_instance(&self, id: &str) -> EngineResult<()> {
         let _audit_access = crate::audit::AUDIT_ACCESS.write().await;
+        #[cfg(feature = "delta-instances")]
+        self.snapshot_cache.lock().await.remove(&(
+            "instances".to_string(),
+            Uuid::parse_str(id).map_err(|e| EngineError::PersistenceError(e.to_string()))?,
+        ));
         let store = self.kv("instances").await?;
 
         store.delete(id).await.map_err(|e| {
@@ -127,6 +132,7 @@ impl WorkflowPersistence for NatsPersistence {
             .is_none()
         {
             self.delete_instance_audits(id).await?;
+            self.delete_instance_states(id).await?;
         }
 
         Ok(())
@@ -402,6 +408,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "history_instances",
             "instance_audit",
+            "instance_states",
         ];
         for name in &kv_bucket_names {
             match self.js.get_key_value(*name).await {
@@ -626,6 +633,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "history_instances",
             "instance_audit",
+            "instance_states",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -773,6 +781,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "history_instances",
             "instance_audit",
+            "instance_states",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -781,7 +790,15 @@ impl WorkflowPersistence for NatsPersistence {
             })?;
 
             if let Ok(Some(entry)) = store.get(key).await {
-                let data = if crate::codec::detached(&entry) {
+                if bucket_name == "instance_states" {
+                    use base64::{Engine as _, engine::general_purpose::STANDARD};
+                    return Ok(BucketEntryDetail {
+                        key: key.to_string(),
+                        data: STANDARD.encode(&entry),
+                        encoding: "base64".into(),
+                    });
+                }
+                let data = if crate::codec::detached(&entry) || crate::journal::is_head(&entry) {
                     serde_json::to_string(&self.restore_instance_record(&entry).await?)
                         .map_err(|e| EngineError::PersistenceError(e.to_string()))?
                 } else {
@@ -978,6 +995,7 @@ impl NatsPersistence {
         payload: Vec<u8>,
     ) -> EngineResult<()> {
         let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let _snapshot_lock = crate::journal::lock_snapshot(id).await;
         let record = if crate::codec::is_prepared(&payload) {
             let (record, audit) = crate::codec::split_prepared(&payload)?;
             let (instance, key) = crate::codec::decode_instance_record(record)?;
@@ -993,14 +1011,23 @@ impl NatsPersistence {
         } else {
             &payload
         };
-        self.kv(bucket)
-            .await?
-            .put(id.to_string(), record.to_vec().into())
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!("Failed to put instance to {bucket}: {e}"))
-            })?;
-        Ok(())
+        #[cfg(feature = "delta-instances")]
+        {
+            self.put_journal_snapshot(bucket, id, record).await
+        }
+        #[cfg(not(feature = "delta-instances"))]
+        {
+            self.kv(bucket)
+                .await?
+                .put(id.to_string(), record.to_vec().into())
+                .await
+                .map_err(|e| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to put instance to {bucket}: {e}"
+                    ))
+                })?;
+            Ok(())
+        }
     }
 
     async fn ensure_instance_audit(&self, key: &str, bytes: &[u8]) -> EngineResult<()> {
@@ -1032,7 +1059,8 @@ impl NatsPersistence {
         &self,
         bytes: &[u8],
     ) -> EngineResult<ProcessInstance> {
-        let (mut instance, key) = crate::codec::decode_instance_record(bytes)?;
+        let record = self.resolve_snapshot(bytes).await?;
+        let (mut instance, key) = crate::codec::decode_instance_record(&record)?;
         if let Some(key) = key {
             let audit = self
                 .kv("instance_audit")
@@ -1081,6 +1109,18 @@ impl NatsPersistence {
             .lock()
             .await
             .retain(|key| !key.starts_with(&prefix));
+        Ok(())
+    }
+    async fn delete_instance_states(&self, id: &str) -> EngineResult<()> {
+        let prefix = format!("{id}.");
+        let store = self.kv("instance_states").await?;
+        let mut keys = store.keys().await.map_err(crate::journal::failure)?;
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(crate::journal::failure)?;
+            if key.starts_with(&prefix) {
+                store.purge(&key).await.map_err(crate::journal::failure)?;
+            }
+        }
         Ok(())
     }
 }
