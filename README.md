@@ -538,11 +538,24 @@ volumes:
 
 ### 2. Install the desktop app binary release
 
-The ready-to-use apps are available on the [GitHub Releases page](https://github.com/maatini/bpmninja/releases).
+The ready-to-use apps are available on the [GitHub Releases page](https://github.com/yasir2000/bpmninja/releases).
 
 *   **macOS (.dmg):** Open the file and drag the icon into your `Applications` folder. _Note:_ since open-source apps are usually not signed, macOS may report that the app is "damaged" and should be moved to the Trash when you try to open it. This is a known Gatekeeper protection behaviour. Run `xattr -cr /Applications/bpmninja-desktop.app` in the terminal to remove the quarantine flag. After that, the app can be opened normally.
 *   **Windows (.exe / .msi):** Run the installer by double-clicking it. If a Microsoft SmartScreen warning appears, click "More info" and then "Run anyway".
 *   **Linux (.AppImage / .deb):** Install the `.deb` package via `sudo dpkg -i package.deb`. If you use the `.AppImage`, you may need to make it executable first with `chmod +x app.AppImage`.
+
+### Generate desktop packages with CI
+
+The [Desktop Packages workflow](.github/workflows/release.yml) builds the installers below on desktop changes in pull requests and pushes to `main`. Run it manually from **Actions → Desktop Packages → Run workflow** to package any selected branch. Download the `desktop-*` artifacts from the completed run; artifacts are retained for 14 days.
+
+| Target | Packages | Artifact |
+| --- | --- | --- |
+| Linux x64 | `.AppImage`, `.deb` | `desktop-linux-x64` |
+| Windows x64 | `.exe` (NSIS), `.msi` | `desktop-windows-x64` |
+| macOS Apple Silicon | `.dmg` | `desktop-macos-arm64` |
+| macOS Intel | `.dmg` | `desktop-macos-x64` |
+
+Pushing a `v*` tag builds all targets and attaches the six installers to a **draft GitHub release** after all builds succeed. Review and publish the draft from GitHub Releases. Manual and pull request builds only upload workflow artifacts. The **Build Linux Packages**, **Build Windows Packages**, and **Build macOS Packages** workflows allow manual builds for a single platform using the same build configuration. Installers are unsigned, as described above.
 
 ### 3. Running from source (for developers)
 

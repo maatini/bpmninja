@@ -1,0 +1,114 @@
+name: Desktop package build
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Platform to package (all, linux, windows, or macos)
+        type: string
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  targets:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - name: Select package targets
+        id: targets
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        shell: python
+        run: |
+          import json, os
+          rows = [
+              {"os": "ubuntu-24.04", "platform": "linux", "name": "linux-x64", "target": "x86_64-unknown-linux-gnu", "bundles": "deb,appimage"},
+              {"os": "windows-latest", "platform": "windows", "name": "windows-x64", "target": "x86_64-pc-windows-msvc", "bundles": "nsis,msi"},
+              {"os": "macos-latest", "platform": "macos", "name": "macos-arm64", "target": "aarch64-apple-darwin", "bundles": "dmg"},
+              {"os": "macos-15-intel", "platform": "macos", "name": "macos-x64", "target": "x86_64-apple-darwin", "bundles": "dmg"},
+          ]
+          platform = os.environ["PLATFORM"]
+          selected = [row for row in rows if platform == "all" or row["platform"] == platform]
+          if not selected:
+              raise SystemExit(f"Unsupported platform: {platform}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("matrix=" + json.dumps({"include": selected}) + "\n")
+
+  build:
+    name: Package ${{ matrix.name }}
+    needs: targets
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop-tauri/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri -> target
+          key: desktop-${{ matrix.target }}
+
+      - name: Install Linux packaging dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install frontend dependencies
+        working-directory: desktop-tauri
+        run: npm ci
+
+      - name: Build installers
+        working-directory: desktop-tauri
+        run: npm run tauri -- build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+
+      - name: Verify every requested package format
+        env:
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          root = Path("desktop-tauri/src-tauri/target") / os.environ["TARGET"] / "release/bundle"
+          formats = {"deb": "*.deb", "appimage": "*.AppImage", "nsis": "*.exe", "msi": "*.msi", "dmg": "*.dmg"}
+          for bundle in os.environ["BUNDLES"].split(","):
+              files = list((root / bundle).glob(formats[bundle]))
+              if not files or any(path.stat().st_size == 0 for path in files):
+                  raise SystemExit(f"Missing or empty {bundle} package in {root / bundle}")
+              for path in files:
+                  print(path)
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg

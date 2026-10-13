@@ -2184,9 +2184,9 @@
     "semantic_hash": ""
   },
   "docs/knowledge-base/modules/persistence/interfaces.md": {
-    "mtime": 1791847809.9519043,
-    "seen": 1791847845.9178705,
-    "ast_hash": "b6e1f2015c85f0457b4515b2c7ac875b",
+    "mtime": 1791850378.7345665,
+    "seen": 1791850466.0535903,
+    "ast_hash": "e5ca3648aa3fd23be40b8e8b4dbdb1d2",
     "semantic_hash": ""
   },
   "docs/knowledge-base/modules/persistence/responsibility.md": {
@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1791847549.5692897,
-    "seen": 1791847597.560438,
-    "ast_hash": "497d9df578fdb88b9acf5183d4b2a1f7",
+    "mtime": 1791850378.7375607,
+    "seen": 1791850466.0535903,
+    "ast_hash": "c263bf9664e648ed886f0f3e7bc4b22c",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2741,34 +2741,34 @@
     "ast_hash": "7a3293d49bd56d3c63bc481b43e5f90e",
     "semantic_hash": ""
   },
+  "persistence-nats/src/journal.rs": {
+    "mtime": 1791850161.761208,
+    "seen": 1791850368.105336,
+    "ast_hash": "1319888a6f72408a30a6a81edf250b25",
+    "semantic_hash": ""
+  },
   "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
     "mtime": 1791788199.4289715,
-    "seen": 1791850368.1043382,
+    "seen": 1791850540.4934921,
     "ast_hash": "a1f693df6e86f00ab16e5a8460b29471",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/capabilities.json": {
     "mtime": 1791788199.4289715,
-    "seen": 1791850368.1043382,
+    "seen": 1791850540.4934921,
     "ast_hash": "ae9a90b4ccc1267aa4b783ecf7b4b072",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/desktop-schema.json": {
     "mtime": 1791788199.4309711,
-    "seen": 1791850368.1043382,
+    "seen": 1791850540.4934921,
     "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/macOS-schema.json": {
     "mtime": 1791788199.4329703,
-    "seen": 1791850368.1043382,
+    "seen": 1791850540.4934921,
     "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
-    "semantic_hash": ""
-  },
-  "persistence-nats/src/journal.rs": {
-    "mtime": 1791850161.761208,
-    "seen": 1791850368.105336,
-    "ast_hash": "1319888a6f72408a30a6a81edf250b25",
     "semantic_hash": ""
   }
 }

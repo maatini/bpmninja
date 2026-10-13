@@ -1776,21 +1776,21 @@
     "semantic_hash": ""
   },
   ".github/workflows/build-linux.yml": {
-    "mtime": 1791788199.3659713,
-    "seen": 1791806103.481633,
-    "ast_hash": "6197912a7c59f0542102568b1619681c",
+    "mtime": 1791851254.5863528,
+    "seen": 1791851350.3679028,
+    "ast_hash": "c7c179a288de4d7c5abde5a5893d5d04",
     "semantic_hash": ""
   },
   ".github/workflows/build-macos.yml": {
-    "mtime": 1791788199.3669717,
-    "seen": 1791806103.481633,
-    "ast_hash": "646387c9c3aeca963a69e0fc2df77f8f",
+    "mtime": 1791851254.5873609,
+    "seen": 1791851350.3679028,
+    "ast_hash": "f87559bbeb589b7acc075b715fe88be0",
     "semantic_hash": ""
   },
   ".github/workflows/build-windows.yml": {
-    "mtime": 1791788199.3669717,
-    "seen": 1791806103.481633,
-    "ast_hash": "09aceaf7414fae3687ba11ebd2786e4a",
+    "mtime": 1791851254.5863528,
+    "seen": 1791851350.3679028,
+    "ast_hash": "51f08e1cdc7662f431e3a9d4d206c85f",
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
@@ -1830,9 +1830,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1791788199.3709798,
-    "seen": 1791806103.481633,
-    "ast_hash": "30c20f11109aee70faa302e523c96253",
+    "mtime": 1791851254.5873609,
+    "seen": 1791851350.3679028,
+    "ast_hash": "49ce136cad1a0790ad9ef12304252b0f",
     "semantic_hash": ""
   },
   ".github/workflows/update-quality-metrics.yml": {
@@ -1848,9 +1848,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1791798470.7883165,
-    "seen": 1791806103.481633,
-    "ast_hash": "2f379107d99922d41eadffa72c16c960",
+    "mtime": 1791851254.591349,
+    "seen": 1791851350.3679028,
+    "ast_hash": "ebd534a7667405ce408a98b3d90d89d9",
     "semantic_hash": ""
   },
   "api-spec/tsp-output/@typespec/openapi3/openapi.yaml": {
@@ -2745,6 +2745,12 @@
     "mtime": 1791850161.761208,
     "seen": 1791850368.105336,
     "ast_hash": "1319888a6f72408a30a6a81edf250b25",
+    "semantic_hash": ""
+  },
+  ".github/workflows/desktop-packages.yml": {
+    "mtime": 1791851254.5853443,
+    "seen": 1791851350.3679028,
+    "ast_hash": "178f923f4f891a034ebcf9a7238e39f2",
     "semantic_hash": ""
   }
 }

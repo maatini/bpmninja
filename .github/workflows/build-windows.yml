@@ -1,52 +1,13 @@
-name: Build Windows Binary
+name: Build Windows Packages
 
 on:
-  # Allows manual triggering of the workflow from the GitHub UI
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-tauri:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: x86_64-pc-windows-msvc
-
-      - name: Install UI Dependencies
-        working-directory: desktop-tauri
-        run: npm install
-
-      - name: Build Tauri App (Windows)
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: desktop-tauri
-          # Automatically creates a draft release containing the .exe / .msi installer
-          tagName: app-v__VERSION__ 
-          releaseName: 'Windows Build v__VERSION__'
-          releaseDraft: true
-          prerelease: false
-
-      - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-binary
-          path: |
-            desktop-tauri/src-tauri/target/release/bundle/msi/*.msi
-            desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe
+  packages:
+    uses: ./.github/workflows/desktop-packages.yml
+    with:
+      platform: windows
