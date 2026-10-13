@@ -87,7 +87,13 @@ export function ProcessDefinitionPage({ definitionKey, onBack, onViewInstance }:
   }, [definitionKey, toast]);
 
   usePolling(fetchLiveState, 30000);
-  useEngineEvents(fetchLiveState);
+  useEngineEvents(event => {
+    // Migration aus dieser Definition betrifft auch bereits angezeigte Instanzen.
+    if (event.type !== 'resync_required' && event.definition_key
+      && event.definition_key !== definitionKey
+      && !instances.some(instance => instance.id === event.instance_id)) return;
+    void fetchLiveState();
+  });
 
   // Aggregate token counts per node across all active instances
   const tokenCountsByNode = useMemo(() => {

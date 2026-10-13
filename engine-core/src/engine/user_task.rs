@@ -145,6 +145,7 @@ impl WorkflowEngine {
         .await;
 
         // Continue running
+        self.emit_task_changed(instance_id, task_id).await;
         self.run_instance_batch(instance_id, token).await
     }
 }

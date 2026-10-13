@@ -19,26 +19,32 @@ use super::state::AppState;
 
 /// SSE handler — each connecting client gets its own broadcast receiver.
 ///
-/// The event `data` field contains the JSON-serialized `EngineEvent` type tag.
-/// Clients filter by `type` to decide which data to refresh.
+/// Event names remain compatible; data contains entity IDs and compact deltas.
+/// Broadcast loss is explicit: clients must reload after `resync_required`.
 pub async fn engine_events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = state.engine.subscribe_events();
-    let stream = BroadcastStream::new(rx).filter_map(|result| {
-        match result {
-            Ok(event) => {
-                let event_type = match &event {
-                    EngineEvent::InstanceChanged => "instance_changed",
-                    EngineEvent::TaskChanged => "task_changed",
-                    EngineEvent::DefinitionChanged => "definition_changed",
-                };
-                Some(Ok(Event::default().event(event_type).data("")))
-            }
-            // Lagged receiver — subscriber was too slow, skip
-            Err(_) => None,
+    let stream = BroadcastStream::new(rx).map(|result| match result {
+        Ok(event) => {
+            let event_type = match &event {
+                EngineEvent::InstanceChanged { .. } => "instance_changed",
+                EngineEvent::TaskChanged { .. } => "task_changed",
+                EngineEvent::DefinitionChanged { .. } => "definition_changed",
+            };
+            Ok(Event::default()
+                .event(event_type)
+                .json_data(event)
+                .unwrap_or_else(|_| resync_event()))
         }
+        Err(_) => Ok(resync_event()),
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn resync_event() -> Event {
+    Event::default()
+        .event("resync_required")
+        .data(r#"{"type":"resync_required"}"#)
 }

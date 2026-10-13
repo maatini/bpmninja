@@ -794,7 +794,11 @@ const EVENT_KINDS: [&str; 5] = [
 
 /// Elements with execution semantics the engine does not implement yet
 /// (see the BPMN element matrix in the knowledge base).
-const UNSUPPORTED_ELEMENTS: [&str; 3] = ["transaction", "adHocSubProcess", "standardLoopCharacteristics"];
+const UNSUPPORTED_ELEMENTS: [&str; 3] = [
+    "transaction",
+    "adHocSubProcess",
+    "standardLoopCharacteristics",
+];
 
 /// X0: fails the deploy when the selected process uses BPMN elements whose
 /// execution semantics are not implemented, instead of silently dropping them
@@ -822,9 +826,9 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
     let mut reader = quick_xml::Reader::from_str(xml);
 
     loop {
-        let event = reader.read_event().map_err(|e| {
-            EngineError::InvalidDefinition(format!("BPMN XML parsing failed: {e}"))
-        })?;
+        let event = reader
+            .read_event()
+            .map_err(|e| EngineError::InvalidDefinition(format!("BPMN XML parsing failed: {e}")))?;
         let (e, is_empty) = match &event {
             Event::Start(e) => (e, false),
             Event::Empty(e) => (e, true),
@@ -851,7 +855,8 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
 
             if UNSUPPORTED_ELEMENTS.contains(&name.as_str()) {
                 violations.push(format!("{name} '{at}'"));
-            } else if name == "subProcess" && attr(e, "triggeredByEvent").as_deref() == Some("true") {
+            } else if name == "subProcess" && attr(e, "triggeredByEvent").as_deref() == Some("true")
+            {
                 violations.push(format!("event sub-process '{at}'"));
             } else if name == "receiveTask" && attr(e, "instantiate").as_deref() == Some("true") {
                 violations.push(format!("instantiating receiveTask '{at}'"));
@@ -859,7 +864,9 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
                 && (attr(e, "instantiate").as_deref() == Some("true")
                     || attr(e, "eventGatewayType").as_deref() == Some("Parallel"))
             {
-                violations.push(format!("instantiating or parallel eventBasedGateway '{at}'"));
+                violations.push(format!(
+                    "instantiating or parallel eventBasedGateway '{at}'"
+                ));
             } else if name.ends_with("EventDefinition")
                 && let Some((kind, event_id, count)) = stack
                     .iter_mut()
@@ -869,9 +876,7 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
                 *count += 1;
                 let event_id = event_id.clone().unwrap_or_else(|| "?".to_string());
                 if *count > 1 {
-                    violations.push(format!(
-                        "multiple event definitions on {kind} '{event_id}'"
-                    ));
+                    violations.push(format!("multiple event definitions on {kind} '{event_id}'"));
                 } else if !supported_event_definitions(kind).contains(&name.as_str()) {
                     violations.push(format!("{name} on {kind} '{event_id}'"));
                 }

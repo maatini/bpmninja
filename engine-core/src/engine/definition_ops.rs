@@ -59,7 +59,9 @@ impl WorkflowEngine {
             key
         );
         self.persist_definition(key).await;
-        self.emit_event(crate::engine::events::EngineEvent::DefinitionChanged);
+        self.emit_event(crate::engine::events::EngineEvent::DefinitionChanged {
+            definition_key: key,
+        });
         (key, version)
     }
 
@@ -108,7 +110,7 @@ impl WorkflowEngine {
                 .await?;
         }
 
-        self.emit_event(crate::engine::events::EngineEvent::DefinitionChanged);
+        self.emit_event(crate::engine::events::EngineEvent::DefinitionChanged { definition_key });
         Ok(())
     }
 

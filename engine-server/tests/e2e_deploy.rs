@@ -174,5 +174,8 @@ async fn xml_embedded_subprocess_runs_to_completion() {
     );
     assert!(engine.get_pending_service_tasks().is_empty());
     let inst = engine.get_instance_details(id).await.unwrap();
-    assert_eq!(inst.variables.get("visited"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        inst.variables.get("visited"),
+        Some(&serde_json::json!(true))
+    );
 }

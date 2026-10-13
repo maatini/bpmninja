@@ -33,7 +33,10 @@ impl WorkflowEngine {
             .drive_instance_batch(instance_id, initial_token, &mut history)
             .await;
         self.flush_history(instance_id, history).await;
-        driven?;
+        if let Err(error) = driven {
+            self.emit_instance_changed(instance_id).await;
+            return Err(error);
+        }
 
         self.finish_instance_batch(instance_id).await
     }
@@ -218,7 +221,7 @@ impl WorkflowEngine {
             self.archive_completed_instance(instance_id).await;
         }
 
-        self.emit_event(crate::engine::events::EngineEvent::InstanceChanged);
+        self.emit_instance_changed(instance_id).await;
 
         Ok(())
     }

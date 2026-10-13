@@ -38,6 +38,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Test HTTP benchmark tooling
+        run: python3 -B -m unittest discover -s engine-server/benchmarks -p test_http_load.py -v
+
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 

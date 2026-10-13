@@ -283,6 +283,7 @@ impl WorkflowEngine {
         }
 
         self.remove_persisted_service_task(task_id).await;
+        self.emit_task_changed(instance_id, task_id).await;
 
         metrics::counter!("bpmn_tasks_completed_total", "type" => "service").increment(1);
 
@@ -550,6 +551,7 @@ impl WorkflowEngine {
         .await;
 
         self.remove_persisted_service_task(task_id).await;
+        self.emit_task_changed(instance_id, task_id).await;
 
         // Continue running
         self.run_instance_batch(instance_id, token).await
@@ -696,6 +698,7 @@ impl WorkflowEngine {
             }
 
             self.remove_persisted_service_task(task_id).await;
+            self.emit_task_changed(instance_id, task_id).await;
             self.persist_instance(instance_id).await;
             self.run_instance_batch(instance_id, token).await?;
             return Ok(());

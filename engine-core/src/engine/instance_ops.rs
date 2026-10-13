@@ -303,6 +303,7 @@ impl WorkflowEngine {
         .await;
 
         self.persist_instance(instance_id).await;
+        self.emit_instance_changed(instance_id).await;
 
         Ok(())
     }
@@ -362,6 +363,7 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: suspended");
+        self.emit_instance_changed(instance_id).await;
         Ok(())
     }
 
@@ -412,6 +414,7 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: resumed");
+        self.emit_instance_changed(instance_id).await;
         Ok(())
     }
 
@@ -794,6 +797,7 @@ impl WorkflowEngine {
 
         // --- 8. Persist updated instance ---
         self.persist_instance(instance_id).await;
+        self.emit_instance_changed(instance_id).await;
 
         tracing::info!(
             "Instance {instance_id}: migriert zu Definition '{target_id}' (v{target_version})"
@@ -871,6 +875,12 @@ impl WorkflowEngine {
         self.pending_message_catches
             .retain(|_, t| t.instance_id != instance_id);
 
+        self.emit_event(crate::engine::events::EngineEvent::InstanceChanged {
+            instance_id,
+            definition_key: removed_inst.definition_key,
+            removed: true,
+            delta: None,
+        });
         Ok(())
     }
 }

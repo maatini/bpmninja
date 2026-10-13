@@ -1433,7 +1433,10 @@ fn x0_rejects_signal_start_event_instead_of_plain_start() {
         r#"<startEvent id="s"><signalEventDefinition signalRef="sig"/></startEvent>
            <endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
     );
-    assert!(err.contains("signalEventDefinition on startEvent 's'"), "{err}");
+    assert!(
+        err.contains("signalEventDefinition on startEvent 's'"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1442,7 +1445,10 @@ fn x0_rejects_message_end_event_instead_of_plain_end() {
         r#"<startEvent id="s"/><endEvent id="e"><messageEventDefinition messageRef="msg"/></endEvent>
            <sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
     );
-    assert!(err.contains("messageEventDefinition on endEvent 'e'"), "{err}");
+    assert!(
+        err.contains("messageEventDefinition on endEvent 'e'"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1456,7 +1462,10 @@ fn x0_rejects_multiple_event_definitions() {
            <endEvent id="e"/>
            <sequenceFlow id="f1" sourceRef="s" targetRef="c"/><sequenceFlow id="f2" sourceRef="c" targetRef="e"/>"#,
     );
-    assert!(err.contains("multiple event definitions on intermediateCatchEvent 'c'"), "{err}");
+    assert!(
+        err.contains("multiple event definitions on intermediateCatchEvent 'c'"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1523,5 +1532,8 @@ fn embedded_subprocess_enters_at_start_successor_without_noop_task() {
         def.get_node("sp"),
         Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "inner"
     ));
-    assert!(def.get_node("sp_s").is_none(), "internal start must not be a node");
+    assert!(
+        def.get_node("sp_s").is_none(),
+        "internal start must not be a node"
+    );
 }

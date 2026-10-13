@@ -393,6 +393,13 @@ impl WorkflowEngine {
                 PersistJob::SaveUserTask(task_id)
             );
         }
+        let instance_id = self
+            .pending_user_tasks
+            .get(&task_id)
+            .map(|task| task.instance_id);
+        if let Some(instance_id) = instance_id {
+            self.emit_task_changed(instance_id, task_id).await;
+        }
     }
 
     /// Deletes a completed pending user task from the KV store.
@@ -418,6 +425,13 @@ impl WorkflowEngine {
                 format!("save_service_task({})", task_id),
                 PersistJob::SaveServiceTask(task_id)
             );
+        }
+        let instance_id = self
+            .pending_service_tasks
+            .get(&task_id)
+            .map(|task| task.instance_id);
+        if let Some(instance_id) = instance_id {
+            self.emit_task_changed(instance_id, task_id).await;
         }
     }
 

@@ -118,10 +118,13 @@ export function InstanceDetailDialog({
     if (!selected) return;
     try {
       const details = await getInstanceDetails(selected.id);
-      setVariables(parseVariables(details.variables));
+      setSelected(details);
+      if (!editMode) setVariables(parseVariables(details.variables));
       setLiveTokens(details.tokens);
+      setHistoryRefreshTrigger(n => n + 1);
+      await loadPendingTasks(details);
     } catch { /* silent */ }
-  }, [selected?.id]);
+  }, [selected?.id, editMode, loadPendingTasks]);
 
   useEffect(() => {
     if (!selected) return;
@@ -129,7 +132,7 @@ export function InstanceDetailDialog({
     return () => clearInterval(id);
   }, [selected?.id, liveRefresh]);
 
-  useEngineEvents(liveRefresh, ['instance_changed', 'task_changed'], !!selected);
+  useEngineEvents(liveRefresh, ['instance_changed', 'task_changed'], !!selected, { instanceId: selected?.id });
 
   const refreshDetails = useCallback(async () => {
     if (!selected) return;
