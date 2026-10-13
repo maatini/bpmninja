@@ -72,9 +72,9 @@
     "semantic_hash": ""
   },
   "Cargo.toml": {
-    "mtime": 1791788199.3749707,
-    "seen": 1791806103.4806325,
-    "ast_hash": "67f96ab8420b99709092bcf9b119891a",
+    "mtime": 1791851635.922084,
+    "seen": 1791852016.357111,
+    "ast_hash": "206a1292b47aa9b1a56fb84b83bd06d8",
     "semantic_hash": ""
   },
   "agent-orchestrator/Cargo.toml": {
@@ -1230,9 +1230,9 @@
     "semantic_hash": ""
   },
   "engine-server/Cargo.toml": {
-    "mtime": 1791849969.4600985,
-    "seen": 1791850368.105336,
-    "ast_hash": "de7141d16aca25e530b97017a0ed3bbf",
+    "mtime": 1791851635.919084,
+    "seen": 1791852016.3581142,
+    "ast_hash": "cf595050f2089e2eca9c794b23a6df6f",
     "semantic_hash": ""
   },
   "engine-server/src/lib.rs": {
@@ -1254,9 +1254,9 @@
     "semantic_hash": ""
   },
   "engine-server/src/main.rs": {
-    "mtime": 1791791822.5141811,
-    "seen": 1791806103.481633,
-    "ast_hash": "4d5a6ad16812fa67b42c1725f2b0f0a0",
+    "mtime": 1791851635.9200828,
+    "seen": 1791852016.3581142,
+    "ast_hash": "e495dc4cc2995b1779d493e42d013555",
     "semantic_hash": ""
   },
   "engine-server/src/observability.rs": {
@@ -1794,9 +1794,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1791788199.3680093,
-    "seen": 1791806103.481633,
-    "ast_hash": "3e852ccd54f2fe9be0d88edefd956483",
+    "mtime": 1791851635.9230845,
+    "seen": 1791852016.3591204,
+    "ast_hash": "ac82bea3fe470a67f8d00177ac9a70ff",
     "semantic_hash": ""
   },
   ".github/workflows/dependabot-auto-merge.yml": {
@@ -1848,9 +1848,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1791851254.591349,
-    "seen": 1791851350.3679028,
-    "ast_hash": "ebd534a7667405ce408a98b3d90d89d9",
+    "mtime": 1791851692.2373843,
+    "seen": 1791852016.3591204,
+    "ast_hash": "faf4713b821c4fdbff2250adc91c898f",
     "semantic_hash": ""
   },
   "api-spec/tsp-output/@typespec/openapi3/openapi.yaml": {
@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1791850378.7375607,
-    "seen": 1791850466.0535903,
-    "ast_hash": "c263bf9664e648ed886f0f3e7bc4b22c",
+    "mtime": 1791851692.2333846,
+    "seen": 1791852016.3591204,
+    "ast_hash": "444abe0d7ea63a030aad09f73c4c9513",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2751,6 +2751,24 @@
     "mtime": 1791851254.5853443,
     "seen": 1791851350.3679028,
     "ast_hash": "178f923f4f891a034ebcf9a7238e39f2",
+    "semantic_hash": ""
+  },
+  "engine-server/benches/allocator_bench.rs": {
+    "mtime": 1791851635.9210837,
+    "seen": 1791852016.3581142,
+    "ast_hash": "2b48cfd6fe0111156462f87e0e1d76da",
+    "semantic_hash": ""
+  },
+  "engine-server/src/allocator.rs": {
+    "mtime": 1791851635.9200828,
+    "seen": 1791852016.3581142,
+    "ast_hash": "93b33dc2b08a30c6fa930ec460536297",
+    "semantic_hash": ""
+  },
+  "docs/server-performance.md": {
+    "mtime": 1791851692.2313855,
+    "seen": 1791852016.3591204,
+    "ast_hash": "d18da8ed0b3e30599c3a51577c326b3a",
     "semantic_hash": ""
   }
 }

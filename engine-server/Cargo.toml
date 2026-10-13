@@ -7,12 +7,14 @@ rust-version.workspace = true
 
 [features]
 default = []
+allocator-mimalloc = ["dep:mimalloc"]
 compact-instances = ["persistence-nats/compact-instances"]
 separate-audit-log = ["persistence-nats/separate-audit-log"]
 
 delta-instances = ["persistence-nats/delta-instances"]
 
 [dependencies]
+mimalloc = { version = "0.1.52", optional = true }
 # Deploy-time model checking (V1). Not on crates.io → pinned git revision (MIT).
 rust_bpmn_analyzer = { git = "https://github.com/timKraeuter/rust_bpmn_analyzer", rev = "3d3eede32409d70e6818d8344d480de8d76a6d8b" }
 # Same version as bpmn-parser; used to normalize XML for the analyzer.
@@ -45,7 +47,12 @@ pin-project-lite = "0.2"
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["async_tokio"] }
 async-trait = "0.1"
 reqwest = { version = "0.13", features = ["json", "multipart"] }
 tokio = { workspace = true }
 
+
+[[bench]]
+name = "allocator_bench"
+harness = false

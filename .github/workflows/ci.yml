@@ -41,6 +41,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
+      - name: Check opt-in server allocator and benchmarks
+        run: cargo check --locked -p engine-server --features allocator-mimalloc --all-targets
+
       - name: Start NATS JetStream
         run: |
           docker run -d --name bpmninja-nats \

@@ -714,6 +714,8 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 
 ### Benchmarks
 
+Server allocator, fat LTO, and PGO experiments: [comparison guide](docs/server-performance.md).
+
 Criterion benchmarks cover the engine hot path and the NATS adapter:
 
 ```bash
