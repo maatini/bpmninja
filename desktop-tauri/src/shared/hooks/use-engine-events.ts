@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
-import { matchesEngineEvent, type EngineEventPayload, type EngineEventType, type EngineEventScope } from '../lib/engine-events';
+import { createEngineEventBatcher, matchesEngineEvent, type EngineEventPayload, type EngineEventType, type EngineEventScope } from '../lib/engine-events';
 export type { EngineEventPayload, EngineEventType } from '../lib/engine-events';
 
 /**
@@ -10,6 +10,7 @@ export type { EngineEventPayload, EngineEventType } from '../lib/engine-events';
  * @param callback Funktion, die bei einem Engine-Event aufgerufen wird.
  * @param filter   Optionale Liste von Event-Typen. Wenn leer/nicht angegeben, werden alle Events verarbeitet.
  * @param enabled  Ob das Abonnement aktiv ist (Standard: true).
+ * @param scope    Entity-Filter und Bündelungsfenster; 0 liefert jedes Event sofort.
  */
 export function useEngineEvents(
   callback: (event: EngineEventPayload) => void,
@@ -18,32 +19,26 @@ export function useEngineEvents(
   scope: EngineEventScope = {},
 ) {
   const callbackRef = useRef(callback);
+  const scopeRef = useRef(scope);
+  const filterRef = useRef(filter);
   useEffect(() => {
     callbackRef.current = callback;
   }, [callback]);
+  useEffect(() => { scopeRef.current = scope; }, [scope]);
+  useEffect(() => { filterRef.current = filter; }, [filter]);
 
   useEffect(() => {
     if (!enabled) return;
 
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let pending: EngineEventPayload | undefined;
+    const batcher = createEngineEventBatcher(payload => {
+      if (!disposed && matchesEngineEvent(payload, filterRef.current, scopeRef.current)) callbackRef.current(payload);
+    }, () => scopeRef.current.debounceMs ?? 150);
 
     listen<EngineEventPayload>('engine-event', (event) => {
-      if (disposed || !event.payload || !matchesEngineEvent(event.payload, filter, scope)) return;
-      if (scope.debounceMs === 0) {
-        callbackRef.current(event.payload);
-        return;
-      }
-      // Festes Fenster statt endlosem Debounce bei kontinuierlicher Last.
-      if (pending?.type !== 'resync_required') pending = event.payload;
-      timer ??= setTimeout(() => {
-        timer = undefined;
-        const payload = pending;
-        pending = undefined;
-        if (!disposed && payload) callbackRef.current(payload);
-      }, scope.debounceMs ?? 150);
+      if (disposed || !event.payload || !matchesEngineEvent(event.payload, filterRef.current, scopeRef.current)) return;
+      batcher.push(event.payload);
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
@@ -51,8 +46,8 @@ export function useEngineEvents(
 
     return () => {
       disposed = true;
-      if (timer) clearTimeout(timer);
+      batcher.close();
       unlisten?.();
     };
-  }, [enabled, filter?.join(','), scope.instanceId, scope.definitionKey, scope.debounceMs]);
+  }, [enabled]);
 }

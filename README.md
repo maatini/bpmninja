@@ -355,6 +355,7 @@ The server runs at `http://localhost:8081`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/message` | Correlate a message |
+| `GET` | `/api/events` | SSE entity IDs and compact state deltas ([contract](docs/sse-events.md)) |
 | `GET` | `/api/messages` | List all pending message subscriptions |
 | `GET` | `/api/timers` | List all active timers |
 | `POST` | `/api/timers/process` | Manually process expired timers |

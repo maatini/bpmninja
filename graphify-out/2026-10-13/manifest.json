@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1791853227.9146414,
-    "seen": 1791878358.0079699,
-    "ast_hash": "1f7a70a214785b599f47aa058a918a53",
+    "mtime": 1791880027.0307295,
+    "seen": 1791880044.9999087,
+    "ast_hash": "3587200861eb36a954e850d30c5cfa75",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2766,9 +2766,9 @@
     "semantic_hash": ""
   },
   "docs/server-performance.md": {
-    "mtime": 1791878916.3536983,
-    "seen": 1791879724.0247521,
-    "ast_hash": "b2c9c3f14143fca0e177aef9c08987e7",
+    "mtime": 1791880025.416445,
+    "seen": 1791880044.9999087,
+    "ast_hash": "64fa54433dffb9545ed13e4de792615a",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
@@ -2805,12 +2805,6 @@
     "mtime": 1791878914.0094285,
     "seen": 1791879724.0247521,
     "ast_hash": "4e6884b6a1755a8267b72f5eae89fcf8",
-    "semantic_hash": ""
-  },
-  "TASK_MEMORY.md": {
-    "mtime": 1791879502.2747822,
-    "seen": 1791879724.0247521,
-    "ast_hash": "550192ad5bf7acaf46e2d2c38ce31a87",
     "semantic_hash": ""
   }
 }

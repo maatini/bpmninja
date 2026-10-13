@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers, Pause } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo } from '../../shared/types/engine';
 import { listInstances, listDefinitions, deleteInstance, getInstanceDetails } from '../../shared/lib/tauri';
-import { applyInstanceEvent, type EngineEventPayload } from '../../shared/lib/engine-events';
+import { applyInstanceEvent, reconcileInstanceSnapshot, type EngineEventPayload } from '../../shared/lib/engine-events';
 import { usePolling } from '../../shared/hooks/use-polling';
 import { useEngineEvents } from '../../shared/hooks/use-engine-events';
 import { PageHeader } from '../../shared/components/PageHeader';
@@ -28,18 +28,20 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
   const [selected, setSelected] = useState<ProcessInstance | null>(null);
   const eventVersions = useRef(new Map<string, number>());
   const refreshGeneration = useRef(0);
+  const eventsDuringRefresh = useRef(new Map<string, EngineEventPayload>());
   
   const [instanceToDelete, setInstanceToDelete] = useState<string | null>(null);
 
   const fetchData = async () => {
     const generation = ++refreshGeneration.current;
+    eventsDuringRefresh.current.clear();
     setLoading(true);
     setError(null);
     try {
       const [instList, defList] = await Promise.all([listInstances(), listDefinitions()]);
       if (generation !== refreshGeneration.current) return;
       instList.sort((a: ProcessInstance, b: ProcessInstance) => a.id.localeCompare(b.id));
-      setInstances(instList);
+      setInstances(current => reconcileInstanceSnapshot(instList, current, eventsDuringRefresh.current.values()));
       setDefinitions(defList);
     } catch (e: any) {
       setError(String(e));
@@ -55,6 +57,7 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
       return;
     }
     const id = event.instance_id;
+    eventsDuringRefresh.current.set(id, event);
     const version = (eventVersions.current.get(id) ?? 0) + 1;
     eventVersions.current.set(id, version);
     const updated = applyInstanceEvent(instances, event);

@@ -132,7 +132,10 @@ export function InstanceDetailDialog({
     return () => clearInterval(id);
   }, [selected?.id, liveRefresh]);
 
-  useEngineEvents(liveRefresh, ['instance_changed', 'task_changed'], !!selected, { instanceId: selected?.id });
+  useEngineEvents(event => {
+    if (event.removed) onClose();
+    else void liveRefresh();
+  }, ['instance_changed', 'task_changed'], !!selected, { instanceId: selected?.id });
 
   const refreshDetails = useCallback(async () => {
     if (!selected) return;

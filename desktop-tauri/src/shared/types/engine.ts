@@ -20,11 +20,14 @@ export interface ProcessInstance {
   business_key: string | null;
   tokens?: Record<string, { current_node: string; variables: Record<string, unknown>; is_merged: boolean }>;
   active_tokens?: ActiveToken[];
-  state: 'Running' | 'Completed'
+  state: 'Running' | 'Completed' | 'WaitingOnEventBasedGateway'
     | { WaitingOnUserTask: { task_id: string } }
     | { WaitingOnServiceTask: { task_id: string } }
     | { WaitingOnTimer: { timer_id: string } }
-    | { WaitingOnMessage: { message_name: string } }
+    | { WaitingOnMessage: { message_id: string } }
+    | { ParallelExecution: { active_token_count: number } }
+    | { WaitingOnCallActivity: { sub_instance_id: string } }
+    | { CompletedWithError: { error_code: string } }
     | { Suspended: { previous_state: ProcessInstance['state'] } };
   current_node: string;
   audit_log: string[];

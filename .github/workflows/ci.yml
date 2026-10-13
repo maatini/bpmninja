@@ -177,6 +177,10 @@ jobs:
         working-directory: desktop-tauri
         run: npm run lint
 
+      - name: Test event filtering and deltas
+        working-directory: desktop-tauri
+        run: npm run test:events
+
       - name: Build frontend bundle
         working-directory: desktop-tauri
         run: npm run build

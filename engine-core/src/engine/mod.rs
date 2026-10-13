@@ -39,7 +39,7 @@ mod timer_processor;
 mod topic_index;
 mod user_task;
 
-pub use events::EngineEvent;
+pub use events::{EngineEvent, InstanceDelta, InstanceStatus};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
