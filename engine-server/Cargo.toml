@@ -52,7 +52,6 @@ async-trait = "0.1"
 reqwest = { version = "0.13", features = ["json", "multipart"] }
 tokio = { workspace = true }
 
-
 [[bench]]
 name = "allocator_bench"
 harness = false

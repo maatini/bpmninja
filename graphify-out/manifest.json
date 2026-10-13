@@ -1230,9 +1230,9 @@
     "semantic_hash": ""
   },
   "engine-server/Cargo.toml": {
-    "mtime": 1791851635.919084,
-    "seen": 1791852016.3581142,
-    "ast_hash": "cf595050f2089e2eca9c794b23a6df6f",
+    "mtime": 1791852181.9424832,
+    "seen": 1791852187.1844478,
+    "ast_hash": "f1ed745239cde8ec795068df4761e8f5",
     "semantic_hash": ""
   },
   "engine-server/src/lib.rs": {
@@ -2769,6 +2769,30 @@
     "mtime": 1791851692.2313855,
     "seen": 1791852016.3591204,
     "ast_hash": "d18da8ed0b3e30599c3a51577c326b3a",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
+    "mtime": 1791788199.4289715,
+    "seen": 1791852187.183447,
+    "ast_hash": "a1f693df6e86f00ab16e5a8460b29471",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/capabilities.json": {
+    "mtime": 1791788199.4289715,
+    "seen": 1791852187.183447,
+    "ast_hash": "ae9a90b4ccc1267aa4b783ecf7b4b072",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/desktop-schema.json": {
+    "mtime": 1791788199.4309711,
+    "seen": 1791852187.183447,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/macOS-schema.json": {
+    "mtime": 1791788199.4329703,
+    "seen": 1791852187.183447,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
     "semantic_hash": ""
   }
 }

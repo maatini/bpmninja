@@ -61,3 +61,20 @@ Run the optimized binary against a separate validation workload and compare it
 with an uninstrumented build. Training profiles are workload- and
 architecture-specific; do not reuse them across unrelated targets or revisions.
 No production allocator, LTO, or PGO performance improvement is claimed yet.
+
+## Initial local allocator result (2026-10-13)
+
+Windows x64, Rust 1.99.0, normal release profile (thin LTO), linear workflow with
+100 service tasks. A confirmation run used the already compiled executables,
+2 seconds of warmup, 3 seconds of measurement, and 20 samples:
+
+| Allocator | Criterion time estimate | Estimated interval |
+| --- | --- | --- |
+| System | 5.83 ms | 5.58–6.12 ms |
+| mimalloc | 1.90 ms | 1.74–2.13 ms |
+
+Criterion reported a roughly 68% reduction on this workload (p < 0.05). The first
+shorter run was slower for both builds (9.67 vs 2.90 ms), so absolute latency is
+sensitive to local conditions. This is evidence for keeping the opt-in experiment,
+not a production HTTP/NATS result. Repeat on deployment hardware and record RSS
+and tail latency before changing defaults. Fat LTO and PGO have not been benchmarked.
