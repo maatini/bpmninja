@@ -23,6 +23,7 @@ fn dummy_instance(
     started_at: Option<chrono::DateTime<Utc>>,
 ) -> ProcessInstance {
     ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id,
         definition_key,
         business_key: String::new(),

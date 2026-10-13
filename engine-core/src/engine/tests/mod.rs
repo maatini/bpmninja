@@ -1,6 +1,7 @@
 pub mod boundary_restore;
 pub mod call_activity_parallel;
 pub mod call_errors;
+pub mod camunda_compat;
 pub mod events;
 pub mod gateways;
 pub mod helpers;

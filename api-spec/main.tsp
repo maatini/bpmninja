@@ -43,7 +43,9 @@ model ProcessInstance {
   parent_instance_id?: string;
   state: unknown;
   current_node?: string;
-  variables: Record<VariableValue>;
+  variables: Record<unknown>;
+  @doc("Optional transport type hints; absent from legacy/native-only snapshots.")
+  variable_types?: Record<string>;
   started_at?: string;
   completed_at?: string;
 }
@@ -470,3 +472,86 @@ op metrics(): {
   @header contentType: "text/plain";
   @body body: string;
 };
+
+@route("/engine-rest/external-task")
+@doc("Camunda 7 worker facade. Primitive/Date/Json variables only; Java objects, local scopes, tenant/definition filters and extension properties are rejected.")
+namespace CamundaExternalTasks {
+  model TypedVariable {
+    type?: "Null" | "Boolean" | "Short" | "Integer" | "Long" | "Double" | "String" | "Date" | "Json";
+    value?: unknown;
+    @doc("Null/empty metadata, transient=false, and Json serializationDataFormat=application/json are supported.")
+    valueInfo?: Record<unknown> | null;
+  }
+  model Topic {
+    topicName: string;
+    @minValue(1) lockDuration: int64;
+    variables?: string[] | null;
+    deserializeValues?: boolean;
+    includeExtensionProperties?: false;
+    localVariables?: false;
+    withoutTenantId?: boolean;
+  }
+  model FetchRequest {
+    workerId: string;
+    @minValue(1) maxTasks: int32;
+    topics?: Topic[];
+    @maxValue(1800000) asyncResponseTimeout?: uint64 | null;
+    @doc("Accepted; all service-task priorities are zero.")
+    usePriority?: boolean;
+  }
+  model FetchedTask {
+    id: string;
+    activityId: string;
+    activityInstanceId: string;
+    processInstanceId: string;
+    processDefinitionId: string;
+    processDefinitionKey: string | null;
+    processDefinitionVersionTag: null;
+    topicName: string;
+    workerId: string;
+    lockExpirationTime: string;
+    retries: int32;
+    errorMessage: string | null;
+    errorDetails: string | null;
+    businessKey: string;
+    tenantId: null;
+    priority: 0;
+    suspended: false;
+    variables: Record<TypedVariable>;
+  }
+  model CompleteRequest {
+    workerId: string;
+    variables?: Record<TypedVariable> | null;
+    @doc("Only null or an empty object is supported; there are no local scopes.")
+    localVariables?: Record<TypedVariable> | null;
+  }
+  model FailureRequest {
+    workerId: string;
+    @minValue(0) retries?: int32 | null;
+    @minValue(0) retryTimeout?: int64 | null;
+    errorMessage?: string | null;
+    errorDetails?: string | null;
+  }
+  model ExtendRequest { workerId: string; @minValue(1) newDuration: int64; }
+  model BpmnErrorRequest {
+    workerId: string;
+    errorCode: string;
+    errorMessage?: string | null;
+    variables?: Record<TypedVariable> | null;
+  }
+  model ErrorBody { type: string; message: string; code: int32; }
+  @error model ErrorResponse {
+    @statusCode statusCode: 400 | 401 | 404 | 413 | 500;
+    @body body: ErrorBody;
+  }
+  @post @route("/fetchAndLock")
+  op fetchAndLock(@body request: FetchRequest): FetchedTask[] | ErrorResponse;
+  @post @route("/{id}/complete")
+  op complete(@path id: string, @body request: CompleteRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/failure")
+  op failure(@path id: string, @body request: FailureRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/extendLock")
+  op extendLock(@path id: string, @body request: ExtendRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/bpmnError")
+  op bpmnError(@path id: string, @body request: BpmnErrorRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+}

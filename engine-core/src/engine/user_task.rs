@@ -25,6 +25,7 @@ impl WorkflowEngine {
             })?;
 
         let instance_id = pending.instance_id;
+        let updated_names: Vec<String> = additional_vars.keys().cloned().collect();
 
         // Reject if instance is suspended
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -86,6 +87,9 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.current_node = pending.node_id.clone();
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
             inst.definition_key
         };
 

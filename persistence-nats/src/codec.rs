@@ -221,7 +221,11 @@ mod tests {
 
     #[test]
     fn mixed_formats_preserve_instance_and_monitoring_values() {
-        let instance = instance();
+        let mut instance = instance();
+        instance.variable_types.insert("date".into(), "Date".into());
+        instance
+            .variables
+            .insert("date".into(), json!("2026-10-13T00:00:00.000+0000"));
         let expected = serde_json::to_value(&instance).unwrap();
         let json = serde_json::to_vec(&instance).unwrap();
         let compact = encode_compact(&instance).unwrap();

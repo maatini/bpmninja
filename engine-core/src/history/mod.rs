@@ -344,6 +344,7 @@ mod tests {
     #[test]
     fn test_calculate_diff() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -393,6 +394,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_file_upload_human_text() {
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -502,6 +504,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_empty() {
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -727,6 +730,7 @@ mod tests {
     fn test_calculate_diff_only_variables_changed() {
         // Catches: replace || with && in calculate_diff_from_snapshot (line 318)
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK".into(),
@@ -763,6 +767,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_only_removed() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK".into(),
@@ -796,6 +801,7 @@ mod tests {
     #[test]
     fn test_diff_snapshot_produces_same_result_as_full_clone() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),

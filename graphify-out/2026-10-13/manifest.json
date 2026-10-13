@@ -2813,12 +2813,6 @@
     "ast_hash": "185e8a74f0cc235762679745042b21d8",
     "semantic_hash": ""
   },
-  "TASK_MEMORY.md": {
-    "mtime": 1791882409.912856,
-    "seen": 1791882431.5681272,
-    "ast_hash": "9f0c9d26724aea689bb8a17986db4baf",
-    "semantic_hash": ""
-  },
   "desktop-tauri/tests/engine-events.test.mjs": {
     "mtime": 1791881194.9383767,
     "seen": 1791882188.189868,

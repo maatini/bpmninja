@@ -183,6 +183,7 @@ impl WorkflowEngine {
         parent_instance_id: Option<Uuid>,
     ) -> ProcessInstance {
         ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key: Uuid::new_v4().to_string(),
@@ -532,6 +533,7 @@ impl WorkflowEngine {
         let instance_id = Uuid::new_v4();
         let business_key = Uuid::new_v4().to_string();
         let instance = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key,
@@ -710,6 +712,7 @@ impl WorkflowEngine {
         }
 
         let instance = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key,

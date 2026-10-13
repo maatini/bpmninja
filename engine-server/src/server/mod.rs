@@ -1,5 +1,6 @@
 use tokio::sync::RwLock;
 pub(crate) mod auth;
+pub(crate) mod camunda;
 pub(crate) mod deploy;
 pub(crate) mod events;
 pub(crate) mod files;
@@ -240,6 +241,26 @@ pub fn build_app_with_config(
         .route("/api/timers/process", post(timers::process_timers))
         .route("/api/messages", get(messages::get_pending_messages))
         // Service Task endpoints
+        .route(
+            "/engine-rest/external-task/fetchAndLock",
+            post(camunda::fetch),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/complete",
+            post(camunda::complete),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/failure",
+            post(camunda::failure),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/extendLock",
+            post(camunda::extend),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/bpmnError",
+            post(camunda::bpmn_error),
+        )
         .route("/api/service-tasks", get(tasks::get_service_tasks))
         .route(
             "/api/service-task/fetchAndLock",

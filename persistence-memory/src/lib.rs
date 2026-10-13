@@ -95,6 +95,7 @@ mod tests {
         p.save_file("file2", &[0u8; 200]).await.unwrap();
 
         let inst = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: uuid::Uuid::new_v4(),
             definition_key: uuid::Uuid::new_v4(),
             business_key: String::new(),

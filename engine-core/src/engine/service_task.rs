@@ -86,7 +86,43 @@ impl WorkflowEngine {
         topics: &[String],
         lock_duration: i64,
     ) -> Vec<PendingServiceTask> {
+        self.fetch_and_lock_service_tasks_for(
+            worker_id,
+            max_tasks,
+            topics,
+            TimeDelta::seconds(lock_duration),
+        )
+        .await
+    }
+
+    /// Millisecond variant for transports whose contract requires exact lock durations.
+    pub async fn fetch_and_lock_service_tasks_ms(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[String],
+        lock_duration_ms: i64,
+    ) -> Vec<PendingServiceTask> {
+        self.fetch_and_lock_service_tasks_for(
+            worker_id,
+            max_tasks,
+            topics,
+            TimeDelta::milliseconds(lock_duration_ms),
+        )
+        .await
+    }
+
+    async fn fetch_and_lock_service_tasks_for(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[String],
+        lock_duration: TimeDelta,
+    ) -> Vec<PendingServiceTask> {
         let now = Utc::now();
+        let Some(expires_at) = now.checked_add_signed(lock_duration) else {
+            return Vec::new();
+        };
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
 
@@ -97,6 +133,16 @@ impl WorkflowEngine {
                 break;
             }
 
+            let instance_id = self
+                .pending_service_tasks
+                .get(&task_id)
+                .map(|task| task.instance_id);
+            if let Some(instance_id) = instance_id
+                && let Some(instance) = self.instances.get(&instance_id).await
+                && matches!(instance.read().await.state, InstanceState::Suspended { .. })
+            {
+                continue;
+            }
             let Some(mut task) = self.pending_service_tasks.get_mut(&task_id) else {
                 topic_index::remove(&self.service_task_topic_index, &topic, task_id);
                 continue;
@@ -118,13 +164,13 @@ impl WorkflowEngine {
 
             // Lock the task
             task.worker_id = Some(worker_id.to_string());
-            task.lock_expiration = Some(now + TimeDelta::seconds(lock_duration));
+            task.lock_expiration = Some(expires_at);
 
             tracing::info!(
                 "Service task {} locked by worker '{}' for {}s",
                 task.id,
                 worker_id,
-                lock_duration
+                lock_duration.num_seconds()
             );
 
             result.push(task.clone());
@@ -146,6 +192,17 @@ impl WorkflowEngine {
         task_id: Uuid,
         worker_id: &str,
         variables: HashMap<String, Value>,
+    ) -> EngineResult<()> {
+        self.complete_service_task_with_types(task_id, worker_id, variables, HashMap::new())
+            .await
+    }
+
+    pub async fn complete_service_task_with_types(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        variables: HashMap<String, Value>,
+        variable_types: HashMap<String, String>,
     ) -> EngineResult<()> {
         // Atomically verify lock ownership and remove the task in one shard-lock
         // window to prevent TOCTOU race conditions between concurrent workers.
@@ -186,6 +243,7 @@ impl WorkflowEngine {
         } else {
             None
         };
+        let updated_names: Vec<String> = variables.keys().cloned().collect();
 
         // Retrieve token from central store and merge variables
         let mut token = {
@@ -232,6 +290,10 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.variables = token.variables.clone();
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
+            inst.variable_types.extend(variable_types);
             inst.definition_key
         };
 
@@ -311,6 +373,44 @@ impl WorkflowEngine {
         error_message: Option<String>,
         error_details: Option<String>,
     ) -> EngineResult<()> {
+        self.fail_service_task_with_retry_timeout(
+            task_id,
+            worker_id,
+            retries,
+            error_message,
+            error_details,
+            0,
+        )
+        .await
+    }
+
+    /// Stores the retry deadline in the existing persisted lock-expiration field.
+    /// No timer or in-memory-only scheduling state is needed after a restart.
+    pub async fn fail_service_task_with_retry_timeout(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        retries: Option<i32>,
+        error_message: Option<String>,
+        error_details: Option<String>,
+        retry_timeout_ms: i64,
+    ) -> EngineResult<()> {
+        if retry_timeout_ms < 0 {
+            return Err(EngineError::InvalidDefinition(
+                "retry timeout must not be negative".into(),
+            ));
+        }
+        let retry_at = if retry_timeout_ms == 0 {
+            None
+        } else {
+            Some(
+                Utc::now()
+                    .checked_add_signed(TimeDelta::milliseconds(retry_timeout_ms))
+                    .ok_or_else(|| {
+                        EngineError::InvalidDefinition("retry timeout exceeds date range".into())
+                    })?,
+            )
+        };
         let (instance_id, node_id, new_retries) = {
             let mut task = self
                 .pending_service_tasks
@@ -328,7 +428,7 @@ impl WorkflowEngine {
 
             // Release the lock so it can be retried (or becomes incident)
             task.worker_id = None;
-            task.lock_expiration = None;
+            task.lock_expiration = retry_at;
 
             (task.instance_id, task.node_id.clone(), new_retries)
         }; // DashMap guard released before any `.await`.
@@ -454,6 +554,7 @@ impl WorkflowEngine {
             }
         };
         let instance_id = task.instance_id;
+        let updated_names: Vec<_> = variables.keys().cloned().collect();
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
             Some(lk.read().await.clone())
@@ -507,6 +608,9 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.current_node = task.node_id.clone();
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
             inst.definition_key
         };
 
@@ -564,6 +668,31 @@ impl WorkflowEngine {
         worker_id: &str,
         additional_duration: i64,
     ) -> EngineResult<()> {
+        self.extend_lock_for(task_id, worker_id, TimeDelta::seconds(additional_duration))
+            .await
+    }
+
+    pub async fn extend_lock_ms(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        duration_ms: i64,
+    ) -> EngineResult<()> {
+        self.extend_lock_for(task_id, worker_id, TimeDelta::milliseconds(duration_ms))
+            .await
+    }
+
+    async fn extend_lock_for(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        additional_duration: TimeDelta,
+    ) -> EngineResult<()> {
+        let expires_at = Utc::now()
+            .checked_add_signed(additional_duration)
+            .ok_or_else(|| {
+                EngineError::InvalidDefinition("lock duration exceeds date range".into())
+            })?;
         {
             let mut task = self
                 .pending_service_tasks
@@ -572,9 +701,12 @@ impl WorkflowEngine {
 
             verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
-            task.lock_expiration = Some(Utc::now() + TimeDelta::seconds(additional_duration));
+            task.lock_expiration = Some(expires_at);
 
-            tracing::info!("Service task {task_id}: lock extended by {additional_duration}s");
+            tracing::info!(
+                "Service task {task_id}: lock extended by {}ms",
+                additional_duration.num_milliseconds()
+            );
         }
 
         self.persist_service_task(task_id).await;
@@ -591,6 +723,27 @@ impl WorkflowEngine {
         task_id: Uuid,
         worker_id: &str,
         error_code: &str,
+    ) -> EngineResult<()> {
+        self.handle_bpmn_error_with_variables(
+            task_id,
+            worker_id,
+            error_code,
+            HashMap::new(),
+            HashMap::new(),
+            None,
+        )
+        .await
+    }
+
+    /// Applies worker variables to the token before the boundary path executes.
+    pub async fn handle_bpmn_error_with_variables(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        error_code: &str,
+        variables: HashMap<String, Value>,
+        variable_types: HashMap<String, String>,
+        error_message: Option<String>,
     ) -> EngineResult<()> {
         // Atomically verify lock ownership and remove to prevent TOCTOU
         let task = self.remove_pending_service_task_if(&task_id, |_, t| {
@@ -613,6 +766,17 @@ impl WorkflowEngine {
             }
         };
         let instance_id = task.instance_id;
+
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let mut instance = instance.write().await;
+            for name in variables.keys() {
+                instance.variable_types.remove(name);
+            }
+            instance.variable_types.extend(variable_types);
+            if let Some(message) = &error_message {
+                instance.push_audit_log(format!("BPMN error detail: {message}"));
+            }
+        }
 
         let def_key = {
             let inst_arc = self
@@ -679,6 +843,7 @@ impl WorkflowEngine {
                     ))
                 })?
             };
+            token.variables.extend(variables);
             let def = self
                 .definitions
                 .get(&def_key)
@@ -695,6 +860,7 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
+                inst.variables = token.variables.clone();
             }
 
             self.remove_persisted_service_task(task_id).await;
@@ -713,6 +879,10 @@ impl WorkflowEngine {
 
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
+            if let Some(token) = inst.tokens.get_mut(&incident.token_id) {
+                token.variables.extend(variables.clone());
+            }
+            inst.variables.extend(variables);
             inst.push_audit_log(format!(
                 "🚨 BPMN error '{}' thrown by worker '{}' at service task '{}' (No boundary event caught it)",
                 error_code, worker_id, incident.node_id

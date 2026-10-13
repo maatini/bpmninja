@@ -154,6 +154,9 @@ pub struct ProcessInstance {
     pub audit_log: Vec<String>,
     /// Current process variables (synced from the executing token).
     pub variables: HashMap<String, Value>,
+    /// Optional transport type hints (e.g. Integer versus Long); values remain JSON-native.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub variable_types: HashMap<String, String>,
     /// Central token store — the single source of truth for all active tokens.
     /// PendingTasks reference tokens by UUID instead of owning copies.
     #[serde(default)]
@@ -227,6 +230,7 @@ mod tests {
 
     fn make_instance() -> ProcessInstance {
         ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "test".into(),

@@ -152,6 +152,7 @@ async fn test_definition_instance_restore_roundtrip() {
     let mut variables = HashMap::new();
     variables.insert("foo".into(), serde_json::json!("bar"));
     let instance = ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id: instance_id,
         definition_key: def_key,
         business_key: "bk-restore".into(),

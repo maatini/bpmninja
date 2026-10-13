@@ -331,6 +331,9 @@ The server runs at `http://localhost:8081`.
 
 ### Service Tasks (Camunda-compatible)
 
+Die fünf Camunda-7-Worker-Routen stehen unter `/engine-rest/external-task` zur
+Verfügung; [Vertrag, Variablentypen und Grenzen](docs/camunda7-workers.md).
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/service-tasks` | List all service tasks |

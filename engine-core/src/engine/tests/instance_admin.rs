@@ -90,6 +90,7 @@ async fn restore_instance_loads_from_persistence() {
 
     // Create a dummy instance
     let inst = ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id: Uuid::new_v4(),
         definition_key: def_key,
         business_key: "BK1".into(),
@@ -1020,6 +1021,7 @@ async fn test_instance_store_is_empty_and_clear() {
 
     let id = Uuid::new_v4();
     let inst = ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id,
         definition_key: Uuid::new_v4(),
         business_key: String::new(),
@@ -1198,6 +1200,7 @@ async fn test_restore_instance_makes_it_accessible() {
     let def_key = uuid::Uuid::new_v4();
 
     let instance = crate::runtime::ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id: inst_id,
         definition_key: def_key,
         business_key: "restored".into(),

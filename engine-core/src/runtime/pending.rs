@@ -23,6 +23,14 @@ pub struct PendingUserTask {
 // External task item (Camunda-style)
 // ---------------------------------------------------------------------------
 
+/// Lightweight ownership information without a variable snapshot.
+#[derive(Debug, Clone)]
+pub struct ServiceTaskLease {
+    pub instance_id: Uuid,
+    pub worker_id: Option<String>,
+    pub lock_expiration: Option<DateTime<Utc>>,
+}
+
 /// A service task that can be fetched and completed by remote workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingServiceTask {

@@ -13,6 +13,16 @@ use crate::runtime::{
 };
 
 impl WorkflowEngine {
+    /// Lock metadata without cloning the queue or the task's variable snapshot.
+    pub fn service_task_lock(&self, task_id: Uuid) -> Option<crate::runtime::ServiceTaskLease> {
+        self.pending_service_tasks
+            .get(&task_id)
+            .map(|task| crate::runtime::ServiceTaskLease {
+                instance_id: task.instance_id,
+                worker_id: task.worker_id.clone(),
+                lock_expiration: task.lock_expiration,
+            })
+    }
     /// Returns summary statistics for monitoring dashboards.
     pub async fn get_stats(&self) -> EngineStats {
         let all_insts = self.instances.all().await;
@@ -239,6 +249,7 @@ impl WorkflowEngine {
             let mut deleted: usize = 0;
 
             for (key, value) in variables {
+                instance.variable_types.remove(&key);
                 if value.is_null() {
                     // Delete
                     if instance.variables.remove(&key).is_some() {
@@ -543,6 +554,7 @@ impl WorkflowEngine {
             inst.variables.clone()
         };
         // Merge provided variables
+        let updated_names: Vec<_> = variables.keys().cloned().collect();
         for (k, v) in variables {
             if v.is_null() {
                 token_vars.remove(&k);
@@ -582,6 +594,9 @@ impl WorkflowEngine {
 
             // Sync variables to instance level
             inst.variables = token_vars;
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
 
             inst.push_audit_log(format!(
                 "🎯 Token moved: '{}' → '{}'",
