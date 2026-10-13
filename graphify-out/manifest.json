@@ -210,9 +210,9 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/tests.rs": {
-    "mtime": 1791880401.830369,
-    "seen": 1791880602.2937825,
-    "ast_hash": "0a2e0c101c3ebfce6f4f850e00304472",
+    "mtime": 1791882505.1338706,
+    "seen": 1791882648.1151204,
+    "ast_hash": "579a7705bc403e1573bb67507be66d29",
     "semantic_hash": ""
   },
   "desktop-tauri/components.json": {
@@ -1554,9 +1554,9 @@
     "semantic_hash": ""
   },
   "persistence-nats/src/client.rs": {
-    "mtime": 1791850012.828958,
-    "seen": 1791850368.105336,
-    "ast_hash": "32aa0021e42689659bba31eede183234",
+    "mtime": 1791882505.9069333,
+    "seen": 1791882648.1171188,
+    "ast_hash": "06bcde8d989dfe0808d385587c008172",
     "semantic_hash": ""
   },
   "persistence-nats/src/lib.rs": {
@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1791880027.0307295,
-    "seen": 1791880044.9999087,
-    "ast_hash": "3587200861eb36a954e850d30c5cfa75",
+    "mtime": 1791882408.2989805,
+    "seen": 1791882431.5691295,
+    "ast_hash": "06573d94a7518b44204d801cd84d0623",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2742,9 +2742,9 @@
     "semantic_hash": ""
   },
   "persistence-nats/src/journal.rs": {
-    "mtime": 1791850161.761208,
-    "seen": 1791850368.105336,
-    "ast_hash": "1319888a6f72408a30a6a81edf250b25",
+    "mtime": 1791882505.9319785,
+    "seen": 1791882648.1171188,
+    "ast_hash": "cee3acef0ab802dd8d5d2e7f9b1413b5",
     "semantic_hash": ""
   },
   ".github/workflows/desktop-packages.yml": {
@@ -2784,9 +2784,9 @@
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/desktop-schema.json": {
-    "mtime": 1791881381.1385825,
-    "seen": 1791882188.1888678,
-    "ast_hash": "b473d191792e0ec26bc8c6e785a9ecc0",
+    "mtime": 1791882412.2879374,
+    "seen": 1791882431.5671294,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/macOS-schema.json": {
@@ -2811,12 +2811,6 @@
     "mtime": 1791881190.7522526,
     "seen": 1791882188.189868,
     "ast_hash": "185e8a74f0cc235762679745042b21d8",
-    "semantic_hash": ""
-  },
-  "TASK_MEMORY.md": {
-    "mtime": 1791881386.143599,
-    "seen": 1791882188.189868,
-    "ast_hash": "2e16600b364309b1453c7996658b0053",
     "semantic_hash": ""
   },
   "desktop-tauri/tests/engine-events.test.mjs": {

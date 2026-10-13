@@ -123,30 +123,30 @@ pub(crate) fn choose_node(
         return Err(failure("snapshot exceeds size limit"));
     }
     let full_size = FULL.len() + snapshot.len();
-    if let Some((head, base)) = previous {
-        if head.depth < MAX_DEPTH {
-            let prefix = snapshot
-                .iter()
-                .zip(base)
-                .take_while(|(a, b)| a == b)
-                .count();
-            let remaining = snapshot.len().min(base.len()) - prefix;
-            let suffix = snapshot
-                .iter()
-                .rev()
-                .zip(base.iter().rev())
-                .take(remaining)
-                .take_while(|(a, b)| a == b)
-                .count();
-            let mut delta = DELTA.to_vec();
-            delta.extend_from_slice(&(prefix as u32).to_be_bytes());
-            delta.extend_from_slice(&(suffix as u32).to_be_bytes());
-            delta.extend_from_slice(&(head.key.len() as u16).to_be_bytes());
-            delta.extend_from_slice(head.key.as_bytes());
-            delta.extend_from_slice(&snapshot[prefix..snapshot.len() - suffix]);
-            if delta.len() < full_size {
-                return Ok((delta, head.depth + 1));
-            }
+    if let Some((head, base)) = previous
+        && head.depth < MAX_DEPTH
+    {
+        let prefix = snapshot
+            .iter()
+            .zip(base)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let remaining = snapshot.len().min(base.len()) - prefix;
+        let suffix = snapshot
+            .iter()
+            .rev()
+            .zip(base.iter().rev())
+            .take(remaining)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let mut delta = DELTA.to_vec();
+        delta.extend_from_slice(&(prefix as u32).to_be_bytes());
+        delta.extend_from_slice(&(suffix as u32).to_be_bytes());
+        delta.extend_from_slice(&(head.key.len() as u16).to_be_bytes());
+        delta.extend_from_slice(head.key.as_bytes());
+        delta.extend_from_slice(&snapshot[prefix..snapshot.len() - suffix]);
+        if delta.len() < full_size {
+            return Ok((delta, head.depth + 1));
         }
     }
     let mut full = FULL.to_vec();
@@ -269,10 +269,10 @@ impl NatsPersistence {
             )?;
             let key = key(id, &node);
             let nodes = self.kv("instance_states").await?;
-            if let Err(error) = nodes.create(&key, node.clone().into()).await {
-                if nodes.get(&key).await.map_err(failure)?.as_deref() != Some(node.as_slice()) {
-                    return Err(failure(error));
-                }
+            if let Err(error) = nodes.create(&key, node.clone().into()).await
+                && nodes.get(&key).await.map_err(failure)?.as_deref() != Some(node.as_slice())
+            {
+                return Err(failure(error));
             }
             Head { id, key, depth }
         };

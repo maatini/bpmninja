@@ -173,39 +173,37 @@ impl NatsPersistence {
             .await;
 
         // Readers always need this bucket, including after disabling detached writes.
-        if js.get_key_value("instance_audit").await.is_err() {
-            if let Err(create_error) = js
+        if js.get_key_value("instance_audit").await.is_err()
+            && let Err(create_error) = js
                 .create_key_value(async_nats::jetstream::kv::Config {
                     bucket: "instance_audit".into(),
                     description: "Immutable instance audit snapshots".into(),
                     ..Default::default()
                 })
                 .await
-            {
-                // A concurrent connection may have created the same bucket.
-                js.get_key_value("instance_audit").await.map_err(|_| {
-                    EngineError::PersistenceError(format!(
-                        "Failed to initialize audit bucket: {create_error}"
-                    ))
-                })?;
-            }
+        {
+            // A concurrent connection may have created the same bucket.
+            js.get_key_value("instance_audit").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize audit bucket: {create_error}"
+                ))
+            })?;
         }
 
-        if js.get_key_value("instance_states").await.is_err() {
-            if let Err(error) = js
+        if js.get_key_value("instance_states").await.is_err()
+            && let Err(error) = js
                 .create_key_value(async_nats::jetstream::kv::Config {
                     bucket: "instance_states".into(),
                     description: "Immutable checkpoints and deltas".into(),
                     ..Default::default()
                 })
                 .await
-            {
-                js.get_key_value("instance_states").await.map_err(|_| {
-                    EngineError::PersistenceError(format!(
-                        "Failed to initialize state journal: {error}"
-                    ))
-                })?;
-            }
+        {
+            js.get_key_value("instance_states").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize state journal: {error}"
+                ))
+            })?;
         }
 
         Ok(Self {

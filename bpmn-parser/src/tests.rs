@@ -1485,8 +1485,7 @@ fn x0_rejects_transaction_and_loops() {
 
 #[test]
 fn x0_accepts_visual_and_data_elements() {
-    let xml = format!(
-        r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
              <collaboration id="c"><participant id="pool" processRef="p"/></collaboration>
              <process id="p" isExecutable="true">
                <laneSet id="ls"><lane id="lane1"><flowNodeRef>s</flowNodeRef></lane></laneSet>
@@ -1498,7 +1497,7 @@ fn x0_accepts_visual_and_data_elements() {
                <group id="g"/>
              </process>
            </definitions>"#
-    );
+        .to_string();
     parse_bpmn_xml(&xml).expect("visual/data elements must be accepted");
 }
 
