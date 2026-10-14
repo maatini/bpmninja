@@ -31,8 +31,8 @@ fn tree(xml: &str) -> EngineResult<Node> {
                 for attr in e.attributes() {
                     let attr = attr.map_err(|e| invalid(e.to_string()))?;
                     // Attribute prefixes are preserved for extension defaults.
-                    let name = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
-                    let value = attr.decode_and_unescape_value(reader.decoder()).map_err(|e| invalid(e.to_string()))?.into_owned();
+                    let name = attr.key.as_ref().to_string();
+                    let value = attr.normalized_value(quick_xml::XmlVersion::default()).map_err(|e| invalid(e.to_string()))?.into_owned();
                     node.attrs.insert(name, value);
                 }
                 stack.push(node);
@@ -41,10 +41,10 @@ fn tree(xml: &str) -> EngineResult<Node> {
                 let node = stack.pop().ok_or_else(|| invalid("unbalanced XML"))?;
                 stack.last_mut().ok_or_else(|| invalid("unbalanced XML"))?.children.push(node);
             }
-            Event::Text(e) => stack.last_mut().unwrap().text.push_str(&e.decode().map_err(|e| invalid(e.to_string()))?),
-            Event::CData(e) => stack.last_mut().unwrap().text.push_str(&e.decode().map_err(|e| invalid(e.to_string()))?),
+            Event::Text(e) => stack.last_mut().unwrap().text.push_str(e.as_ref()),
+            Event::CData(e) => stack.last_mut().unwrap().text.push_str(e.as_ref()),
             Event::GeneralRef(e) => {
-                let reference = e.decode().map_err(|e| invalid(e.to_string()))?;
+                let reference = e.as_ref();
                 let escaped = format!("&{reference};");
                 stack.last_mut().unwrap().text.push_str(&quick_xml::escape::unescape(&escaped).map_err(|e| invalid(e.to_string()))?);
             }

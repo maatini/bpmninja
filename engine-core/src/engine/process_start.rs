@@ -270,6 +270,15 @@ impl WorkflowEngine {
     ) -> EngineResult<Uuid> {
         let child_id = Uuid::new_v4();
         let called_node = token.current_node.clone();
+        let parent = self.instances.get(&parent_instance_id).await
+            .ok_or(EngineError::NoSuchInstance(parent_instance_id))?;
+        let parent_def_key = parent.read().await.definition_key;
+        let parent_def = self.definitions.get(&parent_def_key)
+            .ok_or(EngineError::NoSuchDefinition(parent_def_key))?;
+        let child_variables = match parent_def.data_mappings.get(&called_node).and_then(|m| m.call_inputs.as_ref()) {
+            Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &token.variables)?,
+            None => token.variables.clone(),
+        };
 
         if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
             let mut parent = inst_arc.write().await;
@@ -291,7 +300,7 @@ impl WorkflowEngine {
         match self
             .start_instance_with_variables_parent_and_id(
                 child_def_key,
-                token.variables.clone(),
+                child_variables,
                 Some(parent_instance_id),
                 Some(child_id),
             )
@@ -356,7 +365,7 @@ impl WorkflowEngine {
             let remaining_calls = parent.outstanding_calls.len();
             let was_parallel = matches!(parent.state, InstanceState::ParallelExecution { .. });
 
-            let (called_node_id, mut token_to_resume) = if let Some(call) = tracked {
+            let (called_node_id, token_to_resume) = if let Some(call) = tracked {
                 (call.node_id, Some(call.token))
             } else if let InstanceState::WaitingOnCallActivity { token, .. } = &parent.state {
                 (parent.current_node.clone(), Some(token.clone()))
@@ -382,16 +391,6 @@ impl WorkflowEngine {
 
             let def_key = parent.definition_key;
 
-            if let Some(active) = parent
-                .active_tokens
-                .iter_mut()
-                .find(|at| at.token.current_node == called_node_id && !at.completed)
-            {
-                active.token.variables.extend(child_vars.clone());
-                token_to_resume = Some(active.token.clone());
-            } else if let Some(ref mut linear_token) = token_to_resume {
-                linear_token.variables.extend(child_vars.clone());
-            }
 
             (called_node_id, token_to_resume, def_key)
         };
@@ -418,10 +417,22 @@ impl WorkflowEngine {
             // End-Scripts der Call-Activity ausführen. Bei Fehler: Eltern-Instanz als
             // fehlerhaft markieren, damit sie nicht in `Running`-Zustand ohne Token
             // hängen bleibt.
-            if let Err(e) = self
-                .run_end_scripts(parent_id, &mut token, &def, &called_node_id)
-                .await
-            {
+            let completion = async {
+                if error_code.is_none() {
+                    let transferred = match def.data_mappings.get(&called_node_id).and_then(|m| m.call_outputs.as_ref()) {
+                        Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &child_vars)?,
+                        None => child_vars.clone(),
+                    };
+                    token.variables.extend(transferred.clone());
+                    // Call outputs are process writes even if ordinary activity outputs exist.
+                    if let Some(scope) = &mut token.data_scope {
+                        scope.original_variables.extend(transferred);
+                    }
+                    self.run_end_scripts(parent_id, &mut token, &def, &called_node_id).await?;
+                }
+                Ok::<(), EngineError>(())
+            }.await;
+            if let Err(e) = completion {
                 tracing::error!(
                     "Instanz {parent_id}: End-Script der Call Activity '{}' fehlgeschlagen: {e} — markiere als fehlerhaft",
                     called_node_id
@@ -470,6 +481,7 @@ impl WorkflowEngine {
             }
 
             let next_node = if let Some(bound_id) = target_boundary {
+                token.discard_data_scope();
                 bound_id
             } else {
                 crate::engine::executor::resolve_next_target(
@@ -548,7 +560,7 @@ impl WorkflowEngine {
                 "⏰ Timer fired ({}s) — started at node '{start_id}'",
                 provided_duration.as_secs()
             )],
-            variables: HashMap::new(),
+            variables: def.variable_defaults.clone(),
             tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
@@ -577,7 +589,7 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::new(&start_id);
+        let token = Token::with_variables(&start_id, def.variable_defaults.clone());
 
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
@@ -698,7 +710,8 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let instance_id = Uuid::new_v4();
-        let mut vars = variables.clone();
+        let mut vars = def.variable_defaults.clone();
+        vars.extend(variables.clone());
         let business_key = vars
             .remove("business_key")
             .and_then(|v| v.as_str().map(String::from))

@@ -52,15 +52,10 @@ impl WorkflowEngine {
                 ))
             })?
         };
+        let original_token = token.clone();
         for (k, v) in additional_vars {
             token.variables.insert(k, v);
         }
-
-        self.remove_persisted_user_task(task_id).await;
-        self.cancel_boundary_timers(instance_id, &pending.node_id)
-            .await;
-        self.cancel_boundary_message_catches(instance_id, &pending.node_id)
-            .await;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
             Some(lk.read().await.clone())
@@ -111,11 +106,18 @@ impl WorkflowEngine {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 inst.state = InstanceState::WaitingOnUserTask { task_id };
-                inst.tokens.insert(token.id, token);
+                inst.tokens.insert(original_token.id, original_token);
             }
             self.pending_user_tasks.insert(task_id, pending);
+            self.persist_instance(instance_id).await;
             return Err(e);
         }
+
+        self.remove_persisted_user_task(task_id).await;
+        self.cancel_boundary_timers(instance_id, &pending.node_id)
+            .await;
+        self.cancel_boundary_message_catches(instance_id, &pending.node_id)
+            .await;
 
         // Register compensation handler if this activity has a BoundaryCompensationEvent
         self.register_compensation_handler(instance_id, &pending.node_id, &def)

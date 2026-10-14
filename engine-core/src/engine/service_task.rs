@@ -260,14 +260,10 @@ impl WorkflowEngine {
                 ))
             })?
         };
+        let original_token = token.clone();
         for (k, v) in variables {
             token.variables.insert(k, v);
         }
-
-        self.cancel_boundary_timers(instance_id, &task.node_id)
-            .await;
-        self.cancel_boundary_message_catches(instance_id, &task.node_id)
-            .await;
 
         tracing::info!(
             "Instance {}: completed service task '{}' (task_id: {task_id})",
@@ -289,7 +285,7 @@ impl WorkflowEngine {
             if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                 inst.state = InstanceState::Running;
             }
-            inst.variables = token.variables.clone();
+            inst.variables = token.process_variables();
             for name in updated_names {
                 inst.variable_types.remove(&name);
             }
@@ -304,30 +300,25 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
         let def = Arc::clone(&def);
 
-        // Run end scripts
-        {
-            let inst_arc = self
-                .instances
-                .get(&instance_id)
-                .await
-                .ok_or(EngineError::NoSuchInstance(instance_id))?;
-            let mut inst = inst_arc.write().await;
-            let crate::ProcessInstance {
-                audit_log,
-                variables,
-                ..
-            } = &mut *inst;
-            crate::scripting::run_end_scripts(
-                &self.scripts,
-                instance_id,
-                &mut token,
-                &def,
-                &task.node_id,
-                audit_log,
-                variables,
-            )
-            .await?;
+        if let Err(error) = self.run_end_scripts(instance_id, &mut token, &def, &task.node_id).await {
+            if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                let mut inst = inst_arc.write().await;
+                if let Some(old) = &old_state {
+                    inst.state = old.state.clone();
+                    inst.variables = old.variables.clone();
+                    inst.variable_types = old.variable_types.clone();
+                }
+                inst.tokens.insert(original_token.id, original_token);
+            }
+            self.insert_pending_service_task(task);
+            self.persist_instance(instance_id).await;
+            return Err(error);
         }
+
+        self.cancel_boundary_timers(instance_id, &task.node_id)
+            .await;
+        self.cancel_boundary_message_catches(instance_id, &task.node_id)
+            .await;
 
         let next =
             crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;
@@ -577,14 +568,10 @@ impl WorkflowEngine {
                 ))
             })?
         };
+        let original_token = token.clone();
         for (k, v) in variables {
             token.variables.insert(k, v);
         }
-
-        self.cancel_boundary_timers(instance_id, &task.node_id)
-            .await;
-        self.cancel_boundary_message_catches(instance_id, &task.node_id)
-            .await;
 
         tracing::info!(
             "Instance {}: incident on service task '{}' resolved manually (task_id: {task_id})",
@@ -620,11 +607,27 @@ impl WorkflowEngine {
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
-        self.run_end_scripts(instance_id, &mut token, &def, &task.node_id)
-            .await?;
+        if let Err(error) = self.run_end_scripts(instance_id, &mut token, &def, &task.node_id).await {
+            if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                let mut inst = inst_arc.write().await;
+                if let Some(old) = &old_state {
+                    inst.state = old.state.clone();
+                    inst.variables = old.variables.clone();
+                }
+                inst.tokens.insert(original_token.id, original_token);
+            }
+            self.insert_pending_service_task(task);
+            self.persist_instance(instance_id).await;
+            return Err(error);
+        }
 
         // Register compensation handler if this activity has a BoundaryCompensationEvent
         self.register_compensation_handler(instance_id, &task.node_id, &def)
+            .await;
+
+        self.cancel_boundary_timers(instance_id, &task.node_id)
+            .await;
+        self.cancel_boundary_message_catches(instance_id, &task.node_id)
             .await;
 
         let next =
@@ -843,6 +846,7 @@ impl WorkflowEngine {
                     ))
                 })?
             };
+            token.discard_data_scope();
             token.variables.extend(variables);
             let def = self
                 .definitions
@@ -862,7 +866,7 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
-                inst.variables = token.variables.clone();
+                inst.variables = token.process_variables();
             }
 
             self.remove_persisted_service_task(task_id).await;
