@@ -300,7 +300,10 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
         let def = Arc::clone(&def);
 
-        if let Err(error) = self.run_end_scripts(instance_id, &mut token, &def, &task.node_id).await {
+        if let Err(error) = self
+            .run_end_scripts(instance_id, &mut token, &def, &task.node_id)
+            .await
+        {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if let Some(old) = &old_state {
@@ -607,7 +610,10 @@ impl WorkflowEngine {
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
-        if let Err(error) = self.run_end_scripts(instance_id, &mut token, &def, &task.node_id).await {
+        if let Err(error) = self
+            .run_end_scripts(instance_id, &mut token, &def, &task.node_id)
+            .await
+        {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if let Some(old) = &old_state {

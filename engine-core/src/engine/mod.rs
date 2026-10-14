@@ -21,8 +21,8 @@ use std::time::Duration;
 use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
-mod definition_ops;
 pub(crate) mod data_mappings;
+mod definition_ops;
 pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;

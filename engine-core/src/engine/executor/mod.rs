@@ -34,6 +34,15 @@ impl WorkflowEngine {
             .await;
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
+            if matches!(error, EngineError::DataMappingError(_)) {
+                if let Some(instance) = self.instances.get(&instance_id).await {
+                    let mut instance = instance.write().await;
+                    instance.state = InstanceState::CompletedWithError { error_code: "DATA_MAPPING_ERROR".into() };
+                    instance.completed_at = Some(chrono::Utc::now());
+                    instance.push_audit_log(error.to_string());
+                }
+                self.persist_instance(instance_id).await;
+            }
             self.emit_instance_changed(instance_id).await;
             self.deliver_queued_signals().await;
             return Err(error);

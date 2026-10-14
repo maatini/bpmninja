@@ -270,12 +270,21 @@ impl WorkflowEngine {
     ) -> EngineResult<Uuid> {
         let child_id = Uuid::new_v4();
         let called_node = token.current_node.clone();
-        let parent = self.instances.get(&parent_instance_id).await
+        let parent = self
+            .instances
+            .get(&parent_instance_id)
+            .await
             .ok_or(EngineError::NoSuchInstance(parent_instance_id))?;
         let parent_def_key = parent.read().await.definition_key;
-        let parent_def = self.definitions.get(&parent_def_key)
+        let parent_def = self
+            .definitions
+            .get(&parent_def_key)
             .ok_or(EngineError::NoSuchDefinition(parent_def_key))?;
-        let child_variables = match parent_def.data_mappings.get(&called_node).and_then(|m| m.call_inputs.as_ref()) {
+        let child_variables = match parent_def
+            .data_mappings
+            .get(&called_node)
+            .and_then(|m| m.call_inputs.as_ref())
+        {
             Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &token.variables)?,
             None => token.variables.clone(),
         };
@@ -391,7 +400,6 @@ impl WorkflowEngine {
 
             let def_key = parent.definition_key;
 
-
             (called_node_id, token_to_resume, def_key)
         };
 
@@ -419,8 +427,14 @@ impl WorkflowEngine {
             // hängen bleibt.
             let completion = async {
                 if error_code.is_none() {
-                    let transferred = match def.data_mappings.get(&called_node_id).and_then(|m| m.call_outputs.as_ref()) {
-                        Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &child_vars)?,
+                    let transferred = match def
+                        .data_mappings
+                        .get(&called_node_id)
+                        .and_then(|m| m.call_outputs.as_ref())
+                    {
+                        Some(mappings) => {
+                            crate::domain::data::evaluate_mappings(mappings, &child_vars)?
+                        }
                         None => child_vars.clone(),
                     };
                     token.variables.extend(transferred.clone());
@@ -428,10 +442,12 @@ impl WorkflowEngine {
                     if let Some(scope) = &mut token.data_scope {
                         scope.original_variables.extend(transferred);
                     }
-                    self.run_end_scripts(parent_id, &mut token, &def, &called_node_id).await?;
+                    self.run_end_scripts(parent_id, &mut token, &def, &called_node_id)
+                        .await?;
                 }
                 Ok::<(), EngineError>(())
-            }.await;
+            }
+            .await;
             if let Err(e) = completion {
                 tracing::error!(
                     "Instanz {parent_id}: End-Script der Call Activity '{}' fehlgeschlagen: {e} — markiere als fehlerhaft",

@@ -23,14 +23,16 @@ import { CustomPropertiesProvider } from './properties/ConditionPropertiesProvid
 import { ScriptPropertiesProvider } from './properties/ScriptPropertiesProvider';
 import { TopicPropertiesProvider } from './properties/TopicPropertiesProvider';
 import { AssigneePropertiesProvider } from './properties/AssigneePropertiesProvider';
+import { DataMappingsPropertiesProvider } from './properties/DataMappingsPropertiesProvider';
 import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider', 'dataMappingsPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
   topicPropertiesProvider: ['type', TopicPropertiesProvider],
   assigneePropertiesProvider: ['type', AssigneePropertiesProvider],
+  dataMappingsPropertiesProvider: ['type', DataMappingsPropertiesProvider],
   calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
 };
 

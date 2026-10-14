@@ -279,7 +279,9 @@ async fn swimlanes_and_artifacts_deploy_run_and_export_unchanged() {
     // Visual and data elements do not change the flow.
     let res = client
         .post(format!("{}/api/start", base))
-        .json(&serde_json::json!({ "definition_key": def_key, "variables": { "DataObject_1": {} } }))
+        .json(
+            &serde_json::json!({ "definition_key": def_key, "variables": { "DataObject_1": {} } }),
+        )
         .send()
         .await
         .unwrap();

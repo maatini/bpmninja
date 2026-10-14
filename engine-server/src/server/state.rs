@@ -32,7 +32,7 @@ impl IntoResponse for AppError {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             Self::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
-            Self::Engine(EngineError::InvalidDefinition(msg)) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(EngineError::InvalidDefinition(msg) | EngineError::DataMappingError(msg)) => (StatusCode::BAD_REQUEST, msg),
             Self::Engine(EngineError::NoMatchingCondition(msg)) => (
                 StatusCode::BAD_REQUEST,
                 format!("No matching condition at gateway '{msg}'"),

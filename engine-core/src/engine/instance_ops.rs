@@ -280,7 +280,6 @@ impl WorkflowEngine {
                 "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
                 instance_id
             );
-
         }
 
         // With centralized tokens, we also update instance.tokens so that
@@ -300,7 +299,9 @@ impl WorkflowEngine {
                         } else {
                             scope.original_variables.insert(key.clone(), value.clone());
                         }
-                        if scope.local_names.contains(key) { continue; }
+                        if scope.local_names.contains(key) {
+                            continue;
+                        }
                     }
                     if value.is_null() {
                         token.variables.remove(key);

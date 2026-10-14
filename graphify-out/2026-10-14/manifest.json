@@ -978,9 +978,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/process_start.rs": {
-    "mtime": 1792003006.9006398,
-    "seen": 1792003181.8037093,
-    "ast_hash": "0f22e61a4bfaca61bfadc36f0d731782",
+    "mtime": 1792003223.1152968,
+    "seen": 1792003278.0136983,
+    "ast_hash": "56d61b06b88c2a4166bad9fc93cd5a5b",
     "semantic_hash": ""
   },
   "engine-core/src/engine/registry.rs": {
@@ -996,9 +996,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/service_task.rs": {
-    "mtime": 1791971654.0912056,
-    "seen": 1791974476.4516678,
-    "ast_hash": "a4d3ec996ed3af252ce3ff3e7d0094bc",
+    "mtime": 1792003223.118263,
+    "seen": 1792003278.0136983,
+    "ast_hash": "380e9705f44826f9849f047f17038682",
     "semantic_hash": ""
   },
   "engine-core/src/engine/tests/boundary_restore.rs": {
@@ -1146,9 +1146,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/user_task.rs": {
-    "mtime": 1791884581.2131145,
-    "seen": 1791887237.0275643,
-    "ast_hash": "c8bac14e91458dc12280e05f33b0fef5",
+    "mtime": 1792003223.1192682,
+    "seen": 1792003278.0136983,
+    "ast_hash": "42feb9adc6525b39afd49c33777b8aa0",
     "semantic_hash": ""
   },
   "engine-core/src/history/mod.rs": {

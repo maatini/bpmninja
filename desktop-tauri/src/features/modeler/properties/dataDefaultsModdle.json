@@ -1,0 +1,18 @@
+{
+  "name": "BpmninjaData",
+  "uri": "https://bpmninja.dev/schema/bpmn",
+  "prefix": "bpmninja",
+  "xml": { "tagAlias": "lowerCase" },
+  "types": [
+    {
+      "name": "PropertyDefault",
+      "extends": ["bpmn:Property"],
+      "properties": [{ "name": "default", "isAttr": true, "type": "String" }]
+    },
+    {
+      "name": "ObjectDefault",
+      "extends": ["bpmn:DataObject"],
+      "properties": [{ "name": "default", "isAttr": true, "type": "String" }]
+    }
+  ]
+}
