@@ -247,6 +247,7 @@ impl WorkflowEngine {
             }
         }
 
+        token.discard_data_scope();
         token.variables.extend(variables.clone());
 
         let old_state = if let Some(lk) = self.instances.get(&catch.instance_id).await {

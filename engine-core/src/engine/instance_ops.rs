@@ -236,7 +236,8 @@ impl WorkflowEngine {
             None
         };
 
-        let updated_vars = {
+        let updates = variables.clone();
+        {
             let instance_arc = self
                 .instances
                 .get(&instance_id)
@@ -280,8 +281,7 @@ impl WorkflowEngine {
                 instance_id
             );
 
-            instance.variables.clone()
-        };
+        }
 
         // With centralized tokens, we also update instance.tokens so that
         // when a pending task is completed, it picks up the latest variables.
@@ -293,7 +293,15 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut instance = instance_arc.write().await;
             for token in instance.tokens.values_mut() {
-                for (key, value) in &updated_vars {
+                for (key, value) in &updates {
+                    if let Some(scope) = &mut token.data_scope {
+                        if value.is_null() {
+                            scope.original_variables.remove(key);
+                        } else {
+                            scope.original_variables.insert(key.clone(), value.clone());
+                        }
+                        if scope.local_names.contains(key) { continue; }
+                    }
                     if value.is_null() {
                         token.variables.remove(key);
                     } else {

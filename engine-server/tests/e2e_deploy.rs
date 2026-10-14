@@ -211,8 +211,10 @@ const SWIMLANES_ARTIFACTS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
         <bpmn:sourceRef>DataObjectReference_1</bpmn:sourceRef>
         <bpmn:targetRef>Property_1</bpmn:targetRef>
       </bpmn:dataInputAssociation>
+      <bpmn:property id="Property_Total" name="total" />
       <bpmn:dataOutputAssociation id="DataOut_1">
-        <bpmn:targetRef>DataStoreReference_1</bpmn:targetRef>
+        <bpmn:sourceRef>Property_Total</bpmn:sourceRef>
+        <bpmn:targetRef>DataObjectReference_1</bpmn:targetRef>
       </bpmn:dataOutputAssociation>
       <bpmn:script>let total = 40 + 2;</bpmn:script>
     </bpmn:scriptTask>
@@ -277,7 +279,7 @@ async fn swimlanes_and_artifacts_deploy_run_and_export_unchanged() {
     // Visual and data elements do not change the flow.
     let res = client
         .post(format!("{}/api/start", base))
-        .json(&serde_json::json!({ "definition_key": def_key }))
+        .json(&serde_json::json!({ "definition_key": def_key, "variables": { "DataObject_1": {} } }))
         .send()
         .await
         .unwrap();
@@ -293,5 +295,5 @@ async fn swimlanes_and_artifacts_deploy_run_and_export_unchanged() {
         .await
         .unwrap();
     assert_eq!(details["state"], "Completed");
-    assert_eq!(details["variables"]["total"], 42);
+    assert_eq!(details["variables"]["DataObject_1"], 42);
 }

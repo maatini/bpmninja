@@ -311,6 +311,7 @@ impl WorkflowEngine {
         if !is_boundary_of(def, boundary_id, &marker.node_id) {
             return;
         }
+        token.discard_data_scope();
         token.loop_instance = None;
         let Some(inst_arc) = self.instances.get(&instance_id).await else {
             return;

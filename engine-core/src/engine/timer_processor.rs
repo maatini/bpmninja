@@ -218,6 +218,7 @@ impl WorkflowEngine {
                 }
             }
 
+            token.discard_data_scope();
             let next = crate::engine::executor::resolve_next_target(
                 &def,
                 &timer.node_id,

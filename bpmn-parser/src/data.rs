@@ -129,21 +129,32 @@ fn activity(node: &Node, refs: &HashMap<String, String>) -> EngineResult<Activit
     let mut result = ActivityMappings::default();
     let mut inputs = HashMap::new();
     let mut outputs = HashMap::new();
+    for property in node.children("property") {
+        let id = property.id()?;
+        let name = property.attr("name").filter(|s| !s.trim().is_empty()).unwrap_or(id);
+        if refs.contains_key(id) || inputs.insert(id.into(), name.into()).is_some() {
+            return Err(invalid("duplicate property id"));
+        }
+        outputs.insert(id.into(), name.into());
+        if property.attr("bpmninja:default").is_some() {
+            return Err(invalid("task property defaults are not supported; use inputParameter"));
+        }
+    }
     for io in node.children("ioSpecification") {
         for item in &io.children {
             if matches!(item.name.as_str(), "dataInput" | "dataOutput") {
                 if item.attr("isCollection") == Some("true") { return Err(invalid("collection ioSpecification is not supported")); }
                 let id = item.id()?;
                 let name = item.attr("name").filter(|s| !s.trim().is_empty()).unwrap_or(id);
+                if refs.contains_key(id) || inputs.contains_key(id) || outputs.contains_key(id) { return Err(invalid("duplicate IO reference")); }
                 let map = if item.name == "dataInput" { &mut inputs } else { &mut outputs };
-                if refs.contains_key(id) || inputs_and_outputs_conflict(id, map) { return Err(invalid("duplicate IO reference")); }
                 map.insert(id.into(), name.into());
             } else if !matches!(item.name.as_str(), "inputSet" | "outputSet") {
                 return Err(invalid(format!("unsupported ioSpecification child '{}'", item.name)));
             }
         }
     }
-    if inputs.keys().any(|id| outputs.contains_key(id)) { return Err(invalid("ambiguous IO id")); }
+
     for association in node.children.iter().filter(|n| matches!(n.name.as_str(), "dataInputAssociation" | "dataOutputAssociation")) {
         if association.children.iter().any(|n| !matches!(n.name.as_str(), "sourceRef" | "targetRef")) {
             return Err(invalid("association assignment/transformation is not supported"));
@@ -202,7 +213,6 @@ fn activity(node: &Node, refs: &HashMap<String, String>) -> EngineResult<Activit
     }
     Ok(result)
 }
-fn inputs_and_outputs_conflict(id: &str, map: &HashMap<String, String>) -> bool { map.contains_key(id) }
 
 fn apply_scope(scope: &Node, def: &mut ProcessDefinition, inherited: &HashMap<String, String>, root: bool) -> EngineResult<()> {
     let own = declarations(scope, def)?;
@@ -215,7 +225,7 @@ fn apply_scope(scope: &Node, def: &mut ProcessDefinition, inherited: &HashMap<St
         if node.name == "subProcess" {
             apply_scope(node, def, &refs, false)?;
         }
-        let has_data = node.children.iter().any(|n| matches!(n.name.as_str(), "dataInputAssociation" | "dataOutputAssociation" | "ioSpecification")) ||
+        let has_data = node.children.iter().any(|n| matches!(n.name.as_str(), "dataInputAssociation" | "dataOutputAssociation" | "ioSpecification" | "property")) ||
             node.children("extensionElements").any(|e| e.children.iter().any(|n| matches!(n.name.as_str(), "inputOutput" | "in" | "out")));
         if !has_data { continue; }
         let id = node.id()?;
