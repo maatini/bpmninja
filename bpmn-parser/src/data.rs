@@ -106,45 +106,30 @@ fn expression(text: &str) -> EngineResult<MappingValue> {
     )))
 }
 fn value(node: &Node) -> EngineResult<MappingValue> {
-    if node.children.is_empty() {
-        return expression(&node.text);
-    }
-    if !node.text.trim().is_empty() || node.children.len() != 1 {
-        return Err(invalid("parameter requires one value"));
-    }
-    let child = &node.children[0];
-    match child.name.as_str() {
+    match node.name.as_str() {
         "list" => {
-            if child.children.iter().any(|n| n.name != "value") {
-                return Err(invalid("list accepts value children only"));
+            if !node.text.trim().is_empty() || node.children.iter().any(|n| !matches!(n.name.as_str(), "value" | "list" | "map")) {
+                return Err(invalid("list accepts values, lists, or maps only"));
             }
-            Ok(MappingValue::List(
-                child
-                    .children
-                    .iter()
-                    .map(value)
-                    .collect::<EngineResult<_>>()?,
-            ))
+            Ok(MappingValue::List(node.children.iter().map(value).collect::<EngineResult<_>>()?))
         }
         "map" => {
+            if !node.text.trim().is_empty() { return Err(invalid("map cannot contain literal text")); }
             let mut values = HashMap::new();
-            for entry in &child.children {
-                if entry.name != "entry" {
-                    return Err(invalid("map accepts entry children only"));
-                }
-                let key = entry
-                    .attr("key")
-                    .ok_or_else(|| invalid("map entry requires key"))?;
-                if values.insert(key.into(), value(entry)?).is_some() {
-                    return Err(invalid("duplicate map key"));
-                }
+            for entry in &node.children {
+                if entry.name != "entry" { return Err(invalid("map accepts entry children only")); }
+                let key = entry.attr("key").ok_or_else(|| invalid("map entry requires key"))?;
+                if values.insert(key.into(), value(entry)?).is_some() { return Err(invalid("duplicate map key")); }
             }
             Ok(MappingValue::Map(values))
         }
-        _ => Err(invalid(format!(
-            "unsupported parameter value '{}'",
-            child.name
-        ))),
+        _ => {
+            if node.children.is_empty() { return expression(&node.text); }
+            if !node.text.trim().is_empty() || node.children.len() != 1 { return Err(invalid("parameter requires one value")); }
+            let child = &node.children[0];
+            if !matches!(child.name.as_str(), "list" | "map") { return Err(invalid(format!("unsupported parameter value '{}'", child.name))); }
+            value(child)
+        }
     }
 }
 

@@ -37,7 +37,9 @@ impl WorkflowEngine {
             if matches!(error, EngineError::DataMappingError(_)) {
                 if let Some(instance) = self.instances.get(&instance_id).await {
                     let mut instance = instance.write().await;
-                    instance.state = InstanceState::CompletedWithError { error_code: "DATA_MAPPING_ERROR".into() };
+                    instance.state = InstanceState::CompletedWithError {
+                        error_code: "DATA_MAPPING_ERROR".into(),
+                    };
                     instance.completed_at = Some(chrono::Utc::now());
                     instance.push_audit_log(error.to_string());
                 }

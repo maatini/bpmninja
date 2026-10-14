@@ -17,9 +17,7 @@ impl MappingValue {
         match self {
             Self::Literal(value) => Ok(value.clone()),
             Self::Variable(name) => variables.get(name).cloned().ok_or_else(|| {
-                EngineError::DataMappingError(format!(
-                    "Data mapping: variable '{name}' is missing"
-                ))
+                EngineError::DataMappingError(format!("Data mapping: variable '{name}' is missing"))
             }),
             Self::List(values) => values
                 .iter()

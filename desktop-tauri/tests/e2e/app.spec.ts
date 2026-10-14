@@ -1862,6 +1862,76 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await page.waitForTimeout(300);
   }
 
+  const X11_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:bpmninja="https://bpmninja.dev/schema/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" targetNamespace="test">
+<bpmn:process id="Process_Data" isExecutable="true"><bpmn:property id="Customer" name="customerId" bpmninja:default="7"/>
+<bpmn:startEvent id="start"/><bpmn:serviceTask id="work" camunda:topic="mapped"><bpmn:extensionElements><camunda:inputOutput><camunda:inputParameter name="id">\${customerId}</camunda:inputParameter><camunda:outputParameter name="receipt">\${result}</camunda:outputParameter></camunda:inputOutput></bpmn:extensionElements></bpmn:serviceTask>
+<bpmn:callActivity id="call" calledElement="child"/><bpmn:endEvent id="end"/>
+<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="work"/><bpmn:sequenceFlow id="f2" sourceRef="work" targetRef="call"/><bpmn:sequenceFlow id="f3" sourceRef="call" targetRef="end"/>
+<bpmn:dataObject id="Order" name="order"/><bpmn:dataObjectReference id="OrderRef" dataObjectRef="Order"/>
+</bpmn:process><bpmndi:BPMNDiagram id="Diagram_Data"><bpmndi:BPMNPlane id="Plane_Data" bpmnElement="Process_Data">
+<bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="100" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="work_di" bpmnElement="work"><dc:Bounds x="180" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="call_di" bpmnElement="call"><dc:Bounds x="330" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="480" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="order_di" bpmnElement="OrderRef"><dc:Bounds x="200" y="210" width="36" height="50"/></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="136" y="118"/><di:waypoint x="180" y="118"/></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="280" y="118"/><di:waypoint x="330" y="118"/></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="430" y="118"/><di:waypoint x="480" y="118"/></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></bpmn:definitions>`;
+
+  async function exportedXml(page: Page): Promise<string> {
+    return page.evaluate(async () => (await (window as any).__bpmnModeler__.saveXML({ format: true })).xml);
+  }
+
+  test('X11 edits nested activity mappings and retains output mappings on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, X11_XML, 'work');
+    const input = page.getByLabel('Activity inputs', { exact: true });
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(/customerId/);
+    await input.fill(JSON.stringify({ id: '${customerId}', options: [['a'], { label: 'a & b' }] }));
+    await input.blur();
+    await expect.poll(() => exportedXml(page)).toContain('name="options"');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('name="receipt"');
+    expect(xml).toContain('a &amp; b');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('work'));
+    }, xml);
+    await expect(input).toHaveValue(/options/);
+    expect(JSON.parse(await input.inputValue()).options).toEqual([['a'], { label: 'a & b' }]);
+    await input.fill('{"id":"${customerId + 1}"}');
+    await input.blur();
+    await expect(page.getByText(/expression interpolation is unsupported/)).toBeVisible();
+    expect(await exportedXml(page)).toContain('name="options"');
+  });
+
+  test('X11 edits Call Activity transfers and typed process defaults', async ({ page }) => {
+    await loadXmlAndClickElement(page, X11_XML, 'call');
+    await page.getByLabel('Child inputs', { exact: true }).fill('{"childId":"${id}"}');
+    await page.getByLabel('Child inputs', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('target="childId"');
+    await page.getByLabel('Child outputs', { exact: true }).fill('{"receipt":"${answer}"}');
+    await page.getByLabel('Child outputs', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('target="receipt"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('selection').select([]));
+    const defaults = page.getByLabel('Process variable defaults', { exact: true });
+    await expect(defaults).toHaveValue(/customerId/);
+    await defaults.fill('{"customerId":9,"flags":{"enabled":true}}');
+    await defaults.blur();
+    await expect.poll(() => exportedXml(page)).toContain('bpmninja:default="9"');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('name="flags"');
+    await page.evaluate(async (xml: string) => { await (window as any).__bpmnModeler__.importXML(xml); }, xml);
+    await expect(defaults).toHaveValue(/enabled/);
+    await defaults.fill('{}');
+    await defaults.blur();
+    await expect.poll(() => exportedXml(page)).not.toContain('bpmninja:default=');
+    expect(await exportedXml(page)).toContain('id="Customer"');
+  });
+
   test('condition group visible for ExclusiveGateway outgoing flow', async ({ page }) => {
     // Camunda 7 Modeler Kompatibilität – condition shown for XOR gateway flows
     await loadXmlAndClickElement(page, FLOW_CONDITION_XML_XOR, 'Flow_Cond');

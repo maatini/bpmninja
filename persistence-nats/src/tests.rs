@@ -13,6 +13,49 @@ fn nats_required() -> bool {
     std::env::var("CI").is_ok() || std::env::var("REQUIRE_NATS_TESTS").is_ok()
 }
 
+#[tokio::test]
+async fn x11_mapped_external_task_survives_nats_reconnect() {
+    use engine_core::domain::{ActivityMappings, BpmnElement, DataMapping, MappingValue, ProcessDefinitionBuilder};
+    use engine_core::WorkflowEngine;
+    use std::collections::HashMap;
+    use serde_json::json;
+    let stream = format!("TEST_X11_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else { return; };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = ProcessDefinitionBuilder::new("mapped_restore")
+        .node("start", BpmnElement::StartEvent)
+        .node("work", BpmnElement::ServiceTask { topic: "mapped".into(), multi_instance: None })
+        .node("end", BpmnElement::EndEvent).flow("start", "work").flow("work", "end").build().unwrap();
+    def.variable_defaults.insert("customerId".into(), json!(7));
+    def.data_mappings.insert("work".into(), ActivityMappings {
+        inputs: vec![DataMapping { target: "id".into(), value: MappingValue::Variable("customerId".into()) }],
+        outputs: vec![DataMapping { target: "receipt".into(), value: MappingValue::Variable("result".into()) }],
+        ..Default::default()
+    });
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let task = engine.fetch_and_lock_service_tasks("worker", 1, &["mapped".into()], 60).await.remove(0);
+    assert_eq!(task.variables_snapshot["id"], json!(7));
+    engine.fail_service_task(task.id, "worker", Some(2), Some("retry".into()), None).await.unwrap();
+    engine.update_instance_variables(id, HashMap::from([("customerId".into(), json!(99))])).await.unwrap();
+    drop(engine);
+    let fresh = Arc::new(NatsPersistence::connect(&nats_url(), &stream).await.unwrap());
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for def in fresh.list_definitions().await.unwrap().into_iter().filter(|def| def.key == key) { restored.deploy_definition(def).await; }
+    for instance in fresh.list_instances().await.unwrap().into_iter().filter(|instance| instance.id == id) { restored.restore_instance(instance).await; }
+    for task in fresh.list_service_tasks().await.unwrap().into_iter().filter(|task| task.instance_id == id) { restored.restore_service_task(task); }
+    let task = restored.fetch_and_lock_service_tasks("worker", 1, &["mapped".into()], 60).await.remove(0);
+    assert_eq!(restored.get_instance_details(id).await.unwrap().tokens[&task.token_id].variables["id"], json!(7));
+    restored.complete_service_task(task.id, "worker", HashMap::from([("result".into(), json!(42))])).await.unwrap();
+    let result = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(result.state, engine_core::InstanceState::Completed);
+    assert_eq!(result.variables["receipt"], json!(42));
+    assert_eq!(result.variables["customerId"], json!(99));
+    assert!(!result.variables.contains_key("id"));
+    fresh.delete_instance(&id.to_string()).await.unwrap();
+    fresh.delete_definition(&key.to_string()).await.unwrap();
+}
+
 pub async fn setup_nats_test() -> Option<Arc<NatsPersistence>> {
     connect_nats(&format!("TEST_STREAM_{}", Uuid::new_v4())).await
 }
