@@ -22,6 +22,9 @@ pub struct ProcessDefinition {
     pub event_listeners: Vec<ScopeEventListener>,
     #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
+    /// Loop / multi-instance characteristics per activity node (X4/X5).
+    #[serde(default)]
+    pub loops: HashMap<String, crate::domain::LoopCharacteristics>,
     #[serde(skip)]
     compiled_conditions: HashMap<String, crate::condition::CompiledCondition>,
 }
@@ -55,6 +58,7 @@ impl ProcessDefinition {
                     BpmnElement::StartEvent
                         | BpmnElement::TimerStartEvent(_)
                         | BpmnElement::MessageStartEvent { .. }
+                        | BpmnElement::SignalStartEvent { .. }
                 )
             })
             .count();
@@ -79,6 +83,7 @@ impl ProcessDefinition {
                     BpmnElement::EndEvent
                         | BpmnElement::ErrorEndEvent { .. }
                         | BpmnElement::EscalationEndEvent { .. }
+                        | BpmnElement::SignalEndEvent { .. }
                         | BpmnElement::CompensationEndEvent { .. }
                         | BpmnElement::TerminateEndEvent
                         | BpmnElement::SubProcessEndEvent { .. }
@@ -107,6 +112,7 @@ impl ProcessDefinition {
         for (node_id, element) in &nodes {
             if let BpmnElement::BoundaryTimerEvent { attached_to, .. }
             | BpmnElement::BoundaryMessageEvent { attached_to, .. }
+            | BpmnElement::BoundarySignalEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
             | BpmnElement::BoundaryCompensationEvent { attached_to, .. } = element
@@ -125,6 +131,7 @@ impl ProcessDefinition {
                 BpmnElement::EndEvent
                     | BpmnElement::ErrorEndEvent { .. }
                     | BpmnElement::EscalationEndEvent { .. }
+                    | BpmnElement::SignalEndEvent { .. }
                     | BpmnElement::CompensationEndEvent { .. }
                     | BpmnElement::TerminateEndEvent
                     | BpmnElement::SubProcessEndEvent { .. }
@@ -177,11 +184,13 @@ impl ProcessDefinition {
                     if let Some(target_element) = nodes.get(&sf.target)
                         && !matches!(
                             target_element,
-                            BpmnElement::MessageCatchEvent { .. } | BpmnElement::TimerCatchEvent(_)
+                            BpmnElement::MessageCatchEvent { .. }
+                                | BpmnElement::SignalCatchEvent { .. }
+                                | BpmnElement::TimerCatchEvent(_)
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
-                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
+                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
                             sf.target
                         )));
                     }
@@ -198,6 +207,7 @@ impl ProcessDefinition {
             listeners,
             event_listeners,
             sub_processes,
+            loops: HashMap::new(),
             compiled_conditions: HashMap::new(),
         })
     }
@@ -241,6 +251,7 @@ impl ProcessDefinition {
                 BpmnElement::StartEvent
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
+                    | BpmnElement::SignalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {
@@ -320,6 +331,7 @@ pub struct ProcessDefinitionBuilder {
     listeners: HashMap<String, Vec<ExecutionListener>>,
     event_listeners: Vec<ScopeEventListener>,
     sub_processes: Vec<ProcessDefinition>,
+    loops: HashMap<String, crate::domain::LoopCharacteristics>,
 }
 
 impl ProcessDefinitionBuilder {
@@ -333,7 +345,18 @@ impl ProcessDefinitionBuilder {
             listeners: HashMap::new(),
             event_listeners: Vec::new(),
             sub_processes: Vec::new(),
+            loops: HashMap::new(),
         }
+    }
+
+    /// Marks `node_id` as a multi-instance or loop activity (X4/X5).
+    pub fn loop_characteristics(
+        mut self,
+        node_id: impl Into<String>,
+        characteristics: crate::domain::LoopCharacteristics,
+    ) -> Self {
+        self.loops.insert(node_id.into(), characteristics);
+        self
     }
 
     /// Sets an explicit key for the definition (used during restore).
@@ -420,8 +443,59 @@ impl ProcessDefinitionBuilder {
         if let Some(key) = self.key {
             def.key = key;
         }
+        validate_loops(&def.nodes, &self.loops)?;
+        def.loops = self.loops;
         Ok(def)
     }
+}
+
+/// Loops only on activities without sub-process scope; non-interrupting
+/// boundary events would fire once per instance, so they are rejected.
+fn validate_loops(
+    nodes: &HashMap<String, BpmnElement>,
+    loops: &HashMap<String, crate::domain::LoopCharacteristics>,
+) -> EngineResult<()> {
+    for (node_id, characteristics) in loops {
+        match nodes.get(node_id) {
+            Some(
+                BpmnElement::UserTask(_)
+                | BpmnElement::ServiceTask { .. }
+                | BpmnElement::ScriptTask { .. }
+                | BpmnElement::SendTask { .. }
+                | BpmnElement::CallActivity { .. },
+            ) => {}
+            Some(_) => {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "Loop / multi-instance is only supported on tasks and call activities (node '{node_id}')"
+                )));
+            }
+            None => return Err(EngineError::NoSuchNode(node_id.clone())),
+        }
+        if let crate::domain::LoopCharacteristics::MultiInstance(mi) = characteristics
+            && mi.loop_cardinality.is_none()
+            && mi.collection.is_none()
+        {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance activity '{node_id}' needs loopCardinality or collection"
+            )));
+        }
+        let non_interrupting = nodes.iter().find(|(_, element)| {
+            matches!(
+                element,
+                BpmnElement::BoundaryTimerEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundaryMessageEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundarySignalEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundaryEscalationEvent { attached_to, cancel_activity: false, .. }
+                    if attached_to == node_id
+            )
+        });
+        if let Some((boundary_id, _)) = non_interrupting {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Non-interrupting boundary event '{boundary_id}' on loop activity '{node_id}' is not supported"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

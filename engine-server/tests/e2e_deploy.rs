@@ -179,3 +179,119 @@ async fn xml_embedded_subprocess_runs_to_completion() {
         Some(&serde_json::json!(true))
     );
 }
+
+/// X15: bpmn-js style export with pool, lanes, group/category, text annotation,
+/// association, data object and data store (incl. data associations) and DI.
+const SWIMLANES_ARTIFACTS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_X15" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:collaboration id="Collaboration_1">
+    <bpmn:participant id="Participant_1" name="Order handling" processRef="SwimlaneProcess" />
+    <bpmn:group id="Group_1" categoryValueRef="CategoryValue_1" />
+  </bpmn:collaboration>
+  <bpmn:category id="Category_1">
+    <bpmn:categoryValue id="CategoryValue_1" value="Automated part" />
+  </bpmn:category>
+  <bpmn:dataStore id="DataStore_1" name="Orders DB" />
+  <bpmn:process id="SwimlaneProcess" isExecutable="true">
+    <bpmn:laneSet id="LaneSet_1">
+      <bpmn:lane id="Lane_Sales" name="Sales">
+        <bpmn:flowNodeRef>start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>calc</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Done" name="Archive">
+        <bpmn:flowNodeRef>end</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="start"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:scriptTask id="calc" scriptFormat="rhai">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+      <bpmn:property id="Property_1" name="__targetRef_placeholder" />
+      <bpmn:dataInputAssociation id="DataIn_1">
+        <bpmn:sourceRef>DataObjectReference_1</bpmn:sourceRef>
+        <bpmn:targetRef>Property_1</bpmn:targetRef>
+      </bpmn:dataInputAssociation>
+      <bpmn:dataOutputAssociation id="DataOut_1">
+        <bpmn:targetRef>DataStoreReference_1</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+      <bpmn:script>let total = 40 + 2;</bpmn:script>
+    </bpmn:scriptTask>
+    <bpmn:endEvent id="end"><bpmn:incoming>f2</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="calc" />
+    <bpmn:sequenceFlow id="f2" sourceRef="calc" targetRef="end" />
+    <bpmn:dataObjectReference id="DataObjectReference_1" name="Order" dataObjectRef="DataObject_1" />
+    <bpmn:dataObject id="DataObject_1" />
+    <bpmn:dataStoreReference id="DataStoreReference_1" dataStoreRef="DataStore_1" />
+    <bpmn:textAnnotation id="TextAnnotation_1"><bpmn:text>Computes the order total</bpmn:text></bpmn:textAnnotation>
+    <bpmn:association id="Association_1" sourceRef="calc" targetRef="TextAnnotation_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_1">
+      <bpmndi:BPMNShape id="Participant_1_di" bpmnElement="Participant_1" isHorizontal="true">
+        <dc:Bounds x="100" y="80" width="600" height="250" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Sales_di" bpmnElement="Lane_Sales" isHorizontal="true">
+        <dc:Bounds x="130" y="80" width="570" height="125" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Done_di" bpmnElement="Lane_Done" isHorizontal="true">
+        <dc:Bounds x="130" y="205" width="570" height="125" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="172" y="122" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="calc_di" bpmnElement="calc"><dc:Bounds x="260" y="100" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="412" y="252" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Group_1_di" bpmnElement="Group_1"><dc:Bounds x="240" y="90" width="140" height="100" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_1_di" bpmnElement="TextAnnotation_1"><dc:Bounds x="400" y="100" width="150" height="30" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="208" y="140" /><di:waypoint x="260" y="140" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="310" y="180" /><di:waypoint x="430" y="252" /></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>"#;
+
+#[tokio::test]
+async fn swimlanes_and_artifacts_deploy_run_and_export_unchanged() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{}/api/deploy", base))
+        .json(&serde_json::json!({ "xml": SWIMLANES_ARTIFACTS_XML, "name": "Swimlanes" }))
+        .send()
+        .await
+        .unwrap();
+    let text = res.text().await.unwrap();
+    assert!(text.contains("definition_key"), "deploy failed: {text}");
+    let body: Value = serde_json::from_str(&text).unwrap();
+    let def_key = body["definition_key"].as_str().unwrap().to_string();
+
+    // Export returns the deployed document byte for byte (lanes, artifacts, DI).
+    let exported = client
+        .get(format!("{}/api/definitions/{}/xml", base, def_key))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(exported, SWIMLANES_ARTIFACTS_XML);
+
+    // Visual and data elements do not change the flow.
+    let res = client
+        .post(format!("{}/api/start", base))
+        .json(&serde_json::json!({ "definition_key": def_key }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let instance_id = body["instance_id"].as_str().unwrap();
+    let details: Value = client
+        .get(format!("{}/api/instances/{}", base, instance_id))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(details["state"], "Completed");
+    assert_eq!(details["variables"]["total"], 42);
+}

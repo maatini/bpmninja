@@ -11,6 +11,16 @@ pub struct Token {
     pub variables: HashMap<String, Value>,
     #[serde(default)]
     pub is_merged: bool,
+    /// Set while the token executes one iteration of a loop / multi-instance activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_instance: Option<LoopInstance>,
+}
+
+/// Identifies the loop iteration a token is executing (X4/X5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoopInstance {
+    pub node_id: String,
+    pub index: usize,
 }
 
 impl Token {
@@ -21,6 +31,7 @@ impl Token {
             current_node: start_node.to_string(),
             variables: HashMap::new(),
             is_merged: false,
+            loop_instance: None,
         }
     }
 
@@ -32,6 +43,7 @@ impl Token {
             current_node: start_node.to_string(),
             variables,
             is_merged: false,
+            loop_instance: None,
         }
     }
 }

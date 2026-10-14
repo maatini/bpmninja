@@ -848,6 +848,8 @@ impl WorkflowEngine {
                 .definitions
                 .get(&def_key)
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
+            self.interrupt_loop_activity(instance_id, &mut token, &def, &boundary_id)
+                .await;
             let next =
                 crate::engine::executor::resolve_next_target(&def, &boundary_id, &token.variables)?;
 

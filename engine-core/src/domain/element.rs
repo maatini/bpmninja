@@ -63,6 +63,20 @@ pub enum BpmnElement {
         message_name: String,
         cancel_activity: bool,
     },
+    /// A start event triggered by a broadcast signal (X1).
+    SignalStartEvent { signal_name: String },
+    /// An intermediate catch event waiting for a broadcast signal.
+    SignalCatchEvent { signal_name: String },
+    /// An intermediate throw event broadcasting a signal, then continuing.
+    SignalThrowEvent { signal_name: String },
+    /// An end event broadcasting a signal.
+    SignalEndEvent { signal_name: String },
+    /// A boundary signal event attached to an activity.
+    BoundarySignalEvent {
+        attached_to: String,
+        signal_name: String,
+        cancel_activity: bool,
+    },
     /// A boundary error event attached to an activity.
     BoundaryErrorEvent {
         attached_to: String,

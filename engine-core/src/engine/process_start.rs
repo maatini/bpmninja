@@ -136,6 +136,7 @@ impl WorkflowEngine {
                         node_id: target_definition.clone(),
                         message_name: message_name.clone(),
                         token_id: Uuid::nil(),
+                        kind: crate::runtime::CatchKind::Message,
                     };
                     self.pending_message_catches.insert(pending.id, pending);
                 }

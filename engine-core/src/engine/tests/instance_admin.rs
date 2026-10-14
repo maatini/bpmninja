@@ -311,6 +311,7 @@ async fn restore_timer_and_message_catch() {
         node_id: "msg_1".into(),
         message_name: "ORDER_RECEIVED".into(),
         token_id: Uuid::new_v4(),
+        kind: crate::runtime::CatchKind::Message,
     };
     engine.restore_message_catch(catch.clone());
     assert_eq!(engine.pending_message_catches.len(), 1);
@@ -1142,6 +1143,7 @@ async fn test_restore_timer_and_message_catch() {
         node_id: "msg".into(),
         message_name: "order".into(),
         token_id: uuid::Uuid::new_v4(),
+        kind: crate::runtime::CatchKind::Message,
     };
     engine.restore_message_catch(pending_msg);
     assert_eq!(engine.pending_message_catches.len(), 1);

@@ -35,10 +35,13 @@ impl WorkflowEngine {
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
             self.emit_instance_changed(instance_id).await;
+            self.deliver_queued_signals().await;
             return Err(error);
         }
 
-        self.finish_instance_batch(instance_id).await
+        let finished = self.finish_instance_batch(instance_id).await;
+        self.deliver_queued_signals().await;
+        finished
     }
 
     /// Runs tokens until the queue is empty; collects history entries.
@@ -254,6 +257,33 @@ impl WorkflowEngine {
 
         let def_clone = Arc::clone(&def);
 
+        // X4/X5: a marked token that left its loop activity finishes an iteration.
+        if let Some(marker) = token.loop_instance.clone()
+            && marker.node_id != current_id
+            && let Some(action) = self
+                .leave_loop_instance(instance_id, token, &def_clone, marker)
+                .await?
+        {
+            return Ok(action);
+        }
+        // X4/X5: entering a loop activity starts its iterations.
+        if let Some(characteristics) = def_clone.loops.get(&current_id)
+            && token
+                .loop_instance
+                .as_ref()
+                .is_none_or(|marker| marker.node_id != current_id)
+        {
+            return self
+                .enter_loop_activity(
+                    instance_id,
+                    token.clone(),
+                    &def_clone,
+                    &current_id,
+                    characteristics,
+                )
+                .await;
+        }
+
         let mut start_audits = Vec::new();
         scripting::run_node_scripts(
             &self.scripts,
@@ -277,7 +307,8 @@ impl WorkflowEngine {
         match &element {
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)
-            | BpmnElement::MessageStartEvent { .. } => {
+            | BpmnElement::MessageStartEvent { .. }
+            | BpmnElement::SignalStartEvent { .. } => {
                 self.handle_start_event(instance_id, token, &def_clone, &current_id)
                     .await
             }
@@ -334,8 +365,41 @@ impl WorkflowEngine {
                     .await
             }
             BpmnElement::MessageCatchEvent { message_name } => {
-                self.handle_message_catch_event(instance_id, token, &current_id, message_name)
-                    .await
+                self.handle_message_catch_event(
+                    instance_id,
+                    token,
+                    &current_id,
+                    message_name,
+                    crate::runtime::CatchKind::Message,
+                )
+                .await
+            }
+            BpmnElement::SignalCatchEvent { signal_name } => {
+                self.handle_message_catch_event(
+                    instance_id,
+                    token,
+                    &current_id,
+                    signal_name,
+                    crate::runtime::CatchKind::Signal,
+                )
+                .await
+            }
+            BpmnElement::SignalThrowEvent { signal_name } => {
+                self.handle_signal_throw_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
+            BpmnElement::SignalEndEvent { signal_name } => {
+                let action = self
+                    .handle_end_event(instance_id, token, &def_clone, &current_id)
+                    .await?;
+                self.signal_outbox.push(signal_name.clone());
+                Ok(action)
             }
             BpmnElement::CallActivity { called_element } => {
                 self.handle_call_activity(
@@ -398,6 +462,7 @@ impl WorkflowEngine {
             }
             BpmnElement::BoundaryTimerEvent { .. }
             | BpmnElement::BoundaryMessageEvent { .. }
+            | BpmnElement::BoundarySignalEvent { .. }
             | BpmnElement::BoundaryErrorEvent { .. }
             | BpmnElement::BoundaryEscalationEvent { .. } => {
                 self.handle_boundary_event(instance_id, token, &def_clone, &current_id)

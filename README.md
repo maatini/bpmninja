@@ -168,7 +168,7 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
-- **Multi-Instance:** `multiInstanceLoopCharacteristics` is not supported; deploy fails with `InvalidDefinition`.
+- **Multi-Instance & loops:** `multiInstanceLoopCharacteristics` (parallel / sequential; `loopCardinality` or `camunda:collection` + `elementVariable`, `completionCondition`, optional `outputCollection`/`outputElement`) and `standardLoopCharacteristics` (`loopCondition`, `testBefore`, `loopMaximum`) run on all task types and call activities. Loop variables (`loopCounter`, `nrOfInstances`, element/output element …) stay local. Not supported on sub-processes yet; non-interrupting boundary events on loop activities are rejected.
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
 - **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
@@ -656,7 +656,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 | Task mapping & attributes | 7 | Camunda assignee/topic, `data-*` precedence, sendTask `messageRef`, receiveTask, manualTask, businessRuleTask with topic, timer FormalExpression |
-| Rejected definitions | 6 | Empty timer, multi-instance, generic task, empty script, catch without trigger, businessRuleTask without topic |
+| Rejected definitions | 6 | Empty timer, generic task, empty script, catch without trigger, businessRuleTask without topic, loops on sub-processes |
 | Process selection & flattening | 2 | Executable-process selection, sub-process flattening of send/inclusive/event nodes |
 
 ### engine-server E2E Tests (74 tests, 19 files)

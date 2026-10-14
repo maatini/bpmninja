@@ -981,6 +981,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /api/signal:
+    post:
+      operationId: Api_broadcastSignal
+      description: Broadcast a signal to all waiting signal catch/boundary events and start processes with a matching signal start event.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcastSignalResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastSignalRequest'
   /api/start:
     post:
       operationId: Api_start
@@ -1395,6 +1419,26 @@ components:
           type: string
         errorCode:
           type: string
+    BroadcastSignalRequest:
+      type: object
+      required:
+        - signalName
+      properties:
+        signalName:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    BroadcastSignalResponse:
+      type: object
+      required:
+        - affectedInstances
+      properties:
+        affectedInstances:
+          type: array
+          items:
+            type: string
+          description: Instances resumed by the signal plus instances started by signal start events.
     BucketEntry:
       type: object
       required:
@@ -1906,6 +1950,12 @@ components:
           type: string
         message_name:
           type: string
+          description: Message or signal name, depending on `kind`.
+        kind:
+          type: string
+          enum:
+            - Message
+            - Signal
     PendingServiceTask:
       type: object
       required:

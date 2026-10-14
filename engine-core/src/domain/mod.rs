@@ -14,9 +14,9 @@ pub use error::{EngineError, EngineResult};
 pub use file_ref::FileReference;
 pub use flow::SequenceFlow;
 pub use listener::{ExecutionListener, ListenerEvent, ScopeEventListener};
-pub use multi_instance::MultiInstanceDef;
+pub use multi_instance::{LoopCharacteristics, MultiInstanceDef, StandardLoopDef};
 pub use timer::TimerDefinition;
-pub use token::Token;
+pub use token::{LoopInstance, Token};
 
 #[cfg(test)]
 mod tests;

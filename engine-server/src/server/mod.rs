@@ -237,6 +237,7 @@ pub fn build_app_with_config(
         )
         // Phase 1 endpoints
         .route("/api/message", post(messages::correlate_message))
+        .route("/api/signal", post(messages::broadcast_signal))
         .route("/api/timers", get(timers::get_pending_timers))
         .route("/api/timers/process", post(timers::process_timers))
         .route("/api/messages", get(messages::get_pending_messages))

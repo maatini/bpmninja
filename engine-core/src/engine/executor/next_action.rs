@@ -323,8 +323,9 @@ impl WorkflowEngine {
                 self.persist_instance(instance_id).await;
             }
             NextAction::MultiInstanceFork { node_id, tokens } => {
+                // Parallel multi-instance (X4): children report to `multi_instance_state`,
+                // not to a join barrier.
                 let branch_count = tokens.len();
-                let join_id = format!("MI_JOIN_{node_id}");
                 let inst_arc = self
                     .instances
                     .get(&instance_id)
@@ -332,14 +333,7 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 {
                     let mut inst = inst_arc.write().await;
-                    inst.join_barriers.insert(
-                        join_id.clone(),
-                        JoinBarrier {
-                            gateway_node_id: join_id.clone(),
-                            expected_count: branch_count,
-                            arrived_tokens: Vec::new(),
-                        },
-                    );
+                    inst.current_node = node_id.clone();
                     if let Some(active) = inst
                         .active_tokens
                         .iter_mut()

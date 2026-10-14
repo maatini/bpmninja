@@ -178,7 +178,7 @@ cargo run -p engine-server
 - Rhai-Scripte: `let x = 1;` für neue Variablen, `x = 2;` für bestehende
 - Compensation- und Escalation-Events voll unterstützt
 - Incident Management implementiert
-- Multi-Instance (`multiInstanceLoopCharacteristics`) wird **nicht** unterstützt: Deploy schlägt mit `InvalidDefinition` fehl (`NextAction::MultiInstanceFork` existiert, wird aber nie erzeugt)
+- Multi-Instance (parallel/sequenziell) und Standard-Loop auf Tasks und Call Activities: `ProcessDefinition.loops`, Token-Marker `loop_instance`, Ablauf in `engine/loops.rs` (Entry-/Exit-Hook in `execute_step`). Auf Sub-Prozessen abgelehnt (braucht Laufzeit-Scopes, X6); nicht-unterbrechende Boundary-Events an Loop-Aktivitäten werden beim Deploy abgelehnt
 
 ## Coding-Konventionen
 

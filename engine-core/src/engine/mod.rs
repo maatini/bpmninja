@@ -28,12 +28,14 @@ pub(crate) mod gateway;
 pub(crate) mod handlers;
 mod instance_ops;
 pub(crate) mod instance_store;
+mod loops;
 mod message_processor;
 mod persistence_ops;
 mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+mod signal;
 mod task_handler;
 mod timer_index;
 mod timer_processor;
@@ -55,6 +57,8 @@ pub struct WorkflowEngine {
     pub(crate) service_task_notify: tokio::sync::Notify,
     /// In-process handlers per topic, executed by the task-handler dispatcher.
     pub(crate) task_handlers: DashMap<String, Arc<dyn TaskHandler>>,
+    /// Signals thrown during a batch, delivered once the batch has finished.
+    pub(crate) signal_outbox: signal::SignalOutbox,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
@@ -94,6 +98,7 @@ impl WorkflowEngine {
             service_task_topic_index: DashMap::new(),
             service_task_notify: tokio::sync::Notify::new(),
             task_handlers: DashMap::new(),
+            signal_outbox: signal::SignalOutbox::default(),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
             timer_notify: tokio::sync::Notify::new(),
@@ -288,7 +293,8 @@ impl WorkflowEngine {
                 .filter_map(|(id, node)| {
                     if let crate::domain::BpmnElement::BoundaryMessageEvent {
                         attached_to, ..
-                    } = node
+                    }
+                    | crate::domain::BpmnElement::BoundarySignalEvent { attached_to, .. } = node
                     {
                         if attached_to == task_node_id {
                             Some(id.clone())

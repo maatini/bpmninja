@@ -179,6 +179,16 @@ model CorrelateMessageResponse {
   affectedInstances: string[];
 }
 
+model BroadcastSignalRequest {
+  signalName: string;
+  variables?: Record<unknown>;
+}
+
+model BroadcastSignalResponse {
+  @doc("Instances resumed by the signal plus instances started by signal start events.")
+  affectedInstances: string[];
+}
+
 model ProcessTimersResponse {
   triggered: int32;
 }
@@ -192,7 +202,9 @@ model PendingTimer {
 model PendingMessage {
   instance_id: string;
   node_id: string;
+  @doc("Message or signal name, depending on `kind`.")
   message_name: string;
+  kind?: "Message" | "Signal";
 }
 
 model BackendInfo {
@@ -391,6 +403,10 @@ namespace Api {
 
   @post @route("/message")
   op correlateMessage(@body request: CorrelateMessageRequest): CorrelateMessageResponse | AppError;
+
+  @post @route("/signal")
+  @doc("Broadcast a signal to all waiting signal catch/boundary events and start processes with a matching signal start event.")
+  op broadcastSignal(@body request: BroadcastSignalRequest): BroadcastSignalResponse | AppError;
 
   @get @route("/timers")
   op getPendingTimers(): PendingTimer[] | AppError;

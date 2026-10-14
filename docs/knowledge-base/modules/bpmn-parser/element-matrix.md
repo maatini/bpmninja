@@ -22,7 +22,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Escalation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
 | Compensation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
 | Conditional | ❌ [X2] | ❌ [X2] | — | ❌ [X2] | — |
-| Signal | ❌ [X1] | ❌ [X1] | ❌ [X1] | ❌ [X1] | ❌ [X1] |
+| Signal | ✅ (latest version; not in sub-processes) | ✅ | ✅ (broadcast after the step) | ✅ interrupting / non-interrupting | ✅ (not in sub-processes) |
 | Link | — | ✅ (resolved at parse time) | ✅ (resolved at parse time) | — | — |
 | Cancel | — | — | — | ❌ [X7] | ❌ [X7] |
 | Terminate | — | — | — | — | ✅ |
@@ -45,8 +45,8 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Event Sub-Process | ❌ [X9] | Was parsed but never triggered |
 | Transaction | ❌ [X7] | |
 | Ad-hoc Sub-Process | ❌ [X8] | |
-| Loop (`standardLoopCharacteristics`) | ❌ [X5] | |
-| Multi-instance (parallel / sequential) | ❌ [X4] | |
+| Loop (`standardLoopCharacteristics`) | ✅ | Tasks + call activities; `loopCondition`, `testBefore`, `loopMaximum`. On sub-processes ❌ [X6] |
+| Multi-instance (parallel / sequential) | ✅ | Tasks + call activities; cardinality or `camunda:collection`/`elementVariable`, `completionCondition`, `outputCollection`/`outputElement`; loop variables local. On sub-processes ❌ [X6]; non-interrupting boundary events on loop activities ❌ |
 | Compensation activity (`isForCompensation`) | ⚠️ [G1] | The engine finds the handler via a **sequence flow** leaving the compensation boundary event. The standard BPMN form (an **association**, as drawn by bpmn-js) is not parsed yet, so such handlers are never called |
 
 ## Flow Objects — Gateways
@@ -74,7 +74,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Element | Status | Notes |
 |---|---|---|
 | Pool (participant) | 🟡 | One executable process per deployment [X12] |
-| Lane / lane set | 🟡 | Optional lane → candidate group mapping [X15] |
+| Lane / lane set | 🟡 | Kept on export (original XML is stored verbatim). Lane → candidate group needs candidate groups on user tasks [X16] |
 
 ## Artifacts
 

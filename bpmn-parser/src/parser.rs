@@ -186,6 +186,19 @@ fn resolve_message_ref(
     nonempty_attr(message_ref).map(|r| lookup.get(&r).cloned().unwrap_or(r))
 }
 
+/// Resolves a `signalRef` to the signal's name (falls back to the reference).
+fn signal_name(
+    element_id: &str,
+    def: crate::models::BpmnSignalEventDefinition,
+    lookup: &HashMap<String, String>,
+) -> EngineResult<String> {
+    resolve_message_ref(def.signal_ref, lookup).ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "signalEventDefinition on '{element_id}' has no signalRef"
+        ))
+    })
+}
+
 fn send_task_message_name(
     task: &crate::models::BpmnSendTask,
     lookup: &HashMap<String, String>,
@@ -277,19 +290,43 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
     })
 }
 
-/// Multi-instance is not executed at runtime. Presence of
-/// `multiInstanceLoopCharacteristics` must fail deploy instead of mapping
-/// silently to a single-instance activity.
-fn parse_multi_instance(
-    mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
+/// X4/X5: registers multi-instance / standard-loop characteristics of an
+/// activity on the builder (validated in `build()`).
+fn with_loop(
+    builder: ProcessDefinitionBuilder,
     element_id: &str,
-) -> EngineResult<Option<engine_core::model::MultiInstanceDef>> {
-    if mi.is_some() {
-        return Err(EngineError::InvalidDefinition(format!(
-            "Multi-instance is not supported (element '{element_id}')"
-        )));
-    }
-    Ok(None)
+    mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
+    standard: Option<crate::models::BpmnStandardLoopCharacteristics>,
+) -> EngineResult<ProcessDefinitionBuilder> {
+    use engine_core::model::{LoopCharacteristics, MultiInstanceDef, StandardLoopDef};
+    let text = |v: Option<crate::models::BpmnLoopCardinality>| {
+        v.and_then(|c| c.value)
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    };
+    let characteristics = match (mi, standard) {
+        (Some(_), Some(_)) => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "'{element_id}' has both multi-instance and standard loop characteristics"
+            )));
+        }
+        (Some(mi), None) => LoopCharacteristics::MultiInstance(MultiInstanceDef {
+            is_sequential: mi.is_sequential.unwrap_or(false),
+            loop_cardinality: text(mi.loop_cardinality),
+            collection: nonempty_attr(mi.collection),
+            element_variable: nonempty_attr(mi.element_variable),
+            completion_condition: text(mi.completion_condition),
+            output_collection: nonempty_attr(mi.output_collection),
+            output_element: nonempty_attr(mi.output_element),
+        }),
+        (None, Some(standard)) => LoopCharacteristics::Standard(StandardLoopDef {
+            loop_condition: text(standard.loop_condition),
+            test_before: standard.test_before.unwrap_or(false),
+            loop_maximum: standard.loop_maximum,
+        }),
+        (None, None) => return Ok(builder),
+    };
+    Ok(builder.loop_characteristics(element_id, characteristics))
 }
 
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
@@ -348,6 +385,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         })
         .collect();
 
+    let signal_lookup: HashMap<String, String> = defs
+        .signals
+        .iter()
+        .map(|s| (s.id.clone(), s.name.clone().unwrap_or_else(|| s.id.clone())))
+        .collect();
+
     let escalation_lookup: HashMap<String, String> = defs
         .escalations
         .iter()
@@ -376,6 +419,9 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 .and_then(|ref_id| message_lookup.get(&ref_id).cloned())
                 .unwrap_or_else(|| "generic_message".into());
             builder = builder.node(start.id, BpmnElement::MessageStartEvent { message_name });
+        } else if let Some(sig) = start.signal_event_definition {
+            let signal_name = signal_name(&node_id, sig, &signal_lookup)?;
+            builder = builder.node(start.id, BpmnElement::SignalStartEvent { signal_name });
         } else {
             builder = builder.node(start.id, BpmnElement::StartEvent);
         }
@@ -406,6 +452,9 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     activity_ref: comp.activity_ref,
                 },
             );
+        } else if let Some(sig) = end.signal_event_definition {
+            let signal_name = signal_name(&node_id, sig, &signal_lookup)?;
+            builder = builder.node(end.id, BpmnElement::SignalEndEvent { signal_name });
         } else {
             builder = builder.node(end.id, BpmnElement::EndEvent);
         }
@@ -417,12 +466,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         let node_id = task.id.clone();
         // Fallback: data-topic, then data-handler, then camunda:topic, then node_id
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -432,7 +481,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.user_tasks {
         let node_id = task.id.clone();
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        builder = with_loop(builder, &node_id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
@@ -447,7 +496,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             .or(task.data_script)
             .unwrap_or_default();
 
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
 
         if script_content.trim().is_empty() {
             return Err(EngineError::InvalidDefinition(format!(
@@ -459,7 +508,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             task.id,
             BpmnElement::ScriptTask {
                 script: script_content,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -469,12 +518,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.send_tasks {
         let node_id = task.id.clone();
         let message_name = send_task_message_name(&task, &message_lookup);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::SendTask {
                 message_name,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -483,7 +532,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 5c. receiveTask waits for a message (same runtime as MessageCatchEvent)
     for task in process.receive_tasks {
         let node_id = task.id.clone();
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        builder = with_loop(builder, &node_id, task.multi_instance, task.standard_loop)?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
                 .as_ref()
@@ -518,7 +567,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.manual_tasks {
         let node_id = task.id.clone();
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        builder = with_loop(builder, &node_id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
@@ -539,12 +588,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             )));
         }
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -561,6 +610,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 5d. Call Activities — mapped to BpmnElement::CallActivity with calledElement
     for task in process.call_activities {
         let node_id = task.id.clone();
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         let called_element = task.called_element.unwrap_or_else(|| task.id.clone());
         builder = builder.node(task.id, BpmnElement::CallActivity { called_element });
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -640,9 +690,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = signal_name(&catch_evt.id, sig, &signal_lookup)?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timer, message, signal or link definition",
                 node_id
             )));
         }
@@ -680,9 +733,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     activity_ref: comp.activity_ref,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = signal_name(&evt.id, sig, &signal_lookup)?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, escalation, compensate, signal or link definition",
                 node_id
             )));
         }
@@ -742,6 +798,16 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     cancel_activity,
                 },
             );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name = signal_name(&bd.id, sig, &signal_lookup)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
         } else if bd.compensate_event_definition.is_some() {
             builder = builder.node(
                 bd.id,
@@ -749,7 +815,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -774,6 +840,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             &message_lookup,
             &error_lookup,
             &escalation_lookup,
+            &signal_lookup,
         )?;
     }
 
@@ -868,25 +935,33 @@ fn resolve_link_events(
 /// that kind of event is rejected by [`reject_unsupported_elements`].
 fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
     match event_kind {
-        "startEvent" => &["timerEventDefinition", "messageEventDefinition"],
+        "startEvent" => &[
+            "timerEventDefinition",
+            "messageEventDefinition",
+            "signalEventDefinition",
+        ],
         "endEvent" => &[
             "terminateEventDefinition",
             "errorEventDefinition",
             "escalationEventDefinition",
             "compensateEventDefinition",
+            "signalEventDefinition",
         ],
         "intermediateCatchEvent" => &[
             "timerEventDefinition",
             "messageEventDefinition",
             "linkEventDefinition",
+            "signalEventDefinition",
         ],
         "intermediateThrowEvent" => &[
             "messageEventDefinition",
             "linkEventDefinition",
+            "signalEventDefinition",
             "escalationEventDefinition",
             "compensateEventDefinition",
         ],
         "boundaryEvent" => &[
+            "signalEventDefinition",
             "timerEventDefinition",
             "messageEventDefinition",
             "errorEventDefinition",
@@ -907,11 +982,7 @@ const EVENT_KINDS: [&str; 5] = [
 
 /// Elements with execution semantics the engine does not implement yet
 /// (see the BPMN element matrix in the knowledge base).
-const UNSUPPORTED_ELEMENTS: [&str; 3] = [
-    "transaction",
-    "adHocSubProcess",
-    "standardLoopCharacteristics",
-];
+const UNSUPPORTED_ELEMENTS: [&str; 2] = ["transaction", "adHocSubProcess"];
 
 /// X0: fails the deploy when the selected process uses BPMN elements whose
 /// execution semantics are not implemented, instead of silently dropping them
@@ -968,6 +1039,15 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
 
             if UNSUPPORTED_ELEMENTS.contains(&name.as_str()) {
                 violations.push(format!("{name} '{at}'"));
+            } else if (name == "multiInstanceLoopCharacteristics"
+                || name == "standardLoopCharacteristics")
+                && stack
+                    .last()
+                    .is_some_and(|(kind, _, _)| kind == "subProcess")
+            {
+                violations.push(format!(
+                    "{name} on sub-process '{at}' (needs runtime scopes, X6)"
+                ));
             } else if name == "subProcess" && attr(e, "triggeredByEvent").as_deref() == Some("true")
             {
                 violations.push(format!("event sub-process '{at}'"));
@@ -986,6 +1066,7 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
                     "instantiating or parallel eventBasedGateway '{at}'"
                 ));
             } else if name.ends_with("EventDefinition")
+                && let in_sub_process = stack.iter().any(|(kind, _, _)| kind == "subProcess")
                 && let Some((kind, event_id, count)) = stack
                     .iter_mut()
                     .rev()
@@ -997,6 +1078,11 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
                     violations.push(format!("multiple event definitions on {kind} '{event_id}'"));
                 } else if !supported_event_definitions(kind).contains(&name.as_str()) {
                     violations.push(format!("{name} on {kind} '{event_id}'"));
+                } else if name == "signalEventDefinition"
+                    && (kind == "startEvent" || kind == "endEvent")
+                    && in_sub_process
+                {
+                    violations.push(format!("signal {kind} '{event_id}' inside a sub-process"));
                 }
             }
         }
@@ -1024,6 +1110,7 @@ fn flatten_subprocess(
     message_lookup: &HashMap<String, String>,
     error_lookup: &HashMap<String, String>,
     escalation_lookup: &HashMap<String, String>,
+    signal_lookup: &HashMap<String, String>,
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
     resolve_link_events(
@@ -1086,12 +1173,12 @@ fn flatten_subprocess(
 
     for task in sp.service_tasks {
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
@@ -1108,36 +1195,36 @@ fn flatten_subprocess(
                 task.id
             )));
         }
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::ScriptTask {
                 script,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
 
     for task in sp.user_tasks {
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
     }
 
     for task in sp.send_tasks {
         let message_name = send_task_message_name(&task, message_lookup);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::SendTask {
                 message_name,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
 
     for task in sp.receive_tasks {
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
                 .as_ref()
@@ -1154,7 +1241,7 @@ fn flatten_subprocess(
 
     for task in sp.manual_tasks {
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
     }
 
@@ -1172,12 +1259,12 @@ fn flatten_subprocess(
             )));
         }
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
@@ -1190,6 +1277,7 @@ fn flatten_subprocess(
     }
 
     for task in sp.call_activities {
+        builder = with_loop(builder, &task.id, task.multi_instance, task.standard_loop)?;
         let called_element = task.called_element.unwrap_or_else(|| task.id.clone());
         builder = builder.node(task.id, BpmnElement::CallActivity { called_element });
     }
@@ -1236,9 +1324,12 @@ fn flatten_subprocess(
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = signal_name(&catch_evt.id, sig, signal_lookup)?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timer, message, signal or link definition",
                 catch_evt.id
             )));
         }
@@ -1271,9 +1362,12 @@ fn flatten_subprocess(
                     activity_ref: comp.activity_ref,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = signal_name(&evt.id, sig, signal_lookup)?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, escalation, compensate, signal or link definition",
                 evt.id
             )));
         }
@@ -1327,6 +1421,16 @@ fn flatten_subprocess(
                     cancel_activity,
                 },
             );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name = signal_name(&bd.id, sig, signal_lookup)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
         } else if bd.compensate_event_definition.is_some() {
             builder = builder.node(
                 bd.id,
@@ -1334,7 +1438,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
                 bd.id
             )));
         }
@@ -1364,6 +1468,7 @@ fn flatten_subprocess(
             message_lookup,
             error_lookup,
             escalation_lookup,
+            signal_lookup,
         )?;
     }
 

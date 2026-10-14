@@ -568,6 +568,7 @@ impl WorkflowEngine {
             current_node: target_node_id.to_string(),
             variables: token_vars.clone(),
             is_merged: false,
+            loop_instance: None,
         };
 
         // --- 5. Reset instance state ---

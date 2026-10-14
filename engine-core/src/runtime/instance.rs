@@ -52,10 +52,24 @@ pub enum NextAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MultiInstanceProgress {
     pub node_id: String,
+    /// Planned instances (multi-instance) or iterations so far (standard loop).
     pub total: usize,
     pub completed: usize,
-    /// For sequential MI: the token that will re-execute the task
-    pub sequential_token: Option<Token>,
+    /// Parallel children still running.
+    #[serde(default)]
+    pub active_tokens: Vec<uuid::Uuid>,
+    /// Collection elements for sequential instances not yet started.
+    #[serde(default)]
+    pub elements: Vec<serde_json::Value>,
+    /// `output_element` per instance index.
+    #[serde(default)]
+    pub outputs: Vec<serde_json::Value>,
+    /// Variables of finished parallel children, merged at the end.
+    #[serde(default)]
+    pub merged_variables: HashMap<String, serde_json::Value>,
+    /// Values of the local loop variables before the activity started.
+    #[serde(default)]
+    pub shadowed: HashMap<String, Option<serde_json::Value>>,
 }
 
 /// The state of a process instance.

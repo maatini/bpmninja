@@ -18,7 +18,7 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `ExecutionListener` | `domain/listener.rs` | Script attached to a node (start/end event) |
 | `ListenerEvent` | `domain/listener.rs` | Enum: Start, End |
 | `ScopeEventListener` | `domain/listener.rs` | Timer/Message/Error event sub-process listener |
-| `MultiInstanceDef` | `domain/multi_instance.rs` | Multi-instance configuration |
+| `MultiInstanceDef`, `StandardLoopDef`, `LoopCharacteristics` | `domain/multi_instance.rs` | Loop configuration per node in `ProcessDefinition.loops` (builder: `loop_characteristics`) |
 | `FileReference` | `domain/file_ref.rs` | File variable metadata (object_key, filename, mime_type, size) |
 
 ### Runtime Types
@@ -30,7 +30,7 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `NextAction` | `runtime/instance.rs` | Execution loop dispatch: Continue, WaitFor*, Complete, Terminate, etc. |
 | `ActiveToken` | `runtime/instance.rs` | Token traveling through graph with fork_id and branch_index |
 | `JoinBarrier` | `runtime/instance.rs` | Synchronization barrier at converging gateway |
-| `MultiInstanceProgress` | `runtime/instance.rs` | Progress tracking for multi-instance tasks |
+| `MultiInstanceProgress` | `runtime/instance.rs` | Persisted progress per loop activity (`ProcessInstance.multi_instance_state`): counts, active children, outputs, merged + shadowed variables |
 | `CompensationRecord` | `runtime/instance.rs` | Completed compensatable activity + handler node |
 | `PendingUserTask` | `runtime/pending.rs` | User task awaiting completion (has token_id ref) |
 | `PendingServiceTask` | `runtime/pending.rs` | Service task with lock, retries, variables_snapshot |
@@ -147,6 +147,24 @@ pub enum EngineEvent {
 | `spawn_task_handler_dispatcher(self: &Arc<Self>) -> JoinHandle<()>` | Long-Poll über `fetch_and_lock_service_tasks` mit Worker-ID `IN_PROCESS_WORKER_ID`, Lock 300 s, max. 64 parallele Handler; Ergebnis über `complete_service_task` / `fail_service_task_with_retry_timeout` / `handle_bpmn_error_with_variables` |
 
 Locks, Retries, Incidents, Error-Boundaries und Persistenz verhalten sich wie bei externen Workern; Topics ohne Handler bleiben für REST-/Camunda-Worker abrufbar. Panik im Handler = `Fail` mit `retries: None`. CPU-lastige Handler gehören in `spawn_blocking`. Der Server registriert keine Handler (Library-Feature für eingebettete Nutzung).
+
+### Signale (`engine/signal.rs`, X1)
+
+| Item | Detail |
+|------|--------|
+| Elemente | `SignalStartEvent`, `SignalCatchEvent`, `SignalThrowEvent`, `SignalEndEvent`, `BoundarySignalEvent { cancel_activity }` |
+| `broadcast_signal(name, vars) -> Vec<Uuid>` | Setzt **alle** wartenden Signal-Catches/-Boundaries fort (ohne Business-Key) und startet die jeweils neueste Definition mit passendem Signal-Start; Fehler einzelner Instanzen werden geloggt, nicht propagiert |
+| Wartezustand | `PendingMessageCatch` mit `kind: CatchKind::Signal` (`#[serde(default)]` = `Message` für Altdaten); `correlate_message` ignoriert Signal-Catches |
+| Throw/End | Signal landet in der `SignalOutbox` und wird nach `run_instance_batch` zugestellt (keine Locks, kein Re-Entry); nur der äußerste Aufrufer liefert aus. Keine Variablen-Weitergabe. Signal-Start, der dasselbe Signal wirft, erzeugt eine Endlosschleife |
+
+### Loops / Multi-Instance (`engine/loops.rs`, X4/X5)
+
+| Item | Detail |
+|------|--------|
+| Entry | `execute_step` → `enter_loop_activity` when a token reaches a node in `def.loops` without a matching `Token.loop_instance` marker. Parallel → `NextAction::MultiInstanceFork` (children registered as active tokens); sequential / standard loop → `Continue` with marker; 0 instances or false `testBefore` → skip to successor |
+| Exit | `execute_step` → `leave_loop_instance` when a marked token is no longer at its activity. Counting happens under one instance write lock; non-final parallel children end via `NextAction::Complete`; the final step continues a merged token (`is_merged`) with outgoing flows evaluated on the final variables |
+| Boundary | Boundary paths call `interrupt_loop_activity` before moving on (message/signal, timer, service-task `bpmnError`); call-activity errors stop at the boundary node and are caught in the exit hook. Remaining children: wait states, user/service tasks and tokens are removed (child processes of call activities keep running) |
+| Variables | `loopCounter`, `nrOfInstances`, `nrOfCompletedInstances`, `nrOfActiveInstances`, element and output element are local (previous values restored). Expressions accept `${…}` |
 
 ### Retry queue (internal)
 

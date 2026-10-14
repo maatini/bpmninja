@@ -137,6 +137,7 @@ impl WorkflowEngine {
         token: &mut Token,
         current_id: &str,
         message_name: &str,
+        kind: crate::runtime::CatchKind,
     ) -> EngineResult<NextAction> {
         let pending = PendingMessageCatch {
             id: Uuid::new_v4(),
@@ -144,6 +145,7 @@ impl WorkflowEngine {
             node_id: current_id.to_string(),
             message_name: message_name.to_string(),
             token_id: token.id,
+            kind,
         };
         let inst_arc = self
             .instances
@@ -154,7 +156,7 @@ impl WorkflowEngine {
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(
-            "✉️ Message catch event '{current_id}' waiting for '{message_name}'"
+            "✉️ {kind:?} catch event '{current_id}' waiting for '{message_name}'"
         ));
         Ok(NextAction::WaitForMessage(pending))
     }

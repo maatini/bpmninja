@@ -183,6 +183,8 @@ impl WorkflowEngine {
 
             // Clean up orphaned tasks outside the instance lock
             if !is_non_interrupting {
+                self.interrupt_loop_activity(timer.instance_id, &mut token, &def, &timer.node_id)
+                    .await;
                 let node_to_cancel = &token.current_node;
 
                 // Remove User Tasks

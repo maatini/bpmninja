@@ -170,6 +170,8 @@ export interface PendingMessageCatch {
   node_id: string;
   message_name: string;
   token_id: string;
+  /** Absent on engines older than signal support (X1). */
+  kind?: 'Message' | 'Signal';
 }
 
 export interface LogEntry {

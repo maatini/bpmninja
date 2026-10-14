@@ -163,6 +163,18 @@ impl WorkflowEngine {
                             node_id: target_node.clone(),
                             message_name: message_name.clone(),
                             token_id: token.id,
+                            kind: crate::runtime::CatchKind::Message,
+                        };
+                        actions.push(NextAction::WaitForMessage(pending));
+                    }
+                    BpmnElement::SignalCatchEvent { signal_name } => {
+                        let pending = PendingMessageCatch {
+                            id: Uuid::new_v4(),
+                            instance_id,
+                            node_id: target_node.clone(),
+                            message_name: signal_name.clone(),
+                            token_id: token.id,
+                            kind: crate::runtime::CatchKind::Signal,
                         };
                         actions.push(NextAction::WaitForMessage(pending));
                     }
