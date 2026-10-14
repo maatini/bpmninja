@@ -1,7 +1,8 @@
 # X11 — Data defaults and activity mappings
 
-Status: approved by the user (GO), 2026-10-14. Implementation and validation
-are tracked in `improvements.md`; supported semantics are in [data-mappings.md](data-mappings.md).
+Status: implemented and verified within the documented scope, 2026-10-14,
+following the user’s GO. Supported semantics and explicit rejections are in
+[data-mappings.md](data-mappings.md).
 
 ## Scope and behavior
 
@@ -87,3 +88,17 @@ criteria, including modeler support, pass.
 The first implementation step must settle the concrete expression/default
 encoding from existing parser conventions and fixtures, then document it in the
 mapping contract; BPMN data declarations do not inherently specify JSON defaults.
+
+## Verification result (2026-10-14)
+
+- Engine: 313 tests passed, including 15 mapping tests.
+- Parser: 77 tests passed, including 6 X11 parser tests.
+- Root workspace unit/integration tests passed; doctests passed on a serial rerun.
+- REST: 3 mapping tests and 5 deploy/export regression tests passed.
+- NATS: all 14 adapter tests passed against an isolated local JetStream server;
+  the mapping reconnect test also passed after the final token representation change.
+- Modeler: production build and lint passed (lint retains repository warnings);
+  3 X11 Playwright tests passed using installed Microsoft Edge because the
+  configured Playwright Chromium binary was unavailable.
+- Final workspace clippy with warnings denied and formatting check passed.
+- Graphify AST graph refreshed; temporary test server stopped and files removed.

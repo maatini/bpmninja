@@ -105,7 +105,11 @@ impl WorkflowEngine {
             // Restore token into instance so the task is completable again
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
-                inst.state = InstanceState::WaitingOnUserTask { task_id };
+                if let Some(old) = &old_state {
+                    inst.state = old.state.clone();
+                    inst.current_node = old.current_node.clone();
+                    inst.variable_types = old.variable_types.clone();
+                }
                 inst.tokens.insert(original_token.id, original_token);
             }
             self.pending_user_tasks.insert(task_id, pending);

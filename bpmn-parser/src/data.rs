@@ -261,7 +261,10 @@ fn activity(node: &Node, refs: &HashMap<String, String>) -> EngineResult<Activit
     for io in node.children("ioSpecification") {
         for item in &io.children {
             if matches!(item.name.as_str(), "dataInput" | "dataOutput") {
-                if item.attr("isCollection").is_some_and(|value| value != "false" && value != "0") {
+                if item
+                    .attr("isCollection")
+                    .is_some_and(|value| value != "false" && value != "0")
+                {
                     return Err(invalid("collection ioSpecification is not supported"));
                 }
                 let id = item.id()?;

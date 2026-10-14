@@ -475,3 +475,67 @@ async fn missing_input_marks_instance_failed_instead_of_leaving_it_running() {
     );
     assert!(engine.get_pending_service_tasks().is_empty());
 }
+
+#[tokio::test]
+async fn timer_start_paths_seed_mapping_inputs_before_execution() {
+    let engine = Arc::new(WorkflowEngine::new());
+    let mut def = definition(service());
+    def.nodes.insert(
+        "start".into(),
+        BpmnElement::TimerStartEvent(crate::domain::TimerDefinition::Duration(Duration::ZERO)),
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    engine
+        .start_timer_instance(key, HashMap::from([("customerId".into(), json!(9))]))
+        .await
+        .unwrap();
+    let task = lock(&engine).await;
+    assert_eq!(task.variables_snapshot["id"], json!(9));
+    assert_eq!(task.variables_snapshot["_timer_iteration"], json!(1));
+    engine
+        .trigger_timer_start(key, Duration::ZERO)
+        .await
+        .unwrap();
+    let task = lock(&engine).await;
+    assert_eq!(task.variables_snapshot["id"], json!(7));
+}
+
+#[tokio::test]
+async fn failed_user_mapping_preserves_parallel_execution_state() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(BpmnElement::UserTask("user".into()));
+    def.loops.insert(
+        "act".into(),
+        LoopCharacteristics::MultiInstance(MultiInstanceDef {
+            is_sequential: false,
+            loop_cardinality: Some("2".into()),
+            collection: None,
+            element_variable: None,
+            completion_condition: None,
+            output_collection: None,
+            output_element: None,
+        }),
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let tasks = engine.get_pending_user_tasks();
+    let before = engine.get_instance_details(id).await.unwrap().state;
+    assert!(matches!(before, InstanceState::ParallelExecution { .. }));
+    assert!(
+        engine
+            .complete_user_task(tasks[0].task_id, HashMap::new())
+            .await
+            .is_err()
+    );
+    assert_eq!(engine.get_instance_details(id).await.unwrap().state, before);
+    for task in tasks {
+        engine
+            .complete_user_task(task.task_id, HashMap::from([("result".into(), json!(42))]))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().state,
+        InstanceState::Completed
+    );
+}

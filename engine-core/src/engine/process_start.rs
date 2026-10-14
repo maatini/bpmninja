@@ -756,7 +756,7 @@ impl WorkflowEngine {
                 "⏰ Timer instance #{iteration}/{total} started at node '{start_id}' with {} variable(s)",
                 vars.len()
             )],
-            variables: vars,
+            variables: vars.clone(),
             tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
@@ -781,7 +781,7 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::new(start_id);
+        let token = Token::with_variables(start_id, vars);
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 

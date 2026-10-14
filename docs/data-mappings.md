@@ -57,7 +57,7 @@ fail execution instead of silently becoming null.
 
 Inputs apply once per activation before start listeners. They are local to the
 activation, including each loop iteration. Workers receive the effective task
-variables. Process views hide local input names; an input shadowing an existing
+variables. The process variable map hides local input names; an input shadowing an existing
 process variable does not overwrite the process value.
 
 On success, outputs apply before end listeners and outgoing conditions. When
