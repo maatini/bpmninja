@@ -1,3 +1,4 @@
+mod data;
 pub(crate) mod models;
 pub mod parser;
 

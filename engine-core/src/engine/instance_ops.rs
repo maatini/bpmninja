@@ -569,6 +569,7 @@ impl WorkflowEngine {
             variables: token_vars.clone(),
             is_merged: false,
             loop_instance: None,
+            data_scope: None,
         };
 
         // --- 5. Reset instance state ---

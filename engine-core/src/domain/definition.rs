@@ -25,6 +25,13 @@ pub struct ProcessDefinition {
     /// Loop / multi-instance characteristics per activity node (X4/X5).
     #[serde(default)]
     pub loops: HashMap<String, crate::domain::LoopCharacteristics>,
+    /// X11: declarations do not invent values.
+    #[serde(default)]
+    pub data_variables: Vec<String>,
+    #[serde(default)]
+    pub variable_defaults: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub data_mappings: HashMap<String, crate::domain::ActivityMappings>,
     #[serde(skip)]
     compiled_conditions: HashMap<String, crate::condition::CompiledCondition>,
 }
@@ -208,6 +215,9 @@ impl ProcessDefinition {
             event_listeners,
             sub_processes,
             loops: HashMap::new(),
+            data_variables: Vec::new(),
+            variable_defaults: HashMap::new(),
+            data_mappings: HashMap::new(),
             compiled_conditions: HashMap::new(),
         })
     }

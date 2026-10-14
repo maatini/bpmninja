@@ -1,3 +1,5 @@
+pub mod data;
+pub use data::{ActivityMappings, DataMapping, DataScope, MappingValue};
 pub mod definition;
 pub mod element;
 pub mod error;

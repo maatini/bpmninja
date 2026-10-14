@@ -67,6 +67,9 @@ impl WorkflowEngine {
         predetermined_id: Option<Uuid>,
     ) -> EngineResult<Uuid> {
         let (def, start_id) = self.validate_start_request(definition_key)?;
+        let mut initial = def.variable_defaults.clone();
+        initial.extend(variables);
+        variables = initial;
 
         let instance_id = predetermined_id.unwrap_or_else(Uuid::new_v4);
         let business_key = variables

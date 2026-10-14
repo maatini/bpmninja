@@ -14,6 +14,8 @@ pub struct Token {
     /// Set while the token executes one iteration of a loop / multi-instance activity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loop_instance: Option<LoopInstance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_scope: Option<super::DataScope>,
 }
 
 /// Identifies the loop iteration a token is executing (X4/X5).
@@ -24,6 +26,28 @@ pub struct LoopInstance {
 }
 
 impl Token {
+    /// Variables visible outside the current activity.
+    pub fn process_variables(&self) -> HashMap<String, Value> {
+        let mut variables = self.variables.clone();
+        if let Some(scope) = &self.data_scope {
+            for name in &scope.local_names {
+                if let Some(value) = scope.original_variables.get(name) {
+                    variables.insert(name.clone(), value.clone());
+                } else {
+                    variables.remove(name);
+                }
+            }
+        }
+        variables
+    }
+
+    /// Cancellation discards activation writes without success mappings.
+    pub fn discard_data_scope(&mut self) {
+        if let Some(scope) = self.data_scope.take() {
+            self.variables = scope.original_variables;
+        }
+    }
+
     /// Creates a new token positioned at the given node with empty variables.
     pub fn new(start_node: &str) -> Self {
         Self {
@@ -32,6 +56,7 @@ impl Token {
             variables: HashMap::new(),
             is_merged: false,
             loop_instance: None,
+            data_scope: None,
         }
     }
 
@@ -44,6 +69,7 @@ impl Token {
             variables,
             is_merged: false,
             loop_instance: None,
+            data_scope: None,
         }
     }
 }

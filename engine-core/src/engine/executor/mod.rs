@@ -284,6 +284,8 @@ impl WorkflowEngine {
                 .await;
         }
 
+        crate::engine::data_mappings::enter(token, &def_clone, &current_id)?;
+
         let mut start_audits = Vec::new();
         scripting::run_node_scripts(
             &self.scripts,
@@ -300,7 +302,7 @@ impl WorkflowEngine {
             inst.audit_log.append(&mut start_audits);
             // Only sync variables if a script listener potentially modified them
             if def_clone.listeners.contains_key(&current_id) {
-                inst.variables = token.variables.clone();
+                inst.variables = token.process_variables();
             }
         }
 

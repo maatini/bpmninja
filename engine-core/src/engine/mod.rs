@@ -22,6 +22,7 @@ use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
 mod definition_ops;
+pub(crate) mod data_mappings;
 pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;

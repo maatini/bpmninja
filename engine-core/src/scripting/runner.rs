@@ -318,11 +318,13 @@ pub async fn run_end_scripts(
     instance_audit_log: &mut Vec<String>,
     instance_variables: &mut HashMap<String, Value>,
 ) -> EngineResult<()> {
+    let mut candidate = token.clone();
+    crate::engine::data_mappings::leave(&mut candidate, def, node_id)?;
     let mut end_audits = Vec::new();
     run_node_scripts(
         runner,
         instance_id,
-        token,
+        &mut candidate,
         def,
         node_id,
         ListenerEvent::End,
@@ -330,6 +332,7 @@ pub async fn run_end_scripts(
     )
     .await?;
     instance_audit_log.append(&mut end_audits);
-    *instance_variables = token.variables.clone();
+    *token = candidate;
+    *instance_variables = token.process_variables();
     Ok(())
 }

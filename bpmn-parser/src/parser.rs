@@ -844,7 +844,9 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         )?;
     }
 
-    builder.build()
+    let mut definition = builder.build()?;
+    crate::data::apply(xml, &mut definition)?;
+    Ok(definition)
 }
 
 /// X3: link events are go-to markers inside one scope (process or
