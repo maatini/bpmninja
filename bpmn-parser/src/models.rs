@@ -316,6 +316,9 @@ pub(crate) struct BpmnReceiveTask {
     pub name: Option<String>,
     #[serde(rename = "@messageRef", default)]
     pub message_ref: Option<String>,
+    /// X13: an instantiating receive task starts the process (message start).
+    #[serde(rename = "@instantiate", default)]
+    pub instantiate: Option<bool>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]

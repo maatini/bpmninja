@@ -257,7 +257,7 @@ Neu bekannt (nicht behoben): `run_end_scripts` hält den Instanz-Write-Lock wäh
 | X10 | Multiple / Parallel-Multiple Events (mehrere Event-Definitionen an einem Event) | Low | Medium | Low | Selten, aber Teil der Spezifikation. |
 | X11 | Daten: `dataObject`/`property` als Prozessvariablen mit Defaults, Data Input/Output Associations, `ioSpecification`, Camunda `inputOutput`-Mappings für Tasks und Call Activities | High | Medium | Medium | Heute nur ein globaler Variablen-Scope; Mappings sind für Camunda-Kompatibilität wichtig. |
 | X12 | Kollaboration: mehrere Pools (jeder ausführbare Prozess wird deployt), Message Flows zwischen Pools → engine-interne Zustellung | Medium | Medium | Medium | Heute wird nur der erste Prozess deployt. |
-| X13 | Instanziierende Receive Task, Event-based Gateway mit `instantiate` und Typ `Parallel` | Low | Low | Low | Kleine Lücken im Gateway-/Task-Mapping. |
+| X13 (✅ teilweise) | Instanziierende Receive Task, Event-based Gateway mit `instantiate` und Typ `Parallel` | Low | Low | Low | Kleine Lücken im Gateway-/Task-Mapping. **Erledigt (2026-10-13):** instanziierende Receive Task wird beim Parsen zum `MessageStartEvent` (ohne eingehende Flows, nicht im Sub-Prozess); Parser- und REST-E2E-Test. **Offen:** instanziierender exklusiver Event-Gateway braucht mehrere Message-Starts pro Definition (engine-core: Validierung, `start_event()`, Start am passenden Knoten); paralleler Event-Gateway braucht zusätzlich Korrelationsschlüssel → eigene Design-Entscheidung. Beide werden weiterhin beim Deploy abgelehnt. |
 | X14 | Business Rule Task mit DMN-Entscheidungstabellen (eigener DMN-1.x-Evaluator mit FEEL-Teilmenge) | Medium | High | Medium | Hängt mit S4 (FEEL) zusammen; heute nur als Service Task. |
 | X15 | Swimlanes & Artefakte: Pools/Lanes, Groups, Text Annotations, Associations, Data Stores werden akzeptiert, beim Export erhalten, im Modeler angezeigt; optional Lane → Kandidatengruppe für User Tasks | Low–Med | Low | Low | Nicht ausführungsrelevant, darf aber nicht verloren gehen. |
 | X16 | User-Task-Details: `candidateUsers`/`candidateGroups`, Fälligkeit, Priorität, `formKey`; Claim/Unclaim-API | Medium | Medium | Low | Camunda-Kompatibilität für Task-Listen. |
@@ -318,7 +318,7 @@ Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktiv
 
 1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ → ~~P2, P6~~ ✅ 2026-10-12 → ~~P7~~ ✅ 2026-10-12 → ~~P8~~ ✅ (opt-in) → P9–P10
 2. **Aus der Bewertung** (unabhängig, hoher Nutzen): ~~V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler)~~ ✅; B1/K2/Q1 nach Entscheidung
-2b. **4f BPMN-Vollabdeckung**: X0 (✅ teilweise) + V1 ✅ → ~~X3~~ ✅, X13, X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
+2b. **4f BPMN-Vollabdeckung**: X0 (✅ teilweise) + V1 ✅ → ~~X3~~ ✅, X13 (✅ teilweise), X15 → X1 → X4 + X5 → X11 → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
 3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
 4. **4c**: N1 → N3 → N2, N4–N6
 5. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8

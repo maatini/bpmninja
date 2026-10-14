@@ -1655,3 +1655,81 @@ fn x3_rejects_link_cycle_without_activities() {
     );
     assert!(err.contains("form a cycle"), "{err}");
 }
+
+// --- X13: instantiating receive task = message start -------------------------
+
+#[test]
+fn x13_instantiating_receive_task_becomes_message_start() {
+    let xml = process_xml(
+        r#"<receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+           <userTask id="work"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="rcv" targetRef="work"/>
+           <sequenceFlow id="f2" sourceRef="work" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.start_event(),
+        Some(("rcv", BpmnElement::MessageStartEvent { message_name })) if message_name == "m"
+    ));
+}
+
+#[test]
+fn x13_non_instantiating_receive_task_stays_message_catch() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><receiveTask id="rcv" messageRef="msg"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="rcv"/>
+           <sequenceFlow id="f2" sourceRef="rcv" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("rcv"),
+        Some(BpmnElement::MessageCatchEvent { message_name }) if message_name == "m"
+    ));
+}
+
+#[test]
+fn x13_rejects_instantiating_receive_task_with_incoming_flow() {
+    let err = rejection(
+        r#"<startEvent id="s"/><receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="rcv"/>
+           <sequenceFlow id="f2" sourceRef="rcv" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("must not have incoming sequence flows"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x13_rejects_instantiating_receive_task_inside_sub_process() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/><receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+             <endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="sp_e"/>
+             <sequenceFlow id="b" sourceRef="rcv" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("instantiating receiveTask 'rcv' inside a sub-process"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x13_still_rejects_instantiating_and_parallel_event_gateways() {
+    let err = rejection(
+        r#"<eventBasedGateway id="gw" instantiate="true"/>
+           <intermediateCatchEvent id="c"><messageEventDefinition messageRef="msg"/></intermediateCatchEvent>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="gw" targetRef="c"/><sequenceFlow id="f2" sourceRef="c" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("instantiating or parallel eventBasedGateway 'gw'"),
+        "{err}"
+    );
+}

@@ -36,7 +36,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Service Task | ✅ | External task (fetch-and-lock); topic from `data-topic` / `camunda:topic` |
 | Script Task | ✅ | Rhai |
 | Send Task | ✅ | Throws a message, continues |
-| Receive Task | ✅ | As message catch; `instantiate="true"` ❌ [X13] |
+| Receive Task | ✅ | As message catch; `instantiate="true"` ✅ as message start (no incoming flows, top-level process only) |
 | Manual Task | ✅ | As user task |
 | Business Rule Task | ✅ / ❌ | With topic → external task; without topic ❌ (no DMN) [X14] |
 | Task (abstract) | ❌ | Use a concrete task type |

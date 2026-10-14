@@ -495,7 +495,22 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 node_id
             )));
         };
-        builder = builder.node(task.id, BpmnElement::MessageCatchEvent { message_name });
+        // X13: an instantiating receive task is the process's message start.
+        let element = if task.instantiate == Some(true) {
+            if process
+                .sequence_flows
+                .iter()
+                .any(|f| f.target_ref == node_id)
+            {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "instantiating receiveTask '{node_id}' must not have incoming sequence flows"
+                )));
+            }
+            BpmnElement::MessageStartEvent { message_name }
+        } else {
+            BpmnElement::MessageCatchEvent { message_name }
+        };
+        builder = builder.node(task.id, element);
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
@@ -956,8 +971,13 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
             } else if name == "subProcess" && attr(e, "triggeredByEvent").as_deref() == Some("true")
             {
                 violations.push(format!("event sub-process '{at}'"));
-            } else if name == "receiveTask" && attr(e, "instantiate").as_deref() == Some("true") {
-                violations.push(format!("instantiating receiveTask '{at}'"));
+            } else if name == "receiveTask"
+                && attr(e, "instantiate").as_deref() == Some("true")
+                && stack.iter().any(|(kind, _, _)| kind == "subProcess")
+            {
+                violations.push(format!(
+                    "instantiating receiveTask '{at}' inside a sub-process"
+                ));
             } else if name == "eventBasedGateway"
                 && (attr(e, "instantiate").as_deref() == Some("true")
                     || attr(e, "eventGatewayType").as_deref() == Some("Parallel"))
