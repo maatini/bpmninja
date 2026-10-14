@@ -292,23 +292,16 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut instance = instance_arc.write().await;
             for token in instance.tokens.values_mut() {
-                for (key, value) in &updates {
-                    if let Some(scope) = &mut token.data_scope {
-                        if value.is_null() {
-                            scope.original_variables.remove(key);
-                        } else {
-                            scope.original_variables.insert(key.clone(), value.clone());
-                        }
-                        if scope.local_names.contains(key) {
-                            continue;
-                        }
-                    }
-                    if value.is_null() {
-                        token.variables.remove(key);
-                    } else {
-                        token.variables.insert(key.clone(), value.clone());
-                    }
-                }
+                token.apply_process_updates(&updates);
+            }
+            for call in instance.outstanding_calls.values_mut() {
+                call.token.apply_process_updates(&updates);
+            }
+            for active in &mut instance.active_tokens {
+                active.token.apply_process_updates(&updates);
+            }
+            if let InstanceState::WaitingOnCallActivity { token, .. } = &mut instance.state {
+                token.apply_process_updates(&updates);
             }
         }
 

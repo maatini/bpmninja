@@ -15,7 +15,7 @@ pub struct Token {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loop_instance: Option<LoopInstance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_scope: Option<super::DataScope>,
+    pub data_scope: Option<Box<super::DataScope>>,
 }
 
 /// Identifies the loop iteration a token is executing (X4/X5).
@@ -39,6 +39,26 @@ impl Token {
             }
         }
         variables
+    }
+
+    pub(crate) fn apply_process_updates(&mut self, updates: &HashMap<String, Value>) {
+        for (key, value) in updates {
+            if let Some(scope) = &mut self.data_scope {
+                if value.is_null() {
+                    scope.original_variables.remove(key);
+                } else {
+                    scope.original_variables.insert(key.clone(), value.clone());
+                }
+                if scope.local_names.contains(key) {
+                    continue;
+                }
+            }
+            if value.is_null() {
+                self.variables.remove(key);
+            } else {
+                self.variables.insert(key.clone(), value.clone());
+            }
+        }
     }
 
     /// Cancellation discards activation writes without success mappings.

@@ -213,14 +213,39 @@ async fn task_dto(
 ) -> Result<Value, CamundaError> {
     let instance = state.engine.get_instance_details(task.instance_id).await?;
     let definition = state.engine.get_definition(&task.definition_key).await;
-    let variables: HashMap<String, Value> = instance
-        .variables
+    let token = instance
+        .tokens
+        .get(&task.token_id)
+        .filter(|token| token.data_scope.is_some());
+    let effective_variables = token
+        .map(|token| &token.variables)
+        .unwrap_or(&instance.variables);
+    let mut type_hints = instance.variable_types.clone();
+    if token.is_some()
+        && let Some(mappings) = definition
+            .as_ref()
+            .and_then(|def| def.data_mappings.get(&task.node_id))
+    {
+        for mapping in &mappings.inputs {
+            let hint = match &mapping.value {
+                engine_core::domain::MappingValue::Variable(source) => {
+                    instance.variable_types.get(source).cloned()
+                }
+                _ => None,
+            };
+            type_hints.remove(&mapping.target);
+            if let Some(hint) = hint {
+                type_hints.insert(mapping.target.clone(), hint);
+            }
+        }
+    }
+    let variables: HashMap<String, Value> = effective_variables
         .iter()
         .filter(|(name, _)| selected.is_none_or(|names| names.contains(*name)))
         .map(|(name, value)| {
             (
                 name.clone(),
-                encode_variable(value, instance.variable_types.get(name).map(String::as_str)),
+                encode_variable(value, type_hints.get(name).map(String::as_str)),
             )
         })
         .collect();

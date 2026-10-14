@@ -97,6 +97,8 @@ For full local verification, run the root checks plus module-specific checks fro
 
 ## Supported BPMN Elements
 
+See the [element matrix](docs/knowledge-base/modules/bpmn-parser/element-matrix.md) for supported and rejected forms. [Data defaults and mappings](docs/data-mappings.md) covers task-local inputs, successful outputs, standard data associations, and explicit Call Activity transfers.
+
 ### Basic Elements
 
 | BPMN | Element | Description |

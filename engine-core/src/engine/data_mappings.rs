@@ -14,11 +14,11 @@ pub(crate) fn enter(token: &mut Token, def: &ProcessDefinition, node: &str) -> E
     }
     if let Some(mappings) = def.data_mappings.get(node) {
         let inputs = evaluate_mappings(&mappings.inputs, &token.variables)?;
-        token.data_scope = Some(DataScope {
+        token.data_scope = Some(Box::new(DataScope {
             node_id: node.to_string(),
             original_variables: token.variables.clone(),
             local_names: inputs.keys().cloned().collect(),
-        });
+        }));
         token.variables.extend(inputs);
     }
     Ok(())
@@ -32,10 +32,11 @@ pub(crate) fn leave(token: &mut Token, def: &ProcessDefinition, node: &str) -> E
     if scope.node_id != node {
         return Ok(());
     }
-    let mappings = def
-        .data_mappings
-        .get(node)
-        .expect("activation mapping exists");
+    let mappings = def.data_mappings.get(node).ok_or_else(|| {
+        crate::domain::EngineError::DataMappingError(format!(
+            "mapping for active node '{node}' is missing"
+        ))
+    })?;
     let outputs = evaluate_mappings(&mappings.outputs, &token.variables)?;
     let mut variables = if mappings.outputs.is_empty() {
         token.process_variables()

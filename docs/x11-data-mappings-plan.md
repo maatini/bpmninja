@@ -1,7 +1,7 @@
 # X11 — Data defaults and activity mappings
 
-Status: proposed for approval, 2026-10-14. Next item after X4/X5 in
-`improvements.md`. This plan does not mark X11 implemented.
+Status: approved by the user (GO), 2026-10-14. Implementation and validation
+are tracked in `improvements.md`; supported semantics are in [data-mappings.md](data-mappings.md).
 
 ## Scope and behavior
 

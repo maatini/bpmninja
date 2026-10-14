@@ -64,6 +64,31 @@ function valueProperties(moddle: any, value: MappingValue): any {
   return { definition };
 }
 
+function validateActivity(value: string) {
+  try { parseMappingEditor(value); return undefined; } catch (error) { return (error as Error).message; }
+}
+function validateTransfer(value: string) {
+  const error = validateActivity(value);
+  if (error) return error;
+  if (Object.values(parseMappingEditor(value)).some(item => typeof item !== 'string' || !/^[#$]\{[\p{L}\p{N}_-]+\}$/u.test(item.trim()))) return 'Call transfers require ${variable} values.';
+  return undefined;
+}
+function validateDefaults(value: string) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'Enter a JSON object of process variable defaults.';
+    if (Object.keys(parsed).some(name => !name.trim())) return 'A variable name cannot be empty.';
+    return undefined;
+  } catch { return 'Enter valid JSON.'; }
+}
+function validateJson(value: string) {
+  try { if (value) JSON.parse(value); return undefined; } catch { return 'Enter valid JSON.'; }
+}
+function ActivityInputEditor(props: any) { return MappingEditor({ ...props, direction: 'input', transfer: false }); }
+function ActivityOutputEditor(props: any) { return MappingEditor({ ...props, direction: 'output', transfer: false }); }
+function ChildInputEditor(props: any) { return MappingEditor({ ...props, direction: 'input', transfer: true }); }
+function ChildOutputEditor(props: any) { return MappingEditor({ ...props, direction: 'output', transfer: true }); }
+
 function MappingEditor(props: any) {
   const { element, id, direction, transfer } = props;
   const modeling = useService('modeling');
@@ -84,15 +109,7 @@ function MappingEditor(props: any) {
       return '';
     }
   };
-  const validate = (value: string) => {
-    try {
-      const mappings = parseMappingEditor(value);
-      if (transfer && Object.values(mappings).some(item => typeof item !== 'string' || !/^[#$]\{[\p{L}\p{N}_-]+\}$/u.test(item.trim()))) {
-        return 'Call transfers require ${variable} values.';
-      }
-      return undefined;
-    } catch (error) { return (error as Error).message; }
-  };
+  const validate = transfer ? validateTransfer : validateActivity;
   const setValue = (value: string) => {
     if (validate(value)) return;
     const mappings = parseMappingEditor(value);
@@ -153,14 +170,7 @@ function DefaultsEditor(props: any) {
     }
     return JSON.stringify(values, null, 2);
   };
-  const validate = (value: string) => {
-    try {
-      const parsed = JSON.parse(value || '{}');
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'Enter a JSON object of process variable defaults.';
-      if (Object.keys(parsed).some(name => !name.trim())) return 'A variable name cannot be empty.';
-      return undefined;
-    } catch { return 'Enter valid JSON.'; }
-  };
+  const validate = validateDefaults;
   const setValue = (value: string) => {
     if (validate(value)) return;
     const defaults: Record<string, unknown> = JSON.parse(value || '{}');
@@ -170,11 +180,12 @@ function DefaultsEditor(props: any) {
       if (!remaining.has(name) && old.get('bpmninja:default') === undefined) return old;
       const property = moddle.create('bpmn:Property');
       for (const descriptor of old.$descriptor.properties) {
-        if (descriptor.name !== 'bpmninja:default' && !descriptor.isVirtual && old.get(descriptor.name) !== undefined) {
+        if (descriptor.name !== 'bpmninja:default' && descriptor.name !== 'default' && !descriptor.isVirtual && old.get(descriptor.name) !== undefined) {
           property.set(descriptor.name, old.get(descriptor.name));
         }
       }
-      property.$attrs = { ...old.$attrs };
+      Object.assign(property.$attrs, old.$attrs || {});
+      delete property.$attrs["bpmninja:default"];
       property.$parent = bo;
       if (remaining.has(name)) {
         property.set('bpmninja:default', JSON.stringify(defaults[name]));
@@ -202,7 +213,7 @@ function ObjectDefaultEditor(props: any) {
     element, id, label: 'Data object default (JSON)',
     description: 'Leave empty for a declaration without a value.',
     getValue: () => object.get('bpmninja:default') || '',
-    validate: (value: string) => { try { if (value) JSON.parse(value); return undefined; } catch { return 'Enter valid JSON.'; } },
+    validate: validateJson,
     setValue: (value: string) => {
       try { if (value) JSON.parse(value); } catch { return; }
       modeling.updateModdleProperties(element, object, { 'bpmninja:default': value || undefined });
@@ -216,23 +227,23 @@ export class DataMappingsPropertiesProvider {
   getGroups(element: any) {
     return (groups: any[]) => {
       if (is(element, 'bpmn:Process')) {
-        groups.push({ id: 'processData', label: 'Process data', entries: [{ id: 'process-data-defaults', element, component: DefaultsEditor, isEdited: isTextAreaEntryEdited }] });
+        groups.push({ id: 'processData', label: 'Process data', shouldOpen: true, entries: [{ id: 'process-data-defaults', element, component: DefaultsEditor, isEdited: isTextAreaEntryEdited }] });
         return groups;
       }
       if (is(element, 'bpmn:DataObject') || is(element, 'bpmn:DataObjectReference')) {
-        groups.push({ id: 'objectData', label: 'Process data', entries: [{ id: 'data-object-default', element, component: ObjectDefaultEditor, isEdited: isTextAreaEntryEdited }] });
+        groups.push({ id: 'objectData', label: 'Process data', shouldOpen: true, entries: [{ id: 'data-object-default', element, component: ObjectDefaultEditor, isEdited: isTextAreaEntryEdited }] });
         return groups;
       }
       if (!is(element, 'bpmn:Task') && !is(element, 'bpmn:CallActivity')) return groups;
       // Receive tasks execute as catch events and cannot have activation mappings yet.
       if (is(element, 'bpmn:ReceiveTask')) return groups;
       const entries = ['input', 'output'].map(direction => ({
-        id: 'data-' + direction, element, component: (props: any) => MappingEditor({ ...props, direction, transfer: false }), isEdited: isTextAreaEntryEdited
+        id: 'data-' + direction, element, component: direction === 'input' ? ActivityInputEditor : ActivityOutputEditor, isEdited: isTextAreaEntryEdited
       }));
       if (is(element, 'bpmn:CallActivity')) for (const direction of ['input', 'output']) entries.push({
-        id: 'call-data-' + direction, element, component: (props: any) => MappingEditor({ ...props, direction, transfer: true }), isEdited: isTextAreaEntryEdited
+        id: 'call-data-' + direction, element, component: direction === 'input' ? ChildInputEditor : ChildOutputEditor, isEdited: isTextAreaEntryEdited
       });
-      groups.push({ id: 'dataMappings', label: 'Data mappings', entries });
+      groups.push({ id: 'dataMappings', label: 'Data mappings', shouldOpen: true, entries });
       return groups;
     };
   }

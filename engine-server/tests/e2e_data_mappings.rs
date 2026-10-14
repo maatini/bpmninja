@@ -61,7 +61,13 @@ async fn x11_rest_defaults_output_failure_retry_and_restart() {
     let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
     let (base, server) = serve(engine.clone(), persistence.clone()).await;
     let client = reqwest::Client::new();
-    let key = post(&client, &base, "/api/deploy", json!({"xml":MAPPED})).await["definition_key"]
+    let key = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":MAPPED, "name":"data"}),
+    )
+    .await["definition_key"]
         .as_str()
         .unwrap()
         .to_string();
@@ -140,11 +146,23 @@ async fn x11_rest_call_activity_mappings_and_invalid_deploy() {
             "<scriptTask id=\"work\" scriptFormat=\"rhai\"><script>let result = id * 2;</script>",
         )
         .replace("</serviceTask>", "</scriptTask>");
-    post(&client, &base, "/api/deploy", json!({"xml":child})).await;
+    post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":child, "name":"child"}),
+    )
+    .await;
     let parent = MAPPED.replace("<serviceTask id=\"work\" camunda:topic=\"mapped\">", "<callActivity id=\"work\" calledElement=\"child\">")
         .replace("</serviceTask>", "</callActivity>")
         .replace("</camunda:inputOutput>", "</camunda:inputOutput><camunda:in source=\"id\" target=\"childId\"/><camunda:out source=\"receipt\" target=\"result\"/>");
-    let key = post(&client, &base, "/api/deploy", json!({"xml":parent})).await["definition_key"]
+    let key = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":parent, "name":"data"}),
+    )
+    .await["definition_key"]
         .as_str()
         .unwrap()
         .to_string();
@@ -166,10 +184,57 @@ async fn x11_rest_call_activity_mappings_and_invalid_deploy() {
     assert!(details["variables"].get("childId").is_none());
     let res = client
         .post(format!("{base}/api/deploy"))
-        .json(&json!({"xml":MAPPED.replace("${customerId}", "${customerId + 1}")}))
+        .json(
+            &json!({"name":"invalid", "xml":MAPPED.replace("${customerId}", "${customerId + 1}")}),
+        )
         .send()
         .await
         .unwrap();
     assert_eq!(res.status(), 400);
+    server.abort();
+}
+
+#[tokio::test]
+async fn x11_camunda_worker_receives_local_inputs_and_completes_mapped_outputs() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    let (base, server) = serve(engine, persistence).await;
+    let client = reqwest::Client::new();
+    let key = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":MAPPED,"name":"data"}),
+    )
+    .await["definition_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let id = post(&client, &base, "/api/start", json!({"definition_key":key})).await["instance_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let tasks = post(&client, &base, "/engine-rest/external-task/fetchAndLock", json!({"workerId":"worker","maxTasks":1,"topics":[{"topicName":"mapped","lockDuration":60000,"variables":["id"]}]})).await;
+    assert_eq!(tasks[0]["variables"]["id"]["value"], 7);
+    assert_eq!(tasks[0]["variables"]["id"]["type"], "Integer");
+    assert!(tasks[0]["variables"].get("customerId").is_none());
+    let task = tasks[0]["id"].as_str().unwrap();
+    let res = client
+        .post(format!("{base}/engine-rest/external-task/{task}/complete"))
+        .json(&json!({"workerId":"worker","variables":{"result":{"value":42,"type":"Integer"}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+    let inst: Value = client
+        .get(format!("{base}/api/instances/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(inst["variables"]["receipt"], 42);
+    assert!(inst["variables"].get("id").is_none());
     server.abort();
 }

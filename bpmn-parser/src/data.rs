@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 struct Node {
     name: String,
     attrs: HashMap<String, String>,
+    namespaces: HashMap<String, String>,
     text: String,
     children: Vec<Node>,
 }
@@ -38,6 +39,7 @@ fn tree(xml: &str) -> EngineResult<Node> {
             Event::Start(e) => {
                 let mut node = Node {
                     name: e.local_name().as_ref().to_string(),
+                    namespaces: stack.last().unwrap().namespaces.clone(),
                     ..Default::default()
                 };
                 for attr in e.attributes() {
@@ -49,6 +51,25 @@ fn tree(xml: &str) -> EngineResult<Node> {
                         .map_err(|e| invalid(e.to_string()))?
                         .into_owned();
                     node.attrs.insert(name, value);
+                }
+                for (name, value) in &node.attrs {
+                    if let Some(prefix) = name.strip_prefix("xmlns:") {
+                        node.namespaces.insert(prefix.into(), value.clone());
+                    }
+                }
+                let default = node.attrs.iter().find_map(|(name, value)| {
+                    let (prefix, local) = name.split_once(':')?;
+                    (local == "default"
+                        && node
+                            .namespaces
+                            .get(prefix)
+                            .is_some_and(|uri| uri == "https://bpmninja.dev/schema/bpmn"))
+                    .then(|| value.clone())
+                });
+                // Normalize by namespace URI, independent of the document's prefix.
+                node.attrs.remove("bpmninja:default");
+                if let Some(default) = default {
+                    node.attrs.insert("bpmninja:default".into(), default);
                 }
                 stack.push(node);
             }
@@ -108,26 +129,53 @@ fn expression(text: &str) -> EngineResult<MappingValue> {
 fn value(node: &Node) -> EngineResult<MappingValue> {
     match node.name.as_str() {
         "list" => {
-            if !node.text.trim().is_empty() || node.children.iter().any(|n| !matches!(n.name.as_str(), "value" | "list" | "map")) {
+            if !node.text.trim().is_empty()
+                || node
+                    .children
+                    .iter()
+                    .any(|n| !matches!(n.name.as_str(), "value" | "list" | "map"))
+            {
                 return Err(invalid("list accepts values, lists, or maps only"));
             }
-            Ok(MappingValue::List(node.children.iter().map(value).collect::<EngineResult<_>>()?))
+            Ok(MappingValue::List(
+                node.children
+                    .iter()
+                    .map(value)
+                    .collect::<EngineResult<_>>()?,
+            ))
         }
         "map" => {
-            if !node.text.trim().is_empty() { return Err(invalid("map cannot contain literal text")); }
+            if !node.text.trim().is_empty() {
+                return Err(invalid("map cannot contain literal text"));
+            }
             let mut values = HashMap::new();
             for entry in &node.children {
-                if entry.name != "entry" { return Err(invalid("map accepts entry children only")); }
-                let key = entry.attr("key").ok_or_else(|| invalid("map entry requires key"))?;
-                if values.insert(key.into(), value(entry)?).is_some() { return Err(invalid("duplicate map key")); }
+                if entry.name != "entry" {
+                    return Err(invalid("map accepts entry children only"));
+                }
+                let key = entry
+                    .attr("key")
+                    .ok_or_else(|| invalid("map entry requires key"))?;
+                if values.insert(key.into(), value(entry)?).is_some() {
+                    return Err(invalid("duplicate map key"));
+                }
             }
             Ok(MappingValue::Map(values))
         }
         _ => {
-            if node.children.is_empty() { return expression(&node.text); }
-            if !node.text.trim().is_empty() || node.children.len() != 1 { return Err(invalid("parameter requires one value")); }
+            if node.children.is_empty() {
+                return expression(&node.text);
+            }
+            if !node.text.trim().is_empty() || node.children.len() != 1 {
+                return Err(invalid("parameter requires one value"));
+            }
             let child = &node.children[0];
-            if !matches!(child.name.as_str(), "list" | "map") { return Err(invalid(format!("unsupported parameter value '{}'", child.name))); }
+            if !matches!(child.name.as_str(), "list" | "map") {
+                return Err(invalid(format!(
+                    "unsupported parameter value '{}'",
+                    child.name
+                )));
+            }
             value(child)
         }
     }
@@ -213,7 +261,7 @@ fn activity(node: &Node, refs: &HashMap<String, String>) -> EngineResult<Activit
     for io in node.children("ioSpecification") {
         for item in &io.children {
             if matches!(item.name.as_str(), "dataInput" | "dataOutput") {
-                if item.attr("isCollection") == Some("true") {
+                if item.attr("isCollection").is_some_and(|value| value != "false" && value != "0") {
                     return Err(invalid("collection ioSpecification is not supported"));
                 }
                 let id = item.id()?;
@@ -235,6 +283,24 @@ fn activity(node: &Node, refs: &HashMap<String, String>) -> EngineResult<Activit
                     "unsupported ioSpecification child '{}'",
                     item.name
                 )));
+            }
+        }
+        for set in io
+            .children
+            .iter()
+            .filter(|n| matches!(n.name.as_str(), "inputSet" | "outputSet"))
+        {
+            let (kind, refs) = if set.name == "inputSet" {
+                ("dataInputRefs", &inputs)
+            } else {
+                ("dataOutputRefs", &outputs)
+            };
+            for reference in &set.children {
+                if reference.name != kind || !refs.contains_key(reference.text.trim()) {
+                    return Err(invalid(
+                        "unsupported or dangling inputSet/outputSet reference",
+                    ));
+                }
             }
         }
     }

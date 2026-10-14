@@ -333,3 +333,145 @@ fn mapping_phases_use_one_snapshot_and_fail_atomically() {
     assert!(evaluate_mappings(&[mapping("a", "b"), mapping("b", "missing")], &vars).is_err());
     assert_eq!(vars["a"], json!(1));
 }
+
+#[tokio::test]
+async fn pending_call_mapping_state_survives_restart() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let child = ProcessDefinitionBuilder::new("waiting_child")
+        .node("start", BpmnElement::StartEvent)
+        .node("work", BpmnElement::UserTask("user".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "work")
+        .flow("work", "end")
+        .build()
+        .unwrap();
+    engine.deploy_definition(child).await;
+    let mut parent = definition(BpmnElement::CallActivity {
+        called_element: "waiting_child".into(),
+    });
+    let mappings = parent.data_mappings.get_mut("act").unwrap();
+    mappings.call_inputs = Some(vec![mapping("childId", "id")]);
+    mappings.call_outputs = Some(vec![mapping("result", "answer")]);
+    let (key, _) = engine.deploy_definition(parent).await;
+    let id = engine.start_instance(key).await.unwrap();
+    assert_eq!(
+        engine
+            .get_instance_details(id)
+            .await
+            .unwrap()
+            .outstanding_calls
+            .len(),
+        1
+    );
+    engine
+        .update_instance_variables(id, HashMap::from([("customerId".into(), json!(99))]))
+        .await
+        .unwrap();
+    drop(engine);
+    let restored = WorkflowEngine::new().with_persistence(persistence.clone());
+    for def in persistence.list_definitions().await.unwrap() {
+        restored.deploy_definition(def).await;
+    }
+    for inst in persistence.list_instances().await.unwrap() {
+        restored
+            .restore_instance(serde_json::from_value(serde_json::to_value(inst).unwrap()).unwrap())
+            .await;
+    }
+    for task in persistence.list_user_tasks().await.unwrap() {
+        restored.restore_user_task(task);
+    }
+    let task = restored.get_pending_user_tasks().remove(0);
+    restored
+        .complete_user_task(task.task_id, HashMap::from([("answer".into(), json!(42))]))
+        .await
+        .unwrap();
+    let inst = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert_eq!(inst.variables["receipt"], json!(42));
+    assert_eq!(inst.variables["customerId"], json!(99));
+    assert!(!inst.variables.contains_key("id"));
+}
+
+#[tokio::test]
+async fn failed_child_never_evaluates_success_outputs() {
+    let engine = WorkflowEngine::new();
+    let child = ProcessDefinitionBuilder::new("failed_child")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "fail",
+            BpmnElement::ErrorEndEvent {
+                error_code: "FAIL".into(),
+            },
+        )
+        .flow("start", "fail")
+        .build()
+        .unwrap();
+    engine.deploy_definition(child).await;
+    let mut parent = definition(BpmnElement::CallActivity {
+        called_element: "failed_child".into(),
+    });
+    parent.nodes.insert(
+        "boundary".into(),
+        BpmnElement::BoundaryErrorEvent {
+            attached_to: "act".into(),
+            error_code: None,
+        },
+    );
+    parent.flows.insert(
+        "boundary".into(),
+        vec![crate::domain::SequenceFlow {
+            target: "end".into(),
+            condition: None,
+        }],
+    );
+    let (key, _) = engine.deploy_definition(parent).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let inst = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert!(!inst.variables.contains_key("receipt"));
+    assert!(!inst.variables.contains_key("id"));
+}
+
+#[tokio::test]
+async fn standard_loop_reapplies_inputs_for_each_new_activation() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(BpmnElement::ScriptTask {
+        script: "let result = id + 1;".into(),
+        multi_instance: None,
+    });
+    def.variable_defaults.insert("receipt".into(), json!(0));
+    def.data_mappings.get_mut("act").unwrap().inputs = vec![mapping("id", "receipt")];
+    def.loops.insert(
+        "act".into(),
+        LoopCharacteristics::Standard(crate::domain::StandardLoopDef {
+            loop_condition: Some("receipt < 3".into()),
+            test_before: false,
+            loop_maximum: Some(5),
+        }),
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let inst = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert_eq!(inst.variables["receipt"], json!(3));
+    assert!(!inst.variables.contains_key("id"));
+}
+
+#[tokio::test]
+async fn missing_input_marks_instance_failed_instead_of_leaving_it_running() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(service());
+    def.variable_defaults.clear();
+    let (key, _) = engine.deploy_definition(def).await;
+    assert!(engine.start_instance(key).await.is_err());
+    let instances = engine.instances.all().await;
+    let inst = instances.values().next().unwrap().read().await;
+    assert_eq!(
+        inst.state,
+        InstanceState::CompletedWithError {
+            error_code: "DATA_MAPPING_ERROR".into()
+        }
+    );
+    assert!(engine.get_pending_service_tasks().is_empty());
+}

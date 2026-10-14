@@ -21,6 +21,8 @@ Camunda-Engine-REST-Implementierung.
 
 ## Fetch und Completion
 
+Mit [X11-Daten-Mappings](data-mappings.md) liefert Fetch die effektiven Task-Variablen einschließlich lokaler Inputs; Completion wertet erfolgreiche Output-Mappings aus. Die JSON-Werttypen bleiben erhalten. `localVariables=true` bleibt außerhalb des unterstützten Worker-Vertrags.
+
 ```json
 {
   "workerId": "example-worker",

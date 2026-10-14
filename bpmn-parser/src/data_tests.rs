@@ -63,6 +63,20 @@ fn x11_task_property_is_an_association_endpoint() {
 }
 
 #[test]
+fn x11_default_extension_resolves_namespace_aliases() {
+    let document = xml(
+        r#"<property id="source" name="source" bpmninja:default="[1,2]"/>"#,
+        "",
+    )
+    .replace("bpmninja:", "ninja:")
+    .replace("xmlns:bpmninja", "xmlns:ninja");
+    assert_eq!(
+        parse_bpmn_xml(&document).unwrap().variable_defaults["source"],
+        json!([1, 2])
+    );
+}
+
+#[test]
 fn x11_call_in_out_are_explicit_transfers() {
     let xml = xml("", r#"<extensionElements><camunda:in source="id" target="childId"/><camunda:out sourceExpression="${answer}" target="receipt"/></extensionElements>"#)
         .replace("<serviceTask id=\"act\" camunda:topic=\"mapped\">", "<callActivity id=\"act\" calledElement=\"child\">")

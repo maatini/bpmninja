@@ -1,13 +1,13 @@
 # BPMN 2.0.2 Element Matrix
 
-Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, 2026-10-12). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
+Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, updated 2026-10-14). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
 
 | Symbol | Meaning |
 |---|---|
 | ✅ | Parsed **and executed** |
 | 🟡 | Accepted, **no execution semantics** (visual / documentation / data element — the flow is unaffected) |
 | ❌ | **Rejected at deploy** with `InvalidDefinition` naming the element — backlog item in brackets |
-| ⚠️ | **Partial** — works only in a non-standard modelling form (see notes) |
+| ⚠️ | **Partial** — implemented subset or non-standard modelling form (see notes) |
 
 Only the deployed process is checked (first `isExecutable="true"` process, else the first process). Elements of other pools are ignored.
 
@@ -67,7 +67,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Sequence flow | ✅ | Conditional and default flows |
 | Message flow | 🟡 | Between pools; only one process is deployed [X12] |
 | Association | 🟡 | Compensation associations not yet interpreted [G1] |
-| Data association (input / output) | 🟡 | Data exchange via process variables only [X11] |
+| Data association (input / output) | ⚠️ | One source/target; process data ↔ task IO/property; dangling references, assignments, transformations rejected. [Contract](../../../data-mappings.md) |
 
 ## Swimlanes
 
@@ -87,10 +87,12 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 
 | Element | Status | Notes |
 |---|---|---|
-| Data object / data object reference / collection | 🟡 | [X11] |
+| Data object / data object reference | ✅ | Process variable declarations; explicit JSON defaults; references alias the object variable [X11] |
+| Data object collection | ⚠️ | JSON arrays supported as values; no XML Schema collection typing |
 | Data store reference | 🟡 | |
-| Data input / data output / `ioSpecification` | 🟡 | [X11] |
-| Property | 🟡 | [X11] |
+| Data input / data output / `ioSpecification` | ⚠️ | Scalar task IO and validated input/output sets; process/subprocess IO and collection IO rejected [X11] |
+| Property | ⚠️ | Process declarations/defaults and task association endpoints; subprocess declarations rejected pending X6 [X11] |
+| Camunda `inputOutput` / Call Activity `in` / `out` | ⚠️ | Task-local input and success output mappings; literals, variable references, nested lists/maps; explicit child transfer; scripts/compound expressions rejected. [Contract](../../../data-mappings.md) |
 | Message, Error, Escalation, Signal definitions (root elements) | ✅ | Referenced by event definitions |
 
 ## Maintenance

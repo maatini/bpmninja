@@ -1909,6 +1909,8 @@ test.describe('bpmninja Desktop App – E2E', () => {
   });
 
   test('X11 edits Call Activity transfers and typed process defaults', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
     await loadXmlAndClickElement(page, X11_XML, 'call');
     await page.getByLabel('Child inputs', { exact: true }).fill('{"childId":"${id}"}');
     await page.getByLabel('Child inputs', { exact: true }).blur();
@@ -1930,6 +1932,25 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await defaults.blur();
     await expect.poll(() => exportedXml(page)).not.toContain('bpmninja:default=');
     expect(await exportedXml(page)).toContain('id="Customer"');
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('X11 edits data object defaults and preserves them on export', async ({ page }) => {
+    await loadXmlAndClickElement(page, X11_XML, 'OrderRef');
+    const field = page.getByLabel('Data object default (JSON)', { exact: true });
+    await field.fill('{"status":"new"}');
+    await field.blur();
+    await expect.poll(() => exportedXml(page)).toMatch(/<bpmn:dataObject[^>]*bpmninja:default=/);
+    const xml = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('OrderRef'));
+    }, xml);
+    await expect(field).toHaveValue('{"status":"new"}');
+    await field.fill('');
+    await field.blur();
+    await expect.poll(() => exportedXml(page)).not.toMatch(/<bpmn:dataObject[^>]*bpmninja:default=/);
   });
 
   test('condition group visible for ExclusiveGateway outgoing flow', async ({ page }) => {
