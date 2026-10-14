@@ -198,21 +198,21 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/models.rs": {
-    "mtime": 1791908606.03802,
-    "seen": 1791908614.7584522,
-    "ast_hash": "5ffab25304eb0ceaa74bbef3fe2728f7",
+    "mtime": 1791914794.031397,
+    "seen": 1791951717.06395,
+    "ast_hash": "907c742e03bf36660df3970076806803",
     "semantic_hash": ""
   },
   "bpmn-parser/src/parser.rs": {
-    "mtime": 1791908611.6550016,
-    "seen": 1791908614.7584522,
-    "ast_hash": "f5824a1c8a0a61d5459daccc9ff721f3",
+    "mtime": 1791915052.6475205,
+    "seen": 1791951717.06395,
+    "ast_hash": "60d63e6ecd387966508b5215eaa68246",
     "semantic_hash": ""
   },
   "bpmn-parser/src/tests.rs": {
-    "mtime": 1791908883.508031,
-    "seen": 1791909455.0157554,
-    "ast_hash": "dc1d339e3d2de6164216dfb31b18f0a5",
+    "mtime": 1791915052.6695194,
+    "seen": 1791951717.06395,
+    "ast_hash": "738feb36df063194db250d33b69fb8f2",
     "semantic_hash": ""
   },
   "desktop-tauri/components.json": {
@@ -1410,9 +1410,9 @@
     "semantic_hash": ""
   },
   "engine-server/tests/e2e_lifecycle.rs": {
-    "mtime": 1791788199.8720496,
-    "seen": 1791806103.481633,
-    "ast_hash": "fc8e29f9ec3140d7ca33bf8de6e53b06",
+    "mtime": 1791914824.7576795,
+    "seen": 1791951717.06395,
+    "ast_hash": "019504763af85be099e2d1952d0b93b5",
     "semantic_hash": ""
   },
   "engine-server/tests/e2e_migration.rs": {
@@ -2004,9 +2004,9 @@
     "semantic_hash": ""
   },
   "docs/knowledge-base/modules/bpmn-parser/element-matrix.md": {
-    "mtime": 1791908882.8331666,
-    "seen": 1791909455.0157554,
-    "ast_hash": "7a99b70c46a466c8b1c8e87bfde9a4b0",
+    "mtime": 1791915051.973153,
+    "seen": 1791951717.0649498,
+    "ast_hash": "81dbe355d8efc4800cdd623cb4a8f92a",
     "semantic_hash": ""
   },
   "docs/knowledge-base/modules/bpmn-parser/gotchas.md": {
@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1791908882.8341875,
-    "seen": 1791909455.0157554,
-    "ast_hash": "5ba417e0710a01f8b9053493ab4e4cab",
+    "mtime": 1791915051.974705,
+    "seen": 1791951717.0649498,
+    "ast_hash": "8bae67e3d80fb5334df441899eb130cc",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
