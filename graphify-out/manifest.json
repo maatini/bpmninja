@@ -2932,5 +2932,29 @@
     "seen": 1792005954.7545738,
     "ast_hash": "d68692a9ff20ea2c6279f14381cfda5f",
     "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
+    "mtime": 1791881381.0730648,
+    "seen": 1792007196.2240412,
+    "ast_hash": "a1f693df6e86f00ab16e5a8460b29471",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/capabilities.json": {
+    "mtime": 1791788199.4289715,
+    "seen": 1792007196.2240412,
+    "ast_hash": "ae9a90b4ccc1267aa4b783ecf7b4b072",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/desktop-schema.json": {
+    "mtime": 1791882412.2879374,
+    "seen": 1792007196.2240412,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/macOS-schema.json": {
+    "mtime": 1791788199.4329703,
+    "seen": 1792007196.2240412,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
+    "semantic_hash": ""
   }
 }

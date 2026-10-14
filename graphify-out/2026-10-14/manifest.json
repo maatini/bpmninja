@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1792005467.7603965,
-    "seen": 1792005680.858888,
-    "ast_hash": "56ed2b9e7f58ed22f50c6bc47aec5f46",
+    "mtime": 1792006093.4244797,
+    "seen": 1792006116.9164748,
+    "ast_hash": "2fcc1497a97a9a3c2fdbbf2d59e1c7f3",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2892,9 +2892,9 @@
     "semantic_hash": ""
   },
   "docs/x11-data-mappings-plan.md": {
-    "mtime": 1792004519.7365663,
-    "seen": 1792004947.9400768,
-    "ast_hash": "60ad1fac2d2a60c1225097d690be0f49",
+    "mtime": 1792006093.4254801,
+    "seen": 1792006116.9164748,
+    "ast_hash": "e73e7b5ae52aeaeeeaeefc8f2848f926",
     "semantic_hash": ""
   },
   "bpmn-parser/src/data_tests.rs": {
