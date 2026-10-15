@@ -572,6 +572,7 @@ impl WorkflowEngine {
             is_merged: false,
             loop_instance: None,
             data_scope: None,
+            event_context: None,
         };
 
         // --- 5. Reset instance state ---

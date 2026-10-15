@@ -28,23 +28,30 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         // History of this batch is buffered and written in one call — also when
         // the batch fails, so no recorded step is lost.
+        let initial_has_event_context = initial_token.event_context.is_some();
         let mut history = Vec::new();
         let driven = self
             .drive_instance_batch(instance_id, initial_token, &mut history)
             .await;
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
-            if matches!(error, EngineError::DataMappingError(_)) {
+            if matches!(error, EngineError::DataMappingError(_)) || initial_has_event_context {
                 if let Some(instance) = self.instances.get(&instance_id).await {
                     let mut instance = instance.write().await;
                     instance.state = InstanceState::CompletedWithError {
-                        error_code: "DATA_MAPPING_ERROR".into(),
+                        error_code: if matches!(error, EngineError::DataMappingError(_)) {
+                            "DATA_MAPPING_ERROR"
+                        } else {
+                            "EVENT_SUBPROCESS_EXECUTION_ERROR"
+                        }
+                        .into(),
                     };
                     instance.completed_at = Some(chrono::Utc::now());
                     instance.push_audit_log(error.to_string());
                 }
                 self.persist_instance(instance_id).await;
             }
+            self.cleanup_finished_event_scope(instance_id).await;
             self.emit_instance_changed(instance_id).await;
             self.deliver_queued_signals().await;
             return Err(error);
@@ -112,7 +119,25 @@ impl WorkflowEngine {
             };
             let current_gateway_id = token.current_node.clone();
 
-            let action = self.execute_step(instance_id, &mut token).await?;
+            if token.event_context.is_some() {
+                let Some(instance) = self.instances.get(&instance_id).await else {
+                    continue;
+                };
+                let mut instance = instance.write().await;
+                if !crate::engine::event_subprocess::token_valid(&instance, &token) {
+                    continue;
+                }
+                instance.tokens.insert(token.id, token.clone());
+            }
+            let action = match self.execute_step(instance_id, &mut token).await {
+                Ok(action) => action,
+                Err(EngineError::AlreadyCompleted) if token.event_context.is_some() => {
+                    self.clear_wait_states_for_token(instance_id, &token.id)
+                        .await;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
 
             let (event_type, description) = match &action {
                 NextAction::Continue(_) => (
@@ -201,6 +226,7 @@ impl WorkflowEngine {
                 instance_id,
                 token_id,
                 &current_gateway_id,
+                &token,
                 &mut queue,
             )
             .await?;
@@ -214,6 +240,7 @@ impl WorkflowEngine {
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
 
+        self.cleanup_finished_event_scope(instance_id).await;
         // After batch finishes for this instance, if it completed, check parent
         let mut completed = false;
         let mut error_code_to_propagate = None;
@@ -252,6 +279,9 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let instance = instance_arc.read().await;
+            if !crate::engine::event_subprocess::token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             instance.definition_key
         };
 
@@ -298,22 +328,49 @@ impl WorkflowEngine {
         crate::engine::data_mappings::enter(token, &def_clone, &current_id)?;
 
         let mut start_audits = Vec::new();
-        scripting::run_node_scripts(
-            &self.scripts,
-            instance_id,
-            token,
-            &def_clone,
-            &current_id,
-            ListenerEvent::Start,
-            &mut start_audits,
-        )
-        .await?;
+        if token
+            .event_context
+            .as_ref()
+            .is_none_or(|c| c.started_node.as_deref() != Some(&current_id))
+        {
+            scripting::run_node_scripts(
+                &self.scripts,
+                instance_id,
+                token,
+                &def_clone,
+                &current_id,
+                ListenerEvent::Start,
+                &mut start_audits,
+            )
+            .await?;
+            if let Some(context) = &mut token.event_context {
+                context.started_node = Some(current_id.clone());
+            }
+        }
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
+            if !crate::engine::event_subprocess::token_valid(&inst, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             inst.audit_log.append(&mut start_audits);
             // Only sync variables if a script listener potentially modified them
             if def_clone.listeners.contains_key(&current_id) {
-                inst.variables = token.process_variables();
+                let updates = token.process_variables();
+                if let Some(context) = &mut token.event_context {
+                    for key in context.baseline.keys() {
+                        if !updates.contains_key(key) {
+                            inst.variables.remove(key);
+                        }
+                    }
+                    for (key, value) in updates {
+                        if context.baseline.get(&key) != Some(&value) {
+                            inst.variables.insert(key, value);
+                        }
+                    }
+                    context.baseline = inst.variables.clone();
+                } else {
+                    inst.variables = updates;
+                }
             }
         }
 

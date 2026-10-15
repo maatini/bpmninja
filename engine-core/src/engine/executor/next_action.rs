@@ -9,14 +9,26 @@ use crate::runtime::*;
 impl WorkflowEngine {
     /// Dispatches a single `NextAction` produced by `execute_step`.
     /// Returns `true` when the execution loop should stop (Terminate cleared the queue).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_next_action(
         &self,
         action: NextAction,
         instance_id: Uuid,
         token_id: Uuid,
         current_gateway_id: &str,
+        source: &Token,
         queue: &mut VecDeque<Token>,
     ) -> EngineResult<()> {
+        if source.event_context.is_some() {
+            let instance = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, source) {
+                return Ok(());
+            }
+        }
         match action {
             NextAction::Continue(next_token) => {
                 // 1-of-N inclusive *splits* return Continue, so ContinueMultiple never
@@ -27,19 +39,37 @@ impl WorkflowEngine {
                     .node_is_inclusive_split(instance_id, current_gateway_id)
                     .await?
                 {
-                    self.register_join_barrier_if_needed(instance_id, current_gateway_id, 1)
-                        .await?;
+                    self.register_join_barrier_if_needed(
+                        instance_id,
+                        current_gateway_id,
+                        1,
+                        source,
+                    )
+                    .await?;
                 }
                 queue.push_back(next_token);
             }
             NextAction::ContinueMultiple(forked_tokens) => {
                 let branch_count = forked_tokens.len();
+                if source.event_context.is_some()
+                    && let Some(instance) = self.instances.get(&instance_id).await
+                {
+                    instance.write().await.tokens.remove(&token_id);
+                }
 
-                self.register_join_barrier_if_needed(instance_id, current_gateway_id, branch_count)
-                    .await?;
+                self.register_join_barrier_if_needed(
+                    instance_id,
+                    current_gateway_id,
+                    branch_count,
+                    source,
+                )
+                .await?;
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if let Some(active) = inst
                         .active_tokens
                         .iter_mut()
@@ -70,6 +100,9 @@ impl WorkflowEngine {
                 if let Some(merged_token) = merged {
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
+                        if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                            return Ok(());
+                        }
                         inst.state = InstanceState::Running;
                         inst.current_node = gateway_id.clone();
                     }
@@ -80,11 +113,18 @@ impl WorkflowEngine {
                 let task_id = pending.task_id;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                         inst.state = InstanceState::WaitingOnUserTask { task_id };
                     }
+                    self.pending_user_tasks.insert(task_id, pending);
                 }
-                self.pending_user_tasks.insert(task_id, pending);
+
+                if source.event_context.is_some() {
+                    self.persist_instance(instance_id).await;
+                }
                 self.persist_user_task(task_id).await;
                 self.persist_instance(instance_id).await;
             }
@@ -92,11 +132,18 @@ impl WorkflowEngine {
                 let task_id = svc_task.id;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                         inst.state = InstanceState::WaitingOnServiceTask { task_id };
                     }
+                    self.insert_pending_service_task(svc_task);
                 }
-                self.insert_pending_service_task(svc_task);
+
+                if source.event_context.is_some() {
+                    self.persist_instance(instance_id).await;
+                }
                 self.persist_service_task(task_id).await;
                 self.persist_instance(instance_id).await;
             }
@@ -104,11 +151,18 @@ impl WorkflowEngine {
                 let timer_id = pending.id;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                         inst.state = InstanceState::WaitingOnTimer { timer_id };
                     }
+                    self.insert_pending_timer(pending);
                 }
-                self.insert_pending_timer(pending);
+
+                if source.event_context.is_some() {
+                    self.persist_instance(instance_id).await;
+                }
                 self.persist_timer(timer_id).await;
                 self.persist_instance(instance_id).await;
             }
@@ -116,17 +170,27 @@ impl WorkflowEngine {
                 let message_id = pending.id;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                         inst.state = InstanceState::WaitingOnMessage { message_id };
                     }
+                    self.pending_message_catches.insert(message_id, pending);
                 }
-                self.pending_message_catches.insert(message_id, pending);
+
+                if source.event_context.is_some() {
+                    self.persist_instance(instance_id).await;
+                }
                 self.persist_message_catch(message_id).await;
                 self.persist_instance(instance_id).await;
             }
             NextAction::WaitForEventGroup(actions) => {
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                         inst.state = InstanceState::WaitingOnEventBasedGateway;
                     }
@@ -136,11 +200,17 @@ impl WorkflowEngine {
                         NextAction::WaitForTimer(pending) => {
                             let timer_id = pending.id;
                             self.insert_pending_timer(pending);
+                            if source.event_context.is_some() {
+                                self.persist_instance(instance_id).await;
+                            }
                             self.persist_timer(timer_id).await;
                         }
                         NextAction::WaitForMessage(pending) => {
                             let message_id = pending.id;
                             self.pending_message_catches.insert(message_id, pending);
+                            if source.event_context.is_some() {
+                                self.persist_instance(instance_id).await;
+                            }
                             self.persist_message_catch(message_id).await;
                         }
                         _ => {} // EventBasedGateway validation ensures this won't happen
@@ -199,12 +269,18 @@ impl WorkflowEngine {
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     inst.tokens.remove(&token_id);
                 }
 
                 if self.all_tokens_completed(instance_id).await? {
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
+                        if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                            return Ok(());
+                        }
                         inst.state = InstanceState::Completed;
                         inst.completed_at = Some(chrono::Utc::now());
                         inst.audit_log
@@ -223,10 +299,37 @@ impl WorkflowEngine {
                 self.persist_instance(instance_id).await;
             }
             NextAction::ErrorEnd { error_code } => {
+                if let Some(handler) = self
+                    .prepare_event_code(instance_id, &error_code, false, source)
+                    .await?
+                {
+                    queue.clear();
+                    queue.push_back(handler);
+                    return Ok(());
+                }
+                if source.event_context.is_some() {
+                    if let Some(instance) = self.instances.get(&instance_id).await {
+                        let mut instance = instance.write().await;
+                        if !crate::engine::event_subprocess::token_valid(&instance, source) {
+                            return Ok(());
+                        }
+                        instance.state = InstanceState::CompletedWithError { error_code };
+                        instance.completed_at = Some(chrono::Utc::now());
+                        if let Some(state) = &mut instance.event_state {
+                            state.generation += 1;
+                        }
+                    }
+                    queue.clear();
+                    self.cleanup_finished_event_scope(instance_id).await;
+                    return Ok(());
+                }
                 self.complete_branch_token(instance_id, token_id).await?;
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     inst.tokens.remove(&token_id);
                 }
 
@@ -234,6 +337,9 @@ impl WorkflowEngine {
                     // Schreiblock in eigenem Block — muss vor record_history_event freigegeben sein
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
+                        if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                            return Ok(());
+                        }
                         inst.state = InstanceState::CompletedWithError {
                             error_code: error_code.clone(),
                         };
@@ -255,10 +361,19 @@ impl WorkflowEngine {
                 self.persist_instance(instance_id).await;
             }
             NextAction::EscalationEnd { escalation_code } => {
+                if let Some(handler) = self
+                    .prepare_event_code(instance_id, &escalation_code, true, source)
+                    .await?
+                {
+                    queue.push_back(handler);
+                }
                 self.complete_branch_token(instance_id, token_id).await?;
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     inst.tokens.remove(&token_id);
                 }
 
@@ -266,6 +381,9 @@ impl WorkflowEngine {
                     // Schreiblock in eigenem Block — muss vor record_history_event freigegeben sein
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
+                        if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                            return Ok(());
+                        }
                         inst.state = InstanceState::Completed;
                         inst.completed_at = Some(chrono::Utc::now());
                         inst.push_audit_log(format!(
@@ -286,11 +404,37 @@ impl WorkflowEngine {
             }
             NextAction::SpawnAndContinue { main, spawned } => {
                 queue.push_back(main);
-                for extra_token in spawned {
+                for mut extra_token in spawned {
+                    if extra_token.event_context.is_none() {
+                        extra_token.inherit_event_context(source);
+                    }
+                    if extra_token.event_context.is_some()
+                        && let Some(instance) = self.instances.get(&instance_id).await
+                    {
+                        let mut instance = instance.write().await;
+                        instance.tokens.insert(extra_token.id, extra_token.clone());
+                        if !instance
+                            .active_tokens
+                            .iter()
+                            .any(|active| active.token.id == extra_token.id)
+                        {
+                            instance.active_tokens.push(ActiveToken {
+                                token: extra_token.clone(),
+                                fork_id: None,
+                                branch_index: 0,
+                                completed: false,
+                            });
+                        }
+                    }
                     queue.push_back(extra_token);
                 }
             }
             NextAction::Terminate => {
+                if source.event_context.is_some() {
+                    self.terminate_event_scope(instance_id, source).await?;
+                    queue.clear();
+                    return Ok(());
+                }
                 self.pending_user_tasks
                     .retain(|_, t| t.instance_id != instance_id);
                 self.clear_pending_service_tasks_for_instance(instance_id);
@@ -300,6 +444,9 @@ impl WorkflowEngine {
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     for at in inst.active_tokens.iter_mut() {
                         at.completed = true;
                     }
@@ -326,6 +473,11 @@ impl WorkflowEngine {
                 // Parallel multi-instance (X4): children report to `multi_instance_state`,
                 // not to a join barrier.
                 let branch_count = tokens.len();
+                if source.event_context.is_some()
+                    && let Some(instance) = self.instances.get(&instance_id).await
+                {
+                    instance.write().await.tokens.remove(&token_id);
+                }
                 let inst_arc = self
                     .instances
                     .get(&instance_id)
@@ -333,6 +485,9 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 {
                     let mut inst = inst_arc.write().await;
+                    if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                        return Ok(());
+                    }
                     inst.current_node = node_id.clone();
                     if let Some(active) = inst
                         .active_tokens

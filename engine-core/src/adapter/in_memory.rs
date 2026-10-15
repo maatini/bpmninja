@@ -538,6 +538,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };

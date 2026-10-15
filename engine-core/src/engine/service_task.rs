@@ -285,7 +285,12 @@ impl WorkflowEngine {
             if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                 inst.state = InstanceState::Running;
             }
-            inst.variables = token.process_variables();
+            if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            if token.event_context.is_none() {
+                inst.variables = token.process_variables();
+            }
             for name in updated_names {
                 inst.variable_types.remove(&name);
             }
@@ -306,6 +311,9 @@ impl WorkflowEngine {
         {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
+                if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    return Err(EngineError::AlreadyCompleted);
+                }
                 if let Some(old) = &old_state {
                     inst.state = old.state.clone();
                     inst.variables = old.variables.clone();
@@ -318,9 +326,9 @@ impl WorkflowEngine {
             return Err(error);
         }
 
-        self.cancel_boundary_timers(instance_id, &task.node_id)
+        self.cancel_boundary_timers(instance_id, &task.node_id, Some(task.token_id))
             .await;
-        self.cancel_boundary_message_catches(instance_id, &task.node_id)
+        self.cancel_boundary_message_catches(instance_id, &task.node_id, Some(task.token_id))
             .await;
 
         let next =
@@ -616,6 +624,9 @@ impl WorkflowEngine {
         {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
+                if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    return Err(EngineError::AlreadyCompleted);
+                }
                 if let Some(old) = &old_state {
                     inst.state = old.state.clone();
                     inst.variables = old.variables.clone();
@@ -631,9 +642,9 @@ impl WorkflowEngine {
         self.register_compensation_handler(instance_id, &task.node_id, &def)
             .await;
 
-        self.cancel_boundary_timers(instance_id, &task.node_id)
+        self.cancel_boundary_timers(instance_id, &task.node_id, Some(task.token_id))
             .await;
-        self.cancel_boundary_message_catches(instance_id, &task.node_id)
+        self.cancel_boundary_message_catches(instance_id, &task.node_id, Some(task.token_id))
             .await;
 
         let next =
@@ -797,9 +808,9 @@ impl WorkflowEngine {
             inst.definition_key
         };
 
-        self.cancel_boundary_timers(instance_id, &task.node_id)
+        self.cancel_boundary_timers(instance_id, &task.node_id, Some(task.token_id))
             .await;
-        self.cancel_boundary_message_catches(instance_id, &task.node_id)
+        self.cancel_boundary_message_catches(instance_id, &task.node_id, Some(task.token_id))
             .await;
 
         let target_boundary = if let Some(def) = self.definitions.get(&def_key) {
@@ -872,7 +883,12 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
-                inst.variables = token.process_variables();
+                if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                    return Err(EngineError::AlreadyCompleted);
+                }
+                if token.event_context.is_none() {
+                    inst.variables = token.process_variables();
+                }
             }
 
             self.remove_persisted_service_task(task_id).await;
@@ -882,6 +898,20 @@ impl WorkflowEngine {
             return Ok(());
         }
 
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let token = instance.read().await.tokens.get(&task.token_id).cloned();
+            if let Some(mut token) = token {
+                token.variables.extend(variables.clone());
+                if let Some(handler) = self
+                    .prepare_event_code(instance_id, error_code, false, &token)
+                    .await?
+                {
+                    self.remove_persisted_service_task(task_id).await;
+                    self.run_instance_batch(instance_id, handler).await?;
+                    return Ok(());
+                }
+            }
+        }
         // Unhandled BPMN error: re-insert as incident so the token is not a zombie.
         let mut incident = task;
         incident.retries = 0;

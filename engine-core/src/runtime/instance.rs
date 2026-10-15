@@ -191,12 +191,29 @@ pub struct ProcessInstance {
     /// Independent of `InstanceState` so parallel calls can resume individually.
     #[serde(default)]
     pub outstanding_calls: HashMap<Uuid, OutstandingCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_state: Option<Box<EventSubProcessState>>,
     /// Timestamp when this instance was started.
     #[serde(default)]
     pub started_at: Option<DateTime<Utc>>,
     /// Timestamp when this instance reached a terminal state.
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EventSubProcessState {
+    pub generation: u64,
+    pub main_completed: bool,
+    pub subscriptions: HashMap<Uuid, EventSubscription>,
+    pub activations: HashMap<Uuid, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventSubscription {
+    pub subprocess_id: String,
+    pub next_due: Option<DateTime<Utc>>,
+    pub remaining: Option<u32>,
 }
 
 impl ProcessInstance {
@@ -259,6 +276,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         }

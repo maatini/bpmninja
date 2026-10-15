@@ -332,7 +332,50 @@ pub async fn run_end_scripts(
     )
     .await?;
     instance_audit_log.append(&mut end_audits);
+    let mut updates = candidate.process_variables();
+    if let Some(context) = &mut candidate.event_context {
+        let mut locals = std::collections::HashSet::new();
+        if let Some(marker) = &candidate.loop_instance {
+            locals.extend(
+                [
+                    "loopCounter",
+                    "nrOfInstances",
+                    "nrOfActiveInstances",
+                    "nrOfCompletedInstances",
+                ]
+                .into_iter()
+                .map(String::from),
+            );
+            if let Some(crate::domain::LoopCharacteristics::MultiInstance(mi)) =
+                def.loops.get(&marker.node_id)
+            {
+                locals.extend(mi.element_variable.iter().cloned());
+            }
+        }
+        updates.retain(|key, _| !locals.contains(key));
+        for key in context.baseline.keys() {
+            if !updates.contains_key(key) {
+                instance_variables.remove(key);
+            }
+        }
+        for (key, value) in updates {
+            if context.baseline.get(&key) != Some(&value) {
+                instance_variables.insert(key, value);
+            }
+        }
+        context.baseline = instance_variables.clone();
+        context.started_node = None;
+        let local_values: HashMap<_, _> = candidate
+            .variables
+            .iter()
+            .filter(|(key, _)| locals.contains(*key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        candidate.variables = instance_variables.clone();
+        candidate.variables.extend(local_values);
+    } else {
+        *instance_variables = updates;
+    }
     *token = candidate;
-    *instance_variables = token.process_variables();
     Ok(())
 }

@@ -21,6 +21,8 @@ pub struct ProcessDefinition {
     #[serde(default)]
     pub event_listeners: Vec<ScopeEventListener>,
     #[serde(default)]
+    pub event_subprocesses: Vec<crate::domain::EventSubProcess>,
+    #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
     /// Loop / multi-instance characteristics per activity node (X4/X5).
     #[serde(default)]
@@ -213,6 +215,7 @@ impl ProcessDefinition {
             flows,
             listeners,
             event_listeners,
+            event_subprocesses: Vec::new(),
             sub_processes,
             loops: HashMap::new(),
             data_variables: Vec::new(),
@@ -256,6 +259,13 @@ impl ProcessDefinition {
     /// Returns the (id, element) of the start event.
     pub fn start_event(&self) -> Option<(&str, &BpmnElement)> {
         self.nodes.iter().find_map(|(id, e)| {
+            if self
+                .event_subprocesses
+                .iter()
+                .any(|handler| handler.node_ids.contains(id))
+            {
+                return None;
+            }
             if matches!(
                 e,
                 BpmnElement::StartEvent

@@ -105,6 +105,9 @@ impl WorkflowEngine {
             // Restore token into instance so the task is completable again
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
+                if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    return Err(EngineError::AlreadyCompleted);
+                }
                 if let Some(old) = &old_state {
                     inst.state = old.state.clone();
                     inst.current_node = old.current_node.clone();
@@ -118,9 +121,9 @@ impl WorkflowEngine {
         }
 
         self.remove_persisted_user_task(task_id).await;
-        self.cancel_boundary_timers(instance_id, &pending.node_id)
+        self.cancel_boundary_timers(instance_id, &pending.node_id, Some(pending.token_id))
             .await;
-        self.cancel_boundary_message_catches(instance_id, &pending.node_id)
+        self.cancel_boundary_message_catches(instance_id, &pending.node_id, Some(pending.token_id))
             .await;
 
         // Register compensation handler if this activity has a BoundaryCompensationEvent

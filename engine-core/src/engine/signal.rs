@@ -65,6 +65,16 @@ impl WorkflowEngine {
 
         let mut affected = Vec::new();
         for (catch_id, instance_id) in catches {
+            if let Some(instance) = self.instances.get(&instance_id).await
+                && matches!(
+                    instance.read().await.state,
+                    crate::runtime::InstanceState::Suspended { .. }
+                        | crate::runtime::InstanceState::Completed
+                        | crate::runtime::InstanceState::CompletedWithError { .. }
+                )
+            {
+                continue;
+            }
             // A sibling catch (event gateway, interrupting boundary) may have fired first.
             if !self.pending_message_catches.contains_key(&catch_id) {
                 continue;

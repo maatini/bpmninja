@@ -16,6 +16,8 @@ pub struct Token {
     pub loop_instance: Option<LoopInstance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_scope: Option<Box<super::DataScope>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_context: Option<Box<EventContext>>,
 }
 
 /// Identifies the loop iteration a token is executing (X4/X5).
@@ -25,7 +27,30 @@ pub struct LoopInstance {
     pub index: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventContext {
+    pub generation: u64,
+    pub activation: Option<Uuid>,
+    #[serde(default)]
+    pub started_node: Option<String>,
+    pub baseline: HashMap<String, Value>,
+}
+
 impl Token {
+    pub(crate) fn scope_key(&self, node: &str) -> String {
+        match self
+            .event_context
+            .as_ref()
+            .and_then(|context| context.activation)
+        {
+            Some(id) => format!("{id}/{node}"),
+            None => node.to_string(),
+        }
+    }
+    pub(crate) fn inherit_event_context(&mut self, other: &Token) {
+        self.event_context = other.event_context.clone();
+    }
+
     /// Variables visible outside the current activity.
     pub fn process_variables(&self) -> HashMap<String, Value> {
         let mut variables = self.variables.clone();
@@ -43,6 +68,13 @@ impl Token {
 
     pub(crate) fn apply_process_updates(&mut self, updates: &HashMap<String, Value>) {
         for (key, value) in updates {
+            if let Some(context) = &mut self.event_context {
+                if value.is_null() {
+                    context.baseline.remove(key);
+                } else {
+                    context.baseline.insert(key.clone(), value.clone());
+                }
+            }
             if let Some(scope) = &mut self.data_scope {
                 if value.is_null() {
                     scope.original_variables.remove(key);
@@ -77,6 +109,7 @@ impl Token {
             is_merged: false,
             loop_instance: None,
             data_scope: None,
+            event_context: None,
         }
     }
 
@@ -90,6 +123,7 @@ impl Token {
             is_merged: false,
             loop_instance: None,
             data_scope: None,
+            event_context: None,
         }
     }
 }

@@ -1,9 +1,9 @@
 # X9 — Event subprocesses
 
-Status: proposed for approval, 2026-10-14. Implementation has not started.
+Status: X9a authorized by continuation, 2026-10-15. Parser/runtime implementation in progress.
 Next task after X11 in `improvements.md`.
 
-## Actual starting point
+## Starting point before X9a
 
 - `bpmn-parser/src/parser.rs::reject_unsupported_elements` rejects every
   `subProcess` with `triggeredByEvent="true"`. XML event subprocesses are not
@@ -132,5 +132,12 @@ also describes repeated non-interrupting activation, cancellation of other activ
 handlers on interruption, and completion waiting for triggered handlers. This is
 an implementation reference; it does not establish full BPMN or Camunda conformance.
 
-Approve **X9a** to begin the first implementation above. X9b/X9c are follow-ups,
-and full X9 must not be marked complete after X9a alone.
+X9a is authorized. X9b/X9c are follow-ups; full X9 remains incomplete.
+
+## Implementation checkpoint (2026-10-15)
+
+- Implemented process-level timer/message/signal/error/escalation definitions and XML parsing, interruption flags, task mappings, repeated activation, shared process writes, completion waiting, cancellation of child calls, and generation fences.
+- Persisted subscriptions and activations are bound to the original definition. Startup reconciliation prunes cancelled work, recreates missing subscription jobs, and resumes claimed activations.
+- External model checking explicitly reports skipped event-subprocess semantics. Legacy ScopeEventListener definitions require migration.
+- Body-node execution listeners remain supported. Container execution listeners are explicitly rejected pending a container lifecycle implementation.
+- Parser and core suites pass at this checkpoint. Further acceptance work remains: additional loop/race/termination coverage, REST and real NATS recovery tests, modeler properties and browser roundtrip tests, and final workspace/frontend checks. X9a is not complete.

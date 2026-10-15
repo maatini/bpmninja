@@ -114,3 +114,6 @@ lint_output.txt
 graphify-out/cache
 # Temporary X11 verification files and isolated JetStream store
 .tmp/x11-*
+
+# Isolated X9 verification artifacts
+.tmp/x9-*

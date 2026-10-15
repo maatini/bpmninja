@@ -6,22 +6,22 @@ use engine_core::error::{EngineError, EngineResult};
 use quick_xml::events::Event;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Default, Debug)]
-struct Node {
-    name: String,
-    attrs: HashMap<String, String>,
-    namespaces: HashMap<String, String>,
-    text: String,
-    children: Vec<Node>,
+#[derive(Default, Debug, Clone)]
+pub(crate) struct Node {
+    pub(crate) name: String,
+    pub(crate) attrs: HashMap<String, String>,
+    pub(crate) namespaces: HashMap<String, String>,
+    pub(crate) text: String,
+    pub(crate) children: Vec<Node>,
 }
 impl Node {
-    fn attr(&self, name: &str) -> Option<&str> {
+    pub(crate) fn attr(&self, name: &str) -> Option<&str> {
         self.attrs.get(name).map(String::as_str)
     }
-    fn children(&self, name: &str) -> impl Iterator<Item = &Node> {
+    pub(crate) fn children(&self, name: &str) -> impl Iterator<Item = &Node> {
         self.children.iter().filter(move |n| n.name == name)
     }
-    fn id(&self) -> EngineResult<&str> {
+    pub(crate) fn id(&self) -> EngineResult<&str> {
         self.attr("id")
             .ok_or_else(|| invalid("data element requires an id"))
     }
@@ -30,7 +30,7 @@ fn invalid(message: impl Into<String>) -> EngineError {
     EngineError::InvalidDefinition(format!("Data mapping: {}", message.into()))
 }
 
-fn tree(xml: &str) -> EngineResult<Node> {
+pub(crate) fn tree(xml: &str) -> EngineResult<Node> {
     let mut reader = quick_xml::Reader::from_str(xml);
     reader.config_mut().expand_empty_elements = true;
     let mut stack = vec![Node::default()];

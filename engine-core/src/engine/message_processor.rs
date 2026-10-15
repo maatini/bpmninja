@@ -22,6 +22,14 @@ impl WorkflowEngine {
                 && let Some(inst_arc) = self.instances.get(&catch.instance_id).await
             {
                 let inst = inst_arc.read().await;
+                if matches!(
+                    inst.state,
+                    InstanceState::Suspended { .. }
+                        | InstanceState::Completed
+                        | InstanceState::CompletedWithError { .. }
+                ) {
+                    continue;
+                }
                 if let Some(ref bk) = business_key
                     && &inst.business_key != bk
                 {
@@ -82,6 +90,18 @@ impl WorkflowEngine {
         variables: &HashMap<String, Value>,
         event_label: &str,
     ) -> EngineResult<()> {
+        if let Some(catch) = self
+            .pending_message_catches
+            .get(&catch_id)
+            .map(|c| c.clone())
+            && self
+                .is_event_subscription(catch.instance_id, catch.token_id)
+                .await
+            {
+                return self
+                    .fire_event_subscription(catch.instance_id, catch.token_id, variables)
+                    .await;
+        }
         let catch = self
             .pending_message_catches
             .remove(&catch_id)
@@ -95,44 +115,10 @@ impl WorkflowEngine {
             .await;
 
         if catch.token_id.is_nil() {
-            // This is a Scope Event Listener (Event Sub-Process) trigger
-            let child_bpmn_id = catch.node_id.clone();
-            let child_def_key = {
-                let (k, _) = self
-                    .definitions
-                    .find_latest_by_bpmn_id(&child_bpmn_id)
-                    .ok_or_else(|| {
-                        EngineError::InvalidDefinition(format!(
-                            "Event Subprocess '{child_bpmn_id}' not found"
-                        ))
-                    })?;
-                k
-            };
-
-            // Get the instance variables to pass down, merged with correlation variables
-            let mut instance_vars = {
-                let inst_arc = self
-                    .instances
-                    .get(&catch.instance_id)
-                    .await
-                    .ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
-                let inst = inst_arc.read().await;
-                inst.variables.clone()
-            };
-            instance_vars.extend(variables.clone());
-
-            // Spawn the call activity loosely
-            let _child_id = self
-                .spawn_call_activity(
-                    child_def_key,
-                    catch.instance_id,
-                    child_bpmn_id.clone(),
-                    instance_vars,
-                )
-                .await?;
-
-            self.remove_persisted_message_catch(catch_id).await;
-            return Ok(());
+            self.pending_message_catches.insert(catch.id, catch);
+            return Err(EngineError::InvalidDefinition(
+                "Legacy nil-token scope subscription requires migration".into(),
+            ));
         }
 
         let def_key = {

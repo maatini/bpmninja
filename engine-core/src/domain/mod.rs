@@ -2,6 +2,8 @@ pub mod data;
 pub use data::{ActivityMappings, DataMapping, DataScope, MappingValue};
 pub mod definition;
 pub mod element;
+pub mod event_subprocess;
+pub use event_subprocess::{EventSubProcess, EventSubProcessTrigger};
 pub mod error;
 pub mod file_ref;
 pub mod flow;

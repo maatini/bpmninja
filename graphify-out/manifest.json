@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1792006093.4244797,
-    "seen": 1792006116.9164748,
-    "ast_hash": "2fcc1497a97a9a3c2fdbbf2d59e1c7f3",
+    "mtime": 1792007344.9412186,
+    "seen": 1792007899.1868317,
+    "ast_hash": "fa36c0edea9100166e5bb46262ec2ba1",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2955,6 +2955,12 @@
     "mtime": 1791788199.4329703,
     "seen": 1792007196.2240412,
     "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
+    "semantic_hash": ""
+  },
+  "docs/x9-event-subprocess-plan.md": {
+    "mtime": 1792007341.060559,
+    "seen": 1792007899.1868317,
+    "ast_hash": "c6e58dfc26f148d0a07defa745007b30",
     "semantic_hash": ""
   }
 }

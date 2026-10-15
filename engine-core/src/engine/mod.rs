@@ -23,6 +23,7 @@ use crate::persistence::WorkflowPersistence;
 pub(crate) mod boundary;
 pub(crate) mod data_mappings;
 mod definition_ops;
+pub(crate) mod event_subprocess;
 pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;
@@ -225,7 +226,12 @@ impl WorkflowEngine {
     }
 
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
-    pub(crate) async fn cancel_boundary_timers(&self, instance_id: Uuid, task_node_id: &str) {
+    pub(crate) async fn cancel_boundary_timers(
+        &self,
+        instance_id: Uuid,
+        task_node_id: &str,
+        token_id: Option<Uuid>,
+    ) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             inst.definition_key
@@ -257,12 +263,18 @@ impl WorkflowEngine {
         let timer_ids_to_delete: std::collections::HashSet<Uuid> = self
             .pending_timers
             .iter()
-            .filter(|r| r.instance_id == instance_id && bound_timers.contains(&r.node_id))
+            .filter(|r| {
+                r.instance_id == instance_id
+                    && bound_timers.contains(&r.node_id)
+                    && token_id.is_none_or(|id| r.token_id == id)
+            })
             .map(|r| r.id)
             .collect();
 
         self.retain_pending_timers(|_, t| {
-            !(t.instance_id == instance_id && bound_timers.contains(&t.node_id))
+            !(t.instance_id == instance_id
+                && bound_timers.contains(&t.node_id)
+                && token_id.is_none_or(|id| t.token_id == id))
         });
 
         // Delete from persistence
@@ -280,6 +292,7 @@ impl WorkflowEngine {
         &self,
         instance_id: Uuid,
         task_node_id: &str,
+        token_id: Option<Uuid>,
     ) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
@@ -315,7 +328,11 @@ impl WorkflowEngine {
         let msg_ids_to_delete: std::collections::HashSet<Uuid> = self
             .pending_message_catches
             .iter()
-            .filter(|r| r.instance_id == instance_id && bound_messages.contains(&r.node_id))
+            .filter(|r| {
+                r.instance_id == instance_id
+                    && bound_messages.contains(&r.node_id)
+                    && token_id.is_none_or(|id| r.token_id == id)
+            })
             .map(|r| r.id)
             .collect();
 

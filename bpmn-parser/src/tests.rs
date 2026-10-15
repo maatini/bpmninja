@@ -580,7 +580,7 @@ fn parse_event_based_gateway() {
 }
 
 #[test]
-fn parse_event_subprocess_rejected_until_supported() {
+fn parse_interrupting_error_event_subprocess() {
     let xml = r#"
         <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <error id="err1" errorCode="VALIDATION_FAILED" />
@@ -599,10 +599,10 @@ fn parse_event_subprocess_rejected_until_supported() {
         </definitions>
     "#;
 
-    // Event sub-processes were parsed but never triggered at runtime (X0/X9):
-    // deploy must fail clearly instead of silently ignoring them.
-    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
-    assert!(err.contains("event sub-process 'sub1'"), "{err}");
+    let definition = parse_bpmn_xml(xml).unwrap();
+    assert_eq!(definition.event_subprocesses.len(), 1);
+    assert_eq!(definition.start_event().unwrap().0, "s1");
+    assert!(definition.event_subprocesses[0].is_interrupting);
 }
 
 #[test]

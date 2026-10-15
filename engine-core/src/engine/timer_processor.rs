@@ -37,6 +37,44 @@ impl WorkflowEngine {
                 continue;
             };
 
+            if self
+                .is_event_subscription(timer.instance_id, timer.token_id)
+                .await
+            {
+                self.remove_persisted_timer(tid).await;
+                if let Some(token) = self
+                    .prepare_event_activation(
+                        timer.instance_id,
+                        timer.token_id,
+                        &std::collections::HashMap::new(),
+                    )
+                    .await?
+                {
+                    let next = if let Some(instance) = self.instances.get(&timer.instance_id).await
+                    {
+                        instance
+                            .read()
+                            .await
+                            .event_state
+                            .as_ref()
+                            .and_then(|s| s.subscriptions.get(&timer.token_id))
+                            .cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(subscription) = next
+                        && let Some(due) = subscription.next_due
+                    {
+                        let mut next_timer = timer.clone();
+                        next_timer.expires_at = due;
+                        next_timer.remaining_repetitions = subscription.remaining;
+                        self.insert_pending_timer(next_timer);
+                        self.persist_timer(tid).await;
+                    }
+                    self.run_instance_batch(timer.instance_id, token).await?;
+                }
+                continue;
+            }
             // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
             self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
                 .await;
@@ -70,43 +108,10 @@ impl WorkflowEngine {
             .await;
 
             if timer.token_id.is_nil() {
-                // This is a Scope Event Listener (Event Sub-Process) trigger
-                let child_bpmn_id = timer.node_id.clone();
-                let child_def_key = {
-                    let (k, _) = self
-                        .definitions
-                        .find_latest_by_bpmn_id(&child_bpmn_id)
-                        .ok_or_else(|| {
-                            EngineError::InvalidDefinition(format!(
-                                "Event Subprocess '{child_bpmn_id}' not found"
-                            ))
-                        })?;
-                    k
-                };
-
-                // Get the instance variables to pass down
-                let instance_vars = {
-                    let inst_arc = self
-                        .instances
-                        .get(&timer.instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
-                    let inst = inst_arc.read().await;
-                    inst.variables.clone()
-                };
-
-                // Spawn the call activity loosely (it will track parent_instance_id automatically)
-                let _child_id = self
-                    .spawn_call_activity(
-                        child_def_key,
-                        timer.instance_id,
-                        child_bpmn_id.clone(),
-                        instance_vars,
-                    )
-                    .await?;
-
-                self.remove_persisted_timer(tid).await;
-                continue;
+                self.insert_pending_timer(timer);
+                return Err(EngineError::InvalidDefinition(
+                    "Legacy nil-token scope subscription requires migration".into(),
+                ));
             }
 
             // Retrieve token from central store

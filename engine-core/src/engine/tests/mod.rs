@@ -3,6 +3,7 @@ pub mod call_activity_parallel;
 pub mod call_errors;
 pub mod camunda_compat;
 mod data_mappings;
+mod event_subprocess;
 pub mod events;
 pub mod gateways;
 pub mod helpers;

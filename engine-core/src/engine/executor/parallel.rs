@@ -12,6 +12,7 @@ impl WorkflowEngine {
         instance_id: Uuid,
         split_gateway_id: &str,
         branch_count: usize,
+        source: &Token,
     ) -> EngineResult<()> {
         let def_key_arc = self
             .instances
@@ -33,7 +34,7 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
             // A later registration must not drop tokens that already arrived.
-            match inst.join_barriers.entry(join_id.clone()) {
+            match inst.join_barriers.entry(source.scope_key(&join_id)) {
                 std::collections::hash_map::Entry::Occupied(mut occupied) => {
                     occupied.get_mut().expected_count = branch_count;
                 }
@@ -65,6 +66,12 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Ok(());
+        }
+        if token.event_context.is_some() {
+            inst.tokens.insert(token.id, token.clone());
+        }
         inst.active_tokens.push(ActiveToken {
             token: token.clone(),
             fork_id: Some(fork_id.to_string()),
@@ -93,6 +100,7 @@ impl WorkflowEngine {
             .clone();
 
         let structural_expected = def.incoming_flow_count(gateway_id);
+        let scope_key = token.scope_key(gateway_id);
         let inst_arc = self
             .instances
             .get(&instance_id)
@@ -106,7 +114,7 @@ impl WorkflowEngine {
         {
             let barrier = inst
                 .join_barriers
-                .entry(gateway_id.to_string())
+                .entry(scope_key.clone())
                 .or_insert_with(|| JoinBarrier {
                     gateway_node_id: gateway_id.to_string(),
                     expected_count: structural_expected,
@@ -129,7 +137,7 @@ impl WorkflowEngine {
         }) = def.get_node(gateway_id)
         {
             let mut temp_vars = std::collections::HashMap::new();
-            if let Some(barrier) = inst.join_barriers.get(gateway_id) {
+            if let Some(barrier) = inst.join_barriers.get(&scope_key) {
                 for t in &barrier.arrived_tokens {
                     temp_vars.extend(t.variables.clone());
                 }
@@ -145,7 +153,7 @@ impl WorkflowEngine {
         if current_arrived >= expected_count || condition_met {
             let all_tokens = inst
                 .join_barriers
-                .remove(gateway_id)
+                .remove(&scope_key)
                 .ok_or_else(|| {
                     EngineError::InvalidDefinition(format!(
                         "Join barrier for gateway '{}' not found in instance {}",
@@ -165,7 +173,11 @@ impl WorkflowEngine {
                 merged_vars.extend(t.variables.clone());
             }
 
+            for arrived in &all_tokens {
+                inst.tokens.remove(&arrived.id);
+            }
             let mut merged_token = Token::with_variables(gateway_id, merged_vars);
+            merged_token.inherit_event_context(&token);
             merged_token.is_merged = true;
             inst.audit_log.push(format!(
                 "🔗 Join '{}' completed. Tokens merged.",

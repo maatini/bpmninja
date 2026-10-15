@@ -106,7 +106,7 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::with_variables(&start_id, variables);
+        let mut token = Token::with_variables(&start_id, variables);
 
         for listener in &def.event_listeners {
             match listener {
@@ -147,6 +147,8 @@ impl WorkflowEngine {
             }
         }
 
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         Box::pin(self.run_instance_batch(instance_id, token)).await?;
         self.persist_instance(instance_id).await;
 
@@ -164,6 +166,11 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        if !def.event_listeners.is_empty() {
+            return Err(EngineError::InvalidDefinition(
+                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
+            ));
+        }
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -205,6 +212,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }
@@ -224,38 +232,6 @@ impl WorkflowEngine {
             None,
         )
         .await
-    }
-
-    /// Spawns a call activity sub-process
-    pub(crate) async fn spawn_call_activity(
-        &self,
-        child_def_key: Uuid,
-        parent_instance_id: Uuid,
-        called_node: String,
-        variables: HashMap<String, Value>,
-    ) -> EngineResult<Uuid> {
-        let child_id = self
-            .start_instance_with_variables_and_parent(
-                child_def_key,
-                variables,
-                Some(parent_instance_id),
-            )
-            .await?;
-
-        self.record_history_event(
-            parent_instance_id,
-            crate::history::HistoryEventType::CallActivityStarted,
-            &format!(
-                "Started Call Activity '{}' (child instance {})",
-                called_node, child_id
-            ),
-            crate::history::ActorType::Engine,
-            None,
-            None,
-        )
-        .await;
-
-        Ok(child_id)
     }
 
     /// Spawns a Call Activity child and tracks it on the parent before the child runs.
@@ -291,6 +267,10 @@ impl WorkflowEngine {
 
         if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
             let mut parent = inst_arc.write().await;
+            if !crate::engine::event_subprocess::token_valid(&parent, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            parent.tokens.remove(&token.id);
             parent.outstanding_calls.insert(
                 child_id,
                 OutstandingCall {
@@ -376,7 +356,13 @@ impl WorkflowEngine {
 
             let (called_node_id, token_to_resume) = if let Some(call) = tracked {
                 (call.node_id, Some(call.token))
-            } else if let InstanceState::WaitingOnCallActivity { token, .. } = &parent.state {
+            } else if let InstanceState::WaitingOnCallActivity {
+                token,
+                sub_instance_id,
+            } = &parent.state
+                && *sub_instance_id == completed_instance_id
+                && crate::engine::event_subprocess::token_valid(&parent, token)
+            {
                 (parent.current_node.clone(), Some(token.clone()))
             } else {
                 return Ok(());
@@ -422,6 +408,32 @@ impl WorkflowEngine {
                 .get(&def_key)
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
+            if !crate::engine::event_subprocess::token_valid(
+                &*self
+                    .instances
+                    .get(&parent_id)
+                    .await
+                    .ok_or(EngineError::NoSuchInstance(parent_id))?
+                    .read()
+                    .await,
+                &token,
+            ) {
+                return Ok(());
+            }
+            if let Some(code) = &error_code
+                && crate::engine::executor::find_boundary_error_event(&def, &called_node_id, code)
+                    .is_none()
+                && let Some(handler) = self
+                    .prepare_event_code(parent_id, code, false, &token)
+                    .await?
+            {
+                Box::pin(self.run_instance_batch(parent_id, handler)).await?;
+                return Ok(());
+            }
+            self.cancel_boundary_timers(parent_id, &called_node_id, Some(token.id))
+                .await;
+            self.cancel_boundary_message_catches(parent_id, &called_node_id, Some(token.id))
+                .await;
             // End-Scripts der Call-Activity ausführen. Bei Fehler: Eltern-Instanz als
             // fehlerhaft markieren, damit sie nicht in `Running`-Zustand ohne Token
             // hängen bleibt.
@@ -492,6 +504,7 @@ impl WorkflowEngine {
                     token: token.clone(),
                 };
                 inst.push_audit_log(format!("💥 INCIDENT: Child {completed_instance_id} failed with unhandled BPMN error '{}'", error_code.as_deref().unwrap_or_default()));
+                drop(inst);
                 self.persist_instance(parent_id).await;
                 return Ok(());
             }
@@ -534,6 +547,11 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        if !def.event_listeners.is_empty() {
+            return Err(EngineError::InvalidDefinition(
+                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
+            ));
+        }
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -583,6 +601,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -605,8 +624,10 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::with_variables(&start_id, def.variable_defaults.clone());
+        let mut token = Token::with_variables(&start_id, def.variable_defaults.clone());
 
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 
@@ -631,6 +652,11 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        if !def.event_listeners.is_empty() {
+            return Err(EngineError::InvalidDefinition(
+                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
+            ));
+        }
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -763,6 +789,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -781,7 +808,9 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::with_variables(start_id, vars);
+        let mut token = Token::with_variables(start_id, vars);
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 

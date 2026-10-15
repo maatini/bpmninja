@@ -142,6 +142,12 @@ fn expand_empty_elements(xml: &str) -> Result<String, String> {
 
 /// Runs the analyzer synchronously (call from a blocking thread).
 fn analyze(xml: &str) -> ModelCheckReport {
+    if bpmn_parser::parse_bpmn_xml(xml).is_ok_and(|def| !def.event_subprocesses.is_empty()) {
+        return ModelCheckReport::without_result(
+            ModelCheckStatus::Skipped,
+            "Event subprocess bodies are structurally validated; this analyzer does not model subscriptions, interruption, or repeated activations",
+        );
+    }
     let xml = match expand_empty_elements(xml) {
         Ok(xml) => xml,
         Err(e) => {
@@ -237,6 +243,13 @@ impl ModelChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_subprocess_semantics_are_reported_as_skipped() {
+        let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"><message id="m" name="alert"/><process id="p" isExecutable="true"><startEvent id="s"/><endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/><subProcess id="h" triggeredByEvent="true"><startEvent id="hs"><messageEventDefinition messageRef="m"/></startEvent><endEvent id="he"/><sequenceFlow id="hf" sourceRef="hs" targetRef="he"/></subProcess></process></definitions>"#;
+        assert!(bpmn_parser::parse_bpmn_xml(xml).is_ok());
+        assert_eq!(analyze(xml).status, ModelCheckStatus::Skipped);
+    }
 
     #[test]
     fn expands_self_closing_elements() {

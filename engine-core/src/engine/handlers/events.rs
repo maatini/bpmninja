@@ -288,6 +288,26 @@ impl WorkflowEngine {
                 })
             }
         } else {
+            if let Some(handler) = self
+                .prepare_event_code(instance_id, escalation_code, true, token)
+                .await?
+            {
+                let interrupting = handler.event_context.as_ref().is_some_and(|c| {
+                    token
+                        .event_context
+                        .as_ref()
+                        .is_some_and(|source| source.generation != c.generation)
+                });
+                if interrupting {
+                    return Ok(NextAction::Continue(handler));
+                }
+                let next = resolve_next_target(def_clone, current_id, &token.variables)?;
+                token.current_node = next;
+                return Ok(NextAction::SpawnAndContinue {
+                    main: token.clone(),
+                    spawned: vec![handler],
+                });
+            }
             // No handler found — escalation is ignored (non-fatal), token continues
             let next = resolve_next_target(def_clone, current_id, &token.variables)?;
             token.current_node = next.clone();

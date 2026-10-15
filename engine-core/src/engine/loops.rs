@@ -191,6 +191,7 @@ impl WorkflowEngine {
         node_id: &str,
         characteristics: &LoopCharacteristics,
     ) -> EngineResult<NextAction> {
+        let scope_key = token.scope_key(node_id);
         let shadowed = local_variables(characteristics)
             .into_iter()
             .map(|name| {
@@ -232,6 +233,7 @@ impl WorkflowEngine {
                     let children: Vec<Token> = (0..elements.len())
                         .map(|index| {
                             let mut child = Token::with_variables(node_id, token.variables.clone());
+                            child.inherit_event_context(&token);
                             child.loop_instance = Some(LoopInstance {
                                 node_id: node_id.to_string(),
                                 index,
@@ -279,7 +281,7 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
-        if inst.multi_instance_state.contains_key(node_id) {
+        if inst.multi_instance_state.contains_key(&scope_key) {
             return Err(EngineError::InvalidDefinition(format!(
                 "Loop activity '{node_id}' is already active in instance {instance_id}"
             )));
@@ -288,8 +290,7 @@ impl WorkflowEngine {
             "🔁 Loop activity '{node_id}' started ({} planned instance(s))",
             progress.total
         ));
-        inst.multi_instance_state
-            .insert(node_id.to_string(), progress);
+        inst.multi_instance_state.insert(scope_key, progress);
         Ok(action)
     }
 
@@ -320,7 +321,7 @@ impl WorkflowEngine {
             .write()
             .await
             .multi_instance_state
-            .remove(&marker.node_id)
+            .remove(&token.scope_key(&marker.node_id))
         else {
             return;
         };
@@ -367,6 +368,7 @@ impl WorkflowEngine {
         marker: LoopInstance,
     ) -> EngineResult<Option<NextAction>> {
         let node_id = marker.node_id.as_str();
+        let scope_key = token.scope_key(node_id);
         // Paths that stop at the boundary node itself (e.g. call-activity errors).
         if is_boundary_of(def, &token.current_node, node_id) {
             let boundary_id = token.current_node.clone();
@@ -388,7 +390,7 @@ impl WorkflowEngine {
         let outcome = {
             let mut inst = inst_arc.write().await;
             {
-                let Some(progress) = inst.multi_instance_state.get_mut(node_id) else {
+                let Some(progress) = inst.multi_instance_state.get_mut(&scope_key) else {
                     return Ok(None);
                 };
                 let running = match characteristics {
@@ -420,7 +422,7 @@ impl WorkflowEngine {
                 match running {
                     Running::NextIteration => Outcome::NextIteration,
                     Running::ChildDone => Outcome::ChildDone,
-                    Running::Done => match inst.multi_instance_state.remove(node_id) {
+                    Running::Done => match inst.multi_instance_state.remove(&scope_key) {
                         Some(progress) => Outcome::Finished(Box::new(progress)),
                         None => return Ok(None),
                     },
@@ -464,6 +466,7 @@ impl WorkflowEngine {
                 }
                 let mut next = if parallel {
                     let mut merged = Token::with_variables(node_id, vars);
+                    merged.inherit_event_context(token);
                     merged.is_merged = true;
                     merged
                 } else {
@@ -497,8 +500,13 @@ impl WorkflowEngine {
         token.current_node = resolve_next_target(def, node_id, &token.variables)?;
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
-            inst.multi_instance_state.remove(node_id);
-            inst.variables = token.variables.clone();
+            if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            inst.multi_instance_state.remove(&token.scope_key(node_id));
+            if token.event_context.is_none() {
+                inst.variables = token.variables.clone();
+            }
             inst.current_node = token.current_node.clone();
             inst.push_audit_log(format!(
                 "🔁 Loop activity '{node_id}' completed after {iterations} iteration(s)"

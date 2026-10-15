@@ -216,7 +216,7 @@ fn send_task_message_name(
 /// Parse a BpmnTimerEventDefinition into a TimerDefinition.
 ///
 /// Priority: timeDuration > timeDate > timeCycle (per BPMN spec, only one should be set).
-fn parse_timer_definition(
+pub(crate) fn parse_timer_definition(
     node_id: &str,
     timer: &crate::models::BpmnTimerEventDefinition,
 ) -> EngineResult<TimerDefinition> {
@@ -356,6 +356,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let mut process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
+    let (prepared_xml, handlers) = crate::event_subprocess::extract(xml, &process_id)?;
+    let xml = prepared_xml.as_str();
+    process
+        .sub_processes
+        .retain(|sub| sub.triggered_by_event != Some(true));
     reject_unsupported_elements(xml, &process_id)?;
     resolve_link_events(
         &process_id,
@@ -846,6 +851,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
 
     let mut definition = builder.build()?;
     crate::data::apply(xml, &mut definition)?;
+    crate::event_subprocess::attach(&mut definition, handlers)?;
     Ok(definition)
 }
 

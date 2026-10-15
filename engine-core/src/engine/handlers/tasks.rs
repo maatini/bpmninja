@@ -20,11 +20,25 @@ impl WorkflowEngine {
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
+            if self.pending_timers.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == t.node_id
+            }) {
+                continue;
+            }
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {
+            if self.pending_message_catches.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == m.node_id
+            }) {
+                continue;
+            }
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -36,6 +50,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
 
         let pending = PendingUserTask {
             task_id: Uuid::new_v4(),
@@ -92,6 +109,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
         inst.current_node = next;
         inst.variables = token.variables.clone();
         inst.push_audit_log(format!("📜 Script task '{current_id}' executed"));
@@ -121,6 +141,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
         inst.current_node = next;
         inst.push_audit_log(format!(
             "📤 Send task '{current_id}' published message '{message_name}'"
@@ -139,11 +162,25 @@ impl WorkflowEngine {
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
+            if self.pending_timers.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == t.node_id
+            }) {
+                continue;
+            }
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {
+            if self.pending_message_catches.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == m.node_id
+            }) {
+                continue;
+            }
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -155,6 +192,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
 
         let svc_task = PendingServiceTask {
             id: Uuid::new_v4(),

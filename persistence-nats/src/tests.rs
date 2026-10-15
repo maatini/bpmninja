@@ -283,6 +283,7 @@ async fn test_definition_instance_restore_roundtrip() {
         multi_instance_state: HashMap::new(),
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
+        event_state: None,
         started_at: Some(chrono::Utc::now()),
         completed_at: None,
     };

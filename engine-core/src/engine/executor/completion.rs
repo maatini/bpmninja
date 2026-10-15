@@ -32,7 +32,18 @@ impl WorkflowEngine {
             .get(&instance_id)
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let inst = inst_arc.read().await;
+        let mut inst = inst_arc.write().await;
+        Self::refresh_event_completion(&mut inst);
+        if !inst.outstanding_calls.is_empty() {
+            return Ok(false);
+        }
+        if inst
+            .event_state
+            .as_ref()
+            .is_some_and(|s| !s.main_completed || !s.activations.is_empty())
+        {
+            return Ok(false);
+        }
         if !inst.tokens.is_empty() {
             return Ok(false);
         }
@@ -57,6 +68,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
         let crate::ProcessInstance {
             audit_log,
             variables,

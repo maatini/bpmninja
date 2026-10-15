@@ -36,6 +36,9 @@ impl StartupCoordinator {
         let service_tasks = self.restore_service_tasks(engine).await;
         let timers = self.restore_timers(engine).await;
         let message_catches = self.restore_message_catches(engine).await;
+        if let Err(error) = engine.reconcile_event_subprocesses().await {
+            tracing::error!("Event subprocess recovery failed: {error}");
+        }
 
         RestoreStats {
             definitions,
