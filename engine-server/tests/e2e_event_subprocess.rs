@@ -204,3 +204,121 @@ async fn x9_rest_interrupting_signal_cancels_original_task() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn x9b_rest_direct_updates_rearm_and_preserve_latch_across_restart() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    let (base, server) = serve(engine.clone(), persistence.clone()).await;
+    let client = reqwest::Client::new();
+    let xml = xml(false).replace("<messageEventDefinition messageRef=\"trigger\"/>", "<conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition>");
+    let deployed = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":xml,"name":"conditional"}),
+    )
+    .await;
+    assert_eq!(deployed["model_check"]["status"], "skipped");
+    let started = post(
+        &client,
+        &base,
+        "/api/start",
+        json!({"definition_key":deployed["definition_key"]}),
+    )
+    .await;
+    let id = started["instance_id"].as_str().unwrap();
+    for amount in [150, 160, 90, 150] {
+        let response = client
+            .put(format!("{base}/api/instances/{id}/variables"))
+            .json(&json!({"variables":{"amount":amount}}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 204, "{}", response.text().await.unwrap());
+    }
+    server.abort();
+    drop(engine);
+    let restored = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    for definition in persistence.list_definitions().await.unwrap() {
+        restored.deploy_definition(definition).await;
+    }
+    for instance in persistence.list_instances().await.unwrap() {
+        restored.restore_instance(instance).await;
+    }
+    for task in persistence.list_service_tasks().await.unwrap() {
+        restored.restore_service_task(task);
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    let (base, server) = serve(restored, persistence).await;
+    let response = client
+        .put(format!("{base}/api/instances/{id}/variables"))
+        .json(&json!({"variables":{"amount":151}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    finish(&client, &base, "main", id).await;
+    finish(&client, &base, "handler", id).await;
+    finish(&client, &base, "handler", id).await;
+    assert_eq!(
+        get(&client, &base, &format!("/api/instances/{id}")).await["state"],
+        "Completed"
+    );
+    let history = get(
+        &client,
+        &base,
+        &format!("/api/instances/{id}/history?event_types=EventSubprocessActivated"),
+    )
+    .await;
+    assert_eq!(history.as_array().unwrap().len(), 2);
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["context"]["trigger_kind"] == "conditional"
+                && entry["context"]["variable_revision"].is_number())
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn x9b_rest_native_and_camunda_completions_trigger_conditional_handlers() {
+    for camunda in [false, true] {
+        let persistence = Arc::new(InMemoryPersistence::new());
+        let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+        let (base, server) = serve(engine, persistence).await;
+        let client = reqwest::Client::new();
+        let xml = xml(false).replace("<messageEventDefinition messageRef=\"trigger\"/>", "<conditionalEventDefinition><condition>mainResult == 42</condition></conditionalEventDefinition>").replace("isInterrupting=\"false\"", "isInterrupting=\"true\"");
+        let deployed = post(
+            &client,
+            &base,
+            "/api/deploy",
+            json!({"xml":xml,"name":"conditional"}),
+        )
+        .await;
+        let started = post(
+            &client,
+            &base,
+            "/api/start",
+            json!({"definition_key":deployed["definition_key"]}),
+        )
+        .await;
+        let id = started["instance_id"].as_str().unwrap();
+        if camunda {
+            let tasks = post(&client, &base, "/engine-rest/external-task/fetchAndLock", json!({"workerId":"worker","maxTasks":1,"topics":[{"topicName":"main","lockDuration":60000}]})).await;
+            let task = tasks[0]["id"].as_str().unwrap();
+            let response = client.post(format!("{base}/engine-rest/external-task/{task}/complete")).json(&json!({"workerId":"worker","variables":{"mainResult":{"value":42,"type":"Integer"}}})).send().await.unwrap();
+            assert_eq!(response.status(), 204, "{}", response.text().await.unwrap());
+        } else {
+            finish(&client, &base, "main", id).await;
+        }
+        finish(&client, &base, "handler", id).await;
+        assert_eq!(
+            get(&client, &base, &format!("/api/instances/{id}")).await["state"],
+            "Completed"
+        );
+        server.abort();
+    }
+}

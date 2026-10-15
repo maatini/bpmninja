@@ -117,7 +117,7 @@ continues; its successful completion ends the interrupted process scope.
   messages/signals, Call Activity results, and handler writes. Persist evaluation
   state and specify retrigger behavior to prevent infinite activation while a
   condition stays true. Reuse this mechanism for X2; do not mark other conditional
-  event forms implemented as a side effect. Needs its own plan and GO.
+  event forms implemented as a side effect. [Separate plan prepared](x2-conditional-events-plan.md); implementation awaits its own GO.
 - **X9c — Nested scopes and compensation starts:** requires the X6 runtime-scope
   design and compensation lifecycle/snapshots, coordinated with G1. Validate
   compensation-start semantics against BPMN 2.0.2 before implementing them.

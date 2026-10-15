@@ -334,6 +334,12 @@ impl WorkflowEngine {
         self.cancel_boundary_message_catches(instance_id, &task.node_id, Some(task.token_id))
             .await;
 
+        self.run_conditional_work(instance_id).await?;
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
+                return Ok(());
+            }
+        }
         let next =
             crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;
 
@@ -471,6 +477,7 @@ impl WorkflowEngine {
 
         self.persist_service_task(task_id).await;
         self.persist_instance(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
 
         Ok(())
     }
@@ -531,6 +538,7 @@ impl WorkflowEngine {
 
         self.persist_service_task(task_id).await;
         self.persist_instance(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
 
         Ok(())
     }
@@ -650,6 +658,12 @@ impl WorkflowEngine {
         self.cancel_boundary_message_catches(instance_id, &task.node_id, Some(task.token_id))
             .await;
 
+        self.run_conditional_work(instance_id).await?;
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
+                return Ok(());
+            }
+        }
         let next =
             crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;
 
@@ -928,6 +942,11 @@ impl WorkflowEngine {
                 token.variables.extend(variables.clone());
             }
             inst.variables.extend(variables);
+            let definition = self
+                .definitions
+                .get(&inst.definition_key)
+                .ok_or(EngineError::NoSuchDefinition(inst.definition_key))?;
+            Self::evaluate_conditionals(&mut inst, &definition)?;
             inst.push_audit_log(format!(
                 "🚨 BPMN error '{}' thrown by worker '{}' at service task '{}' (No boundary event caught it)",
                 error_code, worker_id, incident.node_id
@@ -941,6 +960,7 @@ impl WorkflowEngine {
         self.insert_pending_service_task(incident);
         self.persist_service_task(task_id).await;
         self.persist_instance(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
 
         Ok(())
     }

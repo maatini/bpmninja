@@ -28,16 +28,34 @@ impl WorkflowEngine {
     ) -> EngineResult<()> {
         // History of this batch is buffered and written in one call — also when
         // the batch fails, so no recorded step is lost.
-        let initial_has_event_context = initial_token.event_context.is_some();
+        let initial_generation = initial_token
+            .event_context
+            .as_ref()
+            .map(|context| context.generation);
+        let initial_has_event_context = initial_generation.is_some();
         let mut history = Vec::new();
+        let mut failure_generation = initial_generation;
         let driven = self
-            .drive_instance_batch(instance_id, initial_token, &mut history)
+            .drive_instance_batch(
+                instance_id,
+                initial_token,
+                &mut history,
+                &mut failure_generation,
+            )
             .await;
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
             if matches!(error, EngineError::DataMappingError(_)) || initial_has_event_context {
                 if let Some(instance) = self.instances.get(&instance_id).await {
                     let mut instance = instance.write().await;
+                    if failure_generation.is_some_and(|generation| {
+                        instance
+                            .event_state
+                            .as_ref()
+                            .is_some_and(|state| state.generation != generation)
+                    }) {
+                        return Ok(());
+                    }
                     instance.state = InstanceState::CompletedWithError {
                         error_code: if matches!(error, EngineError::DataMappingError(_)) {
                             "DATA_MAPPING_ERROR"
@@ -68,10 +86,18 @@ impl WorkflowEngine {
         instance_id: Uuid,
         initial_token: Token,
         history: &mut Vec<crate::history::HistoryEntry>,
+        failure_generation: &mut Option<u64>,
     ) -> EngineResult<()> {
         let mut queue = VecDeque::new();
+        queue.extend(
+            self.conditional_work(instance_id)
+                .await?
+                .into_iter()
+                .filter(|token| token.id != initial_token.id),
+        );
         queue.push_back(initial_token);
         let mut step_count: u32 = 0;
+        let mut conditional_count = 0usize;
 
         while let Some(mut token) = queue.pop_front() {
             step_count += 1;
@@ -129,9 +155,21 @@ impl WorkflowEngine {
                 }
                 instance.tokens.insert(token.id, token.clone());
             }
+            *failure_generation = token
+                .event_context
+                .as_ref()
+                .map(|context| context.generation);
             let action = match self.execute_step(instance_id, &mut token).await {
                 Ok(action) => action,
                 Err(EngineError::AlreadyCompleted) if token.event_context.is_some() => {
+                    let conditional = self.conditional_work(instance_id).await?;
+                    conditional_count += conditional.len();
+                    if conditional_count > 256 {
+                        return Err(EngineError::ExecutionLimitExceeded(
+                            "Conditional activation chain exceeded 256 activations".into(),
+                        ));
+                    }
+                    queue.extend(conditional);
                     self.clear_wait_states_for_token(instance_id, &token.id)
                         .await;
                     continue;
@@ -220,6 +258,14 @@ impl WorkflowEngine {
                 history.push(entry);
             }
 
+            let conditional = self.conditional_work(instance_id).await?;
+            conditional_count += conditional.len();
+            if conditional_count > 256 {
+                return Err(EngineError::ExecutionLimitExceeded(
+                    "Conditional activation chain exceeded 256 activations".into(),
+                ));
+            }
+            queue.extend(conditional);
             let token_id = token.id;
             self.handle_next_action(
                 action,
@@ -230,6 +276,14 @@ impl WorkflowEngine {
                 &mut queue,
             )
             .await?;
+            let conditional = self.conditional_work(instance_id).await?;
+            conditional_count += conditional.len();
+            if conditional_count > 256 {
+                return Err(EngineError::ExecutionLimitExceeded(
+                    "Conditional activation chain exceeded 256 activations".into(),
+                ));
+            }
+            queue.extend(conditional);
         } // end while
 
         Ok(())
@@ -377,6 +431,13 @@ impl WorkflowEngine {
             }
         }
 
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let mut instance = instance.write().await;
+            Self::evaluate_conditionals(&mut instance, &def_clone)?;
+            if !crate::engine::event_subprocess::token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+        }
         match &element {
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)

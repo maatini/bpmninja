@@ -497,6 +497,38 @@ impl WorkflowEngine {
         iterations: usize,
     ) -> EngineResult<NextAction> {
         token.loop_instance = None;
+        if def.event_subprocesses.iter().any(|handler| {
+            matches!(
+                handler.trigger,
+                crate::domain::EventSubProcessTrigger::Conditional(_)
+            )
+        }) {
+            let instance = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut instance = instance.write().await;
+            if !crate::engine::event_subprocess::token_valid(&instance, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            let updates = token.process_variables();
+            if let Some(context) = &mut token.event_context {
+                for key in context.baseline.keys() {
+                    if !updates.contains_key(key) {
+                        instance.variables.remove(key);
+                    }
+                }
+                for (key, value) in updates {
+                    if context.baseline.get(&key) != Some(&value) {
+                        instance.variables.insert(key, value);
+                    }
+                }
+                context.baseline = instance.variables.clone();
+                token.variables = instance.variables.clone();
+            }
+            Self::evaluate_conditionals(&mut instance, def)?;
+        }
         token.current_node = resolve_next_target(def, node_id, &token.variables)?;
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;

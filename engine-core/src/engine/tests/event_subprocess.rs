@@ -1299,3 +1299,506 @@ async fn container_end_waits_for_handler_call_activity() {
     assert_eq!(current.variables["starts"], 1);
     assert_eq!(current.variables["ends"], 1);
 }
+
+#[tokio::test]
+async fn conditional_latch_tracks_committed_transitions_and_initial_values() {
+    let engine = WorkflowEngine::new();
+    let (key, _) = engine
+        .deploy_definition(definition(
+            Trigger::Conditional("amount > 100".into()),
+            false,
+        ))
+        .await;
+    let id = engine
+        .start_instance_with_variables(key, HashMap::from([("amount".into(), json!(150))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 2);
+    engine
+        .update_instance_variables(id, HashMap::from([("amount".into(), json!(160))]))
+        .await
+        .unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("unrelated".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 2);
+    engine
+        .update_instance_variables(id, HashMap::from([("amount".into(), json!(90))]))
+        .await
+        .unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("amount".into(), json!(150))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 3);
+    finish_user(&engine, "main", HashMap::new()).await;
+    finish_user(&engine, "work", HashMap::new()).await;
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert!(matches!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    ));
+}
+
+#[tokio::test]
+async fn conditional_interrupts_task_completion_before_next_work() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("cancelled".into()), true);
+    def.nodes
+        .insert("next".into(), BpmnElement::UserTask("next".into()));
+    def.flows.insert(
+        "main".into(),
+        vec![crate::domain::SequenceFlow::simple("next")],
+    );
+    def.flows.insert(
+        "next".into(),
+        vec![crate::domain::SequenceFlow::simple("end")],
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    finish_user(
+        &engine,
+        "main",
+        HashMap::from([("cancelled".into(), json!(true))]),
+    )
+    .await;
+    let tasks = engine.get_pending_user_tasks();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].node_id, "work");
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert!(matches!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    ));
+}
+
+#[tokio::test]
+async fn conditional_suspension_coalesces_changes_and_resume_evaluates() {
+    let engine = WorkflowEngine::new();
+    let (key, _) = engine
+        .deploy_definition(definition(Trigger::Conditional("flag".into()), false))
+        .await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine.suspend_instance(id).await.unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    engine.resume_instance(id).await.unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 2);
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 2);
+}
+
+#[tokio::test]
+async fn conditional_local_inputs_do_not_trigger_but_committed_outputs_do() {
+    use crate::domain::{ActivityMappings, DataMapping, MappingValue};
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), false);
+    def.data_mappings.insert(
+        "main".into(),
+        ActivityMappings {
+            inputs: vec![DataMapping {
+                target: "flag".into(),
+                value: MappingValue::Literal(json!(true)),
+            }],
+            outputs: vec![DataMapping {
+                target: "flag".into(),
+                value: MappingValue::Variable("result".into()),
+            }],
+            ..Default::default()
+        },
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    let task = engine.get_pending_user_tasks().remove(0);
+    assert!(
+        engine
+            .complete_user_task(task.task_id, HashMap::new())
+            .await
+            .is_err()
+    );
+    let failed = engine.get_instance_details(id).await.unwrap();
+    assert!(!failed.variables.contains_key("flag"));
+    assert!(failed.event_state.unwrap().activations.is_empty());
+    engine
+        .complete_user_task(
+            task.task_id,
+            HashMap::from([("result".into(), json!(true))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(engine.get_pending_user_tasks()[0].node_id, "work");
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+}
+
+#[tokio::test]
+async fn conditional_failed_listener_does_not_commit_or_advance_latch() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), false);
+    def.listeners.insert(
+        "main".into(),
+        vec![crate::domain::ExecutionListener {
+            event: crate::domain::ListenerEvent::End,
+            script: "let flag = true; throw \"fail\";".into(),
+        }],
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let task = engine.get_pending_user_tasks().remove(0);
+    assert!(
+        engine
+            .complete_user_task(task.task_id, HashMap::new())
+            .await
+            .is_err()
+    );
+    let instance = engine.get_instance_details(id).await.unwrap();
+    assert!(!instance.variables.contains_key("flag"));
+    assert!(instance.event_state.unwrap().activations.is_empty());
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+}
+
+#[tokio::test]
+async fn conditional_script_commits_trigger_and_end_callback_can_rearm() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), false);
+    def.nodes.insert(
+        "main".into(),
+        BpmnElement::ScriptTask {
+            script: "let flag = true;".into(),
+            multi_instance: None,
+        },
+    );
+    container_listeners(&mut def, "starts += 1;", "let flag = false; ends += 1;");
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    engine
+        .update_instance_variables(id, HashMap::from([("keep_alive".into(), json!(1))]))
+        .await
+        .unwrap();
+    finish_user(&engine, "work", HashMap::new()).await;
+    let instance = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(instance.variables["flag"], false);
+    assert_eq!(instance.variables["starts"], 1);
+    assert_eq!(instance.variables["ends"], 1);
+    assert_eq!(instance.state, InstanceState::Completed);
+}
+
+#[tokio::test]
+async fn conditional_concurrent_updates_claim_once_and_deletion_rearms() {
+    let engine = WorkflowEngine::new();
+    let (key, _) = engine
+        .deploy_definition(definition(Trigger::Conditional("flag".into()), false))
+        .await;
+    let id = engine.start_instance(key).await.unwrap();
+    let (a, b) = tokio::join!(
+        engine.update_instance_variables(id, HashMap::from([("flag".into(), json!(true))])),
+        engine.update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+    );
+    a.unwrap();
+    b.unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 2);
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), Value::Null)]))
+        .await
+        .unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 3);
+}
+
+#[tokio::test]
+async fn conditional_recovery_replays_saved_claim_and_keeps_true_latch() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = definition(Trigger::Conditional("flag".into()), false);
+    container_listeners(&mut def, "starts += 1;", "ends += 1;");
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    // Crash after the atomic variable/claim transaction, before publication.
+    let instance = engine.instances.get(&id).await.unwrap();
+    {
+        let mut instance = instance.write().await;
+        instance.variables.insert("flag".into(), json!(true));
+        WorkflowEngine::evaluate_conditionals(
+            &mut instance,
+            &engine.get_definition(&key).await.unwrap(),
+        )
+        .unwrap();
+    }
+    engine.persist_instance(id).await;
+    drop(engine);
+    let restored = restore_event_engine(persistence).await;
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(restored.get_pending_user_tasks().len(), 2);
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().variables["starts"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn conditional_call_outputs_interrupt_parent_before_continuation() {
+    let engine = WorkflowEngine::new();
+    let child = ProcessDefinitionBuilder::new("conditional_child")
+        .node("cs", BpmnElement::StartEvent)
+        .node("cw", BpmnElement::UserTask("child".into()))
+        .node("ce", BpmnElement::EndEvent)
+        .flow("cs", "cw")
+        .flow("cw", "ce")
+        .build()
+        .unwrap();
+    engine.deploy_definition(child).await;
+    let mut def = definition(Trigger::Conditional("flag".into()), true);
+    def.nodes.insert(
+        "main".into(),
+        BpmnElement::CallActivity {
+            called_element: "conditional_child".into(),
+        },
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    finish_user(&engine, "cw", HashMap::from([("flag".into(), json!(true))])).await;
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(engine.get_pending_user_tasks()[0].node_id, "work");
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+}
+
+fn second_conditional(
+    definition: &mut ProcessDefinition,
+    expression: &str,
+    interrupting: bool,
+    script: Option<&str>,
+) {
+    let work = script
+        .map(|script| BpmnElement::ScriptTask {
+            script: script.into(),
+            multi_instance: None,
+        })
+        .unwrap_or(BpmnElement::UserTask("second".into()));
+    let body = ProcessDefinitionBuilder::new("second")
+        .node("ss", BpmnElement::StartEvent)
+        .node("sw", work)
+        .node("se", BpmnElement::EndEvent)
+        .flow("ss", "sw")
+        .flow("sw", "se")
+        .build()
+        .unwrap();
+    definition.event_subprocesses.push(EventSubProcess {
+        id: "second".into(),
+        start_node: "ss".into(),
+        node_ids: body.nodes.keys().cloned().collect(),
+        trigger: Trigger::Conditional(expression.into()),
+        is_interrupting: interrupting,
+    });
+    definition.nodes.extend(body.nodes);
+    definition.flows.extend(body.flows);
+}
+
+#[tokio::test]
+async fn conditional_competing_interruptions_use_stable_handler_order() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), true);
+    second_conditional(&mut def, "flag == true", true, None);
+    def.event_subprocesses.reverse();
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(engine.get_pending_user_tasks()[0].node_id, "work");
+}
+
+#[tokio::test]
+async fn conditional_oscillating_handler_writes_fail_with_a_bounded_chain() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), false);
+    def.nodes.insert(
+        "work".into(),
+        BpmnElement::ScriptTask {
+            script: "let flag = false;".into(),
+            multi_instance: None,
+        },
+    );
+    second_conditional(&mut def, "flag == false", false, Some("let flag = true;"));
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let result = engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await;
+    assert!(matches!(
+        result,
+        Err(EngineError::ExecutionLimitExceeded(_))
+    ));
+    assert!(matches!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::CompletedWithError { .. }
+    ));
+    assert!(engine.get_pending_user_tasks().is_empty());
+}
+
+#[tokio::test]
+async fn conditional_message_payload_is_evaluated_before_continuation() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("flag".into()), true);
+    def.nodes.insert(
+        "main".into(),
+        BpmnElement::MessageCatchEvent {
+            message_name: "payload".into(),
+        },
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .correlate_message(
+            "payload".into(),
+            None,
+            HashMap::from([("flag".into(), json!(true))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(engine.get_pending_user_tasks()[0].node_id, "work");
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+}
+
+#[tokio::test]
+async fn conditional_claim_prevents_a_stale_completion_decision() {
+    let engine = WorkflowEngine::new();
+    let (key, _) = engine
+        .deploy_definition(definition(Trigger::Conditional("flag".into()), false))
+        .await;
+    let id = engine.start_instance(key).await.unwrap();
+    let instance = engine.instances.get(&id).await.unwrap();
+    {
+        let mut instance = instance.write().await;
+        instance.tokens.clear();
+        for token in &mut instance.active_tokens {
+            token.completed = true;
+        }
+    }
+    assert!(engine.all_tokens_completed(id).await.unwrap());
+    {
+        let mut instance = instance.write().await;
+        instance.variables.insert("flag".into(), json!(true));
+        WorkflowEngine::evaluate_conditionals(
+            &mut instance,
+            &engine.get_definition(&key).await.unwrap(),
+        )
+        .unwrap();
+        assert!(!WorkflowEngine::scope_execution_complete(&instance));
+    }
+    engine.run_conditional_work(id).await.unwrap();
+    assert_eq!(
+        engine
+            .get_pending_user_tasks()
+            .iter()
+            .filter(|task| task.node_id == "work")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn conditional_multi_instance_output_collection_is_a_process_commit() {
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Conditional("receipts".into()), false);
+    let mut characteristics = parallel_loop(2);
+    if let crate::domain::LoopCharacteristics::MultiInstance(mi) = &mut characteristics {
+        mi.output_collection = Some("receipts".into());
+        mi.output_element = Some("result".into());
+    }
+    def.loops.insert("main".into(), characteristics);
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    finish_user(
+        &engine,
+        "main",
+        HashMap::from([("result".into(), json!(1))]),
+    )
+    .await;
+    assert!(
+        !engine
+            .get_pending_user_tasks()
+            .iter()
+            .any(|task| task.node_id == "work")
+    );
+    finish_user(
+        &engine,
+        "main",
+        HashMap::from([("result".into(), json!(2))]),
+    )
+    .await;
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(engine.get_pending_user_tasks()[0].node_id, "work");
+    let mut receipts = engine.get_instance_details(id).await.unwrap().variables["receipts"]
+        .as_array()
+        .unwrap()
+        .clone();
+    receipts.sort_by_key(|value| value.as_i64());
+    assert_eq!(receipts, vec![json!(1), json!(2)]);
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+}
+
+#[tokio::test]
+async fn conditional_administrative_relocation_is_rejected_without_changing_work() {
+    let engine = WorkflowEngine::new();
+    let def = definition(Trigger::Conditional("flag".into()), false);
+    let (key, _) = engine.deploy_definition(def.clone()).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let (target, _) = engine.deploy_definition(def).await;
+    assert!(
+        engine
+            .move_token(id, "end", HashMap::new(), true)
+            .await
+            .is_err()
+    );
+    assert!(
+        engine
+            .migrate_instance(id, target, HashMap::new())
+            .await
+            .is_err()
+    );
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    assert_eq!(
+        engine
+            .get_instance_details(id)
+            .await
+            .unwrap()
+            .definition_key,
+        key
+    );
+}

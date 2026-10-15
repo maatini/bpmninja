@@ -284,6 +284,9 @@ impl WorkflowEngine {
                         if !crate::engine::event_subprocess::token_valid(&inst, source) {
                             return Ok(());
                         }
+                        if !Self::scope_execution_complete(&inst) {
+                            return Ok(());
+                        }
                         inst.state = InstanceState::Completed;
                         inst.completed_at = Some(chrono::Utc::now());
                         inst.audit_log
@@ -385,6 +388,9 @@ impl WorkflowEngine {
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
                         if !crate::engine::event_subprocess::token_valid(&inst, source) {
+                            return Ok(());
+                        }
+                        if !Self::scope_execution_complete(&inst) {
                             return Ok(());
                         }
                         inst.state = InstanceState::Completed;

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EventSubProcessTrigger {
     Timer(TimerDefinition),
+    Conditional(String),
     Message(String),
     Signal(String),
     Error(Option<String>),

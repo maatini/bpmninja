@@ -474,6 +474,12 @@ impl WorkflowEngine {
                 return Err(e);
             }
 
+            self.run_conditional_work(parent_id).await?;
+            if let Some(instance) = self.instances.get(&parent_id).await {
+                if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
+                    return Ok(());
+                }
+            }
             // Check for BPMN Error handling first
             let mut handle_as_incident = false;
             let mut target_boundary = None;

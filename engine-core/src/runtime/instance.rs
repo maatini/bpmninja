@@ -203,6 +203,19 @@ pub struct ProcessInstance {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EventSubProcessState {
+    #[serde(default)]
+    pub conditional_variables: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    pub variable_revision: u64,
+    #[serde(default)]
+    pub conditional_values: HashMap<Uuid, bool>,
+    #[serde(default)]
+    pub ready_conditional_tokens: Vec<Uuid>,
+    #[serde(default)]
+    pub conditional_cancel_children: Vec<Uuid>,
+    #[serde(default)]
+    pub conditional_cleanup: bool,
+
     pub generation: u64,
     pub main_completed: bool,
     pub subscriptions: HashMap<Uuid, EventSubscription>,

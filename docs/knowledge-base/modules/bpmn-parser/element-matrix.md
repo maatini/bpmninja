@@ -42,7 +42,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Task (abstract) | ❌ | Use a concrete task type |
 | Call Activity | ✅ | Variables propagated both ways, error boundaries |
 | Embedded Sub-Process | ✅ | Flattened at parse time (ADR-003); entered at the internal start event's successor. Boundary events on the sub-process are not spec-exact [X6] |
-| Event Sub-Process | ⚠️ subset [X9a] | Process-level timer/message/signal/error/escalation starts; legal interruption flags, repeated handlers, shared variables, persisted subscriptions and activation recovery. Error starts interrupt. Container start/end listeners accept inline Rhai scripts per activation. Nested scopes, conditional/compensation starts, container data scopes and external listener delegates/resources are rejected. See [runtime contract](../../../event-subprocesses.md). |
+| Event Sub-Process | ⚠️ subset [X9a/X9b] | Process-level timer/message/signal/error/escalation/conditional starts; legal interruption flags, repeated handlers, shared variables, persisted subscriptions and activation recovery. Error starts interrupt. Container start/end listeners accept inline Rhai scripts per activation. Conditional starts use validated inline simple expressions with persisted transition latches. Nested scopes, compensation starts, container data scopes and external listener delegates/resources are rejected. See [runtime contract](../../../event-subprocesses.md). |
 | Transaction | ❌ [X7] | |
 | Ad-hoc Sub-Process | ❌ [X8] | |
 | Loop (`standardLoopCharacteristics`) | ✅ | Tasks + call activities; `loopCondition`, `testBefore`, `loopMaximum`. On sub-processes ❌ [X6] |

@@ -117,6 +117,27 @@ function TimerValue(props: any) {
   });
 }
 
+function ConditionalValue(props: any) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const moddle = useService('moddle');
+  const debounce = useService('debounceInput');
+  const event = eventDefinition(element);
+  return TextFieldEntry({ ...props, label: 'Condition', debounce,
+    description: 'A variable or a comparison, e.g. amount > 100. Triggers again after becoming false, then true.',
+    getValue: () => event.condition?.body || '',
+    validate: (value: string) => value?.trim() ? undefined : 'A condition is required.',
+    setValue: (value: string) => {
+      if (event.condition) modeling.updateModdleProperties(element, event.condition, { body: value });
+      else {
+        const expression = moddle.create('bpmn:FormalExpression', { body: value });
+        expression.$parent = event;
+        modeling.updateModdleProperties(element, event, { condition: expression });
+      }
+    }
+  });
+}
+
 export class EventSubprocessPropertiesProvider {
   static $inject = ['propertiesPanel'];
   constructor(propertiesPanel: any) { propertiesPanel.registerProvider(500, this); }
@@ -124,12 +145,15 @@ export class EventSubprocessPropertiesProvider {
     return (groups: any[]) => {
       if (!is(element, 'bpmn:StartEvent') || !element.businessObject.$parent?.triggeredByEvent) return groups;
       const event = eventDefinition(element);
-      if (!event || (!references[event.$type] && !is(event, 'bpmn:TimerEventDefinition'))) return groups;
+      if (!event || (!references[event.$type] && !is(event, 'bpmn:TimerEventDefinition') && !is(event, 'bpmn:ConditionalEventDefinition'))) return groups;
       const entries = [];
       if (!is(event, 'bpmn:ErrorEventDefinition')) entries.push({ id: 'event-subprocess-interrupting', element, component: Interrupting, isEdited: isCheckboxEntryEdited });
       if (references[event.$type]) entries.push(
         { id: 'event-subprocess-reference', element, component: ReferenceId, isEdited: isTextFieldEntryEdited },
         { id: 'event-subprocess-value', element, component: ReferenceValue, isEdited: isTextFieldEntryEdited }
+      );
+      else if (is(event, 'bpmn:ConditionalEventDefinition')) entries.push(
+        { id: 'event-subprocess-condition', element, component: ConditionalValue, isEdited: isTextFieldEntryEdited }
       );
       else entries.push(
         { id: 'event-subprocess-timer-kind', element, component: TimerKind, isEdited: isSelectEntryEdited },

@@ -277,6 +277,21 @@ impl WorkflowEngine {
             .definitions
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
+        if def.event_subprocesses.iter().any(|handler| {
+            matches!(
+                handler.trigger,
+                crate::domain::EventSubProcessTrigger::Conditional(_)
+            )
+        }) {
+            self.run_end_scripts(catch.instance_id, &mut token, &def, &catch.node_id)
+                .await?;
+            self.run_conditional_work(catch.instance_id).await?;
+            if let Some(instance) = self.instances.get(&catch.instance_id).await {
+                if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
+                    return Ok(());
+                }
+            }
+        }
         let next =
             crate::engine::executor::resolve_next_target(&def, &catch.node_id, &token.variables)?;
         token.current_node = next.clone();

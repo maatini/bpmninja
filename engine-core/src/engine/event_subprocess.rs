@@ -105,6 +105,9 @@ pub(crate) fn validate_definition(
         {
             return Err(invalid("Event subprocess IDs must be nonempty and unique"));
         }
+        if let Trigger::Conditional(expression) = &handler.trigger {
+            crate::condition::validate_event_condition(expression)?;
+        }
         if matches!(handler.trigger, Trigger::Error(_)) && !handler.is_interrupting {
             return Err(invalid(
                 "Error event subprocess starts must be interrupting",
@@ -149,6 +152,155 @@ pub(crate) fn validate_definition(
 }
 
 impl WorkflowEngine {
+    /// Called while the process-variable commit lock is held. Claims and the
+    /// observed variable revision are part of the same persisted instance.
+    pub(crate) fn evaluate_conditionals(
+        instance: &mut ProcessInstance,
+        definition: &ProcessDefinition,
+    ) -> EngineResult<()> {
+        if matches!(
+            instance.state,
+            InstanceState::Suspended { .. }
+                | InstanceState::Completed
+                | InstanceState::CompletedWithError { .. }
+        ) {
+            return Ok(());
+        }
+        let Some(state) = &mut instance.event_state else {
+            return Ok(());
+        };
+        if !definition
+            .event_subprocesses
+            .iter()
+            .any(|handler| matches!(handler.trigger, Trigger::Conditional(_)))
+        {
+            return Ok(());
+        }
+        if state.conditional_variables.as_ref() == Some(&instance.variables) {
+            return Ok(());
+        }
+        state.variable_revision += 1;
+        state.conditional_variables = Some(instance.variables.clone());
+        let revision = state.variable_revision;
+        let mut subscriptions: Vec<_> = state
+            .subscriptions
+            .iter()
+            .filter_map(|(id, subscription)| {
+                definition
+                    .event_subprocesses
+                    .iter()
+                    .find(|handler| handler.id == subscription.subprocess_id)
+                    .and_then(|handler| match &handler.trigger {
+                        Trigger::Conditional(expression) => {
+                            Some((handler.id.clone(), *id, expression.clone()))
+                        }
+                        _ => None,
+                    })
+            })
+            .collect();
+        subscriptions.sort();
+        for (_, subscription, expression) in subscriptions {
+            let current = definition.evaluate_event_condition(&expression, &instance.variables);
+            let state = instance.event_state.as_mut().unwrap();
+            if !state.subscriptions.contains_key(&subscription) {
+                break;
+            }
+            let previous = state
+                .conditional_values
+                .insert(subscription, current)
+                .unwrap_or(false);
+            if current && !previous {
+                if let Some((token, children, interrupted)) = Self::claim_event_activation(
+                    instance,
+                    definition,
+                    subscription,
+                    &HashMap::new(),
+                )? {
+                    let state = instance.event_state.as_mut().unwrap();
+                    state.ready_conditional_tokens.push(token.id);
+                    state.conditional_cancel_children.extend(children);
+                    state.conditional_cleanup |= interrupted;
+                    if let Some(entry) = state.lifecycle_outbox.last_mut() {
+                        entry
+                            .context
+                            .insert("trigger_kind".into(), Value::String("conditional".into()));
+                        entry
+                            .context
+                            .insert("variable_revision".into(), Value::from(revision));
+                    }
+                    if interrupted {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Drains durable claims into the caller's work queue without recursive execution.
+    pub(crate) async fn conditional_work(&self, id: Uuid) -> EngineResult<Vec<Token>> {
+        let _guard = self.conditional_work_locks.lock(id).await;
+        let Some(instance) = self.instances.get(&id).await else {
+            return Ok(Vec::new());
+        };
+        let key = instance.read().await.definition_key;
+        let definition = self
+            .definitions
+            .get(&key)
+            .ok_or(EngineError::NoSuchDefinition(key))?;
+        let (tokens, children, cleanup, generation) = {
+            let mut instance = instance.write().await;
+            Self::evaluate_conditionals(&mut instance, &definition)?;
+            if matches!(instance.state, InstanceState::Suspended { .. }) {
+                return Ok(Vec::new());
+            }
+            let Some(state) = &mut instance.event_state else {
+                return Ok(Vec::new());
+            };
+            let ids = std::mem::take(&mut state.ready_conditional_tokens);
+            let children = state.conditional_cancel_children.clone();
+            let cleanup = state.conditional_cleanup;
+            let generation = state.generation;
+            let tokens = ids
+                .into_iter()
+                .filter_map(|token| instance.tokens.get(&token).cloned())
+                .collect::<Vec<_>>();
+            (tokens, children, cleanup, generation)
+        };
+        if !tokens.is_empty() || cleanup || !children.is_empty() {
+            // Save claims before exposing their body. Tokens remain in the central
+            // registry even after the ready queue is drained, allowing crash replay.
+            self.persist_instance(id).await;
+            if cleanup {
+                self.cancel_event_work(id).await;
+            }
+            for child in &children {
+                self.abort_event_child(*child).await;
+            }
+            {
+                let mut instance = instance.write().await;
+                if let Some(state) = &mut instance.event_state {
+                    state
+                        .conditional_cancel_children
+                        .retain(|child| !children.contains(child));
+                    if state.generation == generation {
+                        state.conditional_cleanup = false;
+                    }
+                }
+            }
+            self.persist_instance(id).await;
+            self.flush_event_lifecycle(id).await;
+        }
+        Ok(tokens)
+    }
+
+    pub(crate) async fn run_conditional_work(&self, id: Uuid) -> EngineResult<()> {
+        for token in self.conditional_work(id).await? {
+            Box::pin(self.run_instance_batch(id, token)).await?;
+        }
+        Ok(())
+    }
+
     /// Container scripts are atomic process-variable updates, independent of task scopes.
     async fn run_event_container_listener(
         &self,
@@ -227,6 +379,7 @@ impl WorkflowEngine {
             entry.diff = Some(diff);
         }
         *token = candidate;
+        Self::evaluate_conditionals(instance, definition)?;
         Ok(())
     }
 
@@ -287,6 +440,9 @@ impl WorkflowEngine {
                 ListenerEvent::Start,
             )
             .await?;
+            if !token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             instance
                 .event_state
                 .as_mut()
@@ -509,6 +665,128 @@ impl WorkflowEngine {
         false
     }
 
+    fn claim_event_activation(
+        instance: &mut ProcessInstance,
+        def: &ProcessDefinition,
+        subscription_id: Uuid,
+        variables: &HashMap<String, Value>,
+    ) -> EngineResult<Option<(Token, Vec<Uuid>, bool)>> {
+        if matches!(
+            instance.state,
+            InstanceState::Completed
+                | InstanceState::CompletedWithError { .. }
+                | InstanceState::Suspended { .. }
+        ) {
+            return Ok(None);
+        }
+        let Some(subscription) = instance
+            .event_state
+            .as_ref()
+            .and_then(|s| s.subscriptions.get(&subscription_id))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let handler = def
+            .event_subprocesses
+            .iter()
+            .find(|h| h.id == subscription.subprocess_id)
+            .ok_or_else(|| {
+                EngineError::InvalidDefinition(
+                    "Event subscription refers to a missing handler".into(),
+                )
+            })?;
+        if matches!(handler.trigger, Trigger::Timer(_))
+            && subscription.next_due.is_none_or(|due| due > Utc::now())
+        {
+            return Ok(None);
+        }
+        let mut children = Vec::new();
+        if handler.is_interrupting {
+            queue_cancelled_activations(instance, "cancelled by interrupting event subprocess");
+            children.extend(instance.outstanding_calls.keys().copied());
+            instance.tokens.clear();
+            instance.active_tokens.clear();
+            instance.join_barriers.clear();
+            instance.multi_instance_state.clear();
+            instance.outstanding_calls.clear();
+            let state = instance.event_state.as_mut().unwrap();
+            state.generation += 1;
+            state.main_completed = true;
+            state.subscriptions.clear();
+            state.activations.clear();
+            state.started_activations.clear();
+        } else if let Trigger::Timer(timer) = &handler.trigger {
+            let remaining = subscription.remaining.map(|n| n.saturating_sub(1));
+            let next_due = if timer.is_recurring() && remaining != Some(0) {
+                timer.next_expiry(Utc::now())
+            } else {
+                None
+            };
+            let state = instance.event_state.as_mut().unwrap();
+            if let Some(next_due) = next_due {
+                let subscription = state.subscriptions.get_mut(&subscription_id).unwrap();
+                subscription.next_due = Some(next_due);
+                subscription.remaining = remaining;
+            } else {
+                state.subscriptions.remove(&subscription_id);
+            }
+        }
+        let activation = Uuid::new_v4();
+        let generation = instance.event_state.as_ref().unwrap().generation;
+        let baseline = instance.variables.clone();
+        let mut effective = baseline.clone();
+        effective.extend(variables.clone());
+        let mut token = Token::with_variables(&handler.start_node, effective);
+        token.event_context = Some(Box::new(EventContext {
+            generation,
+            activation: Some(activation),
+            started_node: None,
+            baseline,
+        }));
+        instance
+            .event_state
+            .as_mut()
+            .unwrap()
+            .activations
+            .insert(activation, handler.id.clone());
+        instance.tokens.insert(token.id, token.clone());
+        instance.active_tokens.push(ActiveToken {
+            token: token.clone(),
+            fork_id: Some(handler.id.clone()),
+            branch_index: 0,
+            completed: false,
+        });
+        instance.state = InstanceState::ParallelExecution {
+            active_token_count: instance
+                .active_tokens
+                .iter()
+                .filter(|t| !t.completed)
+                .count(),
+        };
+        instance.push_audit_log(format!(
+            "Event subprocess '{}' activated ({activation}, interrupting={})",
+            handler.id, handler.is_interrupting
+        ));
+        if handler.is_interrupting {
+            queue_lifecycle(
+                instance,
+                activation,
+                &handler.id,
+                HistoryEventType::EventSubprocessScopeInterrupted,
+                "containing process scope interrupted",
+            );
+        }
+        queue_lifecycle(
+            instance,
+            activation,
+            &handler.id,
+            HistoryEventType::EventSubprocessActivated,
+            "activated",
+        );
+        Ok(Some((token, children, handler.is_interrupting)))
+    }
+
     /// Claims and persists the handler before it can expose work; interruption invalidates old tokens.
     pub(crate) async fn prepare_event_activation(
         &self,
@@ -526,125 +804,12 @@ impl WorkflowEngine {
             .definitions
             .get(&key)
             .ok_or(EngineError::NoSuchDefinition(key))?;
-        let (token, children, interrupted) = {
+        let claimed = {
             let mut instance = instance.write().await;
-            if matches!(
-                instance.state,
-                InstanceState::Completed
-                    | InstanceState::CompletedWithError { .. }
-                    | InstanceState::Suspended { .. }
-            ) {
-                return Ok(None);
-            }
-            let Some(subscription) = instance
-                .event_state
-                .as_ref()
-                .and_then(|s| s.subscriptions.get(&subscription_id))
-                .cloned()
-            else {
-                return Ok(None);
-            };
-            let handler = def
-                .event_subprocesses
-                .iter()
-                .find(|h| h.id == subscription.subprocess_id)
-                .ok_or_else(|| {
-                    EngineError::InvalidDefinition(
-                        "Event subscription refers to a missing handler".into(),
-                    )
-                })?;
-            if matches!(handler.trigger, Trigger::Timer(_))
-                && subscription.next_due.is_none_or(|due| due > Utc::now())
-            {
-                return Ok(None);
-            }
-            let mut children = Vec::new();
-            if handler.is_interrupting {
-                queue_cancelled_activations(
-                    &mut instance,
-                    "cancelled by interrupting event subprocess",
-                );
-                children.extend(instance.outstanding_calls.keys().copied());
-                instance.tokens.clear();
-                instance.active_tokens.clear();
-                instance.join_barriers.clear();
-                instance.multi_instance_state.clear();
-                instance.outstanding_calls.clear();
-                let state = instance.event_state.as_mut().unwrap();
-                state.generation += 1;
-                state.main_completed = true;
-                state.subscriptions.clear();
-                state.activations.clear();
-                state.started_activations.clear();
-            } else if let Trigger::Timer(timer) = &handler.trigger {
-                let remaining = subscription.remaining.map(|n| n.saturating_sub(1));
-                let next_due = if timer.is_recurring() && remaining != Some(0) {
-                    timer.next_expiry(Utc::now())
-                } else {
-                    None
-                };
-                let state = instance.event_state.as_mut().unwrap();
-                if let Some(next_due) = next_due {
-                    let subscription = state.subscriptions.get_mut(&subscription_id).unwrap();
-                    subscription.next_due = Some(next_due);
-                    subscription.remaining = remaining;
-                } else {
-                    state.subscriptions.remove(&subscription_id);
-                }
-            }
-            let activation = Uuid::new_v4();
-            let generation = instance.event_state.as_ref().unwrap().generation;
-            let baseline = instance.variables.clone();
-            let mut effective = baseline.clone();
-            effective.extend(variables.clone());
-            let mut token = Token::with_variables(&handler.start_node, effective);
-            token.event_context = Some(Box::new(EventContext {
-                generation,
-                activation: Some(activation),
-                started_node: None,
-                baseline,
-            }));
-            instance
-                .event_state
-                .as_mut()
-                .unwrap()
-                .activations
-                .insert(activation, handler.id.clone());
-            instance.tokens.insert(token.id, token.clone());
-            instance.active_tokens.push(ActiveToken {
-                token: token.clone(),
-                fork_id: Some(handler.id.clone()),
-                branch_index: 0,
-                completed: false,
-            });
-            instance.state = InstanceState::ParallelExecution {
-                active_token_count: instance
-                    .active_tokens
-                    .iter()
-                    .filter(|t| !t.completed)
-                    .count(),
-            };
-            instance.push_audit_log(format!(
-                "Event subprocess '{}' activated ({activation}, interrupting={})",
-                handler.id, handler.is_interrupting
-            ));
-            if handler.is_interrupting {
-                queue_lifecycle(
-                    &mut instance,
-                    activation,
-                    &handler.id,
-                    HistoryEventType::EventSubprocessScopeInterrupted,
-                    "containing process scope interrupted",
-                );
-            }
-            queue_lifecycle(
-                &mut instance,
-                activation,
-                &handler.id,
-                HistoryEventType::EventSubprocessActivated,
-                "activated",
-            );
-            (token, children, handler.is_interrupting)
+            Self::claim_event_activation(&mut instance, &def, subscription_id, variables)?
+        };
+        let Some((token, children, interrupted)) = claimed else {
+            return Ok(None);
         };
         self.persist_instance(instance_id).await;
         self.flush_event_lifecycle(instance_id).await;
@@ -677,6 +842,7 @@ impl WorkflowEngine {
     pub async fn reconcile_event_subprocesses(&self) -> EngineResult<()> {
         for (id, instance) in self.instances.all().await {
             self.flush_event_lifecycle(id).await;
+            self.run_conditional_work(id).await?;
             let snapshot = instance.read().await.clone();
             let Some(state) = &snapshot.event_state else {
                 continue;
@@ -1157,6 +1323,15 @@ impl WorkflowEngine {
         let mut completed = completed;
         completed.sort();
         for (activation, handler) in completed {
+            if !instance
+                .event_state
+                .as_ref()
+                .unwrap()
+                .activations
+                .contains_key(&activation)
+            {
+                continue;
+            }
             let mut token = Token::with_variables(&handler, instance.variables.clone());
             token.event_context = Some(Box::new(EventContext {
                 generation: instance.event_state.as_ref().unwrap().generation,
@@ -1172,6 +1347,9 @@ impl WorkflowEngine {
                 ListenerEvent::End,
             )
             .await?;
+            if !token_valid(instance, &token) {
+                break;
+            }
             let state = instance.event_state.as_mut().unwrap();
             state.activations.remove(&activation);
             state.started_activations.remove(&activation);

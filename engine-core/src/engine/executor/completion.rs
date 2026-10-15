@@ -5,6 +5,15 @@ use crate::engine::WorkflowEngine;
 use crate::scripting;
 
 impl WorkflowEngine {
+    pub(crate) fn scope_execution_complete(instance: &crate::runtime::ProcessInstance) -> bool {
+        instance
+            .event_state
+            .as_ref()
+            .is_none_or(|state| state.main_completed && state.activations.is_empty())
+            && instance.outstanding_calls.is_empty()
+            && instance.tokens.is_empty()
+            && instance.active_tokens.iter().all(|token| token.completed)
+    }
     pub(crate) async fn complete_branch_token(
         &self,
         instance_id: Uuid,
@@ -34,15 +43,7 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         self.refresh_event_completion(&mut inst).await?;
-        let handlers_active = inst
-            .event_state
-            .as_ref()
-            .is_some_and(|s| !s.main_completed || !s.activations.is_empty());
-        let completed = !handlers_active
-            && inst.outstanding_calls.is_empty()
-            && inst.tokens.is_empty()
-            && inst.active_tokens.iter().all(|t| t.completed);
-        Ok(completed)
+        Ok(Self::scope_execution_complete(&inst))
     }
 
     /// Runs End scripts, commits variables to instance state.
@@ -76,6 +77,8 @@ impl WorkflowEngine {
             audit_log,
             variables,
         )
-        .await
+        .await?;
+        Self::evaluate_conditionals(&mut inst, def)?;
+        Ok(())
     }
 }

@@ -280,17 +280,6 @@ impl WorkflowEngine {
                 "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
                 instance_id
             );
-        }
-
-        // With centralized tokens, we also update instance.tokens so that
-        // when a pending task is completed, it picks up the latest variables.
-        {
-            let instance_arc = self
-                .instances
-                .get(&instance_id)
-                .await
-                .ok_or(EngineError::NoSuchInstance(instance_id))?;
-            let mut instance = instance_arc.write().await;
             for token in instance.tokens.values_mut() {
                 token.apply_process_updates(&updates);
             }
@@ -303,6 +292,11 @@ impl WorkflowEngine {
             if let InstanceState::WaitingOnCallActivity { token, .. } = &mut instance.state {
                 token.apply_process_updates(&updates);
             }
+            let definition = self
+                .definitions
+                .get(&instance.definition_key)
+                .ok_or(EngineError::NoSuchDefinition(instance.definition_key))?;
+            Self::evaluate_conditionals(&mut instance, &definition)?;
         }
 
         self.record_history_event(
@@ -316,6 +310,7 @@ impl WorkflowEngine {
         .await;
 
         self.persist_instance(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
         self.emit_instance_changed(instance_id).await;
 
         Ok(())
@@ -427,6 +422,7 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: resumed");
+        self.run_conditional_work(instance_id).await?;
         self.emit_instance_changed(instance_id).await;
         Ok(())
     }
@@ -476,6 +472,16 @@ impl WorkflowEngine {
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
+        if def.event_subprocesses.iter().any(|handler| {
+            matches!(
+                handler.trigger,
+                crate::domain::EventSubProcessTrigger::Conditional(_)
+            )
+        }) {
+            return Err(EngineError::InvalidDefinition(
+                "Token movement with conditional event subscriptions is not supported".into(),
+            ));
+        }
         if !def.nodes.contains_key(target_node_id) {
             return Err(EngineError::NoSuchNode(target_node_id.to_string()));
         }
@@ -721,6 +727,23 @@ impl WorkflowEngine {
             }
         }
 
+        if [old_state.definition_key, target_definition_key]
+            .iter()
+            .any(|key| {
+                self.definitions.get(key).is_some_and(|definition| {
+                    definition.event_subprocesses.iter().any(|handler| {
+                        matches!(
+                            handler.trigger,
+                            crate::domain::EventSubProcessTrigger::Conditional(_)
+                        )
+                    })
+                })
+            })
+        {
+            return Err(EngineError::InvalidDefinition(
+                "Migration of conditional event subscriptions is not supported".into(),
+            ));
+        }
         // --- 5. Apply migration (write) ---
         {
             let inst_arc = self

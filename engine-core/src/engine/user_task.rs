@@ -130,6 +130,12 @@ impl WorkflowEngine {
         self.register_compensation_handler(instance_id, &pending.node_id, &def)
             .await;
 
+        self.run_conditional_work(instance_id).await?;
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
+                return Ok(());
+            }
+        }
         let next =
             crate::engine::executor::resolve_next_target(&def, &pending.node_id, &token.variables)?;
 

@@ -36,6 +36,8 @@ pub struct ProcessDefinition {
     pub data_mappings: HashMap<String, crate::domain::ActivityMappings>,
     #[serde(skip)]
     compiled_conditions: HashMap<String, crate::condition::CompiledCondition>,
+    #[serde(skip)]
+    compiled_event_conditions: HashMap<String, crate::condition::CompiledCondition>,
 }
 
 impl ProcessDefinition {
@@ -222,6 +224,7 @@ impl ProcessDefinition {
             variable_defaults: HashMap::new(),
             data_mappings: HashMap::new(),
             compiled_conditions: HashMap::new(),
+            compiled_event_conditions: HashMap::new(),
         })
     }
 
@@ -243,6 +246,31 @@ impl ProcessDefinition {
                 )
             })
             .collect();
+        self.compiled_event_conditions = self
+            .event_subprocesses
+            .iter()
+            .filter_map(|handler| {
+                if let crate::domain::EventSubProcessTrigger::Conditional(expression) =
+                    &handler.trigger
+                {
+                    crate::condition::compile_event_condition(expression)
+                        .ok()
+                        .map(|condition| (expression.clone(), condition))
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+
+    pub(crate) fn evaluate_event_condition(
+        &self,
+        expression: &str,
+        variables: &HashMap<String, serde_json::Value>,
+    ) -> bool {
+        self.compiled_event_conditions
+            .get(expression)
+            .is_some_and(|condition| condition.evaluate(variables))
     }
 
     pub(crate) fn evaluate_condition(

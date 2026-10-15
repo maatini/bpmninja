@@ -5,6 +5,11 @@ use engine_core::error::{EngineError, EngineResult};
 fn invalid(message: impl Into<String>) -> EngineError {
     EngineError::InvalidDefinition(format!("Event subprocess: {}", message.into()))
 }
+fn local_attribute<'a>(node: &'a Node, local: &str) -> Option<&'a str> {
+    node.attrs.iter().find_map(|(name, value)| {
+        (name.rsplit(':').next() == Some(local)).then_some(value.as_str())
+    })
+}
 fn event_subprocess(node: &Node) -> bool {
     node.name == "subProcess" && matches!(node.attr("triggeredByEvent"), Some("true" | "1"))
 }
@@ -157,6 +162,28 @@ pub(crate) fn extract(xml: &str, process_id: &str) -> EngineResult<(String, Vec<
             ));
         };
         let trigger = match event.name.as_str() {
+            "conditionalEventDefinition" => {
+                let conditions: Vec<_> = event.children("condition").collect();
+                let [condition] = conditions.as_slice() else {
+                    return Err(invalid("conditional start requires one inline condition"));
+                };
+                if [*event, *start].iter().any(|node| {
+                    local_attribute(node, "variableName").is_some()
+                        || local_attribute(node, "variableEvents").is_some()
+                }) || !condition.children.is_empty()
+                    || local_attribute(condition, "language")
+                        .is_some_and(|language| !language.is_empty())
+                    || local_attribute(condition, "resource").is_some()
+                    || local_attribute(condition, "type")
+                        .is_some_and(|kind| kind.rsplit(':').next() != Some("tFormalExpression"))
+                {
+                    return Err(invalid(
+                        "conditional start supports inline simple conditions without language or variable filters",
+                    ));
+                }
+                engine_core::condition::validate_event_condition(&condition.text)?;
+                EventSubProcessTrigger::Conditional(condition.text.trim().into())
+            }
             "timerEventDefinition" => {
                 let timer: crate::models::BpmnTimerEventDefinition =
                     quick_xml::de::from_str(&serialize(event))

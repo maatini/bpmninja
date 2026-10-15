@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1792043838.22085,
-    "seen": 1792043969.7615798,
-    "ast_hash": "3a20c436b0d24027f406ab24413718e9",
+    "mtime": 1792059591.065091,
+    "seen": 1792067334.0018876,
+    "ast_hash": "64d156fa1ee040a938c62a863c9e091e",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2934,9 +2934,9 @@
     "semantic_hash": ""
   },
   "docs/x9-event-subprocess-plan.md": {
-    "mtime": 1792044392.778561,
-    "seen": 1792057828.2062743,
-    "ast_hash": "7b02f5df49c84568f8fe5ef677959314",
+    "mtime": 1792059899.505313,
+    "seen": 1792067334.0018876,
+    "ast_hash": "290ebe4aadc3cfb1ae38d5b6a9389f6c",
     "semantic_hash": ""
   },
   "bpmn-parser/src/event_subprocess.rs": {
@@ -2970,9 +2970,9 @@
     "semantic_hash": ""
   },
   "docs/event-subprocesses.md": {
-    "mtime": 1792059168.447442,
-    "seen": 1792059362.2066975,
-    "ast_hash": "15ec6cdc671af187fc7e6010691c3a45",
+    "mtime": 1792059655.4563878,
+    "seen": 1792067334.0018876,
+    "ast_hash": "9f6b349c05e95d1c42da00a437c82c82",
     "semantic_hash": ""
   },
   "desktop-tauri/src/features/modeler/properties/EventSubprocessPropertiesProvider.ts": {
@@ -2985,6 +2985,30 @@
     "mtime": 1792058710.003137,
     "seen": 1792059362.2061615,
     "ast_hash": "4c84afb6253509a7abd8d5e7f7cec575",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
+    "mtime": 1791881381.0730648,
+    "seen": 1792067334.0008879,
+    "ast_hash": "a1f693df6e86f00ab16e5a8460b29471",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/capabilities.json": {
+    "mtime": 1791788199.4289715,
+    "seen": 1792067334.0008879,
+    "ast_hash": "ae9a90b4ccc1267aa4b783ecf7b4b072",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/desktop-schema.json": {
+    "mtime": 1791882412.2879374,
+    "seen": 1792067334.0008879,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
+    "semantic_hash": ""
+  },
+  "desktop-tauri/src-tauri/gen/schemas/macOS-schema.json": {
+    "mtime": 1791788199.4329703,
+    "seen": 1792067334.0008879,
+    "ast_hash": "4f6fc22afc26072ac599a52613ad91ce",
     "semantic_hash": ""
   }
 }

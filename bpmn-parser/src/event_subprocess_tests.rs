@@ -159,3 +159,41 @@ fn x9a_container_listener_validation_rejects_unsupported_forms_and_colliding_ids
         );
     }
 }
+
+#[test]
+fn conditional_event_subprocess_validates_inline_expression_contract() {
+    for interrupting in ["true", "false"] {
+        let def = parse_bpmn_xml(&xml(
+            "<conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition>",
+            &format!("isInterrupting=\"{interrupting}\""),
+            "<userTask id=\"work\"/>",
+        )).unwrap();
+        assert_eq!(
+            def.event_subprocesses[0].trigger,
+            EventSubProcessTrigger::Conditional("amount > 100".into())
+        );
+        assert_eq!(
+            def.event_subprocesses[0].is_interrupting,
+            interrupting == "true"
+        );
+    }
+    for condition in [
+        "",
+        "amount >",
+        "amount >= 1 &amp;&amp; flag",
+        "= amount &gt; 1",
+        "amount === 1",
+        "amount > []",
+        "flag()",
+    ] {
+        assert!(parse_bpmn_xml(&xml(&format!("<conditionalEventDefinition><condition>{condition}</condition></conditionalEventDefinition>"), "", "<userTask id=\"work\"/>")).is_err(), "{condition}");
+    }
+    for attributes in [
+        "language=\"feel\"",
+        "camunda:resource=\"script.rhai\"",
+        "xsi:type=\"tExpression\"",
+    ] {
+        assert!(parse_bpmn_xml(&xml(&format!("<conditionalEventDefinition><condition {attributes}>flag</condition></conditionalEventDefinition>"), "", "<userTask id=\"work\"/>")).is_err());
+    }
+    assert!(parse_bpmn_xml(&xml("<conditionalEventDefinition camunda:variableName=\"flag\"><condition>flag</condition></conditionalEventDefinition>", "", "<userTask id=\"work\"/>")).is_err());
+}

@@ -441,6 +441,97 @@ async fn x9_interruption_recovery_prunes_stale_jobs_and_replays_lifecycle_histor
     fresh.delete_definition(&key.to_string()).await.unwrap();
 }
 
+#[tokio::test]
+async fn x9b_conditional_latch_and_missing_claimed_task_survive_nats_reconnect() {
+    use engine_core::domain::EventSubProcessTrigger;
+    use engine_core::{InstanceState, WorkflowEngine};
+    use serde_json::json;
+    use std::collections::HashMap;
+    let stream = format!("TEST_X9B_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut definition = x9_definition();
+    definition.event_subprocesses[0].trigger = EventSubProcessTrigger::Conditional("flag".into());
+    let mut newer = definition.clone();
+    let (key, _) = engine.deploy_definition(definition).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    let task = engine
+        .get_pending_user_tasks()
+        .into_iter()
+        .find(|task| task.node_id == "work")
+        .unwrap();
+    let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    let token = snapshot.tokens.get_mut(&task.token_id).unwrap();
+    token.current_node = "hs".into();
+    token.event_context.as_mut().unwrap().started_node = None;
+    snapshot
+        .event_state
+        .as_mut()
+        .unwrap()
+        .ready_conditional_tokens
+        .push(token.id);
+    persistence.save_instance(&snapshot).await.unwrap();
+    persistence.delete_user_task(task.task_id).await.unwrap();
+    newer.event_subprocesses[0].trigger = EventSubProcessTrigger::Conditional("never".into());
+    let (new_key, _) = engine.deploy_definition(newer).await;
+    drop(engine);
+    drop(persistence);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh.list_definitions().await.unwrap() {
+        restored.deploy_definition(definition).await;
+    }
+    for instance in fresh.list_instances().await.unwrap() {
+        restored.restore_instance(instance).await;
+    }
+    for task in fresh.list_user_tasks().await.unwrap() {
+        restored.restore_user_task(task);
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(restored.get_pending_user_tasks().len(), 2);
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().variables["starts"],
+        1
+    );
+    restored
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(false))]))
+        .await
+        .unwrap();
+    restored
+        .update_instance_variables(id, HashMap::from([("flag".into(), json!(true))]))
+        .await
+        .unwrap();
+    assert_eq!(restored.get_pending_user_tasks().len(), 3);
+    for task in restored.get_pending_user_tasks() {
+        restored
+            .complete_user_task(task.task_id, HashMap::new())
+            .await
+            .unwrap();
+    }
+    let final_state = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(final_state.state, InstanceState::Completed);
+    assert_eq!(final_state.variables["starts"], 2);
+    assert_eq!(final_state.variables["ends"], 2);
+    fresh.delete_instance(&id.to_string()).await.unwrap();
+    fresh.delete_definition(&key.to_string()).await.unwrap();
+    fresh.delete_definition(&new_key.to_string()).await.unwrap();
+}
+
 async fn connect_nats(stream: &str) -> Option<Arc<NatsPersistence>> {
     let url = nats_url();
     match NatsPersistence::connect(&url, stream).await {

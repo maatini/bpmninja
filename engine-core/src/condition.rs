@@ -8,6 +8,66 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+/// Strict grammar for conditional events; gateway parsing remains compatible.
+pub fn validate_event_condition(expression: &str) -> crate::domain::EngineResult<()> {
+    compile_event_condition(expression).map(|_| ())
+}
+
+pub(crate) fn compile_event_condition(
+    expression: &str,
+) -> crate::domain::EngineResult<CompiledCondition> {
+    let invalid = || {
+        crate::domain::EngineError::InvalidDefinition(
+            "Conditional event requires a variable or a single comparison with a JSON literal"
+                .into(),
+        )
+    };
+    let expression = expression.trim();
+    if expression.is_empty() || expression.len() > 4096 {
+        return Err(invalid());
+    }
+    let name_end = expression
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(expression.len());
+    let variable = &expression[..name_end];
+    if !variable.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        return Err(invalid());
+    }
+    let tail = expression[name_end..].trim();
+    if tail.is_empty() {
+        return Ok(CompiledCondition::Truthy(variable.into()));
+    }
+    for (text, operator) in [
+        ("==", Operator::Eq),
+        ("!=", Operator::Ne),
+        (">=", Operator::Ge),
+        ("<=", Operator::Le),
+        (">", Operator::Gt),
+        ("<", Operator::Lt),
+    ] {
+        if let Some(right) = tail.strip_prefix(text) {
+            let right = right.trim();
+            let rhs = serde_json::from_str::<Value>(right)
+                .ok()
+                .or_else(|| {
+                    (right.len() >= 2
+                        && right.starts_with('\'')
+                        && right.ends_with('\'')
+                        && !right[1..right.len() - 1].contains(['\'', '\\', '\n', '\r']))
+                    .then(|| Value::String(right[1..right.len() - 1].into()))
+                })
+                .filter(|value| !value.is_array() && !value.is_object())
+                .ok_or_else(invalid)?;
+            return Ok(CompiledCondition::Comparison {
+                variable: variable.into(),
+                operator,
+                rhs,
+            });
+        }
+    }
+    Err(invalid())
+}
+
 /// Evaluates a simple condition expression against token variables.
 ///
 /// Supported forms:
@@ -270,5 +330,50 @@ mod tests {
         assert!(evaluate_condition("num", &vars));
         assert!(!evaluate_condition("zero", &vars));
         assert!(!evaluate_condition("missing_var", &vars));
+    }
+}
+
+#[cfg(test)]
+mod event_condition_tests {
+    use super::*;
+    #[test]
+    fn strict_conditions_handle_json_strings_and_reject_unsupported_expressions() {
+        let vars = HashMap::from([("status".into(), Value::String("x == y\nnext".into()))]);
+        assert!(
+            compile_event_condition(r#"status == "x == y\nnext""#)
+                .unwrap()
+                .evaluate(&vars)
+        );
+        assert!(
+            compile_event_condition("status != 'other > value'")
+                .unwrap()
+                .evaluate(&vars)
+        );
+        for expression in [
+            "",
+            "a && b",
+            "a >",
+            "a === 1",
+            "a == unquoted",
+            "a > []",
+            "1name",
+            "f()",
+            "a.b",
+            "a == 1 == 1",
+        ] {
+            assert!(
+                validate_event_condition(expression).is_err(),
+                "{expression}"
+            );
+        }
+        for expression in [
+            "flag",
+            "amount >= 1.5",
+            "status == 'approved'",
+            "flag == true",
+            "value == null",
+        ] {
+            assert!(validate_event_condition(expression).is_ok(), "{expression}");
+        }
     }
 }
