@@ -97,10 +97,10 @@ impl WorkflowEngine {
             && self
                 .is_event_subscription(catch.instance_id, catch.token_id)
                 .await
-            {
-                return self
-                    .fire_event_subscription(catch.instance_id, catch.token_id, variables)
-                    .await;
+        {
+            return self
+                .fire_event_subscription(catch.instance_id, catch.token_id, variables)
+                .await;
         }
         let catch = self
             .pending_message_catches
@@ -110,6 +110,13 @@ impl WorkflowEngine {
                 EngineError::InvalidDefinition(format!("Message catch {catch_id} disappeared"))
             })?;
 
+        if !self
+            .event_work_valid(catch.instance_id, catch.token_id)
+            .await
+        {
+            self.remove_persisted_message_catch(catch.id).await;
+            return Ok(());
+        }
         // Event-Based Gateway support: If this message catch triggered, clear any sibling wait states
         self.clear_wait_states_for_token(catch.instance_id, &catch.token_id)
             .await;

@@ -278,6 +278,9 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
+            if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             inst.push_audit_log(format!(
                 "✅ Service task '{}' completed by worker '{}'",
                 task.node_id, worker_id

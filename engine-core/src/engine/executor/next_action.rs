@@ -241,6 +241,9 @@ impl WorkflowEngine {
                         .spawn_call_activity_for_parent(child_key, instance_id, call_token)
                         .await
                     {
+                        if matches!(e, EngineError::AlreadyCompleted) {
+                            return Ok(());
+                        }
                         self.fail_call_activity(
                             instance_id,
                             "CALL_ACTIVITY_SPAWN_FAILED",

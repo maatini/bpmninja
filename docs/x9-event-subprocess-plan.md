@@ -140,4 +140,4 @@ X9a is authorized. X9b/X9c are follow-ups; full X9 remains incomplete.
 - Persisted subscriptions and activations are bound to the original definition. Startup reconciliation prunes cancelled work, recreates missing subscription jobs, and resumes claimed activations.
 - External model checking explicitly reports skipped event-subprocess semantics. Legacy ScopeEventListener definitions require migration.
 - Body-node execution listeners remain supported. Container execution listeners are explicitly rejected pending a container lifecycle implementation.
-- Parser and core suites pass at this checkpoint. Further acceptance work remains: additional loop/race/termination coverage, REST and real NATS recovery tests, modeler properties and browser roundtrip tests, and final workspace/frontend checks. X9a is not complete.
+- Validation: 323 core tests (10 event-subprocess tests) and 80 parser tests pass; formatting and Clippy for core/parser/server pass. Further acceptance work remains: additional loop/race/termination coverage, REST and real NATS recovery tests, modeler properties and browser roundtrip tests, and final workspace/frontend checks. X9a is not complete.

@@ -75,6 +75,13 @@ impl WorkflowEngine {
                 }
                 continue;
             }
+            if !self
+                .event_work_valid(timer.instance_id, timer.token_id)
+                .await
+            {
+                self.remove_persisted_timer(tid).await;
+                continue;
+            }
             // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
             self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
                 .await;

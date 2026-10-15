@@ -28,6 +28,27 @@ pub(crate) fn token_valid(instance: &ProcessInstance, token: &Token) -> bool {
 }
 
 impl WorkflowEngine {
+    pub(crate) async fn event_work_valid(&self, instance_id: Uuid, token_id: Uuid) -> bool {
+        let Some(instance) = self.instances.get(&instance_id).await else {
+            return false;
+        };
+        let instance = instance.read().await;
+        if instance.event_state.is_none() {
+            return true;
+        }
+        instance
+            .tokens
+            .get(&token_id)
+            .or_else(|| {
+                instance
+                    .outstanding_calls
+                    .values()
+                    .find(|call| call.token.id == token_id)
+                    .map(|call| &call.token)
+            })
+            .is_some_and(|token| token_valid(&instance, token))
+    }
+
     pub(crate) async fn initialize_event_subprocesses(
         &self,
         instance_id: Uuid,
