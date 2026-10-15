@@ -489,13 +489,19 @@ async fn x9b_conditional_latch_and_missing_claimed_task_survive_nats_reconnect()
     );
     let restored = WorkflowEngine::new().with_persistence(fresh.clone());
     for definition in fresh.list_definitions().await.unwrap() {
-        restored.deploy_definition(definition).await;
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
     }
     for instance in fresh.list_instances().await.unwrap() {
-        restored.restore_instance(instance).await;
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
     }
     for task in fresh.list_user_tasks().await.unwrap() {
-        restored.restore_user_task(task);
+        if task.instance_id == id {
+            restored.restore_user_task(task);
+        }
     }
     restored.reconcile_event_subprocesses().await.unwrap();
     restored.reconcile_event_subprocesses().await.unwrap();

@@ -286,10 +286,10 @@ impl WorkflowEngine {
             self.run_end_scripts(catch.instance_id, &mut token, &def, &catch.node_id)
                 .await?;
             self.run_conditional_work(catch.instance_id).await?;
-            if let Some(instance) = self.instances.get(&catch.instance_id).await {
-                if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
-                    return Ok(());
-                }
+            if let Some(instance) = self.instances.get(&catch.instance_id).await
+                && !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token)
+            {
+                return Ok(());
             }
         }
         let next =

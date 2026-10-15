@@ -1,6 +1,6 @@
 # X9 — Event subprocesses
 
-Status: X9a implemented and accepted, 2026-10-15. Full X9 remains partial: conditional starts and nested/compensation scopes are separate follow-ups.
+Status: X9a and X9b implemented and accepted, 2026-10-15. Full X9 remains partial: nested/compensation scopes are the X9c follow-up.
 Next task after X11 in `improvements.md`.
 
 ## Starting point before X9a
@@ -117,7 +117,7 @@ continues; its successful completion ends the interrupted process scope.
   messages/signals, Call Activity results, and handler writes. Persist evaluation
   state and specify retrigger behavior to prevent infinite activation while a
   condition stays true. Reuse this mechanism for X2; do not mark other conditional
-  event forms implemented as a side effect. [Separate plan prepared](x2-conditional-events-plan.md); implementation awaits its own GO.
+  event forms implemented as a side effect. [Separate plan and completed acceptance](x2-conditional-events-plan.md), implemented after user GO.
 - **X9c — Nested scopes and compensation starts:** requires the X6 runtime-scope
   design and compensation lifecycle/snapshots, coordinated with G1. Validate
   compensation-start semantics against BPMN 2.0.2 before implementing them.
@@ -182,3 +182,15 @@ Lifecycle checkpoint validation: 335 core tests, 80 parser tests, 16 real-NATS a
 X9a's supported process-level subset and its acceptance items are complete. Full X9 remains partial; X9b/X2 and X9c/X6/G1 remain follow-ups.
 
 Container checkpoint validation: 342 core tests, 82 parser tests, 16 real-NATS adapter tests, 29 server unit tests, 2 event-subprocess REST tests, and 6 Edge browser tests pass. Frontend build/lint, Rust formatting, whitespace checks, and workspace Clippy with warnings denied pass. Knowledge graph refreshed.
+
+## Conditional-start checkpoint (2026-10-15)
+
+X9b is implemented and verified after user GO. Conditional handlers use validated
+inline expressions and persisted false-to-true latches at successful global
+variable commits, including task outputs, scripts/listeners, direct/file updates,
+messages/signals, child outputs, and loop collections. Interruption and recovery
+reuse X9a lifecycle machinery; modeler editing and native/Camunda REST paths are
+covered. [Full decisions and validation](x2-conditional-events-plan.md).
+
+X9a/X9b are complete within their process-level subset. Full X9 still requires
+X9c/X6/G1; X2 intermediate/boundary/top-level conditional events remain open.

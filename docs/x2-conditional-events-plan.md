@@ -1,6 +1,6 @@
 # X2 / X9b — Conditional events
 
-Status: implementation authorized by user GO, 2026-10-15. Runtime/parser/modeler implemented; final integration acceptance in progress. Scope and decisions are recorded below.
+Status: X9b implemented and verified after user GO, 2026-10-15. X2 remains partial; intermediate/boundary catches and top-level conditional starts remain later increments.
 
 ## First increment: shared evaluation and X9b
 
@@ -176,3 +176,31 @@ explicit proposed engine choices within this increment's limited scope.
 provides a comparison for event-subprocess interruption and repeated activation.
 Its FEEL/filter behavior does not define this engine's expression or retrigger
 contract. This plan does not claim BPMN or Camunda conformance.
+
+## Implementation and acceptance checkpoint (2026-10-15)
+
+- Added validated, separately compiled conditional expressions without changing
+  gateway parsing. Both event-subprocess interruption modes are supported;
+  prefixed unsupported filters/resources/languages are rejected.
+- Existing activity-specific write/rollback paths now invoke a shared lock-held
+  evaluator. Its observed variable snapshot, revision, transition latch, claimed
+  tokens, cancellation generation, and lifecycle outbox share instance state.
+  Direct API updates synchronize globals and central tokens in one transaction.
+- Durable ready claims use the existing activation/recovery machinery and a
+  serialized publication drain. Recovery retains successful start-listener
+  markers and true latches. Cancellation remains pending until cleanup finishes.
+- Added generation checks before continuation, a final completion recheck, bounded
+  conditional chains, multi-instance output-collection evaluation, and safeguards
+  against redundant script writes or failed completions restoring stale globals.
+- The modeler edits conditions with undo and XML roundtrip support. The runtime
+  contract documents grammar, truthiness, transition/rearm rules, suspension,
+  revision history, and explicit administrative relocation restrictions.
+- Validation passed: **358 core tests, 83 parser tests, 17 real-NATS adapter tests,
+  29 server unit tests, 4 event-subprocess REST tests, and 7 Edge browser tests**.
+  REST includes native/Camunda completion and restart. Real NATS covers a missing
+  claimed task, retained start marker/latch, repeated reconciliation, and original
+  expression binding after redeployment. Frontend build/lint, formatting,
+  whitespace checks, and workspace Clippy with warnings denied pass. Knowledge
+  graph refreshed; temporary browser config and JetStream store removed.
+
+X9b is complete within this process-level subset. X2 and full X9 remain partial.

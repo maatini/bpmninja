@@ -209,28 +209,29 @@ impl WorkflowEngine {
                 .conditional_values
                 .insert(subscription, current)
                 .unwrap_or(false);
-            if current && !previous {
-                if let Some((token, children, interrupted)) = Self::claim_event_activation(
+            if current
+                && !previous
+                && let Some((token, children, interrupted)) = Self::claim_event_activation(
                     instance,
                     definition,
                     subscription,
                     &HashMap::new(),
-                )? {
-                    let state = instance.event_state.as_mut().unwrap();
-                    state.ready_conditional_tokens.push(token.id);
-                    state.conditional_cancel_children.extend(children);
-                    state.conditional_cleanup |= interrupted;
-                    if let Some(entry) = state.lifecycle_outbox.last_mut() {
-                        entry
-                            .context
-                            .insert("trigger_kind".into(), Value::String("conditional".into()));
-                        entry
-                            .context
-                            .insert("variable_revision".into(), Value::from(revision));
-                    }
-                    if interrupted {
-                        break;
-                    }
+                )?
+            {
+                let state = instance.event_state.as_mut().unwrap();
+                state.ready_conditional_tokens.push(token.id);
+                state.conditional_cancel_children.extend(children);
+                state.conditional_cleanup |= interrupted;
+                if let Some(entry) = state.lifecycle_outbox.last_mut() {
+                    entry
+                        .context
+                        .insert("trigger_kind".into(), Value::String("conditional".into()));
+                    entry
+                        .context
+                        .insert("variable_revision".into(), Value::from(revision));
+                }
+                if interrupted {
+                    break;
                 }
             }
         }

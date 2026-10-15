@@ -162,7 +162,7 @@ its existing payload.
 
 Suspension defers activation. On resume, the current snapshot is evaluated once
 against the last evaluated state; intermediate suspended changes are coalesced.
-Terminal scopes cannot be revived. Chained handler writes are limited to 256
+Terminal scopes cannot be revived. Chained handler writes are limited to 256 additional
 conditional activations per batch: oscillating conditions fail the scope with an
 execution error and diagnostic audit/history instead of running indefinitely.
 

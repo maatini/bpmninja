@@ -319,7 +319,11 @@ impl WorkflowEngine {
                 }
                 if let Some(old) = &old_state {
                     inst.state = old.state.clone();
-                    inst.variables = old.variables.clone();
+                    // Event-context completions commit only after all scripts succeed.
+                    // Their failure must not roll back unrelated concurrent globals.
+                    if original_token.event_context.is_none() {
+                        inst.variables = old.variables.clone();
+                    }
                     inst.variable_types = old.variable_types.clone();
                 }
                 inst.tokens.insert(original_token.id, original_token);
@@ -335,10 +339,10 @@ impl WorkflowEngine {
             .await;
 
         self.run_conditional_work(instance_id).await?;
-        if let Some(instance) = self.instances.get(&instance_id).await {
-            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
-                return Ok(());
-            }
+        if let Some(instance) = self.instances.get(&instance_id).await
+            && !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token)
+        {
+            return Ok(());
         }
         let next =
             crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;
@@ -640,7 +644,11 @@ impl WorkflowEngine {
                 }
                 if let Some(old) = &old_state {
                     inst.state = old.state.clone();
-                    inst.variables = old.variables.clone();
+                    // Event-context completions commit only after all scripts succeed.
+                    // Their failure must not roll back unrelated concurrent globals.
+                    if original_token.event_context.is_none() {
+                        inst.variables = old.variables.clone();
+                    }
                 }
                 inst.tokens.insert(original_token.id, original_token);
             }
@@ -659,10 +667,10 @@ impl WorkflowEngine {
             .await;
 
         self.run_conditional_work(instance_id).await?;
-        if let Some(instance) = self.instances.get(&instance_id).await {
-            if !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token) {
-                return Ok(());
-            }
+        if let Some(instance) = self.instances.get(&instance_id).await
+            && !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token)
+        {
+            return Ok(());
         }
         let next =
             crate::engine::executor::resolve_next_target(&def, &task.node_id, &token.variables)?;

@@ -113,7 +113,11 @@ impl WorkflowEngine {
             return Err(EngineError::AlreadyCompleted);
         }
         inst.current_node = next;
-        inst.variables = token.variables.clone();
+        // Event-context writes were already merged atomically by run_end_scripts.
+        // A second wholesale copy could overwrite a concurrent process commit.
+        if token.event_context.is_none() {
+            inst.variables = token.variables.clone();
+        }
         inst.push_audit_log(format!("📜 Script task '{current_id}' executed"));
         Ok(NextAction::Continue(token.clone()))
     }
