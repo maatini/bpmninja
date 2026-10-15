@@ -960,9 +960,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/message_processor.rs": {
-    "mtime": 1792068436.980704,
-    "seen": 1792069230.2210045,
-    "ast_hash": "26cf5ca4db34b60493a01bcecf53cc18",
+    "mtime": 1792070004.394933,
+    "seen": 1792070091.3115227,
+    "ast_hash": "723b1c826b1dc9e6ab6b0c72b4fa3a00",
     "semantic_hash": ""
   },
   "engine-core/src/engine/mod.rs": {
@@ -978,9 +978,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/process_start.rs": {
-    "mtime": 1792068437.0143616,
-    "seen": 1792069230.2210045,
-    "ast_hash": "a235adfb9ecf425435d82c83ef4a5d13",
+    "mtime": 1792070004.3939307,
+    "seen": 1792070091.3115227,
+    "ast_hash": "fa830fd7914fb9e4209867b1ecbae14c",
     "semantic_hash": ""
   },
   "engine-core/src/engine/registry.rs": {
@@ -996,9 +996,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/service_task.rs": {
-    "mtime": 1792068553.6463487,
-    "seen": 1792069230.2210045,
-    "ast_hash": "c0d9d41d3a31d86c7b897939cd3da585",
+    "mtime": 1792070004.3909316,
+    "seen": 1792070091.3115227,
+    "ast_hash": "e9471339d6cc90c1699499598a944793",
     "semantic_hash": ""
   },
   "engine-core/src/engine/tests/boundary_restore.rs": {
@@ -1146,9 +1146,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/user_task.rs": {
-    "mtime": 1792068437.3782847,
-    "seen": 1792069230.2210045,
-    "ast_hash": "f6b9d7156051522db3faad4ce731fb26",
+    "mtime": 1792070004.386929,
+    "seen": 1792070091.3115227,
+    "ast_hash": "7ba179c6de1b89950a1275234cd681ad",
     "semantic_hash": ""
   },
   "engine-core/src/history/mod.rs": {
@@ -2958,9 +2958,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/event_subprocess.rs": {
-    "mtime": 1792068913.2382412,
-    "seen": 1792069230.2210045,
-    "ast_hash": "cd3f4bdee353edab6b09d47033ca1c69",
+    "mtime": 1792070005.2162032,
+    "seen": 1792070091.3115227,
+    "ast_hash": "4eb7825877eeca01444a2758a5bf1e9b",
     "semantic_hash": ""
   },
   "engine-core/src/engine/tests/event_subprocess.rs": {
@@ -2970,9 +2970,9 @@
     "semantic_hash": ""
   },
   "docs/event-subprocesses.md": {
-    "mtime": 1792069095.3093686,
-    "seen": 1792069230.2250085,
-    "ast_hash": "885a148321f7f5e5fa38d3056f7b9e08",
+    "mtime": 1792070045.072932,
+    "seen": 1792070091.3115227,
+    "ast_hash": "e75c1da882cbdc42317f6030f01c3d0d",
     "semantic_hash": ""
   },
   "desktop-tauri/src/features/modeler/properties/EventSubprocessPropertiesProvider.ts": {

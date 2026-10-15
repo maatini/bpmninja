@@ -150,7 +150,7 @@ a new global map alongside old central-token copies while another completion run
 
 ## Later X2 increments
 
-- **Intermediate catches:** persisted per-token subscriptions, immediate
+- **Intermediate catches (X2a):** [Concrete acceptance plan prepared](x2a-intermediate-conditional-plan.md). Persisted per-token subscriptions, immediate
   evaluation on arrival, single consumption, event-based gateway competition,
   loop/parallel activation isolation, and restore/cancellation.
 - **Boundary catches:** per-activity activation identity, interrupting versus
