@@ -102,10 +102,6 @@ fn x9a_rejects_illegal_starts_and_scopes() {
         ))
         .is_err()
     );
-    assert!(parse_bpmn_xml(&document.replace(
-        "<subProcess id=\"handler\" triggeredByEvent=\"true\">",
-        "<subProcess id=\"handler\" triggeredByEvent=\"true\"><extensionElements><camunda:executionListener event=\"start\"><camunda:script scriptFormat=\"rhai\">let value = 1;</camunda:script></camunda:executionListener></extensionElements>"
-    )).is_err());
 }
 #[test]
 fn x9a_handler_tasks_retain_x11_mappings() {
@@ -118,4 +114,48 @@ fn x9a_handler_tasks_retain_x11_mappings() {
     .unwrap();
     assert_eq!(def.data_mappings["work"].inputs[0].target, "id");
     assert_eq!(def.data_mappings["work"].outputs[0].target, "receipt");
+}
+
+#[test]
+fn x9a_container_listeners_keep_the_container_id() {
+    let document = xml(r#"<messageEventDefinition messageRef="m"/>"#, r#"isInterrupting="false""#, r#"<userTask id="work"/>"#)
+        .replace(r#"<subProcess id="handler" triggeredByEvent="true">"#, r#"<subProcess id="handler" triggeredByEvent="true"><extensionElements><camunda:executionListener event="start"><camunda:script scriptFormat="rhai">let started = true;</camunda:script></camunda:executionListener><camunda:executionListener event="end"><camunda:script scriptFormat="rhai">let ended = true;</camunda:script></camunda:executionListener></extensionElements>"#);
+    let definition = parse_bpmn_xml(&document).unwrap();
+    assert_eq!(definition.listeners["handler"].len(), 2);
+    assert_eq!(
+        definition.listeners["handler"][0].event,
+        engine_core::domain::ListenerEvent::Start
+    );
+    assert_eq!(
+        definition.listeners["handler"][1].event,
+        engine_core::domain::ListenerEvent::End
+    );
+    assert!(!definition.listeners.contains_key("hs"));
+}
+
+#[test]
+fn x9a_container_listener_validation_rejects_unsupported_forms_and_colliding_ids() {
+    let document = xml(
+        r#"<messageEventDefinition messageRef="m"/>"#,
+        "",
+        r#"<userTask id="work"/>"#,
+    );
+    for listener in [
+        r#"<camunda:executionListener event="start" class="ExternalDelegate"/>"#,
+        r#"<camunda:executionListener event="take"><camunda:script scriptFormat="rhai">let value = 1;</camunda:script></camunda:executionListener>"#,
+        r#"<camunda:executionListener event="end"><camunda:script scriptFormat="javascript">var value = 1;</camunda:script></camunda:executionListener>"#,
+        r#"<camunda:executionListener event="start"><camunda:script resource="external.rhai"/></camunda:executionListener>"#,
+    ] {
+        let document = document.replace(r#"<subProcess id="handler" triggeredByEvent="true">"#, &format!(r#"<subProcess id="handler" triggeredByEvent="true"><extensionElements>{listener}</extensionElements>"#));
+        assert!(parse_bpmn_xml(&document).is_err());
+    }
+    for collision in ["p", "main", "work"] {
+        assert!(
+            parse_bpmn_xml(&document.replace(
+                r#"<subProcess id="handler""#,
+                &format!(r#"<subProcess id="{collision}""#)
+            ))
+            .is_err()
+        );
+    }
 }

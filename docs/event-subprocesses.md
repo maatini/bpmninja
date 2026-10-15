@@ -1,4 +1,4 @@
-# Event subprocess runtime (X9a, in progress)
+# Event subprocess runtime (X9a)
 
 An event subprocess directly inside a process executes in the same process
 instance. Its start is a subscription, rather than an additional ordinary start
@@ -32,15 +32,16 @@ removes stale cancelled jobs, recreates missing subscription jobs, and resumes
 claims saved before the handler exposed its first waiting task. This is not an
 exactly-once guarantee for external side effects; workers still need idempotency.
 
-Nested event subprocesses, conditional/compensation starts, handler-level data
-declarations/mappings, and handler-container execution listeners are rejected.
-Attach execution listeners to body nodes for the implemented lifecycle. Legacy
+Nested event subprocesses, conditional/compensation starts, and handler-level
+data declarations/mappings are rejected. Container execution listeners accept
+inline Rhai scripts for start/end; external delegates/resources and other listener
+events/languages are rejected. Legacy
 programmatic `ScopeEventListener` definitions and persisted nil-token listener
 subscriptions require migration to explicit `EventSubProcess` metadata.
 
 The external model analyzer reports event subprocess semantics as `skipped`;
 parser structural validation still runs. It does not certify interruption or
-repeated activation. Remaining acceptance work is tracked in the [X9 plan](x9-event-subprocess-plan.md).
+repeated activation. Supported-scope acceptance and follow-up increments are tracked in the [X9 plan](x9-event-subprocess-plan.md).
 
 ## Editing a start in the modeler
 
@@ -78,3 +79,31 @@ The SSE event `event_subprocess_changed` carries `event_id`, `instance_id`,
 are `activated`, `scope_interrupted`, `interrupted`, and `completed`. Delivery is
 best effort, as for existing SSE events; reconnect/resync reloads persisted
 history. The desktop history timeline refreshes only for its owning instance.
+
+## Container execution listeners
+
+Attach `camunda:executionListener` entries with `event="start"` or `event="end"`
+and an inline `camunda:script scriptFormat="rhai"` to the event subprocess itself.
+The existing modeler **Execution Scripts** group edits both callbacks when the
+container is selected; body-node listeners remain separate.
+
+A container start listener runs once per activation, before the start event's own
+listeners and body tasks. It sees current process variables plus the activation
+payload. Successful writes and the activation's started marker are saved in the
+same instance snapshot before the body exposes work. Restoring that snapshot
+skips the committed callback.
+
+The normal container end listener runs once after every branch, loop iteration,
+and child call belonging to that activation has finished. It sees the latest
+process-variable state, including body output mappings. Cancelled, terminated,
+and failed activations skip the normal end listener. A successful end commits its
+writes, removes the activation/started marker, and queues completion history in
+one instance-state update. Recovery also settles an activation whose body has
+finished without a runnable token remaining.
+
+Each callback chain commits process-variable writes only if all its scripts
+succeed. A callback error fails the owning process scope and cancels its pending
+work; partial writes from that callback chain are discarded. Listener history
+uses the container ID, listener actor type, activation identity, and variable
+diff. This is a snapshot-commit guarantee, not an exactly-once guarantee for
+external effects. The scripting sandbox and its existing limits still apply.

@@ -228,3 +228,24 @@ async fn script_runner_keeps_operation_limit() {
         Err(crate::domain::EngineError::ScriptError(_))
     ));
 }
+
+#[tokio::test]
+async fn script_runner_returns_the_visible_shadowed_binding() {
+    let runner = crate::scripting::ScriptRunner::new(crate::scripting::ScriptConfig::default());
+    let vars = HashMap::from([("value".into(), serde_json::json!(1))]);
+    let first = runner
+        .execute("let value = value + 1;", &vars)
+        .await
+        .unwrap();
+    assert_eq!(first["value"], 2);
+    let second = runner
+        .execute("let value = value + 1;", &first)
+        .await
+        .unwrap();
+    assert_eq!(second["value"], 3);
+    let shadowed = runner
+        .execute("let value = 10; let value = 20;", &vars)
+        .await
+        .unwrap();
+    assert_eq!(shadowed["value"], 20);
+}

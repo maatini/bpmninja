@@ -88,15 +88,28 @@ pub(crate) fn extract(xml: &str, process_id: &str) -> EngineResult<(String, Vec<
         }
         reject_nested(node)?;
         let id = node.id()?.to_string();
-        if node.children("extensionElements").any(|extension| {
-            extension
-                .children
-                .iter()
-                .any(|child| child.name == "executionListener")
-        }) {
-            return Err(invalid(
-                "handler-container execution listeners are not supported; attach listeners to handler body nodes",
-            ));
+        for listener in node
+            .children("extensionElements")
+            .flat_map(|extensions| extensions.children("executionListener"))
+        {
+            let scripts: Vec<_> = listener.children("script").collect();
+            if !matches!(listener.attr("event"), Some("start" | "end"))
+                || scripts.len() != 1
+                || ["class", "delegateExpression", "expression"]
+                    .iter()
+                    .any(|attr| listener.attr(attr).is_some())
+                || scripts.first().is_some_and(|script| {
+                    script.attr("resource").is_some()
+                        || script.text.trim().is_empty()
+                        || script
+                            .attr("scriptFormat")
+                            .is_some_and(|format| !format.eq_ignore_ascii_case("rhai"))
+                })
+            {
+                return Err(invalid(
+                    "container execution listeners require an inline Rhai start/end script",
+                ));
+            }
         }
         if node.children.iter().any(|n| {
             matches!(
@@ -253,6 +266,14 @@ pub(crate) fn attach(
     handlers: Vec<ParsedHandler>,
 ) -> EngineResult<()> {
     for parsed in handlers {
+        if parsed.handler.id == definition.id
+            || definition.nodes.contains_key(&parsed.handler.id)
+            || parsed.body.nodes.contains_key(&parsed.handler.id)
+        {
+            return Err(invalid(
+                "event subprocess container ID must be distinct from process and node IDs",
+            ));
+        }
         if definition.event_subprocesses.iter().any(|other| {
             other.id == parsed.handler.id
                 || (other.trigger == parsed.handler.trigger

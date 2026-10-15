@@ -381,6 +381,7 @@ async fn recovery_recreates_subscription_jobs_and_resumes_claimed_activation() {
 async fn repeated_handlers_keep_parallel_joins_separate() {
     let engine = WorkflowEngine::new();
     let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "starts += 1;", "ends += 1;");
     let body = ProcessDefinitionBuilder::new("parallel-handler")
         .node("hs", BpmnElement::StartEvent)
         .node("fork", BpmnElement::ParallelGateway)
@@ -416,6 +417,10 @@ async fn repeated_handlers_keep_parallel_joins_separate() {
     for _ in 0..2 {
         finish_user(&engine, "a", HashMap::new()).await;
     }
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().variables["ends"],
+        0
+    );
     assert_ne!(
         engine.get_instance_details(id).await.unwrap().state,
         InstanceState::Completed
@@ -423,6 +428,10 @@ async fn repeated_handlers_keep_parallel_joins_separate() {
     for _ in 0..2 {
         finish_user(&engine, "b", HashMap::new()).await;
     }
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().variables["ends"],
+        2
+    );
     assert_eq!(
         engine.get_instance_details(id).await.unwrap().state,
         InstanceState::Completed
@@ -474,6 +483,7 @@ async fn interrupting_handler_cancels_main_loops_and_other_handler_activations()
     let persistence = Arc::new(InMemoryPersistence::new());
     let engine = WorkflowEngine::new().with_persistence(persistence.clone());
     let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "starts += 1;", "let wrongly_ended = true;");
     def.loops.insert("main".into(), parallel_loop(3));
     def.loops.insert("work".into(), parallel_loop(2));
     let body = ProcessDefinitionBuilder::new("stop-handler")
@@ -523,6 +533,14 @@ async fn interrupting_handler_cancels_main_loops_and_other_handler_activations()
         );
     }
     finish_user(&engine, "stop_work", HashMap::new()).await;
+    assert!(
+        !engine
+            .get_instance_details(id)
+            .await
+            .unwrap()
+            .variables
+            .contains_key("wrongly_ended")
+    );
     let history = handler_history(&persistence, id).await;
     let cancelled: Vec<_> = history
         .iter()
@@ -980,4 +998,304 @@ async fn failed_history_write_keeps_lifecycle_outbox_for_retry() {
             .lifecycle_outbox
             .is_empty()
     );
+}
+
+fn container_listeners(definition: &mut ProcessDefinition, start: &str, end: &str) {
+    use crate::domain::{ExecutionListener, ListenerEvent};
+    definition
+        .variable_defaults
+        .insert("starts".into(), json!(0));
+    definition.variable_defaults.insert("ends".into(), json!(0));
+    definition.listeners.insert(
+        "handler".into(),
+        vec![
+            ExecutionListener {
+                event: ListenerEvent::Start,
+                script: start.into(),
+            },
+            ExecutionListener {
+                event: ListenerEvent::End,
+                script: end.into(),
+            },
+        ],
+    );
+}
+
+#[tokio::test]
+async fn container_listeners_run_once_per_repeated_activation_with_shared_variables() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(
+        &mut def,
+        "starts += 1; let seen = payload;",
+        "ends += 1; let final_result = result;",
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    for payload in [1, 2] {
+        engine
+            .correlate_message(
+                "alert".into(),
+                None,
+                HashMap::from([("payload".into(), json!(payload))]),
+            )
+            .await
+            .unwrap();
+    }
+    let current = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(current.variables["starts"], 2);
+    assert_eq!(current.variables["seen"], 2);
+    assert_eq!(current.variables["ends"], 0);
+    assert_eq!(current.event_state.unwrap().started_activations.len(), 2);
+    finish_user(&engine, "main", HashMap::new()).await;
+    for result in [10, 20] {
+        finish_user(
+            &engine,
+            "work",
+            HashMap::from([("result".into(), json!(result))]),
+        )
+        .await;
+    }
+    let current = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(current.state, InstanceState::Completed);
+    assert_eq!(current.variables["starts"], 2);
+    assert_eq!(current.variables["ends"], 2);
+    assert_eq!(current.variables["final_result"], 20);
+    assert!(current.event_state.unwrap().started_activations.is_empty());
+    let history = persistence
+        .query_history(crate::persistence::HistoryQuery {
+            instance_id: id,
+            node_id: Some("handler".into()),
+            event_types: Some(vec![crate::HistoryEventType::ListenerExecuted]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 4);
+    assert!(history.iter().all(
+        |entry| entry.actor_type == crate::history::ActorType::Listener
+            && entry.context.contains_key("activation_id")
+    ));
+}
+
+#[tokio::test]
+async fn container_listener_order_surrounds_body_node_listeners() {
+    use crate::domain::{ExecutionListener, ListenerEvent};
+    let engine = WorkflowEngine::new();
+    let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "trace += \"C\";", "trace += \"Z\";");
+    def.variable_defaults.insert("trace".into(), json!(""));
+    for (node, event, script) in [
+        ("hs", ListenerEvent::Start, "trace += \"S\";"),
+        ("work", ListenerEvent::Start, "trace += \"W\";"),
+        ("work", ListenerEvent::End, "trace += \"w\";"),
+        ("he", ListenerEvent::End, "trace += \"E\";"),
+    ] {
+        def.listeners
+            .entry(node.into())
+            .or_default()
+            .push(ExecutionListener {
+                event,
+                script: script.into(),
+            });
+    }
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().variables["trace"],
+        "CSW"
+    );
+    finish_user(&engine, "work", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().variables["trace"],
+        "CSWwEZ"
+    );
+}
+
+async fn restore_event_engine(persistence: Arc<InMemoryPersistence>) -> WorkflowEngine {
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut definitions = persistence.list_definitions().await.unwrap();
+    definitions.sort_by_key(|definition| definition.version);
+    for definition in definitions {
+        engine.deploy_definition(definition).await;
+    }
+    for snapshot in persistence.list_instances().await.unwrap() {
+        engine.restore_instance(snapshot).await;
+    }
+    for task in persistence.list_user_tasks().await.unwrap() {
+        engine.restore_user_task(task);
+    }
+    for catch in persistence.list_message_catches().await.unwrap() {
+        engine.restore_message_catch(catch);
+    }
+    engine
+}
+
+#[tokio::test]
+async fn recovery_after_container_start_commit_does_not_repeat_start_listener() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "starts += 1;", "ends += 1;");
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let subscription = *engine
+        .get_instance_details(id)
+        .await
+        .unwrap()
+        .event_state
+        .unwrap()
+        .subscriptions
+        .keys()
+        .next()
+        .unwrap();
+    let mut token = engine
+        .prepare_event_activation(id, subscription, &HashMap::new())
+        .await
+        .unwrap()
+        .unwrap();
+    engine
+        .start_event_container(id, &mut token, &engine.get_definition(&key).await.unwrap())
+        .await
+        .unwrap();
+    drop(engine);
+    let restored = restore_event_engine(persistence).await;
+    restored.reconcile_event_subprocesses().await.unwrap();
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().variables["starts"],
+        1
+    );
+    finish_user(&restored, "work", HashMap::new()).await;
+    finish_user(&restored, "main", HashMap::new()).await;
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().variables["ends"],
+        1
+    );
+}
+
+#[tokio::test]
+async fn recovery_finishes_container_end_without_a_remaining_body_token() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "starts += 1;", "ends += 1;");
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    finish_user(&engine, "main", HashMap::new()).await;
+    let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    snapshot.tokens.clear();
+    for active in &mut snapshot.active_tokens {
+        active.completed = true;
+    }
+    persistence.save_instance(&snapshot).await.unwrap();
+    drop(engine);
+    let restored = restore_event_engine(persistence).await;
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored.reconcile_event_subprocesses().await.unwrap();
+    let current = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(current.state, InstanceState::Completed);
+    assert_eq!(current.variables["starts"], 1);
+    assert_eq!(current.variables["ends"], 1);
+    assert!(restored.get_pending_user_tasks().is_empty());
+}
+
+#[tokio::test]
+async fn container_listener_failure_rolls_back_writes_and_fails_the_scope() {
+    for phase in [
+        crate::domain::ListenerEvent::Start,
+        crate::domain::ListenerEvent::End,
+    ] {
+        let engine = WorkflowEngine::new();
+        let mut def = definition(Trigger::Message("alert".into()), false);
+        container_listeners(&mut def, "starts += 1;", "ends += 1;");
+        def.listeners
+            .get_mut("handler")
+            .unwrap()
+            .push(crate::domain::ExecutionListener {
+                event: phase.clone(),
+                script: "throw \"listener failure\";".into(),
+            });
+        let (key, _) = engine.deploy_definition(def).await;
+        let id = engine.start_instance(key).await.unwrap();
+        let triggered = engine
+            .correlate_message("alert".into(), None, HashMap::new())
+            .await;
+        if phase == crate::domain::ListenerEvent::Start {
+            assert!(triggered.is_err());
+        } else {
+            triggered.unwrap();
+            let work = engine
+                .get_pending_user_tasks()
+                .into_iter()
+                .find(|task| task.node_id == "work")
+                .unwrap();
+            assert!(
+                engine
+                    .complete_user_task(work.task_id, HashMap::new())
+                    .await
+                    .is_err()
+            );
+        }
+        let current = engine.get_instance_details(id).await.unwrap();
+        assert!(matches!(
+            current.state,
+            InstanceState::CompletedWithError { .. }
+        ));
+        assert_eq!(
+            current.variables[if phase == crate::domain::ListenerEvent::Start {
+                "starts"
+            } else {
+                "ends"
+            }],
+            0
+        );
+        assert!(engine.get_pending_user_tasks().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn container_end_waits_for_handler_call_activity() {
+    let engine = WorkflowEngine::new();
+    let child = ProcessDefinitionBuilder::new("listener_child")
+        .node("cs", BpmnElement::StartEvent)
+        .node("cw", BpmnElement::UserTask("child".into()))
+        .node("ce", BpmnElement::EndEvent)
+        .flow("cs", "cw")
+        .flow("cw", "ce")
+        .build()
+        .unwrap();
+    engine.deploy_definition(child).await;
+    let mut def = definition(Trigger::Message("alert".into()), false);
+    container_listeners(&mut def, "starts += 1;", "ends += 1;");
+    def.nodes.insert(
+        "work".into(),
+        BpmnElement::CallActivity {
+            called_element: "listener_child".into(),
+        },
+    );
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    finish_user(&engine, "main", HashMap::new()).await;
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().variables["ends"],
+        0
+    );
+    finish_user(&engine, "cw", HashMap::new()).await;
+    let current = engine.get_instance_details(id).await.unwrap();
+    assert_eq!(current.state, InstanceState::Completed);
+    assert_eq!(current.variables["starts"], 1);
+    assert_eq!(current.variables["ends"], 1);
 }

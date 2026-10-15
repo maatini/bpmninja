@@ -94,7 +94,7 @@ async fn x9_rest_message_handlers_repeat_and_survive_restart() {
     let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
     let (base, server) = serve(engine.clone(), persistence.clone()).await;
     let client = reqwest::Client::new();
-    let xml = xml(false);
+    let xml = xml(false).replace(r#"<subProcess id="handler" triggeredByEvent="true">"#, r#"<subProcess id="handler" triggeredByEvent="true"><extensionElements><camunda:executionListener event="start"><camunda:script scriptFormat="rhai">starts += 1;</camunda:script></camunda:executionListener><camunda:executionListener event="end"><camunda:script scriptFormat="rhai">ends += 1;</camunda:script></camunda:executionListener></extensionElements>"#);
     let deployed = post(
         &client,
         &base,
@@ -113,7 +113,13 @@ async fn x9_rest_message_handlers_repeat_and_survive_restart() {
         .await
         .unwrap();
     assert_eq!(exported, xml);
-    let started = post(&client, &base, "/api/start", json!({"definition_key":key})).await;
+    let started = post(
+        &client,
+        &base,
+        "/api/start",
+        json!({"definition_key":key,"variables":{"starts":0,"ends":0}}),
+    )
+    .await;
     let id = started["instance_id"].as_str().unwrap();
     for _ in 0..2 {
         let triggered = post(
@@ -153,6 +159,8 @@ async fn x9_rest_message_handlers_repeat_and_survive_restart() {
     assert_eq!(details["state"], "Completed");
     assert_eq!(details["variables"]["mainResult"], 42);
     assert_eq!(details["variables"]["handlerResult"], 42);
+    assert_eq!(details["variables"]["starts"], 2);
+    assert_eq!(details["variables"]["ends"], 2);
     let history = get(&client, &base, &format!("/api/instances/{id}/history?event_types=EventSubprocessActivated,EventSubprocessCompleted&node_id=handler")).await;
     let entries = history.as_array().unwrap();
     assert_eq!(entries.len(), 4);

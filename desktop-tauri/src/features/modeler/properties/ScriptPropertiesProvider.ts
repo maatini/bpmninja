@@ -138,10 +138,12 @@ function ScriptGroup(element: any, translate: any) {
   if (!is(element, 'bpmn:FlowNode')) {
     return null;
   }
+  const eventContainer = !!element.businessObject.triggeredByEvent;
 
   return {
     id: 'ExecutionScriptsGroup',
     label: translate('Execution Scripts'),
+    shouldOpen: eventContainer,
     entries: [
       {
         id: 'startScript',
@@ -151,7 +153,7 @@ function ScriptGroup(element: any, translate: any) {
             ...props,
             eventType: 'start',
             label: 'Start Script (Rhai)',
-            description: 'Executed when the node is entered',
+            description: eventContainer ? 'Once per handler activation, before its body starts' : 'Executed when the node is entered',
           }),
         isEdited: isTextAreaEntryEdited,
       },
@@ -163,7 +165,7 @@ function ScriptGroup(element: any, translate: any) {
             ...props,
             eventType: 'end',
             label: 'End Script (Rhai)',
-            description: 'Executed when the node completes',
+            description: eventContainer ? 'After all handler branches and child calls finish; skipped on cancellation' : 'Executed when the node completes',
           }),
         isEdited: isTextAreaEntryEdited,
       },

@@ -197,7 +197,13 @@ impl ScriptRunner {
                 .map_err(|e| EngineError::ScriptError(e.to_string()))?;
 
             let mut result = vars;
+            let mut visible = std::collections::HashSet::new();
             for (k, _, v) in scope.iter_raw() {
+                // iter_raw visits newest bindings first. Do not overwrite a
+                // visible `let` binding with the older variable it shadows.
+                if !visible.insert(k) {
+                    continue;
+                }
                 if let Ok(json_val) = rhai::serde::from_dynamic(v) {
                     result.insert(k.to_string(), json_val);
                 }

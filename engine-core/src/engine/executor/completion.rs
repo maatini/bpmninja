@@ -33,7 +33,7 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
-        Self::refresh_event_completion(&mut inst);
+        self.refresh_event_completion(&mut inst).await?;
         let handlers_active = inst
             .event_state
             .as_ref()

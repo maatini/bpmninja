@@ -43,6 +43,25 @@ fn x9_definition() -> engine_core::domain::ProcessDefinition {
     definition.nodes.extend(handler.nodes);
     definition.flows.extend(handler.flows);
     definition
+        .variable_defaults
+        .insert("starts".into(), serde_json::json!(0));
+    definition
+        .variable_defaults
+        .insert("ends".into(), serde_json::json!(0));
+    definition.listeners.insert(
+        "handler".into(),
+        vec![
+            engine_core::domain::ExecutionListener {
+                event: engine_core::domain::ListenerEvent::Start,
+                script: "starts += 1;".into(),
+            },
+            engine_core::domain::ExecutionListener {
+                event: engine_core::domain::ListenerEvent::End,
+                script: "ends += 1;".into(),
+            },
+        ],
+    );
+    definition
 }
 
 #[tokio::test]
@@ -66,6 +85,14 @@ async fn x9_handler_subscriptions_and_tasks_survive_nats_reconnect() {
     newer
         .nodes
         .insert("work".into(), BpmnElement::UserTask("newer".into()));
+    for listener in newer.listeners.get_mut("handler").unwrap() {
+        listener.script = if listener.event == engine_core::domain::ListenerEvent::Start {
+            "starts += 100;"
+        } else {
+            "ends += 100;"
+        }
+        .into();
+    }
     let (new_key, _) = engine.deploy_definition(newer).await;
     assert_ne!(
         new_key, key,
@@ -131,6 +158,9 @@ async fn x9_handler_subscriptions_and_tasks_survive_nats_reconnect() {
         restored.get_instance_details(id).await.unwrap().state,
         InstanceState::Completed
     );
+    let completed = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(completed.variables["starts"], 2);
+    assert_eq!(completed.variables["ends"], 2);
     assert!(
         fresh
             .list_message_catches()
@@ -294,6 +324,12 @@ async fn x9_interruption_recovery_prunes_stale_jobs_and_replays_lifecycle_histor
         .unwrap();
     let handler = engine.get_pending_user_tasks().remove(0);
     let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    // Model the persisted boundary after the container-start transaction but
+    // before the first body node. The marker must suppress a second start.
+    for token in snapshot.tokens.values_mut() {
+        token.current_node = "hs".into();
+        token.event_context.as_mut().unwrap().started_node = None;
+    }
     let lifecycle = persistence
         .query_history(engine_core::persistence::HistoryQuery {
             instance_id: id,
@@ -370,6 +406,9 @@ async fn x9_interruption_recovery_prunes_stale_jobs_and_replays_lifecycle_histor
         .complete_user_task(tasks[0].task_id, HashMap::new())
         .await
         .unwrap();
+    let completed = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(completed.variables["starts"], 1);
+    assert_eq!(completed.variables["ends"], 1);
     assert_eq!(
         restored.get_instance_details(id).await.unwrap().state,
         InstanceState::Completed

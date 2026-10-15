@@ -1,6 +1,6 @@
 # X9 — Event subprocesses
 
-Status: X9a authorized by continuation, 2026-10-15. Parser/runtime, modeler, and integration slice implemented; lifecycle acceptance remains open.
+Status: X9a implemented and accepted, 2026-10-15. Full X9 remains partial: conditional starts and nested/compensation scopes are separate follow-ups.
 Next task after X11 in `improvements.md`.
 
 ## Starting point before X9a
@@ -156,10 +156,10 @@ Validation for this increment: 331 core tests, 80 parser tests, 15 real-NATS ada
 ### Remaining X9a acceptance
 
 - [x] Dedicated handler activation/interruption/completion history and scoped lifecycle notifications (implemented in the lifecycle checkpoint below).
-- [ ] Container start/end execution-listener lifecycle; currently explicitly rejected, while body-node listeners are supported.
+- [x] Container start/end execution-listener lifecycle (implemented in the container checkpoint below).
 - [x] Real NATS crash-point coverage for interruption claims with stale pending jobs (implemented in the lifecycle checkpoint below).
 
-X9a and full X9 remain open until these remaining acceptance items are resolved. Conditional starts and nested/compensation scopes remain the separate X9b/X9c increments.
+X9a acceptance is complete. Full X9 remains open: conditional starts and nested/compensation scopes remain the separate X9b/X9c increments.
 
 ## Lifecycle and interruption recovery checkpoint (2026-10-15)
 
@@ -170,3 +170,15 @@ X9a and full X9 remain open until these remaining acceptance items are resolved.
 - Runtime/parser tests, real NATS adapter tests, frontend event tests/build/lint, and server REST/SSE checks validate this increment. Container execution listeners remain the final X9a implementation item; X9b/X9c remain separate increments.
 
 Lifecycle checkpoint validation: 335 core tests, 80 parser tests, 16 real-NATS adapter tests, 29 server unit tests, 2 event-subprocess REST tests, and 9 frontend event tests pass. Frontend build/lint, Rust formatting, and workspace Clippy pass. Knowledge graph refreshed.
+
+## Container listener checkpoint (2026-10-15)
+
+- Support inline Rhai `start` and `end` execution listeners on event-subprocess containers. Start runs once per activation before body-node listeners and mappings. End runs after all handler branches and child calls finish; cancellation, termination, and failure skip normal end callbacks.
+- Commit each callback chain's process-variable changes atomically. Persist the successful start marker with its variable changes before exposing body work; recovery also settles finished bodies with no runnable token left. Listener history carries the activation identity, phase, and variable diff.
+- Reject unsupported callback events, external scripts/delegates, and non-Rhai languages. The modeler edits both container phases and retains them through XML export/reimport.
+- Correct Rhai result extraction so the newest visible `let` binding wins over a shadowed process variable. Regression coverage includes repeated callbacks and multiple declarations.
+- Added acceptance coverage for ordering, repeated activations, joins, child calls, cancellation, failure without partial writes, recovery before the body and after body completion, and original-definition callback binding across real JetStream reconnects.
+
+X9a's supported process-level subset and its acceptance items are complete. Full X9 remains partial; X9b/X2 and X9c/X6/G1 remain follow-ups.
+
+Container checkpoint validation: 342 core tests, 82 parser tests, 16 real-NATS adapter tests, 29 server unit tests, 2 event-subprocess REST tests, and 6 Edge browser tests pass. Frontend build/lint, Rust formatting, whitespace checks, and workspace Clippy with warnings denied pass. Knowledge graph refreshed.

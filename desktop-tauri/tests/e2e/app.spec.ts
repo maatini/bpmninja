@@ -1944,6 +1944,29 @@ test.describe('bpmninja Desktop App – E2E', () => {
     expect(await exportedXml(page)).toContain('errorRef="HandlerError"');
   });
 
+  test('X9 edits container start and end listeners and retains them on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:messageEventDefinition/>'), 'handler');
+    const start = page.getByLabel('Start Script (Rhai)', { exact: true });
+    const end = page.getByLabel('End Script (Rhai)', { exact: true });
+    await expect(start).toBeVisible();
+    await start.fill('starts += 1;'); await start.blur();
+    await end.fill('ends += 1;'); await end.blur();
+    await expect.poll(() => exportedXml(page)).toContain('ends += 1;');
+    const xml = await exportedXml(page);
+    const containerListeners = await page.evaluate(() => {
+      const modeler = (window as any).__bpmnModeler__;
+      return modeler.get('elementRegistry').get('handler').businessObject.extensionElements.values.map((listener: any) => [listener.event, listener.script.value]);
+    });
+    expect(containerListeners).toEqual([['start', 'starts += 1;'], ['end', 'ends += 1;']]);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('handler'));
+    }, xml);
+    await expect(start).toHaveValue('starts += 1;');
+    await expect(end).toHaveValue('ends += 1;');
+  });
+
   for (const kind of ['signal', 'escalation']) {
     test(`X9 edits ${kind} references and retains non-interrupting starts`, async ({ page }) => {
       await loadXmlAndClickElement(page, eventSubprocessXml(`<bpmn:${kind}EventDefinition/>`), 'hs');

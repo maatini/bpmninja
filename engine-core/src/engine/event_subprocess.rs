@@ -1,7 +1,10 @@
 //! Process-level event handlers. Subscriptions and activation fences live in instance snapshots.
 use super::WorkflowEngine;
 use crate::domain::token::EventContext;
-use crate::domain::{EngineError, EngineResult, EventSubProcessTrigger as Trigger, Token};
+use crate::domain::{
+    EngineError, EngineResult, EventSubProcessTrigger as Trigger, ListenerEvent, ProcessDefinition,
+    Token,
+};
 use crate::history::{ActorType, HistoryEntry, HistoryEventType};
 use crate::runtime::{
     ActiveToken, CatchKind, EventSubProcessState, EventSubscription, InstanceState,
@@ -19,11 +22,16 @@ fn queue_lifecycle(
     event_type: HistoryEventType,
     reason: &str,
 ) {
+    let actor = if event_type == HistoryEventType::ListenerExecuted {
+        ActorType::Listener
+    } else {
+        ActorType::Engine
+    };
     let mut entry = HistoryEntry::new(
         instance.id,
         event_type,
         format!("Event subprocess '{handler}' ({activation}): {reason}"),
-        ActorType::Engine,
+        actor,
         None,
     )
     .with_node(handler)
@@ -90,7 +98,11 @@ pub(crate) fn validate_definition(
     let mut ids = HashSet::new();
     let mut owners = HashMap::new();
     for (index, handler) in definition.event_subprocesses.iter().enumerate() {
-        if handler.id.is_empty() || !ids.insert(&handler.id) {
+        if handler.id.is_empty()
+            || handler.id == definition.id
+            || definition.nodes.contains_key(&handler.id)
+            || !ids.insert(&handler.id)
+        {
             return Err(invalid("Event subprocess IDs must be nonempty and unique"));
         }
         if matches!(handler.trigger, Trigger::Error(_)) && !handler.is_interrupting {
@@ -137,6 +149,157 @@ pub(crate) fn validate_definition(
 }
 
 impl WorkflowEngine {
+    /// Container scripts are atomic process-variable updates, independent of task scopes.
+    async fn run_event_container_listener(
+        &self,
+        instance: &mut ProcessInstance,
+        token: &mut Token,
+        definition: &ProcessDefinition,
+        handler: &str,
+        event: ListenerEvent,
+    ) -> EngineResult<()> {
+        if !definition
+            .listeners
+            .get(handler)
+            .is_some_and(|listeners| listeners.iter().any(|listener| listener.event == event))
+        {
+            return Ok(());
+        }
+        let mut candidate = token.clone();
+        // Refresh shared variables while retaining this activation's explicit payload.
+        let baseline = &token.event_context.as_ref().unwrap().baseline;
+        candidate.variables = instance.variables.clone();
+        for key in baseline.keys() {
+            if !token.variables.contains_key(key) {
+                candidate.variables.remove(key);
+            }
+        }
+        for (key, value) in &token.variables {
+            if baseline.get(key) != Some(value) {
+                candidate.variables.insert(key.clone(), value.clone());
+            }
+        }
+        let before = crate::history::DiffSnapshot::from_instance(instance);
+        let mut audits = Vec::new();
+        crate::scripting::run_node_scripts(
+            &self.scripts,
+            instance.id,
+            &mut candidate,
+            definition,
+            handler,
+            event.clone(),
+            &mut audits,
+        )
+        .await?;
+        instance.variables = candidate.variables.clone();
+        instance.audit_log.extend(audits);
+        let context = candidate.event_context.as_mut().unwrap();
+        context.baseline = instance.variables.clone();
+        let activation = context.activation.unwrap();
+        queue_lifecycle(
+            instance,
+            activation,
+            handler,
+            HistoryEventType::ListenerExecuted,
+            if event == ListenerEvent::Start {
+                "container start listener"
+            } else {
+                "container end listener"
+            },
+        );
+        let diff = crate::history::calculate_diff_from_snapshot(&before, instance);
+        if let Some(entry) = instance
+            .event_state
+            .as_mut()
+            .and_then(|state| state.lifecycle_outbox.last_mut())
+        {
+            entry.context.insert(
+                "listener_event".into(),
+                Value::String(
+                    if event == ListenerEvent::Start {
+                        "start"
+                    } else {
+                        "end"
+                    }
+                    .into(),
+                ),
+            );
+            entry.diff = Some(diff);
+        }
+        *token = candidate;
+        Ok(())
+    }
+
+    pub(crate) async fn start_event_container(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        definition: &ProcessDefinition,
+    ) -> EngineResult<()> {
+        let Some(activation) = token
+            .event_context
+            .as_ref()
+            .and_then(|context| context.activation)
+        else {
+            return Ok(());
+        };
+        let instance = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        {
+            let mut instance = instance.write().await;
+            if !token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            let state = instance.event_state.as_ref().unwrap();
+            let handler_id = state
+                .activations
+                .get(&activation)
+                .ok_or(EngineError::AlreadyCompleted)?
+                .clone();
+            let handler = definition
+                .event_subprocesses
+                .iter()
+                .find(|handler| handler.id == handler_id)
+                .ok_or_else(|| {
+                    EngineError::InvalidDefinition("Missing event subprocess container".into())
+                })?;
+            if token.current_node != handler.start_node
+                || state.started_activations.contains(&activation)
+                || !definition
+                    .listeners
+                    .get(&handler_id)
+                    .is_some_and(|listeners| {
+                        listeners
+                            .iter()
+                            .any(|listener| listener.event == ListenerEvent::Start)
+                    })
+            {
+                return Ok(());
+            }
+            self.run_event_container_listener(
+                &mut instance,
+                token,
+                definition,
+                &handler_id,
+                ListenerEvent::Start,
+            )
+            .await?;
+            instance
+                .event_state
+                .as_mut()
+                .unwrap()
+                .started_activations
+                .insert(activation);
+            instance.tokens.insert(token.id, token.clone());
+        }
+        self.persist_instance(instance_id).await;
+        self.flush_event_lifecycle(instance_id).await;
+        Ok(())
+    }
+
     /// Write durable, idempotent history before acknowledging the snapshot outbox.
     /// No instance lock is held during backend I/O or notification delivery.
     pub(crate) async fn flush_event_lifecycle(&self, instance_id: Uuid) {
@@ -412,6 +575,7 @@ impl WorkflowEngine {
                 state.main_completed = true;
                 state.subscriptions.clear();
                 state.activations.clear();
+                state.started_activations.clear();
             } else if let Trigger::Timer(timer) = &handler.trigger {
                 let remaining = subscription.remaining.map(|n| n.saturating_sub(1));
                 let next_due = if timer.is_recurring() && remaining != Some(0) {
@@ -669,6 +833,58 @@ impl WorkflowEngine {
                     self.run_instance_batch(id, token.clone()).await?;
                 }
             }
+            // A crash may leave a finished body awaiting its container-end
+            // listener, with no runnable token left to drive completion.
+            if !matches!(
+                instance.read().await.state,
+                InstanceState::Completed | InstanceState::CompletedWithError { .. }
+            ) {
+                match self.all_tokens_completed(id).await {
+                    Ok(true) => {
+                        let mut current = instance.write().await;
+                        if !matches!(
+                            current.state,
+                            InstanceState::Suspended { .. }
+                                | InstanceState::Completed
+                                | InstanceState::CompletedWithError { .. }
+                        ) && current.tokens.is_empty()
+                            && current.outstanding_calls.is_empty()
+                            && current.event_state.as_ref().is_some_and(|state| {
+                                state.main_completed && state.activations.is_empty()
+                            })
+                        {
+                            current.state = InstanceState::Completed;
+                            current.completed_at = Some(Utc::now());
+                            current.push_audit_log("Recovered completed process scope".into());
+                            drop(current);
+                            self.record_history_event(
+                                id,
+                                HistoryEventType::InstanceCompleted,
+                                "Recovered completed process scope",
+                                ActorType::Engine,
+                                None,
+                                None,
+                            )
+                            .await;
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        {
+                            let mut current = instance.write().await;
+                            current.state = InstanceState::CompletedWithError {
+                                error_code: "EVENT_SUBPROCESS_EXECUTION_ERROR".into(),
+                            };
+                            current.completed_at = Some(Utc::now());
+                            current.push_audit_log(error.to_string());
+                        }
+                        self.cleanup_finished_event_scope(id).await;
+                        self.emit_instance_changed(id).await;
+                        return Err(error);
+                    }
+                }
+                self.finish_instance_batch(id).await?;
+            }
         }
         Ok(())
     }
@@ -768,6 +984,7 @@ impl WorkflowEngine {
             let state = instance.event_state.as_mut().unwrap();
             state.subscriptions.clear();
             state.activations.clear();
+            state.started_activations.clear();
             children
         };
         self.cancel_event_work(instance_id).await;
@@ -865,6 +1082,7 @@ impl WorkflowEngine {
                 state.generation += 1;
                 state.subscriptions.clear();
                 state.activations.clear();
+                state.started_activations.clear();
             }
             instance.state = InstanceState::CompletedWithError {
                 error_code: "SCOPE_INTERRUPTED".into(),
@@ -883,7 +1101,10 @@ impl WorkflowEngine {
     }
 
     /// Completion ignores subscriptions, but includes active handler calls and parked joins.
-    pub(crate) fn refresh_event_completion(instance: &mut ProcessInstance) {
+    pub(crate) async fn refresh_event_completion(
+        &self,
+        instance: &mut ProcessInstance,
+    ) -> EngineResult<()> {
         let mut active = HashSet::new();
         let mut main_active = false;
         for token in instance
@@ -915,24 +1136,53 @@ impl WorkflowEngine {
                 None => main_active = true,
             }
         }
-        if let Some(state) = &mut instance.event_state {
+        let completed = if let Some(state) = &mut instance.event_state {
             state.main_completed = !main_active;
-            let completed: Vec<_> = state
+            state
                 .activations
                 .iter()
                 .filter(|(id, _)| !active.contains(id))
                 .map(|(id, handler)| (*id, handler.clone()))
-                .collect();
-            state.activations.retain(|id, _| active.contains(id));
-            for (activation, handler) in completed {
-                queue_lifecycle(
-                    instance,
-                    activation,
-                    &handler,
-                    HistoryEventType::EventSubprocessCompleted,
-                    "completed",
-                );
-            }
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if completed.is_empty() {
+            return Ok(());
         }
+        let definition = self
+            .definitions
+            .get(&instance.definition_key)
+            .ok_or(EngineError::NoSuchDefinition(instance.definition_key))?;
+        let mut completed = completed;
+        completed.sort();
+        for (activation, handler) in completed {
+            let mut token = Token::with_variables(&handler, instance.variables.clone());
+            token.event_context = Some(Box::new(EventContext {
+                generation: instance.event_state.as_ref().unwrap().generation,
+                activation: Some(activation),
+                baseline: instance.variables.clone(),
+                started_node: None,
+            }));
+            self.run_event_container_listener(
+                instance,
+                &mut token,
+                &definition,
+                &handler,
+                ListenerEvent::End,
+            )
+            .await?;
+            let state = instance.event_state.as_mut().unwrap();
+            state.activations.remove(&activation);
+            state.started_activations.remove(&activation);
+            queue_lifecycle(
+                instance,
+                activation,
+                &handler,
+                HistoryEventType::EventSubprocessCompleted,
+                "completed",
+            );
+        }
+        Ok(())
     }
 }

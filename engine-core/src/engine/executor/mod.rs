@@ -236,7 +236,7 @@ impl WorkflowEngine {
     }
 
     /// Persists the instance after a batch and handles completion.
-    async fn finish_instance_batch(&self, instance_id: Uuid) -> EngineResult<()> {
+    pub(crate) async fn finish_instance_batch(&self, instance_id: Uuid) -> EngineResult<()> {
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
         self.flush_event_lifecycle(instance_id).await;
@@ -298,6 +298,8 @@ impl WorkflowEngine {
             .clone();
 
         let def_clone = Arc::clone(&def);
+        self.start_event_container(instance_id, token, &def_clone)
+            .await?;
 
         // X4/X5: a marked token that left its loop activity finishes an iteration.
         if let Some(marker) = token.loop_instance.clone()
