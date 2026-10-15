@@ -295,9 +295,10 @@ impl WorkflowPersistence for InMemoryPersistence {
 
     async fn append_history_entry(&self, entry: &HistoryEntry) -> EngineResult<()> {
         let mut h = self.history.write().await;
-        h.entry(entry.instance_id)
-            .or_insert_with(Vec::new)
-            .push(entry.clone());
+        let entries = h.entry(entry.instance_id).or_insert_with(Vec::new);
+        if !entries.iter().any(|existing| existing.id == entry.id) {
+            entries.push(entry.clone());
+        }
         Ok(())
     }
 

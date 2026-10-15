@@ -37,6 +37,7 @@ fn event_stream(
                     EngineEvent::InstanceChanged { .. } => "instance_changed",
                     EngineEvent::TaskChanged { .. } => "task_changed",
                     EngineEvent::DefinitionChanged { .. } => "definition_changed",
+                    EngineEvent::EventSubprocessChanged { .. } => "event_subprocess_changed",
                 };
                 Event::default()
                     .event(event_type)
@@ -89,6 +90,40 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(data).unwrap();
         assert_eq!(payload["definition_key"], key.to_string());
         assert_eq!(payload["type"], "definition_changed");
+    }
+
+    #[tokio::test]
+    async fn sse_transmits_handler_activation_identity() {
+        let (tx, rx) = tokio::sync::broadcast::channel(2);
+        let instance_id = Uuid::new_v4();
+        let activation_id = Uuid::new_v4();
+        tx.send(EngineEvent::EventSubprocessChanged {
+            event_id: Uuid::new_v4(),
+            instance_id,
+            definition_key: Uuid::new_v4(),
+            subprocess_id: "handler".into(),
+            activation_id,
+            phase: "completed".into(),
+            reason: "completed".into(),
+        })
+        .unwrap();
+        let mut body = Sse::new(event_stream(rx))
+            .into_response()
+            .into_body()
+            .into_data_stream();
+        let bytes = body.next().await.unwrap().unwrap();
+        let frame = std::str::from_utf8(&bytes).unwrap();
+        assert!(frame.contains("event: event_subprocess_changed"));
+        let payload: serde_json::Value = serde_json::from_str(
+            frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["instance_id"], instance_id.to_string());
+        assert_eq!(payload["activation_id"], activation_id.to_string());
+        assert_eq!(payload["phase"], "completed");
     }
 
     #[tokio::test]

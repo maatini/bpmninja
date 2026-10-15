@@ -166,11 +166,7 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
-        if !def.event_listeners.is_empty() {
-            return Err(EngineError::InvalidDefinition(
-                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
-            ));
-        }
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -547,11 +543,7 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
-        if !def.event_listeners.is_empty() {
-            return Err(EngineError::InvalidDefinition(
-                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
-            ));
-        }
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -652,11 +644,7 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
-        if !def.event_listeners.is_empty() {
-            return Err(EngineError::InvalidDefinition(
-                "Legacy ScopeEventListener requires migration to EventSubProcess".into(),
-            ));
-        }
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;

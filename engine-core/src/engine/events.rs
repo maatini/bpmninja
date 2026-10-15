@@ -103,6 +103,16 @@ pub enum EngineEvent {
     },
     /// Eine Prozessdefinition wurde deployed oder gelöscht.
     DefinitionChanged { definition_key: Uuid },
+    /// Lifecycle of one handler activation within the owning process instance.
+    EventSubprocessChanged {
+        event_id: Uuid,
+        instance_id: Uuid,
+        definition_key: Uuid,
+        subprocess_id: String,
+        activation_id: Uuid,
+        phase: String,
+        reason: String,
+    },
 }
 
 impl WorkflowEngine {

@@ -36,6 +36,10 @@ pub enum HistoryEventType {
     EscalationThrown,
     CompensationTriggered,
     InstanceMigrated,
+    EventSubprocessActivated,
+    EventSubprocessInterrupted,
+    EventSubprocessScopeInterrupted,
+    EventSubprocessCompleted,
 }
 
 impl HistoryEventType {
@@ -62,6 +66,12 @@ impl HistoryEventType {
             Self::EscalationThrown => "An escalation was thrown".into(),
             Self::CompensationTriggered => "Compensation was triggered".into(),
             Self::InstanceMigrated => "Process instance was migrated to a new definition".into(),
+            Self::EventSubprocessActivated => "Event subprocess activated".into(),
+            Self::EventSubprocessInterrupted => "Event subprocess execution interrupted".into(),
+            Self::EventSubprocessScopeInterrupted => {
+                "Event subprocess interrupted its containing scope".into()
+            }
+            Self::EventSubprocessCompleted => "Event subprocess completed".into(),
         }
     }
 }

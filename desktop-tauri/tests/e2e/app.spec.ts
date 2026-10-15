@@ -1884,6 +1884,81 @@ test.describe('bpmninja Desktop App – E2E', () => {
     return page.evaluate(async () => (await (window as any).__bpmnModeler__.saveXML({ format: true })).xml);
   }
 
+  function eventSubprocessXml(event: string) {
+    return X11_XML.replace('</bpmn:process>', `<bpmn:subProcess id="handler" triggeredByEvent="true"><bpmn:startEvent id="hs" isInterrupting="false">${event}</bpmn:startEvent><bpmn:userTask id="hw"/><bpmn:endEvent id="he"/><bpmn:sequenceFlow id="hf1" sourceRef="hs" targetRef="hw"/><bpmn:sequenceFlow id="hf2" sourceRef="hw" targetRef="he"/></bpmn:subProcess></bpmn:process>`)
+      .replace('</bpmndi:BPMNPlane>', `<bpmndi:BPMNShape id="handler_di" bpmnElement="handler" isExpanded="true"><dc:Bounds x="100" y="300" width="480" height="180"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="hs_di" bpmnElement="hs"><dc:Bounds x="130" y="350" width="36" height="36"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="hw_di" bpmnElement="hw"><dc:Bounds x="220" y="330" width="100" height="80"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="he_di" bpmnElement="he"><dc:Bounds x="420" y="350" width="36" height="36"/></bpmndi:BPMNShape><bpmndi:BPMNEdge id="hf1_di" bpmnElement="hf1"><di:waypoint x="166" y="368"/><di:waypoint x="220" y="368"/></bpmndi:BPMNEdge><bpmndi:BPMNEdge id="hf2_di" bpmnElement="hf2"><di:waypoint x="320" y="368"/><di:waypoint x="420" y="368"/></bpmndi:BPMNEdge></bpmndi:BPMNPlane>`);
+  }
+
+  test('X9 creates message references with atomic undo and retains interruption on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:messageEventDefinition/>'), 'hs');
+    const reference = page.getByLabel('Event reference ID', { exact: true });
+    await reference.fill('AlertMessage');
+    await reference.blur();
+    await expect.poll(() => exportedXml(page)).toContain('messageRef="AlertMessage"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    expect(await exportedXml(page)).not.toContain('id="AlertMessage"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    await page.getByLabel('Event name', { exact: true }).fill('alert & review');
+    await page.getByLabel('Event name', { exact: true }).blur();
+    await page.getByLabel('Interrupting', { exact: true }).check();
+    await expect.poll(() => exportedXml(page)).toMatch(/name="alert &(?:amp;|#38;) review"/);
+    const xml = await exportedXml(page);
+    expect(xml).not.toContain('isInterrupting="false"');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('hs'));
+    }, xml);
+    await expect(reference).toHaveValue('AlertMessage');
+    await expect(page.getByLabel('Event name', { exact: true })).toHaveValue('alert & review');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toBeChecked();
+    await reference.fill('work');
+    await reference.blur();
+    await expect(page.getByText('This ID belongs to a different BPMN element.', { exact: true })).toBeVisible();
+    expect(await exportedXml(page)).toContain('messageRef="AlertMessage"');
+  });
+
+  test('X9 edits timer type and expression without retaining an obsolete timer', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:timerEventDefinition><bpmn:timeDuration>PT1M</bpmn:timeDuration></bpmn:timerEventDefinition>'), 'hs');
+    await expect(page.getByLabel('Timer expression', { exact: true })).toHaveValue('PT1M');
+    await page.getByLabel('Timer type', { exact: true }).selectOption('timeCycle');
+    await page.getByLabel('Timer expression', { exact: true }).fill('R3/PT5M');
+    await page.getByLabel('Timer expression', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('R3/PT5M');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('bpmn:timeCycle');
+    expect(xml).not.toContain('bpmn:timeDuration');
+    expect(xml).toContain('isInterrupting="false"');
+  });
+
+  test('X9 edits error codes and keeps error starts interrupting', async ({ page }) => {
+    const xml = eventSubprocessXml('<bpmn:errorEventDefinition/>').replace('id="hs" isInterrupting="false"', 'id="hs"');
+    await loadXmlAndClickElement(page, xml, 'hs');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toHaveCount(0);
+    await page.getByLabel('Event reference ID', { exact: true }).fill('HandlerError');
+    await page.getByLabel('Event reference ID', { exact: true }).blur();
+    await expect(page.getByLabel('Event code', { exact: true })).toBeEnabled();
+    await page.getByLabel('Event code', { exact: true }).fill('FAIL');
+    await page.getByLabel('Event code', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('errorCode="FAIL"');
+    expect(await exportedXml(page)).toContain('errorRef="HandlerError"');
+  });
+
+  for (const kind of ['signal', 'escalation']) {
+    test(`X9 edits ${kind} references and retains non-interrupting starts`, async ({ page }) => {
+      await loadXmlAndClickElement(page, eventSubprocessXml(`<bpmn:${kind}EventDefinition/>`), 'hs');
+      await page.getByLabel('Event reference ID', { exact: true }).fill('HandlerTrigger');
+      await page.getByLabel('Event reference ID', { exact: true }).blur();
+      const value = page.getByLabel(kind === 'signal' ? 'Event name' : 'Event code', { exact: true });
+      await expect(value).toBeEnabled();
+      await value.fill('ALERT');
+      await value.blur();
+      await expect.poll(() => exportedXml(page)).toContain(kind === 'signal' ? 'name="ALERT"' : 'escalationCode="ALERT"');
+      expect(await exportedXml(page)).toContain(`${kind}Ref="HandlerTrigger"`);
+      await expect(page.getByLabel('Interrupting', { exact: true })).not.toBeChecked();
+    });
+  }
+
   test('X11 edits nested activity mappings and retains output mappings on roundtrip', async ({ page }) => {
     await loadXmlAndClickElement(page, X11_XML, 'work');
     const input = page.getByLabel('Activity inputs', { exact: true });

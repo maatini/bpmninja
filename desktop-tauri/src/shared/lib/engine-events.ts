@@ -1,12 +1,17 @@
 import type { ProcessInstance } from '../types/engine';
 
-export type EngineEventType = 'instance_changed' | 'task_changed' | 'definition_changed' | 'resync_required';
+export type EngineEventType = 'instance_changed' | 'task_changed' | 'definition_changed' | 'event_subprocess_changed' | 'resync_required';
 
 export interface EngineEventPayload {
   type: EngineEventType;
   instance_id?: string;
   task_id?: string;
   definition_key?: string | null;
+  event_id?: string;
+  subprocess_id?: string;
+  activation_id?: string;
+  phase?: 'activated' | 'scope_interrupted' | 'interrupted' | 'completed';
+  reason?: string;
   removed?: boolean;
   delta?: Pick<ProcessInstance, 'state' | 'current_node' | 'business_key' | 'started_at' | 'completed_at'>;
 }

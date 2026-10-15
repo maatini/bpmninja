@@ -102,6 +102,10 @@ fn x9a_rejects_illegal_starts_and_scopes() {
         ))
         .is_err()
     );
+    assert!(parse_bpmn_xml(&document.replace(
+        "<subProcess id=\"handler\" triggeredByEvent=\"true\">",
+        "<subProcess id=\"handler\" triggeredByEvent=\"true\"><extensionElements><camunda:executionListener event=\"start\"><camunda:script scriptFormat=\"rhai\">let value = 1;</camunda:script></camunda:executionListener></extensionElements>"
+    )).is_err());
 }
 #[test]
 fn x9a_handler_tasks_retain_x11_mappings() {

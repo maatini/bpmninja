@@ -1,6 +1,6 @@
 # BPMN 2.0.2 Element Matrix
 
-Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, updated 2026-10-14). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
+Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, updated 2026-10-15). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
 
 | Symbol | Meaning |
 |---|---|
@@ -18,11 +18,11 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | None | ✅ | — | ❌ (milestone not executed) | — | ✅ |
 | Message | ✅ | ✅ | ✅ (as send) | ✅ interrupting / non-interrupting | ❌ [X1/X12] |
 | Timer (duration, date, cycle) | ✅ | ✅ | — | ✅ interrupting / non-interrupting | — |
-| Error | ❌ in event sub-process [X9] | — | — | ✅ | ✅ |
-| Escalation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
+| Error | ✅ interrupting, process-level event sub-process [X9a] | — | — | ✅ | ✅ |
+| Escalation | ✅ process-level event sub-process [X9a] | — | ✅ | ✅ | ✅ |
 | Compensation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
 | Conditional | ❌ [X2] | ❌ [X2] | — | ❌ [X2] | — |
-| Signal | ✅ (latest version; not in sub-processes) | ✅ | ✅ (broadcast after the step) | ✅ interrupting / non-interrupting | ✅ (not in sub-processes) |
+| Signal | ✅ latest version for process starts; original version for process-level event sub-process handlers | ✅ | ✅ (broadcast after the step) | ✅ interrupting / non-interrupting | ✅ (not in embedded sub-processes) |
 | Link | — | ✅ (resolved at parse time) | ✅ (resolved at parse time) | — | — |
 | Cancel | — | — | — | ❌ [X7] | ❌ [X7] |
 | Terminate | — | — | — | — | ✅ |
@@ -42,7 +42,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Task (abstract) | ❌ | Use a concrete task type |
 | Call Activity | ✅ | Variables propagated both ways, error boundaries |
 | Embedded Sub-Process | ✅ | Flattened at parse time (ADR-003); entered at the internal start event's successor. Boundary events on the sub-process are not spec-exact [X6] |
-| Event Sub-Process | ❌ [X9] | Was parsed but never triggered |
+| Event Sub-Process | ⚠️ subset [X9a] | Process-level timer/message/signal/error/escalation starts; legal interruption flags, repeated handlers, shared variables, persisted subscriptions and activation recovery. Error starts interrupt. Nested scopes, conditional/compensation starts, container data scopes and container execution listeners are rejected. See [runtime contract](../../../event-subprocesses.md). |
 | Transaction | ❌ [X7] | |
 | Ad-hoc Sub-Process | ❌ [X8] | |
 | Loop (`standardLoopCharacteristics`) | ✅ | Tasks + call activities; `loopCondition`, `testBefore`, `loopMaximum`. On sub-processes ❌ [X6] |

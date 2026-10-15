@@ -15,6 +15,14 @@ test('scoped events skip other instances and definitions', () => {
   assert.equal(matchesEngineEvent(change, ['instance_changed'], { instanceId: 'a' }), true);
 });
 
+test('handler lifecycle events invalidate only their owning instance history', () => {
+  const event = { type: 'event_subprocess_changed', instance_id: 'a', definition_key: 'def',
+    activation_id: 'activation', subprocess_id: 'handler', phase: 'completed', event_id: 'history-id' };
+  assert.equal(matchesEngineEvent(event, ['event_subprocess_changed'], { instanceId: 'a' }), true);
+  assert.equal(matchesEngineEvent(event, ['event_subprocess_changed'], { instanceId: 'b' }), false);
+  assert.equal(matchesEngineEvent(event, ['instance_changed']), false);
+});
+
 test('legacy events and resync retain full-refresh fallback', () => {
   assert.equal(matchesEngineEvent({ type: 'instance_changed' }, undefined, { instanceId: 'a' }), true);
   assert.equal(matchesEngineEvent({ type: 'resync_required' }, ['task_changed'], { instanceId: 'b' }), true);

@@ -239,6 +239,7 @@ impl WorkflowEngine {
     async fn finish_instance_batch(&self, instance_id: Uuid) -> EngineResult<()> {
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
+        self.flush_event_lifecycle(instance_id).await;
 
         self.cleanup_finished_event_scope(instance_id).await;
         // After batch finishes for this instance, if it completed, check parent

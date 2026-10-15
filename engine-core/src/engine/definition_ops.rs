@@ -33,7 +33,13 @@ impl WorkflowEngine {
     /// Returns (definition_key, version).
     pub async fn deploy_definition(&self, definition: ProcessDefinition) -> (Uuid, i32) {
         let highest = self.definitions.highest_version(&definition.id);
-        let def = Self::normalize_definition(definition, highest);
+        let mut def = Self::normalize_definition(definition, highest);
+        // Cloning a deployed definition also clones its key. Preserve the
+        // immutable definition used by existing instances on redeployment.
+        // Restoring distinct persisted keys into an empty registry keeps them.
+        if self.definitions.contains_key(&def.key) {
+            def.key = Uuid::new_v4();
+        }
         let key = def.key;
         let version = def.version;
 

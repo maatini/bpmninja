@@ -34,24 +34,15 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         Self::refresh_event_completion(&mut inst);
-        if !inst.outstanding_calls.is_empty() {
-            return Ok(false);
-        }
-        if inst
+        let handlers_active = inst
             .event_state
             .as_ref()
-            .is_some_and(|s| !s.main_completed || !s.activations.is_empty())
-        {
-            return Ok(false);
-        }
-        if !inst.tokens.is_empty() {
-            return Ok(false);
-        }
-        if inst.active_tokens.is_empty() {
-            // Linear flow
-            return Ok(true);
-        }
-        Ok(inst.active_tokens.iter().all(|t| t.completed))
+            .is_some_and(|s| !s.main_completed || !s.activations.is_empty());
+        let completed = !handlers_active
+            && inst.outstanding_calls.is_empty()
+            && inst.tokens.is_empty()
+            && inst.active_tokens.iter().all(|t| t.completed);
+        Ok(completed)
     }
 
     /// Runs End scripts, commits variables to instance state.

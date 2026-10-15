@@ -1,6 +1,6 @@
 # X9 — Event subprocesses
 
-Status: X9a authorized by continuation, 2026-10-15. Parser/runtime implementation in progress.
+Status: X9a authorized by continuation, 2026-10-15. Parser/runtime, modeler, and integration slice implemented; lifecycle acceptance remains open.
 Next task after X11 in `improvements.md`.
 
 ## Starting point before X9a
@@ -141,3 +141,32 @@ X9a is authorized. X9b/X9c are follow-ups; full X9 remains incomplete.
 - External model checking explicitly reports skipped event-subprocess semantics. Legacy ScopeEventListener definitions require migration.
 - Body-node execution listeners remain supported. Container execution listeners are explicitly rejected pending a container lifecycle implementation.
 - Validation: 323 core tests (10 event-subprocess tests) and 80 parser tests pass; formatting and Clippy for core/parser/server pass. Further acceptance work remains: additional loop/race/termination coverage, REST and real NATS recovery tests, modeler properties and browser roundtrip tests, and final workspace/frontend checks. X9a is not complete.
+
+## Modeler and integration checkpoint (2026-10-15)
+
+- Added modeler fields for all five supported start types: shared references and names/codes, legal interruption flags, and timer type/expression. Declaration creation plus reference binding is one undo step; conflicting element IDs are rejected.
+- Five Edge browser tests cover message undo/export/reimport, invalid reference types, timer replacement, error interruption rules, signal references, and escalation references. Frontend build and lint pass (lint retains repository warnings).
+- Two REST tests cover unchanged XML export, explicit model-check skipping, repeated handlers, restart, shared writes, and interrupting signal cancellation.
+- The real JetStream adapter suite passes all 15 tests, including handler/subscription recovery and original-definition binding after redeploying a clone.
+- Fixed definition-key reuse on cloned redeployment: it now allocates a fresh key when the key already exists, preserving running instances and persisted old bodies. Distinct restored keys remain stable.
+- Expanded runtime acceptance to 18 event-subprocess tests: parallel joins, multi-instance isolation/cancellation, other-handler cancellation, concurrent interrupting claims, termination cleanup, exact/wildcard error precedence, activity-boundary precedence, old snapshots, and invalid programmatic metadata before instance creation.
+
+Validation for this increment: 331 core tests, 80 parser tests, 15 real-NATS adapter tests, 9 targeted REST tests (2 event-subprocess, 3 versioning, 4 start-error), and 5 Edge browser tests pass. Frontend build/lint, Rust formatting, and workspace Clippy also pass. The knowledge graph has been refreshed.
+
+### Remaining X9a acceptance
+
+- [x] Dedicated handler activation/interruption/completion history and scoped lifecycle notifications (implemented in the lifecycle checkpoint below).
+- [ ] Container start/end execution-listener lifecycle; currently explicitly rejected, while body-node listeners are supported.
+- [x] Real NATS crash-point coverage for interruption claims with stale pending jobs (implemented in the lifecycle checkpoint below).
+
+X9a and full X9 remain open until these remaining acceptance items are resolved. Conditional starts and nested/compensation scopes remain the separate X9b/X9c increments.
+
+## Lifecycle and interruption recovery checkpoint (2026-10-15)
+
+- Added handler activation, completion, cancellation, and containing-scope interruption history. Context carries activation identity, definition key/version, generation, and reason. Cancellation is distinct from normal completion.
+- Lifecycle entries are queued in a serde-defaulted instance outbox with stable history IDs. Writes acknowledge only successfully stored IDs. Failed writes retain pending records; startup reconciliation replays them. In-memory history now deduplicates entry IDs, matching the persistence retry contract and NATS behavior.
+- Added `event_subprocess_changed` SSE notifications with stable event/activation IDs, owning instance/definition/subprocess IDs, phase, and reason. The desktop timeline refreshes for matching instance lifecycle events. SSE remains best effort; persisted history is the reload source after resync.
+- Added coverage for repeated handler identity, history/SSE correspondence, stable, deduplicated history IDs during replay, persistence failure retention, and cancellation without false completion. The real JetStream interruption test restores a claimed handler with its task missing and a stale main task still stored; reconciliation removes stale work, recreates the handler task, and deduplicates unacknowledged history.
+- Runtime/parser tests, real NATS adapter tests, frontend event tests/build/lint, and server REST/SSE checks validate this increment. Container execution listeners remain the final X9a implementation item; X9b/X9c remain separate increments.
+
+Lifecycle checkpoint validation: 335 core tests, 80 parser tests, 16 real-NATS adapter tests, 29 server unit tests, 2 event-subprocess REST tests, and 9 frontend event tests pass. Frontend build/lint, Rust formatting, and workspace Clippy pass. Knowledge graph refreshed.

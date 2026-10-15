@@ -2,6 +2,7 @@
 use super::WorkflowEngine;
 use crate::domain::token::EventContext;
 use crate::domain::{EngineError, EngineResult, EventSubProcessTrigger as Trigger, Token};
+use crate::history::{ActorType, HistoryEntry, HistoryEventType};
 use crate::runtime::{
     ActiveToken, CatchKind, EventSubProcessState, EventSubscription, InstanceState,
     PendingMessageCatch, PendingTimer, ProcessInstance,
@@ -10,6 +11,52 @@ use chrono::Utc;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+
+fn queue_lifecycle(
+    instance: &mut ProcessInstance,
+    activation: Uuid,
+    handler: &str,
+    event_type: HistoryEventType,
+    reason: &str,
+) {
+    let mut entry = HistoryEntry::new(
+        instance.id,
+        event_type,
+        format!("Event subprocess '{handler}' ({activation}): {reason}"),
+        ActorType::Engine,
+        None,
+    )
+    .with_node(handler)
+    .with_context("activation_id", Value::String(activation.to_string()))
+    .with_context(
+        "definition_key",
+        Value::String(instance.definition_key.to_string()),
+    )
+    .with_context("reason", Value::String(reason.into()));
+    if let Some(state) = &mut instance.event_state {
+        entry
+            .context
+            .insert("generation".into(), Value::from(state.generation));
+        state.lifecycle_outbox.push(entry);
+    }
+}
+
+fn queue_cancelled_activations(instance: &mut ProcessInstance, reason: &str) {
+    let cancelled = instance
+        .event_state
+        .as_ref()
+        .map(|state| state.activations.clone())
+        .unwrap_or_default();
+    for (activation, handler) in cancelled {
+        queue_lifecycle(
+            instance,
+            activation,
+            &handler,
+            HistoryEventType::EventSubprocessInterrupted,
+            reason,
+        );
+    }
+}
 
 pub(crate) fn token_valid(instance: &ProcessInstance, token: &Token) -> bool {
     if token.event_context.is_none() {
@@ -27,7 +74,143 @@ pub(crate) fn token_valid(instance: &ProcessInstance, token: &Token) -> bool {
     })
 }
 
+/// Programmatic definitions use the same supported subset as deployed XML.
+pub(crate) fn validate_definition(
+    definition: &crate::domain::ProcessDefinition,
+) -> EngineResult<()> {
+    let invalid = |message: &str| EngineError::InvalidDefinition(message.into());
+    if !definition.event_listeners.is_empty() {
+        return Err(invalid(
+            "Legacy ScopeEventListener requires migration to EventSubProcess",
+        ));
+    }
+    if definition.event_subprocesses.is_empty() {
+        return Ok(());
+    }
+    let mut ids = HashSet::new();
+    let mut owners = HashMap::new();
+    for (index, handler) in definition.event_subprocesses.iter().enumerate() {
+        if handler.id.is_empty() || !ids.insert(&handler.id) {
+            return Err(invalid("Event subprocess IDs must be nonempty and unique"));
+        }
+        if matches!(handler.trigger, Trigger::Error(_)) && !handler.is_interrupting {
+            return Err(invalid(
+                "Error event subprocess starts must be interrupting",
+            ));
+        }
+        if !handler.node_ids.contains(&handler.start_node)
+            || !matches!(
+                definition.nodes.get(&handler.start_node),
+                Some(crate::domain::BpmnElement::StartEvent)
+            )
+        {
+            return Err(invalid(
+                "Event subprocess requires its own plain handler start node",
+            ));
+        }
+        if !matches!(handler.trigger, Trigger::Timer(_))
+            && definition.event_subprocesses[..index]
+                .iter()
+                .any(|other| other.trigger == handler.trigger)
+        {
+            return Err(invalid("Duplicate event subprocess trigger"));
+        }
+        for node in &handler.node_ids {
+            if !definition.nodes.contains_key(node) || owners.insert(node, &handler.id).is_some() {
+                return Err(invalid(
+                    "Event subprocess nodes must exist and belong to one handler",
+                ));
+            }
+        }
+    }
+    for (source, flows) in &definition.flows {
+        if flows
+            .iter()
+            .any(|flow| owners.get(source) != owners.get(&flow.target))
+        {
+            return Err(invalid(
+                "Sequence flows cannot cross an event subprocess boundary",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl WorkflowEngine {
+    /// Write durable, idempotent history before acknowledging the snapshot outbox.
+    /// No instance lock is held during backend I/O or notification delivery.
+    pub(crate) async fn flush_event_lifecycle(&self, instance_id: Uuid) {
+        let _guard = self.event_lifecycle_locks.lock(instance_id).await;
+        let Some(instance) = self.instances.get(&instance_id).await else {
+            return;
+        };
+        let (key, mut entries) = {
+            let instance = instance.read().await;
+            (
+                instance.definition_key,
+                instance
+                    .event_state
+                    .as_ref()
+                    .map(|state| state.lifecycle_outbox.clone())
+                    .unwrap_or_default(),
+            )
+        };
+        if entries.is_empty() {
+            return;
+        }
+        self.persist_instance(instance_id).await;
+        let version = self
+            .definitions
+            .get(&key)
+            .map(|definition| definition.version);
+        for entry in &mut entries {
+            entry.definition_version = version;
+        }
+        if !self.flush_history(instance_id, entries.clone()).await {
+            return;
+        }
+        let written: HashSet<_> = entries.iter().map(|entry| entry.id).collect();
+        {
+            let mut instance = instance.write().await;
+            if let Some(state) = &mut instance.event_state {
+                state
+                    .lifecycle_outbox
+                    .retain(|entry| !written.contains(&entry.id));
+            }
+        }
+        self.persist_instance(instance_id).await;
+        for entry in entries {
+            let phase = match entry.event_type {
+                HistoryEventType::EventSubprocessActivated => "activated",
+                HistoryEventType::EventSubprocessInterrupted => "interrupted",
+                HistoryEventType::EventSubprocessScopeInterrupted => "scope_interrupted",
+                HistoryEventType::EventSubprocessCompleted => "completed",
+                _ => continue,
+            };
+            if let Some(activation_id) = entry
+                .context
+                .get("activation_id")
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                self.emit_event(super::EngineEvent::EventSubprocessChanged {
+                    event_id: entry.id,
+                    instance_id,
+                    definition_key: key,
+                    subprocess_id: entry.node_id.unwrap_or_default(),
+                    activation_id,
+                    phase: phase.into(),
+                    reason: entry
+                        .context
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .into(),
+                });
+            }
+        }
+    }
+
     pub(crate) async fn event_work_valid(&self, instance_id: Uuid, token_id: Uuid) -> bool {
         let Some(instance) = self.instances.get(&instance_id).await else {
             return false;
@@ -214,6 +397,10 @@ impl WorkflowEngine {
             }
             let mut children = Vec::new();
             if handler.is_interrupting {
+                queue_cancelled_activations(
+                    &mut instance,
+                    "cancelled by interrupting event subprocess",
+                );
                 children.extend(instance.outstanding_calls.keys().copied());
                 instance.tokens.clear();
                 instance.active_tokens.clear();
@@ -277,9 +464,26 @@ impl WorkflowEngine {
                 "Event subprocess '{}' activated ({activation}, interrupting={})",
                 handler.id, handler.is_interrupting
             ));
+            if handler.is_interrupting {
+                queue_lifecycle(
+                    &mut instance,
+                    activation,
+                    &handler.id,
+                    HistoryEventType::EventSubprocessScopeInterrupted,
+                    "containing process scope interrupted",
+                );
+            }
+            queue_lifecycle(
+                &mut instance,
+                activation,
+                &handler.id,
+                HistoryEventType::EventSubprocessActivated,
+                "activated",
+            );
             (token, children, handler.is_interrupting)
         };
         self.persist_instance(instance_id).await;
+        self.flush_event_lifecycle(instance_id).await;
         if interrupted {
             self.cancel_event_work(instance_id).await;
             for child in children {
@@ -308,6 +512,7 @@ impl WorkflowEngine {
     /// and resume an activation persisted before its first waiting task was written.
     pub async fn reconcile_event_subprocesses(&self) -> EngineResult<()> {
         for (id, instance) in self.instances.all().await {
+            self.flush_event_lifecycle(id).await;
             let snapshot = instance.read().await.clone();
             let Some(state) = &snapshot.event_state else {
                 continue;
@@ -554,6 +759,7 @@ impl WorkflowEngine {
                 .keys()
                 .copied()
                 .collect::<Vec<_>>();
+            queue_cancelled_activations(&mut instance, "containing process scope finished");
             instance.outstanding_calls.clear();
             instance.tokens.clear();
             instance.active_tokens.clear();
@@ -569,6 +775,7 @@ impl WorkflowEngine {
             self.abort_event_child(child).await;
         }
         self.persist_instance(instance_id).await;
+        self.flush_event_lifecycle(instance_id).await;
     }
 
     pub(crate) async fn terminate_event_scope(
@@ -648,6 +855,7 @@ impl WorkflowEngine {
                 .keys()
                 .copied()
                 .collect::<Vec<_>>();
+            queue_cancelled_activations(&mut instance, "parent scope interrupted");
             instance.outstanding_calls.clear();
             instance.tokens.clear();
             instance.active_tokens.clear();
@@ -668,6 +876,7 @@ impl WorkflowEngine {
         };
         self.cancel_event_work(id).await;
         self.persist_instance(id).await;
+        self.flush_event_lifecycle(id).await;
         for child in children {
             Box::pin(self.abort_event_child(child)).await;
         }
@@ -708,7 +917,22 @@ impl WorkflowEngine {
         }
         if let Some(state) = &mut instance.event_state {
             state.main_completed = !main_active;
+            let completed: Vec<_> = state
+                .activations
+                .iter()
+                .filter(|(id, _)| !active.contains(id))
+                .map(|(id, handler)| (*id, handler.clone()))
+                .collect();
             state.activations.retain(|id, _| active.contains(id));
+            for (activation, handler) in completed {
+                queue_lifecycle(
+                    instance,
+                    activation,
+                    &handler,
+                    HistoryEventType::EventSubprocessCompleted,
+                    "completed",
+                );
+            }
         }
     }
 }

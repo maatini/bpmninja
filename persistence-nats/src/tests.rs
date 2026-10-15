@@ -13,6 +13,145 @@ fn nats_required() -> bool {
     std::env::var("CI").is_ok() || std::env::var("REQUIRE_NATS_TESTS").is_ok()
 }
 
+fn x9_definition() -> engine_core::domain::ProcessDefinition {
+    use engine_core::domain::{
+        BpmnElement, EventSubProcess, EventSubProcessTrigger, ProcessDefinitionBuilder,
+    };
+    let mut definition = ProcessDefinitionBuilder::new("event_restore")
+        .node("start", BpmnElement::StartEvent)
+        .node("main", BpmnElement::UserTask("main".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "main")
+        .flow("main", "end")
+        .build()
+        .unwrap();
+    let handler = ProcessDefinitionBuilder::new("handler")
+        .node("hs", BpmnElement::StartEvent)
+        .node("work", BpmnElement::UserTask("original".into()))
+        .node("he", BpmnElement::EndEvent)
+        .flow("hs", "work")
+        .flow("work", "he")
+        .build()
+        .unwrap();
+    definition.event_subprocesses.push(EventSubProcess {
+        id: "handler".into(),
+        start_node: "hs".into(),
+        node_ids: handler.nodes.keys().cloned().collect(),
+        trigger: EventSubProcessTrigger::Message("alert".into()),
+        is_interrupting: false,
+    });
+    definition.nodes.extend(handler.nodes);
+    definition.flows.extend(handler.flows);
+    definition
+}
+
+#[tokio::test]
+async fn x9_handler_subscriptions_and_tasks_survive_nats_reconnect() {
+    use engine_core::domain::BpmnElement;
+    use engine_core::{InstanceState, WorkflowEngine};
+    use std::collections::HashMap;
+    let stream = format!("TEST_X9_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let definition = x9_definition();
+    let mut newer = definition.clone();
+    let (key, _) = engine.deploy_definition(definition).await;
+    let id = engine.start_instance(key).await.unwrap();
+    engine
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    newer
+        .nodes
+        .insert("work".into(), BpmnElement::UserTask("newer".into()));
+    let (new_key, _) = engine.deploy_definition(newer).await;
+    assert_ne!(
+        new_key, key,
+        "redeployment must preserve the original definition"
+    );
+    drop(engine);
+    drop(persistence);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    for instance in fresh.list_instances().await.unwrap() {
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
+    }
+    for task in fresh.list_user_tasks().await.unwrap() {
+        if task.instance_id == id {
+            restored.restore_user_task(task);
+        }
+    }
+    for catch in fresh.list_message_catches().await.unwrap() {
+        if catch.instance_id == id {
+            restored.restore_message_catch(catch);
+        }
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    let tasks = restored.get_pending_user_tasks();
+    assert_eq!(tasks.len(), 3);
+    assert!(
+        tasks
+            .iter()
+            .filter(|t| t.node_id == "work")
+            .all(|t| t.assignee == "original")
+    );
+    let main = tasks.iter().find(|t| t.node_id == "main").unwrap();
+    restored
+        .complete_user_task(main.task_id, HashMap::new())
+        .await
+        .unwrap();
+    assert_ne!(
+        restored.get_instance_details(id).await.unwrap().state,
+        InstanceState::Completed
+    );
+    for task in tasks.iter().filter(|t| t.node_id == "work") {
+        restored
+            .complete_user_task(task.task_id, HashMap::new())
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().state,
+        InstanceState::Completed
+    );
+    assert!(
+        fresh
+            .list_message_catches()
+            .await
+            .unwrap()
+            .iter()
+            .all(|catch| catch.instance_id != id)
+    );
+    assert!(
+        fresh
+            .list_user_tasks()
+            .await
+            .unwrap()
+            .iter()
+            .all(|task| task.instance_id != id)
+    );
+    fresh.delete_instance(&id.to_string()).await.unwrap();
+    fresh.delete_definition(&key.to_string()).await.unwrap();
+    fresh.delete_definition(&new_key.to_string()).await.unwrap();
+}
+
 #[tokio::test]
 async fn x11_mapped_external_task_survives_nats_reconnect() {
     use engine_core::WorkflowEngine;
@@ -131,6 +270,136 @@ async fn x11_mapped_external_task_survives_nats_reconnect() {
 
 pub async fn setup_nats_test() -> Option<Arc<NatsPersistence>> {
     connect_nats(&format!("TEST_STREAM_{}", Uuid::new_v4())).await
+}
+
+#[tokio::test]
+async fn x9_interruption_recovery_prunes_stale_jobs_and_replays_lifecycle_history() {
+    use engine_core::{HistoryEventType, InstanceState, WorkflowEngine};
+    use std::collections::HashMap;
+    let stream = format!("TEST_X9_CRASH_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut definition = x9_definition();
+    definition.event_subprocesses[0].trigger =
+        engine_core::domain::EventSubProcessTrigger::Signal("stop".into());
+    definition.event_subprocesses[0].is_interrupting = true;
+    let (key, _) = engine.deploy_definition(definition).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let stale = engine.get_pending_user_tasks().remove(0);
+    engine
+        .broadcast_signal("stop", HashMap::new())
+        .await
+        .unwrap();
+    let handler = engine.get_pending_user_tasks().remove(0);
+    let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    let lifecycle = persistence
+        .query_history(engine_core::persistence::HistoryQuery {
+            instance_id: id,
+            event_types: Some(vec![
+                HistoryEventType::EventSubprocessActivated,
+                HistoryEventType::EventSubprocessScopeInterrupted,
+            ]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(lifecycle.len(), 2);
+    snapshot.event_state.as_mut().unwrap().lifecycle_outbox = lifecycle.clone();
+    // A claimed handler is durable, but its pending job is missing and a
+    // separately stored pre-interruption task has survived the crash.
+    persistence.save_instance(&snapshot).await.unwrap();
+    persistence.delete_user_task(handler.task_id).await.unwrap();
+    persistence.save_user_task(&stale).await.unwrap();
+    drop(engine);
+    drop(persistence);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh
+        .list_definitions()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|definition| definition.key == key)
+    {
+        restored.deploy_definition(definition).await;
+    }
+    for snapshot in fresh
+        .list_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|snapshot| snapshot.id == id)
+    {
+        restored.restore_instance(snapshot).await;
+    }
+    for task in fresh
+        .list_user_tasks()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|task| task.instance_id == id)
+    {
+        restored.restore_user_task(task);
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    let tasks = restored.get_pending_user_tasks();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].node_id, "work");
+    assert_ne!(tasks[0].task_id, handler.task_id);
+    assert!(
+        fresh
+            .list_user_tasks()
+            .await
+            .unwrap()
+            .iter()
+            .all(|task| task.task_id != stale.task_id)
+    );
+    assert!(
+        restored
+            .complete_user_task(stale.task_id, HashMap::new())
+            .await
+            .is_err()
+    );
+    restored
+        .complete_user_task(tasks[0].task_id, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.get_instance_details(id).await.unwrap().state,
+        InstanceState::Completed
+    );
+    let history = fresh
+        .query_history(engine_core::persistence::HistoryQuery {
+            instance_id: id,
+            node_id: Some("handler".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    for entry in lifecycle {
+        assert_eq!(
+            history
+                .iter()
+                .filter(|candidate| candidate.id == entry.id)
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        history
+            .iter()
+            .filter(|entry| entry.event_type == HistoryEventType::EventSubprocessCompleted)
+            .count(),
+        1
+    );
+    fresh.delete_instance(&id.to_string()).await.unwrap();
+    fresh.delete_definition(&key.to_string()).await.unwrap();
 }
 
 async fn connect_nats(stream: &str) -> Option<Arc<NatsPersistence>> {

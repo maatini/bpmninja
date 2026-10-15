@@ -40,5 +40,41 @@ subscriptions require migration to explicit `EventSubProcess` metadata.
 
 The external model analyzer reports event subprocess semantics as `skipped`;
 parser structural validation still runs. It does not certify interruption or
-repeated activation. Modeler property editing, REST/NATS end-to-end acceptance,
-and additional scope edge cases remain on the [X9 plan](x9-event-subprocess-plan.md).
+repeated activation. Remaining acceptance work is tracked in the [X9 plan](x9-event-subprocess-plan.md).
+
+## Editing a start in the modeler
+
+Select the start event inside an expanded event subprocess and open **Event
+subprocess start**. Message and signal starts expose a reference ID and event
+name; error and escalation starts expose a reference ID and code. An existing
+declaration ID reuses that declaration. A new ID creates and binds a declaration
+in one undo step. Editing its name or code affects all events using it. IDs
+belonging to another BPMN element type are rejected.
+
+Leave the error/escalation reference empty to catch any code. Error starts are
+always interrupting; other supported starts expose the **Interrupting** checkbox.
+Timer starts expose a duration/date/cycle selector and expression. Changing the
+timer type removes the old expression, then accepts a value for the selected
+type. Deployment validates the timer syntax and supported subprocess structure.
+
+## Lifecycle history and notifications
+
+History uses the owning instance ID and the subprocess container ID as `node_id`.
+`EventSubprocessActivated` and `EventSubprocessCompleted` identify normal handler
+execution. `EventSubprocessScopeInterrupted` records an interrupting handler's
+effect on the containing scope; `EventSubprocessInterrupted` records cancellation
+of an already active handler, including scope termination or failure. Cancelled
+handlers do not receive a normal completion entry.
+
+Each entry includes `activation_id`, `definition_key`, `generation`, and `reason`
+in its context, plus the definition version. Pending entries are saved in the
+instance's `lifecycle_outbox` before history append. Successful append acknowledges
+only those entry IDs; failed writes retain them for the next drain or startup
+reconciliation. Replays reuse stable IDs, and persistence adapters must deduplicate
+history by entry ID. This also covers a crash after append but before acknowledgment.
+
+The SSE event `event_subprocess_changed` carries `event_id`, `instance_id`,
+`definition_key`, `subprocess_id`, `activation_id`, `phase`, and `reason`. Phases
+are `activated`, `scope_interrupted`, `interrupted`, and `completed`. Delivery is
+best effort, as for existing SSE events; reconnect/resync reloads persisted
+history. The desktop history timeline refreshes only for its owning instance.

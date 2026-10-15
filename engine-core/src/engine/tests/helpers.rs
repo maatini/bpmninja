@@ -176,6 +176,7 @@ pub(super) struct InstrumentedPersistence {
     first_delay: Duration,
     later_delay: Duration,
     pub(super) history_batches: AtomicUsize,
+    pub(super) history_failures: AtomicUsize,
     pub(super) serialized_payloads: std::sync::Mutex<Vec<Vec<u8>>>,
     pub(super) save_failures: AtomicUsize,
 }
@@ -189,6 +190,7 @@ impl InstrumentedPersistence {
             first_delay,
             later_delay,
             history_batches: AtomicUsize::new(0),
+            history_failures: AtomicUsize::new(0),
             serialized_payloads: std::sync::Mutex::new(Vec::new()),
             save_failures: AtomicUsize::new(0),
         }
@@ -312,6 +314,17 @@ impl WorkflowPersistence for InstrumentedPersistence {
     }
     async fn append_history_entries(&self, entries: &[HistoryEntry]) -> EngineResult<()> {
         self.history_batches.fetch_add(1, Ordering::SeqCst);
+        if self
+            .history_failures
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(crate::domain::EngineError::PersistenceError(
+                "injected history failure".into(),
+            ));
+        }
         self.inner.append_history_entries(entries).await
     }
     async fn query_history(&self, q: HistoryQuery) -> EngineResult<Vec<HistoryEntry>> {

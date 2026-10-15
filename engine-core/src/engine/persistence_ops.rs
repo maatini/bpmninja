@@ -63,7 +63,7 @@ impl PersistLocks {
         }
     }
 
-    async fn lock(&self, instance_id: Uuid) -> tokio::sync::MutexGuard<'_, ()> {
+    pub(crate) async fn lock(&self, instance_id: Uuid) -> tokio::sync::MutexGuard<'_, ()> {
         let idx = (instance_id.as_u128() % PERSIST_LOCK_STRIPES as u128) as usize;
         self.stripes[idx].lock().await
     }
@@ -196,12 +196,12 @@ impl WorkflowEngine {
         &self,
         instance_id: Uuid,
         entries: Vec<crate::history::HistoryEntry>,
-    ) {
+    ) -> bool {
         let Some(p) = &self.persistence else {
-            return;
+            return true;
         };
         if entries.is_empty() {
-            return;
+            return true;
         }
         let desc = format!(
             "append_history_entries({instance_id}, {} entries)",
@@ -210,7 +210,7 @@ impl WorkflowEngine {
         let mut last_err = None;
         for attempt in 0..=INLINE_RETRIES {
             match p.append_history_entries(&entries).await {
-                Ok(()) => return,
+                Ok(()) => return true,
                 Err(e) if attempt < INLINE_RETRIES => {
                     let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
                     tracing::warn!(
@@ -233,6 +233,7 @@ impl WorkflowEngine {
                 self.enqueue_retry(PersistJob::AppendHistoryEntry(Box::new(entry)));
             }
         }
+        false
     }
 
     /// Helper to record a history entry for an instance, calculating the diff automatically.

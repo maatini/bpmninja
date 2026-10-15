@@ -26,14 +26,16 @@ import { AssigneePropertiesProvider } from './properties/AssigneePropertiesProvi
 import dataDefaultsModdle from './properties/dataDefaultsModdle.json';
 import { DataMappingsPropertiesProvider } from './properties/DataMappingsPropertiesProvider';
 import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
+import { EventSubprocessPropertiesProvider } from './properties/EventSubprocessPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider', 'dataMappingsPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider', 'dataMappingsPropertiesProvider', 'eventSubprocessPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
   topicPropertiesProvider: ['type', TopicPropertiesProvider],
   assigneePropertiesProvider: ['type', AssigneePropertiesProvider],
   dataMappingsPropertiesProvider: ['type', DataMappingsPropertiesProvider],
+  eventSubprocessPropertiesProvider: ['type', EventSubprocessPropertiesProvider],
   calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
 };
 

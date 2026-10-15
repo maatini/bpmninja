@@ -199,7 +199,7 @@ pub trait WorkflowPersistence: Send + Sync {
     ///
     /// Default: one `append_history_entry` call per entry. Backends that can
     /// pipeline writes should override it. Retries may resend entries that were
-    /// already stored, so implementations should deduplicate by `HistoryEntry::id`.
+    /// already stored, so implementations must deduplicate by `HistoryEntry::id`.
     async fn append_history_entries(
         &self,
         entries: &[crate::history::HistoryEntry],

@@ -207,6 +207,9 @@ pub struct EventSubProcessState {
     pub main_completed: bool,
     pub subscriptions: HashMap<Uuid, EventSubscription>,
     pub activations: HashMap<Uuid, String>,
+    /// Stable history IDs survive a crash between snapshot and history writes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lifecycle_outbox: Vec<crate::history::HistoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
