@@ -315,6 +315,25 @@ impl WorkflowEngine {
         }
     }
 
+    pub(crate) fn encode_checked_instance(
+        &self,
+        snapshot: &ProcessInstance,
+    ) -> crate::EngineResult<Vec<u8>> {
+        let mut payload = InstancePayload(Vec::new());
+        serde_json::to_writer(&mut payload, snapshot)
+            .map_err(|e| crate::EngineError::PersistenceError(e.to_string()))?;
+        let payload = match &self.persistence {
+            Some(p) => p.prepare_instance_payload(snapshot, payload.0)?,
+            None => payload.0,
+        };
+        if payload.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
+            return Err(crate::EngineError::PersistenceError(
+                "Instance payload exceeds limit".into(),
+            ));
+        }
+        Ok(payload)
+    }
+
     /// Persistence barrier for explicit-start receipts. Never enqueue and continue on failure.
     pub(crate) async fn persist_instance_required(&self, id: Uuid) -> crate::EngineResult<()> {
         if let Some(p) = &self.persistence {
@@ -325,15 +344,7 @@ impl WorkflowEngine {
                 .await
                 .ok_or(crate::EngineError::NoSuchInstance(id))?;
             let snapshot = instance.read().await.clone();
-            let mut payload = InstancePayload(Vec::new());
-            serde_json::to_writer(&mut payload, &snapshot)
-                .map_err(|e| crate::EngineError::PersistenceError(e.to_string()))?;
-            let payload = p.prepare_instance_payload(&snapshot, payload.0)?;
-            if payload.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
-                return Err(crate::EngineError::PersistenceError(
-                    "Instance payload exceeds limit".into(),
-                ));
-            }
+            let payload = self.encode_checked_instance(&snapshot)?;
             p.save_instance_payload(&snapshot, &payload).await?;
         }
         Ok(())

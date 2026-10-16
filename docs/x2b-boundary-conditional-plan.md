@@ -136,4 +136,4 @@ membership checks, and recurring-timer regression coverage. The resulting core
 suite passes 396 tests and strict workspace Clippy passes. The final real NATS
 and server/REST reruns pass (19, 29, and 7 tests respectively).
 
-The next proposed increment is [X2c explicit top-level conditional starts](x2c-top-level-conditional-starts-plan.md); its separate GO is pending.
+The subsequent increment is [X2c explicit top-level conditional starts](x2c-top-level-conditional-starts-plan.md), now authorized and implemented; its acceptance is recorded in that plan.

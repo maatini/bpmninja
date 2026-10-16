@@ -199,6 +199,28 @@ impl InstrumentedPersistence {
 
 #[async_trait::async_trait]
 impl WorkflowPersistence for InstrumentedPersistence {
+    async fn reserve_conditional_start(
+        &self,
+        receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<crate::ConditionalStartReceipt> {
+        self.inner.reserve_conditional_start(receipt).await
+    }
+    async fn get_conditional_start(
+        &self,
+        id: Uuid,
+    ) -> EngineResult<Option<crate::ConditionalStartReceipt>> {
+        self.inner.get_conditional_start(id).await
+    }
+    async fn list_conditional_starts(&self) -> EngineResult<Vec<crate::ConditionalStartReceipt>> {
+        self.inner.list_conditional_starts().await
+    }
+    async fn complete_conditional_start(
+        &self,
+        receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<()> {
+        self.inner.complete_conditional_start(receipt).await
+    }
+
     async fn save_token(&self, i: Uuid, t: &Token) -> EngineResult<()> {
         self.inner.save_token(i, t).await
     }

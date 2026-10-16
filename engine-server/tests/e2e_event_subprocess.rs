@@ -478,3 +478,99 @@ async fn x2b_rest_boundary_is_visible_and_completion_outputs_close_its_subscript
         server.abort();
     }
 }
+
+#[tokio::test]
+async fn x2c_rest_explicit_starts_retry_conflict_and_manual_rejection() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    let (base, server) = serve(engine.clone(), persistence.clone()).await;
+    let client = reqwest::Client::new();
+    let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"><process id="conditional_rest" isExecutable="true"><startEvent id="s"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></startEvent><userTask id="work"/><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="work"/><sequenceFlow id="b" sourceRef="work" targetRef="e"/></process></definitions>"#;
+    let deployed = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"name":"conditional_rest", "xml":xml}),
+    )
+    .await;
+    let key = deployed["definition_key"].as_str().unwrap();
+    for (path, input) in [
+        ("/api/start", json!({"definition_key":key})),
+        ("/api/start/latest", json!({"bpmn_id":"conditional_rest"})),
+    ] {
+        let response = client
+            .post(format!("{base}{path}"))
+            .json(&input)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{}", response.text().await.unwrap());
+    }
+    let path = "/api/conditional-starts/evaluate";
+    for input in [
+        json!({"request_id":uuid::Uuid::new_v4(), "variables":{}}),
+        json!({"request_id":uuid::Uuid::new_v4(), "definition_key":key,"process_id":"conditional_rest", "variables":{}}),
+    ] {
+        assert_eq!(
+            client
+                .post(format!("{base}{path}"))
+                .json(&input)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    assert!(
+        persistence
+            .list_conditional_starts()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let no = json!({"request_id":uuid::Uuid::new_v4(), "process_id":"conditional_rest", "variables":{"amount":10}});
+    let no_result = post(&client, &base, path, no.clone()).await;
+    assert_eq!(no_result["matched"], false);
+    assert!(no_result.get("instance_id").is_none());
+    assert!(engine.list_instances().await.is_empty());
+    let yes = json!({"request_id":uuid::Uuid::new_v4(), "process_id":"conditional_rest", "business_key":"case-42", "variables":{"amount":200}});
+    let result = post(&client, &base, path, yes.clone()).await;
+    assert_eq!(result["matched"], true);
+    assert_eq!(result["definition_key"], key);
+    assert_eq!(post(&client, &base, path, yes.clone()).await, result);
+    assert_eq!(engine.get_pending_user_tasks().len(), 1);
+    let mut changed = yes.clone();
+    changed["variables"]["amount"] = json!(300);
+    assert_eq!(
+        client
+            .post(format!("{base}{path}"))
+            .json(&changed)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    let id = uuid::Uuid::parse_str(result["instance_id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        engine.get_instance_details(id).await.unwrap().business_key,
+        "case-42"
+    );
+    let task = engine.get_pending_user_tasks().pop().unwrap();
+    engine
+        .complete_user_task(task.task_id, HashMap::new())
+        .await
+        .unwrap();
+    post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"name":"conditional_rest", "xml":xml.replace("amount &gt; 100", "amount &gt; 0")}),
+    )
+    .await;
+    assert_eq!(post(&client, &base, path, yes).await, result);
+    assert_eq!(post(&client, &base, path, no).await, no_result);
+    assert!(engine.get_pending_user_tasks().is_empty());
+    server.abort();
+}

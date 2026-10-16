@@ -1,7 +1,7 @@
 # X2c — Explicit top-level conditional starts
 
-Status: proposed, 2026-10-16. Prepared as the next X2 increment after X2b.
-Implementation requires the separate plan + GO specified in improvements.md.
+Status: implementation authorized by the user’s renewed instruction to continue after the explicit X2c approval question, 2026-10-16. Implemented; acceptance in progress.
+Runtime contract: [conditional starts](conditional-starts.md).
 
 ## Scope and observable behavior
 

@@ -49,7 +49,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, eventTypes, actorTypes, refreshTrigger]);
-  useEngineEvents(() => { void fetchHistory(); }, ['event_subprocess_changed'], true, { instanceId });
+  useEngineEvents(() => { void fetchHistory(); }, ['event_subprocess_changed', 'conditional_start_changed'], true, { instanceId });
 
   const getEventIcon = (type: string) => {
     switch (type) {

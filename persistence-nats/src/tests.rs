@@ -1730,3 +1730,277 @@ async fn x2b_boundary_claim_cleanup_and_version_survive_reconnect() {
         InstanceState::Completed
     );
 }
+
+#[tokio::test]
+async fn x2c_receipts_reserved_snapshot_and_archive_survive_reconnect() {
+    use engine_core::{
+        BpmnElement, ConditionalStartReceipt, ConditionalStartRequest, ConditionalStartResult,
+        ProcessDefinitionBuilder, WorkflowEngine,
+    };
+    use serde_json::json;
+    use std::collections::HashMap;
+    let stream = format!("TEST_X2C_{}", Uuid::new_v4());
+    let Some(p) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(p.clone());
+    let process_id = format!("conditional_{}", Uuid::new_v4());
+    let def = ProcessDefinitionBuilder::new(&process_id)
+        .node(
+            "s",
+            BpmnElement::ConditionalStartEvent {
+                condition: "flag".into(),
+            },
+        )
+        .node("work", BpmnElement::UserTask("original".into()))
+        .node("e", BpmnElement::EndEvent)
+        .flow("s", "work")
+        .flow("work", "e")
+        .listener(
+            "s",
+            engine_core::ListenerEvent::Start,
+            "starts = starts + 1;",
+        )
+        .listener("s", engine_core::ListenerEvent::End, "ends = ends + 1;")
+        .build()
+        .unwrap();
+    let (key, _) = engine.deploy_definition(def.clone()).await;
+    let request = ConditionalStartRequest {
+        request_id: Uuid::new_v4(),
+        definition_key: None,
+        process_id: Some(process_id.clone()),
+        business_key: Some("saved".into()),
+        variables: HashMap::from([
+            ("flag".into(), json!(true)),
+            ("starts".into(), json!(0)),
+            ("ends".into(), json!(0)),
+        ]),
+    };
+    let id = Uuid::new_v4();
+    let receipt = ConditionalStartReceipt {
+        version: 1,
+        request: request.clone(),
+        result: ConditionalStartResult {
+            request_id: request.request_id,
+            definition_key: key,
+            matched: true,
+            instance_id: Some(id),
+        },
+        initial_variables: request.variables.clone(),
+        business_key: "saved".into(),
+        dispatched: false,
+    };
+    // Atomic reserve competes through two independent connections, returning the winning ID.
+    let other = NatsPersistence::connect(&nats_url(), &stream)
+        .await
+        .unwrap();
+    let mut competing = receipt.clone();
+    competing.result.instance_id = Some(Uuid::new_v4());
+    let (a, b) = tokio::join!(
+        p.reserve_conditional_start(&receipt),
+        other.reserve_conditional_start(&competing)
+    );
+    let saved = a.unwrap();
+    assert_eq!(saved.result, b.unwrap().result);
+    let id = saved.result.instance_id.unwrap();
+    let mut no = request.clone();
+    no.request_id = Uuid::new_v4();
+    no.variables.insert("flag".into(), json!(false));
+    let false_result = engine.evaluate_conditional_start(no.clone()).await.unwrap();
+    let mut newer = def;
+    newer.nodes.insert(
+        "s".into(),
+        BpmnElement::ConditionalStartEvent {
+            condition: "never".into(),
+        },
+    );
+    let (new_key, _) = engine.deploy_definition(newer).await;
+    engine.shutdown().await;
+    drop(engine);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    restored.reconcile_conditional_starts().await.unwrap();
+    assert_eq!(
+        restored
+            .get_pending_user_tasks()
+            .iter()
+            .filter(|t| t.instance_id == id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        restored
+            .evaluate_conditional_start(request.clone())
+            .await
+            .unwrap(),
+        saved.result
+    );
+    assert_eq!(
+        restored
+            .evaluate_conditional_start(no.clone())
+            .await
+            .unwrap(),
+        false_result
+    );
+    let task = restored
+        .get_pending_user_tasks()
+        .into_iter()
+        .find(|t| t.instance_id == id)
+        .unwrap();
+    // Initial snapshot committed before the first task: a claimed start with an empty ready queue.
+    let mut initial = restored.get_instance_details(id).await.unwrap();
+    initial.variables = saved.initial_variables.clone();
+    initial.current_node = "s".into();
+    initial.state = engine_core::InstanceState::Running;
+    let mut token = initial.tokens[&task.token_id].clone();
+    token.current_node = "s".into();
+    token.variables = saved.initial_variables.clone();
+    let occurrence = Uuid::new_v4();
+    token.conditional_wait = Some(occurrence);
+    let context = token.event_context.as_mut().unwrap();
+    context.started_node = None;
+    context.baseline = token.variables.clone();
+    initial.tokens.clear();
+    initial.tokens.insert(token.id, token.clone());
+    for active in &mut initial.active_tokens {
+        active.token = token.clone();
+        active.completed = false;
+    }
+    let state = initial.event_state.as_mut().unwrap();
+    state.ready_conditional_tokens.clear();
+    state.conditional_waits.insert(
+        occurrence,
+        engine_core::ConditionalWait {
+            id: occurrence,
+            token_id: token.id,
+            node_id: "s".into(),
+            generation: state.generation,
+            claimed: true,
+            group: None,
+            order: 0,
+            boundary_activation: None,
+            registered_revision: 0,
+            claimed_revision: Some(0),
+        },
+    );
+    fresh.save_instance(&initial).await.unwrap();
+    fresh.delete_user_task(task.task_id).await.unwrap();
+    restored.shutdown().await;
+    drop(restored);
+    let boot = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(boot.clone());
+    for definition in boot.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    restored
+        .restore_instance(
+            boot.list_instances()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|s| s.id == id)
+                .unwrap(),
+        )
+        .await;
+    restored.reconcile_conditional_starts().await.unwrap();
+    let snapshot = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(snapshot.variables["starts"], json!(1));
+    assert_eq!(snapshot.variables["ends"], json!(1));
+    let task = restored
+        .get_pending_user_tasks()
+        .into_iter()
+        .find(|t| t.instance_id == id)
+        .unwrap();
+    // Continuation snapshot exists but its first pending task was not published.
+    fresh.delete_user_task(task.task_id).await.unwrap();
+    restored.shutdown().await;
+    drop(restored);
+    let again = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(again.clone());
+    for definition in again.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    for instance in again.list_instances().await.unwrap() {
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
+    }
+    restored.reconcile_conditional_starts().await.unwrap();
+    restored.reconcile_conditional_starts().await.unwrap();
+    let task = restored
+        .get_pending_user_tasks()
+        .into_iter()
+        .find(|t| t.instance_id == id)
+        .unwrap();
+    assert_eq!(task.assignee, "original");
+    let snapshot = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(snapshot.variables["starts"], json!(1));
+    assert_eq!(snapshot.variables["ends"], json!(1));
+    restored
+        .complete_user_task(task.task_id, HashMap::new())
+        .await
+        .unwrap();
+    // Archive committed before final receipt acknowledgement: never resurrect it.
+    let mut archived_request = request.clone();
+    archived_request.request_id = Uuid::new_v4();
+    let mut archived_receipt = saved.clone();
+    archived_receipt.request = archived_request.clone();
+    archived_receipt.result.request_id = archived_request.request_id;
+    again
+        .reserve_conditional_start(&archived_receipt)
+        .await
+        .unwrap();
+    restored.reconcile_conditional_starts().await.unwrap();
+    assert_eq!(
+        restored
+            .evaluate_conditional_start(archived_request.clone())
+            .await
+            .unwrap()
+            .instance_id,
+        Some(id)
+    );
+    assert!(
+        restored
+            .get_pending_user_tasks()
+            .iter()
+            .all(|t| t.instance_id != id)
+    );
+    // Only remove this test's records; production exposes no receipt eviction.
+    for request_id in [
+        request.request_id,
+        no.request_id,
+        archived_request.request_id,
+    ] {
+        again
+            .kv("conditional_starts")
+            .await
+            .unwrap()
+            .delete(request_id.to_string())
+            .await
+            .unwrap();
+    }
+    again.delete_definition(&key.to_string()).await.unwrap();
+    again.delete_definition(&new_key.to_string()).await.unwrap();
+    restored.shutdown().await;
+}

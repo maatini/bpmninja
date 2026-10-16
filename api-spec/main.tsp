@@ -510,7 +510,7 @@ namespace Api {
   ): LogEntry[] | AppError;
 
   @get @route("/events")
-  @doc("SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.")
+  @doc("SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`, `conditional_start_changed`). Broadcast capacity is 256; slow clients may miss events.")
   op engineEvents(): {
     @header contentType: "text/event-stream";
     @body body: string;

@@ -1,6 +1,6 @@
 # BPMN 2.0.2 Element Matrix
 
-Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, updated 2026-10-15). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
+Status of every BPMN 2.0.2 element in BPMNinja (v0.7.24, updated 2026-10-16). Derived from `bpmn-parser/src/parser.rs` (mapping + `reject_unsupported_elements`) and `engine-core`.
 
 | Symbol | Meaning |
 |---|---|
@@ -21,7 +21,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Error | ✅ interrupting, process-level event sub-process [X9a] | — | — | ✅ | ✅ |
 | Escalation | ✅ process-level event sub-process [X9a] | — | ✅ | ✅ | ✅ |
 | Compensation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
-| Conditional | ✅ process-level event sub-process [X9b]; top-level ❌ [X2] | ✅ [X2a], normal flow and event-based gateway alternatives | — | ✅ non-loop task attachments [X2b] | — |
+| Conditional | ✅ process-level event sub-process [X9b]; top-level ✅ explicit evaluation API [X2c] | ✅ [X2a], normal flow and event-based gateway alternatives | — | ✅ non-loop task attachments [X2b] | — |
 | Signal | ✅ latest version for process starts; original version for process-level event sub-process handlers | ✅ | ✅ (broadcast after the step) | ✅ interrupting / non-interrupting | ✅ (not in embedded sub-processes) |
 | Link | — | ✅ (resolved at parse time) | ✅ (resolved at parse time) | — | — |
 | Cancel | — | — | — | ❌ [X7] | ❌ [X7] |

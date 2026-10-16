@@ -535,6 +535,20 @@ impl WorkflowEngine {
         }
         self.persist_instance(instance_id).await;
         for entry in entries {
+            if entry.event_type == HistoryEventType::InstanceStarted
+                && let Some(request_id) = entry
+                    .context
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                self.emit_event(super::EngineEvent::ConditionalStartChanged {
+                    event_id: entry.id,
+                    instance_id,
+                    definition_key: key,
+                    request_id,
+                });
+            }
             let phase = match entry.event_type {
                 HistoryEventType::EventSubprocessActivated => "activated",
                 HistoryEventType::EventSubprocessInterrupted => "interrupted",
@@ -592,6 +606,16 @@ impl WorkflowEngine {
         instance_id: Uuid,
         token: &mut Token,
     ) -> EngineResult<()> {
+        self.initialize_event_subprocesses_for_request(instance_id, token, None)
+            .await
+    }
+
+    pub(crate) async fn initialize_event_subprocesses_for_request(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        request_id: Option<Uuid>,
+    ) -> EngineResult<()> {
         let instance = self
             .instances
             .get(&instance_id)
@@ -608,6 +632,40 @@ impl WorkflowEngine {
         if def.event_subprocesses.is_empty() && !def.has_conditionals() {
             return Ok(());
         }
+        let (timers, catches) = {
+            let mut snapshot = instance.write().await;
+            Self::prepare_initial_event_state(&def, &mut snapshot, token, request_id)?
+        };
+        if matches!(
+            def.nodes.get(&token.current_node),
+            Some(crate::BpmnElement::ConditionalStartEvent { .. })
+        ) {
+            self.persist_instance_required(instance_id).await?;
+        } else {
+            self.persist_instance(instance_id).await;
+        }
+        for timer in timers {
+            let id = timer.id;
+            self.insert_pending_timer(timer);
+            self.persist_timer(id).await;
+        }
+        for catch in catches {
+            let id = catch.id;
+            self.pending_message_catches.insert(id, catch);
+            self.persist_message_catch(id).await;
+        }
+        Ok(())
+    }
+
+    /// Pure preparation shared by request validation and the initial durable snapshot.
+    pub(crate) fn prepare_initial_event_state(
+        def: &ProcessDefinition,
+        instance: &mut ProcessInstance,
+        token: &mut Token,
+        request_id: Option<Uuid>,
+    ) -> EngineResult<(Vec<PendingTimer>, Vec<PendingMessageCatch>)> {
+        let instance_id = instance.id;
+        let key = instance.definition_key;
         let mut state = EventSubProcessState::default();
         let mut timers = Vec::new();
         let mut catches = Vec::new();
@@ -664,52 +722,47 @@ impl WorkflowEngine {
             started_node: None,
             baseline: token.variables.clone(),
         }));
-        {
-            let mut instance = instance.write().await;
-            instance.event_state = Some(Box::new(state));
-            if matches!(
-                def.nodes.get(&token.current_node),
-                Some(crate::BpmnElement::ConditionalStartEvent { .. })
-            ) {
-                Self::register_conditional_wait(&mut instance, token, &token.current_node, None, 0);
-                let state = instance.event_state.as_mut().unwrap();
-                let wait = state
-                    .conditional_waits
-                    .values_mut()
-                    .find(|wait| wait.token_id == token.id)
-                    .unwrap();
-                wait.claimed = true;
-                wait.claimed_revision = Some(0);
-                token.conditional_wait = Some(wait.id);
-                state.ready_conditional_tokens.push(token.id);
-            }
-            instance.tokens.insert(token.id, token.clone());
-            instance.active_tokens.push(ActiveToken {
-                token: token.clone(),
-                fork_id: None,
-                branch_index: 0,
-                completed: false,
-            });
-        }
+        instance.event_state = Some(Box::new(state));
         if matches!(
             def.nodes.get(&token.current_node),
             Some(crate::BpmnElement::ConditionalStartEvent { .. })
         ) {
-            self.persist_instance_required(instance_id).await?;
-        } else {
-            self.persist_instance(instance_id).await;
+            Self::register_conditional_wait(instance, token, &token.current_node, None, 0);
+            let state = instance.event_state.as_mut().ok_or_else(|| {
+                EngineError::PersistenceError("Missing conditional runtime state".into())
+            })?;
+            let wait = state
+                .conditional_waits
+                .values_mut()
+                .find(|wait| wait.token_id == token.id)
+                .ok_or_else(|| {
+                    EngineError::PersistenceError("Missing conditional-start occurrence".into())
+                })?;
+            wait.claimed = true;
+            wait.claimed_revision = Some(0);
+            token.conditional_wait = Some(wait.id);
+            state.ready_conditional_tokens.push(token.id);
+            state.lifecycle_outbox.push(
+                HistoryEntry::new(
+                    instance_id,
+                    HistoryEventType::InstanceStarted,
+                    "Conditional evaluation accepted",
+                    ActorType::Engine,
+                    None,
+                )
+                .with_node(&token.current_node)
+                .with_context("request_id", serde_json::json!(request_id))
+                .with_context("definition_key", serde_json::json!(key)),
+            );
         }
-        for timer in timers {
-            let id = timer.id;
-            self.insert_pending_timer(timer);
-            self.persist_timer(id).await;
-        }
-        for catch in catches {
-            let id = catch.id;
-            self.pending_message_catches.insert(id, catch);
-            self.persist_message_catch(id).await;
-        }
-        Ok(())
+        instance.tokens.insert(token.id, token.clone());
+        instance.active_tokens.push(ActiveToken {
+            token: token.clone(),
+            fork_id: None,
+            branch_index: 0,
+            completed: false,
+        });
+        Ok((timers, catches))
     }
 
     pub(crate) async fn is_event_subscription(&self, instance_id: Uuid, id: Uuid) -> bool {
@@ -913,221 +966,220 @@ impl WorkflowEngine {
         let Some(instance) = self.instances.get(&id).await else {
             return Ok(());
         };
-        for (id, instance) in [(id, instance)] {
-            self.flush_event_lifecycle(id).await;
-            self.upgrade_gateway_groups(id).await?;
-            self.cleanup_conditional_boundaries(id).await;
-            self.cleanup_stale_boundary_tasks(id).await;
-            self.upgrade_conditional_boundaries(id).await?;
-            self.restore_conditional_boundary_jobs(id).await;
-            self.run_conditional_work(id).await?;
-            let snapshot = instance.read().await.clone();
-            let Some(state) = &snapshot.event_state else {
-                continue;
-            };
-            if matches!(
-                snapshot.state,
-                InstanceState::Completed | InstanceState::CompletedWithError { .. }
-            ) {
-                self.cleanup_finished_event_scope(id).await;
-                continue;
-            }
-            let known_tokens: HashSet<_> = snapshot
-                .tokens
-                .keys()
-                .copied()
-                .chain(snapshot.outstanding_calls.values().map(|c| c.token.id))
-                .chain(
-                    snapshot
-                        .join_barriers
-                        .values()
-                        .flat_map(|j| j.arrived_tokens.iter().map(|t| t.id)),
-                )
-                .collect();
-            let users: Vec<_> = self
-                .pending_user_tasks
-                .iter()
-                .filter(|t| t.instance_id == id && !known_tokens.contains(&t.token_id))
-                .map(|t| t.task_id)
-                .collect();
-            let services: Vec<_> = self
-                .pending_service_tasks
-                .iter()
-                .filter(|t| t.instance_id == id && !known_tokens.contains(&t.token_id))
-                .map(|t| t.id)
-                .collect();
-            let timers: Vec<_> = self
-                .pending_timers
-                .iter()
-                .filter(|t| {
-                    t.instance_id == id
-                        && !known_tokens.contains(&t.token_id)
-                        && !state.subscriptions.contains_key(&t.token_id)
-                })
-                .map(|t| t.id)
-                .collect();
-            let catches: Vec<_> = self
-                .pending_message_catches
-                .iter()
-                .filter(|t| {
-                    t.instance_id == id
-                        && !known_tokens.contains(&t.token_id)
-                        && !state.subscriptions.contains_key(&t.token_id)
-                })
-                .map(|t| t.id)
-                .collect();
-            for task in users {
-                self.pending_user_tasks.remove(&task);
-                self.remove_persisted_user_task(task).await;
-            }
-            for task in services {
-                self.remove_pending_service_task(&task);
-                self.remove_persisted_service_task(task).await;
-            }
-            for task in timers {
-                self.remove_pending_timer(&task);
-                self.remove_persisted_timer(task).await;
-            }
-            for task in catches {
-                self.pending_message_catches.remove(&task);
-                self.remove_persisted_message_catch(task).await;
-            }
-            // The snapshot is written before exposing jobs. Recreate any jobs
-            // missing after a crash between these separate persistence writes.
-            let definition = self
-                .definitions
-                .get(&snapshot.definition_key)
-                .ok_or(EngineError::NoSuchDefinition(snapshot.definition_key))?;
-            for (subscription_id, subscription) in &state.subscriptions {
-                let handler = definition
-                    .event_subprocesses
-                    .iter()
-                    .find(|handler| handler.id == subscription.subprocess_id)
-                    .ok_or_else(|| {
-                        EngineError::InvalidDefinition("Missing persisted event handler".into())
-                    })?;
-                match &handler.trigger {
-                    Trigger::Timer(timer) if !self.pending_timers.contains_key(subscription_id) => {
-                        if let Some(expires_at) = subscription.next_due {
-                            self.insert_pending_timer(PendingTimer {
-                                id: *subscription_id,
-                                instance_id: id,
-                                node_id: handler.start_node.clone(),
-                                token_id: *subscription_id,
-                                expires_at,
-                                timer_def: Some(timer.clone()),
-                                remaining_repetitions: subscription.remaining,
-                            });
-                            self.persist_timer(*subscription_id).await;
-                        }
-                    }
-                    Trigger::Message(name) | Trigger::Signal(name)
-                        if !self.pending_message_catches.contains_key(subscription_id) =>
-                    {
-                        self.pending_message_catches.insert(
-                            *subscription_id,
-                            PendingMessageCatch {
-                                id: *subscription_id,
-                                instance_id: id,
-                                node_id: handler.start_node.clone(),
-                                token_id: *subscription_id,
-                                message_name: name.clone(),
-                                kind: if matches!(handler.trigger, Trigger::Signal(_)) {
-                                    CatchKind::Signal
-                                } else {
-                                    CatchKind::Message
-                                },
-                            },
-                        );
-                        self.persist_message_catch(*subscription_id).await;
-                    }
-                    _ => {}
-                }
-            }
-            if matches!(snapshot.state, InstanceState::Suspended { .. }) {
-                continue;
-            }
-            for token in snapshot.tokens.values() {
-                let parked = snapshot.event_state.as_ref().is_some_and(|state| {
-                    state.gateway_waits.get(&token.id).is_some_and(|group| {
-                        group.winner.is_none() && group.gateway == token.current_node
-                    })
-                }) || snapshot.event_state.as_ref().is_some_and(|state| {
-                    state.conditional_waits.values().any(|wait| {
-                        wait.token_id == token.id && !wait.claimed && wait.group.is_none()
-                    })
-                }) || self.pending_user_tasks.iter().any(|t| {
-                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
-                }) || self.pending_service_tasks.iter().any(|t| {
-                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
-                }) || self.pending_timers.iter().any(|t| {
-                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
-                }) || self.pending_message_catches.iter().any(|t| {
-                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
-                }) || snapshot
-                    .outstanding_calls
+        self.flush_event_lifecycle(id).await;
+        self.upgrade_gateway_groups(id).await?;
+        self.cleanup_conditional_boundaries(id).await;
+        self.cleanup_stale_boundary_tasks(id).await;
+        self.upgrade_conditional_boundaries(id).await?;
+        self.restore_conditional_boundary_jobs(id).await;
+        self.run_conditional_work(id).await?;
+        let snapshot = instance.read().await.clone();
+        let Some(state) = &snapshot.event_state else {
+            return Ok(());
+        };
+        if matches!(
+            snapshot.state,
+            InstanceState::Completed | InstanceState::CompletedWithError { .. }
+        ) {
+            self.cleanup_finished_event_scope(id).await;
+            return Ok(());
+        }
+        let known_tokens: HashSet<_> = snapshot
+            .tokens
+            .keys()
+            .copied()
+            .chain(snapshot.outstanding_calls.values().map(|c| c.token.id))
+            .chain(
+                snapshot
+                    .join_barriers
                     .values()
-                    .any(|c| c.token.id == token.id)
-                    || snapshot
-                        .join_barriers
-                        .values()
-                        .any(|j| j.arrived_tokens.iter().any(|t| t.id == token.id));
-                if !parked {
-                    self.run_instance_batch(id, token.clone()).await?;
+                    .flat_map(|j| j.arrived_tokens.iter().map(|t| t.id)),
+            )
+            .collect();
+        let users: Vec<_> = self
+            .pending_user_tasks
+            .iter()
+            .filter(|t| t.instance_id == id && !known_tokens.contains(&t.token_id))
+            .map(|t| t.task_id)
+            .collect();
+        let services: Vec<_> = self
+            .pending_service_tasks
+            .iter()
+            .filter(|t| t.instance_id == id && !known_tokens.contains(&t.token_id))
+            .map(|t| t.id)
+            .collect();
+        let timers: Vec<_> = self
+            .pending_timers
+            .iter()
+            .filter(|t| {
+                t.instance_id == id
+                    && !known_tokens.contains(&t.token_id)
+                    && !state.subscriptions.contains_key(&t.token_id)
+            })
+            .map(|t| t.id)
+            .collect();
+        let catches: Vec<_> = self
+            .pending_message_catches
+            .iter()
+            .filter(|t| {
+                t.instance_id == id
+                    && !known_tokens.contains(&t.token_id)
+                    && !state.subscriptions.contains_key(&t.token_id)
+            })
+            .map(|t| t.id)
+            .collect();
+        for task in users {
+            self.pending_user_tasks.remove(&task);
+            self.remove_persisted_user_task(task).await;
+        }
+        for task in services {
+            self.remove_pending_service_task(&task);
+            self.remove_persisted_service_task(task).await;
+        }
+        for task in timers {
+            self.remove_pending_timer(&task);
+            self.remove_persisted_timer(task).await;
+        }
+        for task in catches {
+            self.pending_message_catches.remove(&task);
+            self.remove_persisted_message_catch(task).await;
+        }
+        // The snapshot is written before exposing jobs. Recreate any jobs
+        // missing after a crash between these separate persistence writes.
+        let definition = self
+            .definitions
+            .get(&snapshot.definition_key)
+            .ok_or(EngineError::NoSuchDefinition(snapshot.definition_key))?;
+        for (subscription_id, subscription) in &state.subscriptions {
+            let handler = definition
+                .event_subprocesses
+                .iter()
+                .find(|handler| handler.id == subscription.subprocess_id)
+                .ok_or_else(|| {
+                    EngineError::InvalidDefinition("Missing persisted event handler".into())
+                })?;
+            match &handler.trigger {
+                Trigger::Timer(timer) if !self.pending_timers.contains_key(subscription_id) => {
+                    if let Some(expires_at) = subscription.next_due {
+                        self.insert_pending_timer(PendingTimer {
+                            id: *subscription_id,
+                            instance_id: id,
+                            node_id: handler.start_node.clone(),
+                            token_id: *subscription_id,
+                            expires_at,
+                            timer_def: Some(timer.clone()),
+                            remaining_repetitions: subscription.remaining,
+                        });
+                        self.persist_timer(*subscription_id).await;
+                    }
                 }
+                Trigger::Message(name) | Trigger::Signal(name)
+                    if !self.pending_message_catches.contains_key(subscription_id) =>
+                {
+                    self.pending_message_catches.insert(
+                        *subscription_id,
+                        PendingMessageCatch {
+                            id: *subscription_id,
+                            instance_id: id,
+                            node_id: handler.start_node.clone(),
+                            token_id: *subscription_id,
+                            message_name: name.clone(),
+                            kind: if matches!(handler.trigger, Trigger::Signal(_)) {
+                                CatchKind::Signal
+                            } else {
+                                CatchKind::Message
+                            },
+                        },
+                    );
+                    self.persist_message_catch(*subscription_id).await;
+                }
+                _ => {}
             }
-            // A crash may leave a finished body awaiting its container-end
-            // listener, with no runnable token left to drive completion.
-            if !matches!(
-                instance.read().await.state,
-                InstanceState::Completed | InstanceState::CompletedWithError { .. }
-            ) {
-                match self.all_tokens_completed(id).await {
-                    Ok(true) => {
+        }
+        if matches!(snapshot.state, InstanceState::Suspended { .. }) {
+            return Ok(());
+        }
+        for token in snapshot.tokens.values() {
+            let parked = snapshot.event_state.as_ref().is_some_and(|state| {
+                state.gateway_waits.get(&token.id).is_some_and(|group| {
+                    group.winner.is_none() && group.gateway == token.current_node
+                })
+            }) || snapshot.event_state.as_ref().is_some_and(|state| {
+                state
+                    .conditional_waits
+                    .values()
+                    .any(|wait| wait.token_id == token.id && !wait.claimed && wait.group.is_none())
+            }) || self.pending_user_tasks.iter().any(|t| {
+                t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+            }) || self.pending_service_tasks.iter().any(|t| {
+                t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+            }) || self.pending_timers.iter().any(|t| {
+                t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+            }) || self.pending_message_catches.iter().any(|t| {
+                t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+            }) || snapshot
+                .outstanding_calls
+                .values()
+                .any(|c| c.token.id == token.id)
+                || snapshot
+                    .join_barriers
+                    .values()
+                    .any(|j| j.arrived_tokens.iter().any(|t| t.id == token.id));
+            if !parked {
+                self.run_instance_batch(id, token.clone()).await?;
+            }
+        }
+        // A crash may leave a finished body awaiting its container-end
+        // listener, with no runnable token left to drive completion.
+        if !matches!(
+            instance.read().await.state,
+            InstanceState::Completed | InstanceState::CompletedWithError { .. }
+        ) {
+            match self.all_tokens_completed(id).await {
+                Ok(true) => {
+                    let mut current = instance.write().await;
+                    if !matches!(
+                        current.state,
+                        InstanceState::Suspended { .. }
+                            | InstanceState::Completed
+                            | InstanceState::CompletedWithError { .. }
+                    ) && current.tokens.is_empty()
+                        && current.outstanding_calls.is_empty()
+                        && current.event_state.as_ref().is_some_and(|state| {
+                            state.main_completed && state.activations.is_empty()
+                        })
+                    {
+                        current.state = InstanceState::Completed;
+                        current.completed_at = Some(Utc::now());
+                        current.push_audit_log("Recovered completed process scope".into());
+                        drop(current);
+                        self.record_history_event(
+                            id,
+                            HistoryEventType::InstanceCompleted,
+                            "Recovered completed process scope",
+                            ActorType::Engine,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    {
                         let mut current = instance.write().await;
-                        if !matches!(
-                            current.state,
-                            InstanceState::Suspended { .. }
-                                | InstanceState::Completed
-                                | InstanceState::CompletedWithError { .. }
-                        ) && current.tokens.is_empty()
-                            && current.outstanding_calls.is_empty()
-                            && current.event_state.as_ref().is_some_and(|state| {
-                                state.main_completed && state.activations.is_empty()
-                            })
-                        {
-                            current.state = InstanceState::Completed;
-                            current.completed_at = Some(Utc::now());
-                            current.push_audit_log("Recovered completed process scope".into());
-                            drop(current);
-                            self.record_history_event(
-                                id,
-                                HistoryEventType::InstanceCompleted,
-                                "Recovered completed process scope",
-                                ActorType::Engine,
-                                None,
-                                None,
-                            )
-                            .await;
-                        }
+                        current.state = InstanceState::CompletedWithError {
+                            error_code: "EVENT_SUBPROCESS_EXECUTION_ERROR".into(),
+                        };
+                        current.completed_at = Some(Utc::now());
+                        current.push_audit_log(error.to_string());
                     }
-                    Ok(false) => {}
-                    Err(error) => {
-                        {
-                            let mut current = instance.write().await;
-                            current.state = InstanceState::CompletedWithError {
-                                error_code: "EVENT_SUBPROCESS_EXECUTION_ERROR".into(),
-                            };
-                            current.completed_at = Some(Utc::now());
-                            current.push_audit_log(error.to_string());
-                        }
-                        self.cleanup_finished_event_scope(id).await;
-                        self.emit_instance_changed(id).await;
-                        return Err(error);
-                    }
+                    self.cleanup_finished_event_scope(id).await;
+                    self.emit_instance_changed(id).await;
+                    return Err(error);
                 }
-                self.finish_instance_batch(id).await?;
             }
+            self.finish_instance_batch(id).await?;
         }
         Ok(())
     }

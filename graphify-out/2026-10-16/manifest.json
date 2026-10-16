@@ -198,15 +198,15 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/models.rs": {
-    "mtime": 1792127296.4562204,
-    "seen": 1792127463.4415689,
-    "ast_hash": "ae44340219de8c4c52147b5ec892686a",
+    "mtime": 1792145644.9041276,
+    "seen": 1792145687.0113788,
+    "ast_hash": "e9c56f5b6ff4c241c67248d79142e3c5",
     "semantic_hash": ""
   },
   "bpmn-parser/src/parser.rs": {
-    "mtime": 1792127296.458222,
-    "seen": 1792127463.4415689,
-    "ast_hash": "7d7f05e4942bdf2e8460fb5cc781bddb",
+    "mtime": 1792145644.9071298,
+    "seen": 1792145687.0113788,
+    "ast_hash": "938a813fe850e9a1e9a9b9db3a8dbd99",
     "semantic_hash": ""
   },
   "bpmn-parser/src/tests.rs": {
@@ -780,9 +780,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/adapter/in_memory.rs": {
-    "mtime": 1792042964.4140527,
-    "seen": 1792043710.1254275,
-    "ast_hash": "46fb409ceeac393c8737c67e7ae4a168",
+    "mtime": 1792145610.4977727,
+    "seen": 1792145687.0113788,
+    "ast_hash": "ef6bd17856a569037e48f3c634192a07",
     "semantic_hash": ""
   },
   "engine-core/src/adapter/mod.rs": {
@@ -798,21 +798,21 @@
     "semantic_hash": ""
   },
   "engine-core/src/domain/definition.rs": {
-    "mtime": 1792126899.4152627,
-    "seen": 1792127463.4415689,
-    "ast_hash": "14a508ffbacedc2beca04d1b65726f56",
+    "mtime": 1792145565.76374,
+    "seen": 1792145687.0113788,
+    "ast_hash": "c5df3334a01a74ebdb4ef749f4a230a6",
     "semantic_hash": ""
   },
   "engine-core/src/domain/element.rs": {
-    "mtime": 1792126153.8370342,
-    "seen": 1792127463.4415689,
-    "ast_hash": "4d732e78f105da66b0a21f8a93bedf68",
+    "mtime": 1792145565.624328,
+    "seen": 1792145687.0113788,
+    "ast_hash": "cdf4fcaa20c61a0f0f464f388fe6de09",
     "semantic_hash": ""
   },
   "engine-core/src/domain/error.rs": {
-    "mtime": 1792003754.6851158,
-    "seen": 1792003830.307429,
-    "ast_hash": "9c894233050eb4fd52d5e715e442a103",
+    "mtime": 1792145565.7677388,
+    "seen": 1792145687.0113788,
+    "ast_hash": "b85439ce5f861ba0e70068d0dd0777ea",
     "semantic_hash": ""
   },
   "engine-core/src/domain/file_ref.rs": {
@@ -894,9 +894,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/executor/mod.rs": {
-    "mtime": 1792127423.1427186,
-    "seen": 1792127463.4415689,
-    "ast_hash": "d1f0d4298282aacbe7cc1b332633dacd",
+    "mtime": 1792145565.76674,
+    "seen": 1792145687.0113788,
+    "ast_hash": "b7ca4bb004514ba4fc605c00e5d9ab36",
     "semantic_hash": ""
   },
   "engine-core/src/engine/executor/next_action.rs": {
@@ -966,9 +966,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/mod.rs": {
-    "mtime": 1792126899.7137094,
-    "seen": 1792127463.4415689,
-    "ast_hash": "cea30b34f3d38fa907c5d66fd08897e9",
+    "mtime": 1792145565.8088267,
+    "seen": 1792145687.0113788,
+    "ast_hash": "b75b97d4661f87492819271f2e88f877",
     "semantic_hash": ""
   },
   "engine-core/src/engine/persistence_ops.rs": {
@@ -978,9 +978,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/process_start.rs": {
-    "mtime": 1792070004.3939307,
-    "seen": 1792070091.3115227,
-    "ast_hash": "fa830fd7914fb9e4209867b1ecbae14c",
+    "mtime": 1792145565.7657442,
+    "seen": 1792145687.0113788,
+    "ast_hash": "d64f39b6181b29890d82b4f730dd429d",
     "semantic_hash": ""
   },
   "engine-core/src/engine/registry.rs": {
@@ -1158,9 +1158,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/lib.rs": {
-    "mtime": 1791906658.9565246,
-    "seen": 1791906723.2213585,
-    "ast_hash": "11443c2fa844dadd2ac1bad7c2f7241e",
+    "mtime": 1792145565.8098269,
+    "seen": 1792145687.0113788,
+    "ast_hash": "d3f70c00b151859c714758c44d470658",
     "semantic_hash": ""
   },
   "engine-core/src/port/mod.rs": {
@@ -1170,9 +1170,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/port/persistence.rs": {
-    "mtime": 1792043942.3924055,
-    "seen": 1792043969.7615798,
-    "ast_hash": "c9e5b17b900d159427d18a904e54c1d3",
+    "mtime": 1792145610.4967728,
+    "seen": 1792145687.0113788,
+    "ast_hash": "052b582f51f367a59121c519cef0a0ec",
     "semantic_hash": ""
   },
   "engine-core/src/runtime/constants.rs": {
@@ -2940,9 +2940,9 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/event_subprocess.rs": {
-    "mtime": 1792127023.5777159,
-    "seen": 1792127463.4415689,
-    "ast_hash": "4f522821a96b7819450d1c1f68083787",
+    "mtime": 1792145644.9471369,
+    "seen": 1792145687.0113788,
+    "ast_hash": "b4f6667265413657565dea999f2a23c0",
     "semantic_hash": ""
   },
   "bpmn-parser/src/event_subprocess_tests.rs": {
@@ -2958,9 +2958,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/event_subprocess.rs": {
-    "mtime": 1792129166.9730232,
-    "seen": 1792129651.6616914,
-    "ast_hash": "dead71207c698f10907a9235e50e8f13",
+    "mtime": 1792145644.887127,
+    "seen": 1792145687.0113788,
+    "ast_hash": "43e93f1729d0c76f5f1c1b89735b1c4b",
     "semantic_hash": ""
   },
   "engine-core/src/engine/tests/event_subprocess.rs": {
@@ -3069,6 +3069,18 @@
     "mtime": 1792129479.5469594,
     "seen": 1792129651.6616914,
     "ast_hash": "e8a0dbf90b107c445dff53586954c053",
+    "semantic_hash": ""
+  },
+  "engine-core/src/engine/conditional_start.rs": {
+    "mtime": 1792145644.903126,
+    "seen": 1792145687.0113788,
+    "ast_hash": "e7ec0276f24f1abc752c74f569104cf6",
+    "semantic_hash": ""
+  },
+  "TASK_MEMORY.md": {
+    "mtime": 1792145552.9162421,
+    "seen": 1792145687.0113788,
+    "ast_hash": "62d07ae9cef4fc7343214fb4915543af",
     "semantic_hash": ""
   }
 }

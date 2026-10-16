@@ -23,12 +23,22 @@ impl WorkflowPersistence for NatsPersistence {
             .await
         {
             Ok(_) => Ok(receipt.clone()),
-            Err(error) => self
-                .get_conditional_start(receipt.request.request_id)
-                .await?
-                .ok_or_else(|| {
-                    EngineError::PersistenceError(format!("Receipt reservation failed: {error}"))
-                }),
+            Err(error) => {
+                let stored = self
+                    .get_conditional_start(receipt.request.request_id)
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::PersistenceError(format!(
+                            "Receipt reservation failed: {error}"
+                        ))
+                    })?;
+                if stored.request != receipt.request {
+                    return Err(EngineError::ConditionalStartConflict(
+                        receipt.request.request_id,
+                    ));
+                }
+                Ok(stored)
+            }
         }
     }
     async fn get_conditional_start(
@@ -190,6 +200,19 @@ impl WorkflowPersistence for NatsPersistence {
         payload: &[u8],
     ) -> EngineResult<()> {
         self.put_instance_json(instance.id, payload.to_vec()).await
+    }
+
+    async fn get_active_instance(&self, id: Uuid) -> EngineResult<Option<ProcessInstance>> {
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let store = self.kv("instances").await?;
+        match store
+            .get(id.to_string())
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+        {
+            Some(bytes) => Ok(Some(self.restore_instance_record(&bytes).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {
@@ -496,6 +519,7 @@ impl WorkflowPersistence for NatsPersistence {
             "history_instances",
             "instance_audit",
             "instance_states",
+            "conditional_starts",
         ];
         for name in &kv_bucket_names {
             match self.js.get_key_value(*name).await {
@@ -721,6 +745,7 @@ impl WorkflowPersistence for NatsPersistence {
             "history_instances",
             "instance_audit",
             "instance_states",
+            "conditional_starts",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -869,6 +894,7 @@ impl WorkflowPersistence for NatsPersistence {
             "history_instances",
             "instance_audit",
             "instance_states",
+            "conditional_starts",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {

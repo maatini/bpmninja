@@ -46,10 +46,15 @@ impl WorkflowPersistence for InMemoryPersistence {
         receipt: &crate::ConditionalStartReceipt,
     ) -> EngineResult<crate::ConditionalStartReceipt> {
         let mut receipts = self.conditional_starts.write().await;
-        Ok(receipts
+        let saved = receipts
             .entry(receipt.request.request_id)
-            .or_insert_with(|| receipt.clone())
-            .clone())
+            .or_insert_with(|| receipt.clone());
+        if saved.request != receipt.request {
+            return Err(crate::EngineError::ConditionalStartConflict(
+                receipt.request.request_id,
+            ));
+        }
+        Ok(saved.clone())
     }
     async fn get_conditional_start(
         &self,
@@ -116,6 +121,10 @@ impl WorkflowPersistence for InMemoryPersistence {
         let mut i = self.instances.write().await;
         i.insert(instance.id, instance.clone());
         Ok(())
+    }
+
+    async fn get_active_instance(&self, id: uuid::Uuid) -> EngineResult<Option<ProcessInstance>> {
+        Ok(self.instances.read().await.get(&id).cloned())
     }
 
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {

@@ -281,28 +281,34 @@ impl NatsPersistence {
         while let Some(key_result) = keys.next().await {
             match key_result {
                 Ok(key) => match store.get(&key).await {
-                    Ok(Some(entry)) => match if crate::codec::detached(&entry)
-                        || crate::journal::is_head(&entry)
-                    {
-                        let restored = self.restore_instance_record(&entry).await?;
-                        serde_json::to_value(restored)
-                            .and_then(serde_json::from_value::<T>)
-                            .map_err(|e| EngineError::PersistenceError(e.to_string()))
-                    } else {
-                        crate::codec::decode::<T>(&entry)
-                    } {
-                        Ok(item) => entries.push(item),
-                        // A recognized compact record must not disappear from
-                        // restore on corruption or an unsupported version.
-                        Err(e) if crate::codec::is_compact(&entry) => return Err(e),
-                        Err(e) => {
-                            tracing::warn!("Failed to deserialize {entity_name} '{}': {}", key, e)
+                    Ok(Some(entry)) => {
+                        match if crate::codec::detached(&entry) || crate::journal::is_head(&entry) {
+                            let restored = self.restore_instance_record(&entry).await?;
+                            serde_json::to_value(restored)
+                                .and_then(serde_json::from_value::<T>)
+                                .map_err(|e| EngineError::PersistenceError(e.to_string()))
+                        } else {
+                            crate::codec::decode::<T>(&entry)
+                        } {
+                            Ok(item) => entries.push(item),
+                            // A recognized compact record must not disappear from
+                            // restore on corruption or an unsupported version.
+                            Err(e) if crate::codec::is_compact(&entry) => return Err(e),
+                            Err(e) => return Err(e),
                         }
-                    },
+                    }
                     Ok(None) => {}
-                    Err(e) => tracing::warn!("Failed to get {entity_name} '{key}': {}", e),
+                    Err(e) => {
+                        return Err(EngineError::PersistenceError(format!(
+                            "Failed to get {entity_name} '{key}': {e}"
+                        )));
+                    }
                 },
-                Err(e) => tracing::warn!("Failed to stream {entity_name} key: {}", e),
+                Err(e) => {
+                    return Err(EngineError::PersistenceError(format!(
+                        "Failed to stream {entity_name} key: {e}"
+                    )));
+                }
             }
         }
 

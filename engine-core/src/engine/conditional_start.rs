@@ -37,13 +37,32 @@ pub struct ConditionalStartReceipt {
 }
 
 pub(crate) fn validate(definition: &ProcessDefinition) -> EngineResult<()> {
+    let starts = definition
+        .nodes
+        .iter()
+        .filter(|(id, node)| {
+            !definition
+                .event_subprocesses
+                .iter()
+                .any(|h| h.node_ids.contains(*id))
+                && matches!(
+                    node,
+                    BpmnElement::StartEvent
+                        | BpmnElement::TimerStartEvent(_)
+                        | BpmnElement::MessageStartEvent { .. }
+                        | BpmnElement::SignalStartEvent { .. }
+                        | BpmnElement::ConditionalStartEvent { .. }
+                )
+        })
+        .count();
     for (id, node) in &definition.nodes {
         if let BpmnElement::ConditionalStartEvent { condition } = node {
             crate::condition::validate_event_condition(condition)?;
-            if definition
-                .event_subprocesses
-                .iter()
-                .any(|h| h.node_ids.contains(id))
+            if starts != 1
+                || definition
+                    .event_subprocesses
+                    .iter()
+                    .any(|h| h.node_ids.contains(id))
                 || definition.start_event().map(|(node, _)| node) != Some(id.as_str())
                 || definition
                     .flows
@@ -140,6 +159,42 @@ impl WorkflowEngine {
                 initial_variables: variables,
                 dispatched: !matched,
             };
+            let receipt_bytes = serde_json::to_vec(&receipt)
+                .map_err(|error| EngineError::InvalidDefinition(error.to_string()))?;
+            if receipt_bytes.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
+                return Err(EngineError::InvalidDefinition(
+                    "Conditional-start receipt exceeds payload limit".into(),
+                ));
+            }
+            if let Some(id) = receipt.result.instance_id {
+                let (start, _) = definition.start_event().ok_or_else(|| {
+                    EngineError::InvalidDefinition("Missing conditional start".into())
+                })?;
+                let mut snapshot = Self::build_initial_instance(
+                    key,
+                    id,
+                    start,
+                    receipt.initial_variables.clone(),
+                    None,
+                );
+                snapshot.business_key = receipt.business_key.clone();
+                let mut token = Token::with_variables(start, receipt.initial_variables.clone());
+                Self::prepare_initial_event_state(
+                    &definition,
+                    &mut snapshot,
+                    &mut token,
+                    Some(receipt.request.request_id),
+                )?;
+                let payload = self
+                    .encode_checked_instance(&snapshot)
+                    .map_err(|error| EngineError::InvalidDefinition(error.to_string()))?;
+                // Leave room for timestamp precision differences when initialization is retried.
+                if payload.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES.saturating_sub(1024) {
+                    return Err(EngineError::InvalidDefinition(
+                        "Conditional-start initial snapshot exceeds payload limit".into(),
+                    ));
+                }
+            }
             if let Some(persistence) = &self.persistence {
                 let stored = persistence.reserve_conditional_start(&receipt).await?;
                 if stored.request != receipt.request {
@@ -179,6 +234,12 @@ impl WorkflowEngine {
         {
             return self.finish_conditional_start(receipt).await;
         }
+        if self.instances.get(&id).await.is_none()
+            && let Some(p) = &self.persistence
+            && let Some(snapshot) = p.get_active_instance(id).await?
+        {
+            self.restore_instance(snapshot).await;
+        }
         if self.instances.get(&id).await.is_none() {
             let definition = self
                 .definitions
@@ -197,29 +258,12 @@ impl WorkflowEngine {
             instance.business_key = receipt.business_key.clone();
             self.instances.insert(id, instance).await;
             let mut token = Token::with_variables(start, receipt.initial_variables.clone());
-            self.initialize_event_subprocesses(id, &mut token).await?;
-            let instance = self
-                .instances
-                .get(&id)
-                .await
-                .ok_or(EngineError::NoSuchInstance(id))?;
-            let mut instance = instance.write().await;
-            let state = instance.event_state.as_mut().ok_or_else(|| {
-                EngineError::PersistenceError("Missing conditional runtime state".into())
-            })?;
-            state.lifecycle_outbox.push(
-                crate::history::HistoryEntry::new(
-                    id,
-                    crate::history::HistoryEventType::InstanceStarted,
-                    "Conditional evaluation accepted",
-                    crate::history::ActorType::Engine,
-                    None,
-                )
-                .with_node(start)
-                .with_context("request_id", serde_json::json!(receipt.request.request_id))
-                .with_context("definition_key", serde_json::json!(definition.key)),
-            );
-            drop(instance);
+            self.initialize_event_subprocesses_for_request(
+                id,
+                &mut token,
+                Some(receipt.request.request_id),
+            )
+            .await?;
         }
         // Fail closed before exposing work. A retry reuses the in-memory candidate.
         self.persist_instance_required(id).await?;

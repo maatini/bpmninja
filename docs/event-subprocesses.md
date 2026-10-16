@@ -169,7 +169,7 @@ execution error and diagnostic audit/history instead of running indefinitely.
 Administrative token movement and migration involving conditional subscriptions
 are currently rejected before changing execution, because they cannot yet
 preserve subscription ownership and latch semantics. Intermediate catches are supported by [X2a](conditional-catches.md). Top-level
-conditional starts, call/loop/container boundary attachments, nested scopes, and filters remain later
+conditional starts use the explicit [X2c evaluation API](conditional-starts.md). Call/loop/container boundary attachments, nested scopes, and filters remain later
 increments. See the [implementation plan](x2-conditional-events-plan.md).
 
 X2b supports [conditional boundaries on ordinary tasks](boundary-conditional-catches.md), including tasks in these handler bodies.

@@ -78,7 +78,7 @@ History uses the catch node and stable occurrence/token identity, with definitio
 generation, group, and variable-revision context on consumption. The external
 analyzer explicitly skips conditional semantics; structural validation still runs.
 
-Top-level conditional starts remain rejected. X2b adds [conditional task
+Top-level conditional starts use the explicit [X2c evaluation API](conditional-starts.md). X2b adds [conditional task
 boundaries](boundary-conditional-catches.md) with a separate activation contract.
 Nested runtime scopes remain an X6 prerequisite. Administrative token movement
 and migration involving conditional definitions remain rejected before mutation.

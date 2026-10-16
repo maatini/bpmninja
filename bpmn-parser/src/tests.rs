@@ -1437,13 +1437,13 @@ fn rejection(body: &str) -> String {
 }
 
 #[test]
-fn x0_rejects_conditional_start_event_instead_of_plain_start() {
+fn x2c_rejects_conditional_start_without_inline_condition() {
     let err = rejection(
         r#"<startEvent id="s"><conditionalEventDefinition/></startEvent>
            <endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
     );
     assert!(
-        err.contains("conditionalEventDefinition on startEvent 's'"),
+        err.contains("conditional start requires one inline condition"),
         "{err}"
     );
 }
@@ -2025,5 +2025,39 @@ fn x2b_boundary_task_types_and_scope_validation() {
         assert!(parse_bpmn_xml(&xml.replace("<userTask id=\"t\"/>", task)).is_err());
     }
     let foreign = xml.replace("</definitions>", "<process id=\"ignored\"><boundaryEvent id=\"bad\" attachedToRef=\"missing\"><conditionalEventDefinition><condition/></conditionalEventDefinition></boundaryEvent></process></definitions>");
+    assert!(parse_bpmn_xml(&foreign).is_ok());
+}
+
+#[test]
+fn x2c_top_level_conditional_start_validation_and_pool_isolation() {
+    let xml = process_xml(
+        r#"<startEvent id="s"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></startEvent><userTask id="t"/><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="b" sourceRef="t" targetRef="e"/>"#,
+    );
+    let definition = parse_bpmn_xml(&xml).unwrap();
+    assert!(
+        matches!(&definition.nodes["s"], BpmnElement::ConditionalStartEvent { condition } if condition == "amount > 100")
+    );
+    for replacement in [
+        "<condition/>",
+        "<condition>flag &amp;&amp; ready</condition>",
+        r#"<condition language="feel">flag</condition>"#,
+        r#"<condition camunda:resource="condition.rhai">flag</condition>"#,
+    ] {
+        assert!(
+            parse_bpmn_xml(&xml.replace("<condition>amount &gt; 100</condition>", replacement))
+                .is_err(),
+            "{replacement}"
+        );
+    }
+    for invalid in [
+        xml.replace("<conditionalEventDefinition>", r#"<conditionalEventDefinition camunda:variableName="flag">"#),
+        xml.replace("<conditionalEventDefinition>", r#"<conditionalEventDefinition camunda:variableEvents="update">"#),
+        xml.replace("<userTask", r#"<startEvent id="other"/><userTask"#),
+        xml.replace(r#"targetRef="t""#, r#"targetRef="s""#),
+        xml.replace("<conditionalEventDefinition>", "<messageEventDefinition/><conditionalEventDefinition>"),
+        xml.replace(r#"<endEvent id="e"/>"#, r#"<endEvent id="e"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></endEvent>"#),
+        xml.replace(r#"<userTask id="t"/>"#, r#"<intermediateThrowEvent id="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></intermediateThrowEvent>"#),
+    ] { assert!(parse_bpmn_xml(&invalid).is_err(), "{invalid}"); }
+    let foreign = xml.replace("</definitions>", r#"<process id="ignored"><startEvent id="bad"><conditionalEventDefinition><condition/></conditionalEventDefinition></startEvent></process></definitions>"#);
     assert!(parse_bpmn_xml(&foreign).is_ok());
 }

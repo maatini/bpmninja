@@ -1,6 +1,6 @@
 import type { ProcessInstance } from '../types/engine';
 
-export type EngineEventType = 'instance_changed' | 'task_changed' | 'definition_changed' | 'event_subprocess_changed' | 'resync_required';
+export type EngineEventType = 'instance_changed' | 'task_changed' | 'definition_changed' | 'event_subprocess_changed' | 'conditional_start_changed' | 'resync_required';
 
 export interface EngineEventPayload {
   type: EngineEventType;
@@ -8,6 +8,7 @@ export interface EngineEventPayload {
   task_id?: string;
   definition_key?: string | null;
   event_id?: string;
+  request_id?: string;
   subprocess_id?: string;
   activation_id?: string;
   phase?: 'activated' | 'scope_interrupted' | 'interrupted' | 'completed';

@@ -1136,6 +1136,13 @@ fn reject_unsupported_elements(xml: &str, process_id: &str) -> EngineResult<()> 
                     violations.push(format!("multiple event definitions on {kind} '{event_id}'"));
                 } else if !supported_event_definitions(kind).contains(&name.as_str()) {
                     violations.push(format!("{name} on {kind} '{event_id}'"));
+                } else if name == "conditionalEventDefinition"
+                    && kind == "startEvent"
+                    && in_sub_process
+                {
+                    violations.push(format!(
+                        "conditional start '{event_id}' inside an embedded sub-process"
+                    ));
                 } else if name == "signalEventDefinition"
                     && (kind == "startEvent" || kind == "endEvent")
                     && in_sub_process

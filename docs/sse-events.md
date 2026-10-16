@@ -30,6 +30,13 @@ Completion, Lock-/Retry-/Incident-Updates melden die betroffenen IDs.
 Instanz-Löschung invalidiert auch deren Tasks. `definition_changed` enthält
 `definition_key` und meldet Deployment/Löschung.
 
+`conditional_start_changed` meldet einen angenommenen expliziten Conditional-Start
+mit `event_id`, `request_id`, `instance_id` und `definition_key`. Request-Variablen
+werden nicht übertragen. False-Auswertungen erzeugen keine Instanzereignisse.
+Identische Retries haben dieselbe Ergebnis- und Instanzidentität; der Broadcast
+selbst hat weiterhin keine Exactly-once- oder Replay-Garantie. Der entsprechende
+History-Eintrag enthält die Request-ID zum Abgleich.
+
 ## Verlust und Wiederverbindung
 
 Der Broadcast bleibt begrenzt und besitzt kein Replay. Ein langsamer Subscriber

@@ -52,6 +52,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /api/conditional-starts/evaluate:
+    post:
+      operationId: Api_evaluateConditionalStart
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalStartResult'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConditionalStartRequest'
   /api/definitions:
     get:
       operationId: Api_listDefinitions
@@ -168,7 +197,7 @@ paths:
   /api/events:
     get:
       operationId: Api_engineEvents
-      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.
+      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`, `conditional_start_changed`). Broadcast capacity is 256; slow clients may miss events.
       parameters: []
       responses:
         '200':
@@ -1726,6 +1755,45 @@ components:
         variables:
           type: object
           additionalProperties: {}
+    ConditionalStartRequest:
+      type: object
+      required:
+        - request_id
+        - variables
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        process_id:
+          type: string
+        business_key:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+      description: Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.
+    ConditionalStartResult:
+      type: object
+      required:
+        - request_id
+        - definition_key
+        - matched
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        matched:
+          type: boolean
+        instance_id:
+          type: string
+          format: uuid
+          description: Present only when matched is true.
     CorrelateMessageRequest:
       type: object
       required:

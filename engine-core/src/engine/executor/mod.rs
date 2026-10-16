@@ -44,6 +44,10 @@ impl WorkflowEngine {
             .await;
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
+            if matches!(error, EngineError::PersistenceError(_)) {
+                // A failed durability barrier leaves the saved occurrence/continuation retryable.
+                return Err(error);
+            }
             if matches!(error, EngineError::DataMappingError(_)) || failure_generation.is_some() {
                 if let Some(instance) = self.instances.get(&instance_id).await {
                     let mut instance = instance.write().await;

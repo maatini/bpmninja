@@ -34,6 +34,7 @@ fn event_stream(
         let event = match rx.recv().await {
             Ok(event) => {
                 let event_type = match &event {
+                    EngineEvent::ConditionalStartChanged { .. } => "conditional_start_changed",
                     EngineEvent::InstanceChanged { .. } => "instance_changed",
                     EngineEvent::TaskChanged { .. } => "task_changed",
                     EngineEvent::DefinitionChanged { .. } => "definition_changed",

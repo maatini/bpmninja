@@ -212,7 +212,6 @@ impl ProcessDefinition {
                             BpmnElement::MessageCatchEvent { .. }
                                 | BpmnElement::SignalCatchEvent { .. }
                                 | BpmnElement::TimerCatchEvent(_)
-                                | BpmnElement::ConditionalStartEvent { .. }
                                 | BpmnElement::ConditionalCatchEvent { .. }
                         )
                     {

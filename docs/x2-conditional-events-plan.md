@@ -1,6 +1,6 @@
 # X2 / X9b — Conditional events
 
-Status: X9b implemented and verified after user GO, 2026-10-15. X2a intermediate catches are complete. X2 remains partial; X2b task boundaries are complete and verified; call/loop/container boundaries and top-level conditional starts remain later increments.
+Status: X9b implemented and verified after user GO, 2026-10-15. X2a intermediate catches are complete. X2 remains partial; X2b task boundaries are complete and verified; X2c top-level conditional starts are implemented with acceptance in progress; call/loop/container boundaries remain later increments.
 
 ## First increment: shared evaluation and X9b
 
@@ -157,7 +157,7 @@ a new global map alongside old central-token copies while another completion run
   repeated non-interrupting branches, exact task/job cancellation, and precedence
   with activity completion are implemented for ordinary tasks. Call/loop/container
   attachments remain excluded; subprocess scope behavior still requires X6.
-- **Top-level starts (X2c):** [Concrete next-increment plan](x2c-top-level-conditional-starts-plan.md), prepared 2026-10-16; awaiting separate GO. A definition-level evaluation API and explicit input
+- **Top-level starts (X2c):** [Implementation and acceptance plan](x2c-top-level-conditional-starts-plan.md), authorized 2026-10-16 and implemented; acceptance in progress. An explicit definition-level evaluation API provides input
   context, definition-version selection, deduplication/retrigger ownership, and
   startup/redeploy behavior. An existing instance's variable update must not
   implicitly launch unrelated process instances.

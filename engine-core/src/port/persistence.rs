@@ -159,6 +159,14 @@ pub trait WorkflowPersistence: Send + Sync {
     ) -> EngineResult<()> {
         self.save_instance_json(instance, payload).await
     }
+    /// Look up the reserved instance without scanning unrelated active instances.
+    async fn get_active_instance(&self, id: uuid::Uuid) -> EngineResult<Option<ProcessInstance>> {
+        Ok(self
+            .list_instances()
+            .await?
+            .into_iter()
+            .find(|instance| instance.id == id))
+    }
     /// Load all persisted process instances.
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>>;
 

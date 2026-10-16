@@ -91,6 +91,14 @@ impl From<&InstanceState> for InstanceStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EngineEvent {
+    /// An accepted true evaluation entered its reserved instance. No variable payload.
+    ConditionalStartChanged {
+        event_id: Uuid,
+        instance_id: Uuid,
+        definition_key: Uuid,
+        request_id: Uuid,
+    },
+
     /// Eine Prozessinstanz wurde gestartet, hat einen Schritt ausgeführt oder ist abgeschlossen.
     InstanceChanged {
         instance_id: Uuid,
