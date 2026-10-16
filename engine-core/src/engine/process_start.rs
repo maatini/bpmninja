@@ -171,6 +171,11 @@ impl WorkflowEngine {
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
 
+        if matches!(start_element, BpmnElement::ConditionalStartEvent { .. }) {
+            return Err(EngineError::InvalidDefinition(
+                "Use conditional-starts/evaluate for conditional start events".into(),
+            ));
+        }
         if matches!(start_element, BpmnElement::TimerStartEvent(_)) {
             return Err(EngineError::InvalidDefinition(
                 "Use trigger_timer_start() for timer start events".into(),

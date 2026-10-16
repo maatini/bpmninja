@@ -97,6 +97,7 @@ pub(crate) fn validate_definition(
     definition: &crate::domain::ProcessDefinition,
 ) -> EngineResult<()> {
     super::conditional_boundary::validate(definition)?;
+    super::conditional_start::validate(definition)?;
     let invalid = |message: &str| EngineError::InvalidDefinition(message.into());
     if !definition.event_listeners.is_empty() {
         return Err(invalid(
@@ -666,6 +667,15 @@ impl WorkflowEngine {
         {
             let mut instance = instance.write().await;
             instance.event_state = Some(Box::new(state));
+            if matches!(def.nodes.get(&token.current_node), Some(crate::BpmnElement::ConditionalStartEvent { .. })) {
+                Self::register_conditional_wait(&mut instance, token, &token.current_node, None, 0);
+                let state = instance.event_state.as_mut().unwrap();
+                let wait = state.conditional_waits.values_mut().find(|wait| wait.token_id == token.id).unwrap();
+                wait.claimed = true;
+                wait.claimed_revision = Some(0);
+                token.conditional_wait = Some(wait.id);
+                state.ready_conditional_tokens.push(token.id);
+            }
             instance.tokens.insert(token.id, token.clone());
             instance.active_tokens.push(ActiveToken {
                 token: token.clone(),
@@ -674,7 +684,13 @@ impl WorkflowEngine {
                 completed: false,
             });
         }
-        self.persist_instance(instance_id).await;
+        if matches!(def.nodes.get(&token.current_node), Some(crate::BpmnElement::ConditionalStartEvent { .. })) {
+            if let Some(p) = &self.persistence {
+                p.save_instance(&instance.read().await.clone()).await?;
+            }
+        } else {
+            self.persist_instance(instance_id).await;
+        }
         for timer in timers {
             let id = timer.id;
             self.insert_pending_timer(timer);

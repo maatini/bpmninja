@@ -70,6 +70,7 @@ impl ProcessDefinition {
                         | BpmnElement::TimerStartEvent(_)
                         | BpmnElement::MessageStartEvent { .. }
                         | BpmnElement::SignalStartEvent { .. }
+                        | BpmnElement::ConditionalStartEvent { .. }
                 )
             })
             .count();
@@ -211,7 +212,8 @@ impl ProcessDefinition {
                             BpmnElement::MessageCatchEvent { .. }
                                 | BpmnElement::SignalCatchEvent { .. }
                                 | BpmnElement::TimerCatchEvent(_)
-                                | BpmnElement::ConditionalCatchEvent { .. }
+                                | BpmnElement::ConditionalStartEvent { .. }
+                    | BpmnElement::ConditionalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
@@ -276,7 +278,8 @@ impl ProcessDefinition {
             })
             .chain(self.nodes.values().filter_map(|node| {
                 match node {
-                    BpmnElement::ConditionalCatchEvent { condition }
+                    BpmnElement::ConditionalStartEvent { condition }
+                    | BpmnElement::ConditionalCatchEvent { condition }
                     | BpmnElement::BoundaryConditionalEvent { condition, .. } => {
                         crate::condition::compile_event_condition(condition)
                             .ok()
@@ -313,7 +316,8 @@ impl ProcessDefinition {
         self.nodes.values().any(|node| {
             matches!(
                 node,
-                BpmnElement::ConditionalCatchEvent { .. }
+                BpmnElement::ConditionalStartEvent { .. }
+                    | BpmnElement::ConditionalCatchEvent { .. }
                     | BpmnElement::BoundaryConditionalEvent { .. }
             )
         }) || self.event_subprocesses.iter().any(|handler| {
@@ -340,6 +344,7 @@ impl ProcessDefinition {
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
                     | BpmnElement::SignalStartEvent { .. }
+                        | BpmnElement::ConditionalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {
@@ -534,6 +539,7 @@ impl ProcessDefinitionBuilder {
         validate_loops(&def.nodes, &self.loops)?;
         def.loops = self.loops;
         crate::engine::conditional_boundary::validate(&def)?;
+        crate::engine::conditional_start::validate(&def)?;
         Ok(def)
     }
 }

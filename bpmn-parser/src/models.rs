@@ -234,6 +234,8 @@ pub(crate) struct BpmnProcess {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnStartEvent {
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "extensionElements")]

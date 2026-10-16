@@ -19,6 +19,7 @@ use crate::runtime::{
 
 #[derive(Default, Clone)]
 pub struct InMemoryPersistence {
+    conditional_starts: Arc<RwLock<HashMap<uuid::Uuid, crate::ConditionalStartReceipt>>>,
     tokens: Arc<RwLock<HashMap<String, Vec<Token>>>>,
     instances: Arc<RwLock<HashMap<uuid::Uuid, ProcessInstance>>>,
     definitions: Arc<RwLock<HashMap<uuid::Uuid, ProcessDefinition>>>,
@@ -40,6 +41,26 @@ impl InMemoryPersistence {
 
 #[async_trait]
 impl WorkflowPersistence for InMemoryPersistence {
+    async fn reserve_conditional_start(&self, receipt: &crate::ConditionalStartReceipt) -> EngineResult<crate::ConditionalStartReceipt> {
+        let mut receipts = self.conditional_starts.write().await;
+        Ok(receipts.entry(receipt.request.request_id).or_insert_with(|| receipt.clone()).clone())
+    }
+    async fn get_conditional_start(&self, id: uuid::Uuid) -> EngineResult<Option<crate::ConditionalStartReceipt>> {
+        Ok(self.conditional_starts.read().await.get(&id).cloned())
+    }
+    async fn list_conditional_starts(&self) -> EngineResult<Vec<crate::ConditionalStartReceipt>> {
+        Ok(self.conditional_starts.read().await.values().cloned().collect())
+    }
+    async fn complete_conditional_start(&self, receipt: &crate::ConditionalStartReceipt) -> EngineResult<()> {
+        let mut receipts = self.conditional_starts.write().await;
+        let stored = receipts.get_mut(&receipt.request.request_id).ok_or_else(|| crate::EngineError::PersistenceError("Missing conditional-start receipt".into()))?;
+        if stored.request != receipt.request || stored.result != receipt.result {
+            return Err(crate::EngineError::ConditionalStartConflict(receipt.request.request_id));
+        }
+        stored.dispatched = true;
+        Ok(())
+    }
+
     async fn save_token(&self, instance_id: uuid::Uuid, token: &Token) -> EngineResult<()> {
         let mut t = self.tokens.write().await;
         let key = format!("token-{instance_id}-{}", token.id);

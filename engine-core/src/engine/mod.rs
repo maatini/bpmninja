@@ -23,6 +23,8 @@ use crate::persistence::WorkflowPersistence;
 pub(crate) mod boundary;
 pub(crate) mod conditional_boundary;
 mod conditional_catch;
+pub(crate) mod conditional_start;
+pub use conditional_start::{ConditionalStartRequest, ConditionalStartResult, ConditionalStartReceipt};
 pub(crate) mod data_mappings;
 mod definition_ops;
 pub(crate) mod event_subprocess;
@@ -77,6 +79,8 @@ pub struct WorkflowEngine {
     pub(crate) persist_locks: persistence_ops::PersistLocks,
     pub(crate) conditional_step_locks: persistence_ops::PersistLocks,
     pub(crate) conditional_work_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_start_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_start_receipts: DashMap<Uuid, ConditionalStartReceipt>,
     pub(crate) event_lifecycle_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
     pub(crate) scripts: crate::scripting::ScriptRunner,
@@ -117,6 +121,8 @@ impl WorkflowEngine {
             persist_locks: persistence_ops::PersistLocks::new(),
             conditional_step_locks: persistence_ops::PersistLocks::new(),
             conditional_work_locks: persistence_ops::PersistLocks::new(),
+            conditional_start_locks: persistence_ops::PersistLocks::new(),
+            conditional_start_receipts: DashMap::new(),
             event_lifecycle_locks: persistence_ops::PersistLocks::new(),
             scripts: crate::scripting::ScriptRunner::new(script_config),
             event_tx,

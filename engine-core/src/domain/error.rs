@@ -12,6 +12,9 @@ pub enum EngineError {
     #[error("Invalid definition: {0}")]
     InvalidDefinition(String),
 
+    #[error("Conditional start request ID already used with different input: {0}")]
+    ConditionalStartConflict(Uuid),
+
     #[error("Data mapping failed: {0}")]
     DataMappingError(String),
 
