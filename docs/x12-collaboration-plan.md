@@ -13,13 +13,44 @@ because process-based lookup would otherwise be ambiguous.
 `parse_bpmn_xml` retains its executable-first, first-process fallback behavior.
 The collection API requires `isExecutable="true"`; absent or false execution
 flags do not opt a pool into deployment. Current deployment endpoints still
-select one process. Participants and message flows are not yet interpreted.
+select one process.
+
+## Participant and route validation (2026-10-17)
+
+`parse_bpmn_collaboration` returns executable process definitions together with
+serializable collaboration, participant, and directed message-flow metadata.
+Routes retain participant ID, process ID, element ID, message declaration ID,
+and compiled message name. This API prepares metadata; it does not publish
+definitions or perform message delivery. Both existing parser APIs are unchanged.
+
+The initial routing contract is deliberately explicit:
+
+- Each participant process reference must resolve to a top-level process. A
+  process may have only one participant within a collaboration. Black-box pools
+  (no process reference) and non-executable pools are retained as metadata.
+- Internal flow endpoints must be top-level elements in distinct executable
+  participant processes belonging to the same collaboration. Sources support
+  send tasks and intermediate message throws. Targets support message starts,
+  receive tasks (including instantiating receives), intermediate message catches,
+  and message boundaries.
+- Both endpoints must explicitly reference the same declared, named message.
+  Equal message names do not equate different message declarations. An optional
+  flow `messageRef` must match; when absent, the endpoints determine it. Conflicting
+  nested/direct references and legacy fallback names are rejected for routing.
+- All document IDs must be unique and nonempty. References must be unqualified
+  local IDs because existing process compilation does not resolve QName prefixes.
+- Participant-level flow endpoints, black-box/non-executable routes, nested scopes,
+  and loop endpoints (including boundaries attached to loops) are rejected. Those
+  require external transport, scope, or occurrence-aware delivery contracts.
+
+Validation: all **99 parser tests** pass, including eight new collaboration
+tests and a serialization roundtrip. Strict parser Clippy (`--all-targets --
+-D warnings`), formatting, and diff checks pass.
 
 ## Remaining implementation
 
-1. Parse participants and message flows, retaining source/target process and
-   element IDs. Reject unresolved references, same-pool flows and unsupported
-   endpoint kinds. Define black-box participant behavior explicitly.
+1. Participant and message-flow parsing is complete within the contract above.
+   Wire this metadata into the collection deployment path below.
 2. Add collection deployment with a result for every process. Validate all pools
    and perform per-process model checking before publishing definitions. Define
    persistence failure/rollback and startup restoration semantics for a batch;
