@@ -8,7 +8,7 @@ use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessD
 
 use crate::models::{
     BpmnDefinitions, BpmnExtensionElements, BpmnIntermediateCatchEvent, BpmnIntermediateThrowEvent,
-    BpmnLinkEventDefinition, BpmnSequenceFlow,
+    BpmnLinkEventDefinition, BpmnProcess, BpmnSequenceFlow,
 };
 
 /// Helper to attach parsed listeners to the builder
@@ -334,7 +334,51 @@ fn with_loop(
 /// Note: Since `quick-xml` expects exact structure, the parsed XML must match
 /// the structs above (elements rather than attributes where specified, etc.).
 pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
-    let mut defs: BpmnDefinitions = from_str(xml).map_err(|e| {
+    let mut defs = parse_definitions(xml)?;
+    // Preserve the single-process API's executable-first fallback.
+    let executable_idx = defs
+        .processes
+        .iter()
+        .position(|p| p.is_executable == Some(true))
+        .unwrap_or(0);
+    let process = defs.processes.remove(executable_idx);
+    build_process(xml, &defs, process)
+}
+
+/// Parse every explicitly executable process in document order.
+///
+/// Unlike `parse_bpmn_xml`, this API never falls back to a non-executable
+/// process. Every selected process must validate before any results are returned.
+/// Collaboration message flows are not interpreted by this API.
+pub fn parse_bpmn_processes(xml: &str) -> EngineResult<Vec<ProcessDefinition>> {
+    let mut defs = parse_definitions(xml)?;
+    let mut ids = std::collections::HashSet::new();
+    for process in &defs.processes {
+        if process.id.trim().is_empty() || !ids.insert(process.id.as_str()) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Empty or duplicate BPMN process ID: '{}'",
+                process.id
+            )));
+        }
+    }
+    let processes = std::mem::take(&mut defs.processes);
+    let selected: Vec<_> = processes
+        .into_iter()
+        .filter(|process| process.is_executable == Some(true))
+        .collect();
+    if selected.is_empty() {
+        return Err(EngineError::InvalidDefinition(
+            "No explicitly executable <process> element found in BPMN XML".into(),
+        ));
+    }
+    selected
+        .into_iter()
+        .map(|process| build_process(xml, &defs, process))
+        .collect()
+}
+
+fn parse_definitions(xml: &str) -> EngineResult<BpmnDefinitions> {
+    let defs: BpmnDefinitions = from_str(xml).map_err(|e| {
         EngineError::InvalidDefinition(format!(
             "BPMN XML parsing failed (hint: ensure the XML contains a valid <process> element and supported entities): {}",
             e
@@ -347,14 +391,14 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         ));
     }
 
-    // Find the executable process, or fallback to the first one available
-    let executable_idx = defs
-        .processes
-        .iter()
-        .position(|p| p.is_executable == Some(true))
-        .unwrap_or(0);
-    let mut process = defs.processes.remove(executable_idx);
+    Ok(defs)
+}
 
+fn build_process(
+    xml: &str,
+    defs: &BpmnDefinitions,
+    mut process: BpmnProcess,
+) -> EngineResult<ProcessDefinition> {
     let process_id = process.id.clone();
     crate::event_subprocess::validate_conditional_catches(xml, &process_id)?;
     let (prepared_xml, handlers) = crate::event_subprocess::extract(xml, &process_id)?;

@@ -192,9 +192,9 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/lib.rs": {
-    "mtime": 1792009585.1971235,
-    "seen": 1792037861.9543202,
-    "ast_hash": "4d6fd8a997e893508a602a35231b4956",
+    "mtime": 1792180966.8167577,
+    "seen": 1792181086.7730913,
+    "ast_hash": "7543ad96e9a101bb2359f46902e37193",
     "semantic_hash": ""
   },
   "bpmn-parser/src/models.rs": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/parser.rs": {
-    "mtime": 1792146098.235991,
-    "seen": 1792147370.1028888,
-    "ast_hash": "47723424d7a094007fbfdc0bbe2ea7f0",
+    "mtime": 1792180952.4870272,
+    "seen": 1792181086.7730913,
+    "ast_hash": "40277d26c887d16095baeb64cb634b21",
     "semantic_hash": ""
   },
   "bpmn-parser/src/tests.rs": {
@@ -3066,9 +3066,9 @@
     "semantic_hash": ""
   },
   "docs/x2c-top-level-conditional-starts-plan.md": {
-    "mtime": 1792162511.8107045,
-    "seen": 1792162625.7611952,
-    "ast_hash": "395a2c7814c26964d65a98e98ae21c27",
+    "mtime": 1792162643.3589954,
+    "seen": 1792180923.1761603,
+    "ast_hash": "fa1e5863fcd6cb5847d47f19a73c65a4",
     "semantic_hash": ""
   },
   "engine-core/src/engine/conditional_start.rs": {
@@ -3087,6 +3087,18 @@
     "mtime": 1792146654.2104397,
     "seen": 1792147370.1038878,
     "ast_hash": "24884709c0fbb3d9209b832223f6061b",
+    "semantic_hash": ""
+  },
+  "bpmn-parser/src/collaboration_tests.rs": {
+    "mtime": 1792180971.6287677,
+    "seen": 1792181086.7730913,
+    "ast_hash": "8029c6ad8f832fccd8e583c65b5ba626",
+    "semantic_hash": ""
+  },
+  "docs/x12-collaboration-plan.md": {
+    "mtime": 1792181010.8176289,
+    "seen": 1792181086.7740965,
+    "ast_hash": "bc945fa7074ba32ed632c6e16c3d6f22",
     "semantic_hash": ""
   }
 }
