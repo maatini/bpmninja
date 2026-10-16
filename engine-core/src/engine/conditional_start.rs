@@ -40,12 +40,20 @@ pub(crate) fn validate(definition: &ProcessDefinition) -> EngineResult<()> {
     for (id, node) in &definition.nodes {
         if let BpmnElement::ConditionalStartEvent { condition } = node {
             crate::condition::validate_event_condition(condition)?;
-            if definition.event_subprocesses.iter().any(|h| h.node_ids.contains(id))
+            if definition
+                .event_subprocesses
+                .iter()
+                .any(|h| h.node_ids.contains(id))
                 || definition.start_event().map(|(node, _)| node) != Some(id.as_str())
-                || definition.flows.values().flatten().any(|flow| flow.target == *id)
+                || definition
+                    .flows
+                    .values()
+                    .flatten()
+                    .any(|flow| flow.target == *id)
             {
                 return Err(EngineError::InvalidDefinition(
-                    "Conditional start must be the sole top-level start, without incoming flows".into(),
+                    "Conditional start must be the sole top-level start, without incoming flows"
+                        .into(),
                 ));
             }
         }
@@ -60,7 +68,10 @@ impl WorkflowEngine {
     ) -> EngineResult<ConditionalStartResult> {
         if request.request_id.is_nil()
             || request.definition_key.is_some() == request.process_id.is_some()
-            || request.process_id.as_ref().is_some_and(|id| id.trim().is_empty())
+            || request
+                .process_id
+                .as_ref()
+                .is_some_and(|id| id.trim().is_empty())
             || request.variables.contains_key("business_key")
         {
             return Err(EngineError::InvalidDefinition(
@@ -69,9 +80,13 @@ impl WorkflowEngine {
         }
         let _guard = self.conditional_start_locks.lock(request.request_id).await;
         let saved = if let Some(persistence) = &self.persistence {
-            persistence.get_conditional_start(request.request_id).await?
+            persistence
+                .get_conditional_start(request.request_id)
+                .await?
         } else {
-            self.conditional_start_receipts.get(&request.request_id).map(|r| r.clone())
+            self.conditional_start_receipts
+                .get(&request.request_id)
+                .map(|r| r.clone())
         };
         let receipt = if let Some(saved) = saved {
             if saved.request != request {
@@ -81,37 +96,61 @@ impl WorkflowEngine {
         } else {
             let key = match request.definition_key {
                 Some(key) => key,
-                None => self.definitions.find_latest_by_bpmn_id(request.process_id.as_deref().unwrap_or_default())
+                None => self
+                    .definitions
+                    .find_latest_by_bpmn_id(request.process_id.as_deref().unwrap_or_default())
                     .map(|(key, _)| key)
-                    .ok_or_else(|| EngineError::InvalidDefinition("No definition for process_id".into()))?,
+                    .ok_or_else(|| {
+                        EngineError::InvalidDefinition("No definition for process_id".into())
+                    })?,
             };
-            let definition = self.definitions.get(&key).ok_or(EngineError::NoSuchDefinition(key))?;
+            let definition = self
+                .definitions
+                .get(&key)
+                .ok_or(EngineError::NoSuchDefinition(key))?;
             super::event_subprocess::validate_definition(&definition)?;
-            let Some((_, BpmnElement::ConditionalStartEvent { condition })) = definition.start_event() else {
-                return Err(EngineError::InvalidDefinition("Selected definition has no conditional start".into()));
+            let Some((_, BpmnElement::ConditionalStartEvent { condition })) =
+                definition.start_event()
+            else {
+                return Err(EngineError::InvalidDefinition(
+                    "Selected definition has no conditional start".into(),
+                ));
             };
             let mut variables = definition.variable_defaults.clone();
             variables.extend(request.variables.clone());
             // Match ordinary start semantics: business_key is instance metadata.
-            let default_business_key = variables.remove("business_key").and_then(|v| v.as_str().map(str::to_owned));
+            let default_business_key = variables
+                .remove("business_key")
+                .and_then(|v| v.as_str().map(str::to_owned));
             let matched = definition.evaluate_event_condition(condition, &variables);
             let receipt = ConditionalStartReceipt {
                 version: 1,
                 result: ConditionalStartResult {
-                    request_id: request.request_id, definition_key: key, matched,
+                    request_id: request.request_id,
+                    definition_key: key,
+                    matched,
                     instance_id: matched.then(Uuid::new_v4),
                 },
-                business_key: request.business_key.clone().or(default_business_key).unwrap_or_else(|| Uuid::new_v4().to_string()),
-                request, initial_variables: variables, dispatched: !matched,
+                business_key: request
+                    .business_key
+                    .clone()
+                    .or(default_business_key)
+                    .unwrap_or_else(|| Uuid::new_v4().to_string()),
+                request,
+                initial_variables: variables,
+                dispatched: !matched,
             };
             if let Some(persistence) = &self.persistence {
                 let stored = persistence.reserve_conditional_start(&receipt).await?;
                 if stored.request != receipt.request {
-                    return Err(EngineError::ConditionalStartConflict(receipt.request.request_id));
+                    return Err(EngineError::ConditionalStartConflict(
+                        receipt.request.request_id,
+                    ));
                 }
                 stored
             } else {
-                self.conditional_start_receipts.insert(receipt.request.request_id, receipt.clone());
+                self.conditional_start_receipts
+                    .insert(receipt.request.request_id, receipt.clone());
                 receipt
             }
         };
@@ -119,12 +158,21 @@ impl WorkflowEngine {
         Ok(receipt.result)
     }
 
-    async fn dispatch_conditional_start(&self, receipt: &ConditionalStartReceipt) -> EngineResult<()> {
+    async fn dispatch_conditional_start(
+        &self,
+        receipt: &ConditionalStartReceipt,
+    ) -> EngineResult<()> {
         if receipt.version != 1 {
-            return Err(EngineError::PersistenceError("Unsupported conditional-start receipt version".into()));
+            return Err(EngineError::PersistenceError(
+                "Unsupported conditional-start receipt version".into(),
+            ));
         }
-        let Some(id) = receipt.result.instance_id else { return Ok(()); };
-        if receipt.dispatched { return Ok(()); }
+        let Some(id) = receipt.result.instance_id else {
+            return Ok(());
+        };
+        if receipt.dispatched {
+            return Ok(());
+        }
         // Archive lookup must propagate storage failures: an outage cannot authorize a new start.
         if let Some(p) = &self.persistence
             && p.get_completed_instance(&id.to_string()).await?.is_some()
@@ -132,41 +180,64 @@ impl WorkflowEngine {
             return self.finish_conditional_start(receipt).await;
         }
         if self.instances.get(&id).await.is_none() {
-            let definition = self.definitions.get(&receipt.result.definition_key)
+            let definition = self
+                .definitions
+                .get(&receipt.result.definition_key)
                 .ok_or(EngineError::NoSuchDefinition(receipt.result.definition_key))?;
-            let (start, _) = definition.start_event().ok_or_else(|| EngineError::InvalidDefinition("Missing pinned start".into()))?;
-            let mut instance = Self::build_initial_instance(definition.key, id, start, receipt.initial_variables.clone(), None);
+            let (start, _) = definition
+                .start_event()
+                .ok_or_else(|| EngineError::InvalidDefinition("Missing pinned start".into()))?;
+            let mut instance = Self::build_initial_instance(
+                definition.key,
+                id,
+                start,
+                receipt.initial_variables.clone(),
+                None,
+            );
             instance.business_key = receipt.business_key.clone();
             self.instances.insert(id, instance).await;
             let mut token = Token::with_variables(start, receipt.initial_variables.clone());
             self.initialize_event_subprocesses(id, &mut token).await?;
-            let instance = self.instances.get(&id).await.ok_or(EngineError::NoSuchInstance(id))?;
+            let instance = self
+                .instances
+                .get(&id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(id))?;
             let mut instance = instance.write().await;
-            let state = instance.event_state.as_mut().ok_or_else(|| EngineError::PersistenceError("Missing conditional runtime state".into()))?;
-            state.lifecycle_outbox.push(crate::history::HistoryEntry::new(
-                id, crate::history::HistoryEventType::InstanceStarted, "Conditional evaluation accepted",
-                crate::history::ActorType::Engine, None,
-            ).with_node(start).with_context("request_id", serde_json::json!(receipt.request.request_id))
-             .with_context("definition_key", serde_json::json!(definition.key)));
+            let state = instance.event_state.as_mut().ok_or_else(|| {
+                EngineError::PersistenceError("Missing conditional runtime state".into())
+            })?;
+            state.lifecycle_outbox.push(
+                crate::history::HistoryEntry::new(
+                    id,
+                    crate::history::HistoryEventType::InstanceStarted,
+                    "Conditional evaluation accepted",
+                    crate::history::ActorType::Engine,
+                    None,
+                )
+                .with_node(start)
+                .with_context("request_id", serde_json::json!(receipt.request.request_id))
+                .with_context("definition_key", serde_json::json!(definition.key)),
+            );
             drop(instance);
         }
         // Fail closed before exposing work. A retry reuses the in-memory candidate.
-        if let Some(p) = &self.persistence {
-            let instance = self.instances.get(&id).await.ok_or(EngineError::NoSuchInstance(id))?;
-            let snapshot = instance.read().await.clone();
-            p.save_instance(&snapshot).await?;
-        }
-        self.run_conditional_work(id).await?;
+        self.persist_instance_required(id).await?;
+        self.reconcile_event_instance(id).await?;
         self.finish_conditional_start(receipt).await
     }
 
-    async fn finish_conditional_start(&self, receipt: &ConditionalStartReceipt) -> EngineResult<()> {
+    async fn finish_conditional_start(
+        &self,
+        receipt: &ConditionalStartReceipt,
+    ) -> EngineResult<()> {
         let mut receipt = receipt.clone();
         receipt.dispatched = true;
         if let Some(p) = &self.persistence {
             p.complete_conditional_start(&receipt).await?;
         } else {
-            self.conditional_start_receipts.insert(receipt.request.request_id, receipt);
+            self.conditional_start_receipts
+                .insert(receipt.request.request_id, receipt);
         }
         Ok(())
     }
@@ -176,10 +247,16 @@ impl WorkflowEngine {
         let receipts = if let Some(p) = &self.persistence {
             p.list_conditional_starts().await?
         } else {
-            self.conditional_start_receipts.iter().map(|r| r.clone()).collect()
+            self.conditional_start_receipts
+                .iter()
+                .map(|r| r.clone())
+                .collect()
         };
         for receipt in receipts {
-            let _guard = self.conditional_start_locks.lock(receipt.request.request_id).await;
+            let _guard = self
+                .conditional_start_locks
+                .lock(receipt.request.request_id)
+                .await;
             self.dispatch_conditional_start(&receipt).await?;
         }
         self.reconcile_event_subprocesses().await

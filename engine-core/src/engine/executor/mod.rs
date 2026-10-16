@@ -491,7 +491,8 @@ impl WorkflowEngine {
         }
         match &element {
             BpmnElement::ConditionalStartEvent { .. } => {
-                self.handle_conditional_catch(instance_id, token, &def_clone, &current_id).await
+                self.handle_conditional_catch(instance_id, token, &def_clone, &current_id)
+                    .await
             }
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)

@@ -93,7 +93,10 @@ fn conditional_expression(start: &Node, event: &Node) -> EngineResult<String> {
 
 pub(crate) fn validate_conditional_catches(xml: &str, process_id: &str) -> EngineResult<()> {
     fn visit(node: &Node) -> EngineResult<()> {
-        if matches!(node.name.as_str(), "intermediateCatchEvent" | "boundaryEvent" | "startEvent") {
+        if matches!(
+            node.name.as_str(),
+            "intermediateCatchEvent" | "boundaryEvent" | "startEvent"
+        ) {
             for event in node.children("conditionalEventDefinition") {
                 conditional_expression(node, event)?;
             }
@@ -135,8 +138,16 @@ pub(crate) fn validate_conditional_catches(xml: &str, process_id: &str) -> Engin
             .filter(|process| process.attr("id") == Some(process_id))
         {
             let starts: Vec<_> = process.children("startEvent").collect();
-            if starts.iter().any(|start| start.children("conditionalEventDefinition").next().is_some()) && starts.len() != 1 {
-                return Err(invalid("conditional start must be the sole top-level start"));
+            if starts.iter().any(|start| {
+                start
+                    .children("conditionalEventDefinition")
+                    .next()
+                    .is_some()
+            }) && starts.len() != 1
+            {
+                return Err(invalid(
+                    "conditional start must be the sole top-level start",
+                ));
             }
             visit(process)?;
         }

@@ -35,6 +35,10 @@ impl IntoResponse for AppError {
             Self::Engine(
                 EngineError::InvalidDefinition(msg) | EngineError::DataMappingError(msg),
             ) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(EngineError::ConditionalStartConflict(id)) => (
+                StatusCode::CONFLICT,
+                format!("Request ID already used with different input: {id}"),
+            ),
             Self::Engine(EngineError::NoMatchingCondition(msg)) => (
                 StatusCode::BAD_REQUEST,
                 format!("No matching condition at gateway '{msg}'"),

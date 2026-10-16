@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_persistence(p_arc.clone() as Arc<dyn WorkflowPersistence>);
             StartupCoordinator::new(p_arc.clone())
                 .restore(&mut engine, &mut xml_cache)
-                .await;
+                .await?;
 
             // Log-Persistenz in NATS einrichten
             let log_sink = NatsLogSink::new(p_arc.jetstream()).await;

@@ -210,7 +210,14 @@ impl WorkflowEngine {
             Self::evaluate_conditionals(&mut instance, definition)?;
             *token = candidate;
             drop(instance);
-            self.persist_instance(id).await;
+            if matches!(
+                definition.nodes.get(node),
+                Some(BpmnElement::ConditionalStartEvent { .. })
+            ) {
+                self.persist_instance_required(id).await?;
+            } else {
+                self.persist_instance(id).await;
+            }
             return Ok(NextAction::Continue(token.clone()));
         }
         if token.conditional_wait.is_some() {

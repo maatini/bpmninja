@@ -147,7 +147,8 @@ fn analyze(xml: &str) -> ModelCheckReport {
             || def.nodes.values().any(|node| {
                 matches!(
                     node,
-                    engine_core::domain::BpmnElement::ConditionalCatchEvent { .. }
+                    engine_core::domain::BpmnElement::ConditionalStartEvent { .. }
+                        | engine_core::domain::BpmnElement::ConditionalCatchEvent { .. }
                         | engine_core::domain::BpmnElement::BoundaryConditionalEvent { .. }
                 )
             })

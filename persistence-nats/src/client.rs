@@ -9,7 +9,8 @@ use futures::StreamExt;
 use tokio::sync::OnceCell;
 
 /// KV buckets created on connect; their handles are cached after first use.
-const KV_BUCKETS: [&str; 10] = [
+const KV_BUCKETS: [&str; 11] = [
+    "conditional_starts",
     "tokens",
     "instances",
     "definitions",
@@ -202,6 +203,22 @@ impl NatsPersistence {
             js.get_key_value("instance_states").await.map_err(|_| {
                 EngineError::PersistenceError(format!(
                     "Failed to initialize state journal: {error}"
+                ))
+            })?;
+        }
+
+        if js.get_key_value("conditional_starts").await.is_err()
+            && let Err(error) = js
+                .create_key_value(kv::Config {
+                    bucket: "conditional_starts".into(),
+                    description: "Durable explicit conditional-start receipts; no TTL".into(),
+                    ..Default::default()
+                })
+                .await
+        {
+            js.get_key_value("conditional_starts").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize conditional starts: {error}"
                 ))
             })?;
         }

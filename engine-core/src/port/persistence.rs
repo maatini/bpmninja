@@ -89,15 +89,32 @@ pub struct StorageInfo {
 #[async_trait]
 pub trait WorkflowPersistence: Send + Sync {
     /// Atomically create or return the existing immutable evaluation identity/result.
-    async fn reserve_conditional_start(&self, _receipt: &crate::ConditionalStartReceipt) -> EngineResult<crate::ConditionalStartReceipt> {
-        Err(crate::EngineError::PersistenceError("Conditional-start receipts unsupported by backend".into()))
+    async fn reserve_conditional_start(
+        &self,
+        _receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<crate::ConditionalStartReceipt> {
+        Err(crate::EngineError::PersistenceError(
+            "Conditional-start receipts unsupported by backend".into(),
+        ))
     }
-    async fn get_conditional_start(&self, _id: uuid::Uuid) -> EngineResult<Option<crate::ConditionalStartReceipt>> {
-        Err(crate::EngineError::PersistenceError("Conditional-start receipts unsupported by backend".into()))
+    async fn get_conditional_start(
+        &self,
+        _id: uuid::Uuid,
+    ) -> EngineResult<Option<crate::ConditionalStartReceipt>> {
+        Err(crate::EngineError::PersistenceError(
+            "Conditional-start receipts unsupported by backend".into(),
+        ))
     }
-    async fn list_conditional_starts(&self) -> EngineResult<Vec<crate::ConditionalStartReceipt>> { Ok(Vec::new()) }
-    async fn complete_conditional_start(&self, _receipt: &crate::ConditionalStartReceipt) -> EngineResult<()> {
-        Err(crate::EngineError::PersistenceError("Conditional-start receipts unsupported by backend".into()))
+    async fn list_conditional_starts(&self) -> EngineResult<Vec<crate::ConditionalStartReceipt>> {
+        Ok(Vec::new())
+    }
+    async fn complete_conditional_start(
+        &self,
+        _receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<()> {
+        Err(crate::EngineError::PersistenceError(
+            "Conditional-start receipts unsupported by backend".into(),
+        ))
     }
 
     /// Save a token for a specific process instance.

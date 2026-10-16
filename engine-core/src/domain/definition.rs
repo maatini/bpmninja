@@ -213,7 +213,7 @@ impl ProcessDefinition {
                                 | BpmnElement::SignalCatchEvent { .. }
                                 | BpmnElement::TimerCatchEvent(_)
                                 | BpmnElement::ConditionalStartEvent { .. }
-                    | BpmnElement::ConditionalCatchEvent { .. }
+                                | BpmnElement::ConditionalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
@@ -344,7 +344,7 @@ impl ProcessDefinition {
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
                     | BpmnElement::SignalStartEvent { .. }
-                        | BpmnElement::ConditionalStartEvent { .. }
+                    | BpmnElement::ConditionalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {

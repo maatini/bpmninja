@@ -417,7 +417,14 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for start in process.start_events {
         let node_id = start.id.clone();
         if let Some(conditional) = start.conditional_event_definition {
-            let condition = conditional.condition.ok_or_else(|| EngineError::InvalidDefinition("Conditional start requires a condition".into()))?.value.trim().to_string();
+            let condition = conditional
+                .condition
+                .ok_or_else(|| {
+                    EngineError::InvalidDefinition("Conditional start requires a condition".into())
+                })?
+                .value
+                .trim()
+                .to_string();
             builder = builder.node(start.id, BpmnElement::ConditionalStartEvent { condition });
         } else if let Some(timer) = start.timer_event_definition {
             let timer_def = parse_timer_definition(&start.id, &timer)?;

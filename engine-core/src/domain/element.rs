@@ -6,7 +6,9 @@ pub enum BpmnElement {
     /// A plain (none) start event — the process starts immediately.
     StartEvent,
     /// Started only by an accepted explicit conditional evaluation receipt.
-    ConditionalStartEvent { condition: String },
+    ConditionalStartEvent {
+        condition: String,
+    },
     /// A timer-triggered start event that fires after the given duration.
     TimerStartEvent(TimerDefinition),
     /// An end event — the process terminates here.

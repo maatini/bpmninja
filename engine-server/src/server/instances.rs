@@ -11,6 +11,15 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub(crate) async fn evaluate_conditional_start(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<engine_core::ConditionalStartRequest>,
+) -> Result<Json<engine_core::ConditionalStartResult>, AppError> {
+    Ok(Json(
+        state.engine.evaluate_conditional_start(payload).await?,
+    ))
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StartRequest {
     pub definition_key: String,

@@ -73,6 +73,22 @@ model DeployResponse {
   model_check?: ModelCheckReport;
 }
 
+@doc("Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.")
+model ConditionalStartRequest {
+  @format("uuid") request_id: string;
+  @format("uuid") definition_key?: string;
+  process_id?: string;
+  business_key?: string;
+  variables: Record<unknown>;
+}
+model ConditionalStartResult {
+  @format("uuid") request_id: string;
+  @format("uuid") definition_key: string;
+  matched: boolean;
+  @doc("Present only when matched is true.")
+  @format("uuid") instance_id?: string;
+}
+
 model StartRequest {
   definition_key: string;
   business_key?: string;
@@ -291,6 +307,9 @@ namespace Api {
 
   @post @route("/deploy")
   op deploy(@body request: DeployRequest): DeployResponse | AppError;
+
+  @post @route("/conditional-starts/evaluate")
+  op evaluateConditionalStart(@body request: ConditionalStartRequest): ConditionalStartResult | { @statusCode statusCode: 409; @body body: AppError } | AppError;
 
   @post @route("/start")
   op start(@body request: StartRequest): StartResponse | AppError;

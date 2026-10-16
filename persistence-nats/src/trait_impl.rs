@@ -11,6 +11,93 @@ use crate::client::NatsPersistence;
 
 #[async_trait]
 impl WorkflowPersistence for NatsPersistence {
+    async fn reserve_conditional_start(
+        &self,
+        receipt: &engine_core::ConditionalStartReceipt,
+    ) -> EngineResult<engine_core::ConditionalStartReceipt> {
+        let store = self.kv("conditional_starts").await?;
+        let payload = serde_json::to_vec(receipt)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        match store
+            .create(receipt.request.request_id.to_string(), payload.into())
+            .await
+        {
+            Ok(_) => Ok(receipt.clone()),
+            Err(error) => self
+                .get_conditional_start(receipt.request.request_id)
+                .await?
+                .ok_or_else(|| {
+                    EngineError::PersistenceError(format!("Receipt reservation failed: {error}"))
+                }),
+        }
+    }
+    async fn get_conditional_start(
+        &self,
+        id: Uuid,
+    ) -> EngineResult<Option<engine_core::ConditionalStartReceipt>> {
+        let store = self.kv("conditional_starts").await?;
+        store
+            .get(id.to_string())
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+            .map(|bytes| {
+                serde_json::from_slice(&bytes)
+                    .map_err(|e| EngineError::PersistenceError(e.to_string()))
+            })
+            .transpose()
+    }
+    async fn list_conditional_starts(
+        &self,
+    ) -> EngineResult<Vec<engine_core::ConditionalStartReceipt>> {
+        let store = self.kv("conditional_starts").await?;
+        let mut keys = store
+            .keys()
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        let mut receipts = Vec::new();
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            let id =
+                Uuid::parse_str(&key).map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            if let Some(receipt) = self.get_conditional_start(id).await? {
+                receipts.push(receipt);
+            }
+        }
+        Ok(receipts)
+    }
+    async fn complete_conditional_start(
+        &self,
+        receipt: &engine_core::ConditionalStartReceipt,
+    ) -> EngineResult<()> {
+        let store = self.kv("conditional_starts").await?;
+        let key = receipt.request.request_id.to_string();
+        let entry = store
+            .entry(&key)
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+            .ok_or_else(|| {
+                EngineError::PersistenceError("Missing conditional-start receipt".into())
+            })?;
+        let mut stored: engine_core::ConditionalStartReceipt = serde_json::from_slice(&entry.value)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        if stored.request != receipt.request || stored.result != receipt.result {
+            return Err(EngineError::ConditionalStartConflict(
+                receipt.request.request_id,
+            ));
+        }
+        if stored.dispatched {
+            return Ok(());
+        }
+        stored.dispatched = true;
+        let payload = serde_json::to_vec(&stored)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        store
+            .update(key, payload.into(), entry.revision)
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        Ok(())
+    }
+
     async fn save_token(&self, instance_id: Uuid, token: &Token) -> EngineResult<()> {
         let store = self.kv("tokens").await?;
         let key = format!("token-{instance_id}-{}", token.id);

@@ -315,6 +315,30 @@ impl WorkflowEngine {
         }
     }
 
+    /// Persistence barrier for explicit-start receipts. Never enqueue and continue on failure.
+    pub(crate) async fn persist_instance_required(&self, id: Uuid) -> crate::EngineResult<()> {
+        if let Some(p) = &self.persistence {
+            let _guard = self.persist_locks.lock(id).await;
+            let instance = self
+                .instances
+                .get(&id)
+                .await
+                .ok_or(crate::EngineError::NoSuchInstance(id))?;
+            let snapshot = instance.read().await.clone();
+            let mut payload = InstancePayload(Vec::new());
+            serde_json::to_writer(&mut payload, &snapshot)
+                .map_err(|e| crate::EngineError::PersistenceError(e.to_string()))?;
+            let payload = p.prepare_instance_payload(&snapshot, payload.0)?;
+            if payload.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
+                return Err(crate::EngineError::PersistenceError(
+                    "Instance payload exceeds limit".into(),
+                ));
+            }
+            p.save_instance_payload(&snapshot, &payload).await?;
+        }
+        Ok(())
+    }
+
     /// Persists the current state of a process instance.
     pub(crate) async fn persist_instance(&self, instance_id: Uuid) {
         if let (Some(p), Some(inst_arc)) =

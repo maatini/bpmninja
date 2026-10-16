@@ -667,10 +667,17 @@ impl WorkflowEngine {
         {
             let mut instance = instance.write().await;
             instance.event_state = Some(Box::new(state));
-            if matches!(def.nodes.get(&token.current_node), Some(crate::BpmnElement::ConditionalStartEvent { .. })) {
+            if matches!(
+                def.nodes.get(&token.current_node),
+                Some(crate::BpmnElement::ConditionalStartEvent { .. })
+            ) {
                 Self::register_conditional_wait(&mut instance, token, &token.current_node, None, 0);
                 let state = instance.event_state.as_mut().unwrap();
-                let wait = state.conditional_waits.values_mut().find(|wait| wait.token_id == token.id).unwrap();
+                let wait = state
+                    .conditional_waits
+                    .values_mut()
+                    .find(|wait| wait.token_id == token.id)
+                    .unwrap();
                 wait.claimed = true;
                 wait.claimed_revision = Some(0);
                 token.conditional_wait = Some(wait.id);
@@ -684,10 +691,11 @@ impl WorkflowEngine {
                 completed: false,
             });
         }
-        if matches!(def.nodes.get(&token.current_node), Some(crate::BpmnElement::ConditionalStartEvent { .. })) {
-            if let Some(p) = &self.persistence {
-                p.save_instance(&instance.read().await.clone()).await?;
-            }
+        if matches!(
+            def.nodes.get(&token.current_node),
+            Some(crate::BpmnElement::ConditionalStartEvent { .. })
+        ) {
+            self.persist_instance_required(instance_id).await?;
         } else {
             self.persist_instance(instance_id).await;
         }
@@ -895,7 +903,17 @@ impl WorkflowEngine {
     /// Run after loading definitions, instances and pending work. Remove cancelled records
     /// and resume an activation persisted before its first waiting task was written.
     pub async fn reconcile_event_subprocesses(&self) -> EngineResult<()> {
-        for (id, instance) in self.instances.all().await {
+        for id in self.instances.all().await.keys() {
+            self.reconcile_event_instance(*id).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn reconcile_event_instance(&self, id: Uuid) -> EngineResult<()> {
+        let Some(instance) = self.instances.get(&id).await else {
+            return Ok(());
+        };
+        for (id, instance) in [(id, instance)] {
             self.flush_event_lifecycle(id).await;
             self.upgrade_gateway_groups(id).await?;
             self.cleanup_conditional_boundaries(id).await;

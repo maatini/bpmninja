@@ -124,7 +124,7 @@ function ConditionalValue(props: any) {
   const debounce = useService('debounceInput');
   const event = eventDefinition(element);
   return TextFieldEntry({ ...props, label: 'Condition', debounce,
-    description: is(element, 'bpmn:IntermediateCatchEvent') ? 'A variable or comparison, e.g. amount > 100. Continues once when true.' : 'A variable or a comparison, e.g. amount > 100. Triggers again after becoming false, then true.',
+    description: is(element, 'bpmn:StartEvent') && is(element.businessObject.$parent, 'bpmn:Process') ? 'Evaluated explicitly through the conditional-start API using initial process variables.' : is(element, 'bpmn:IntermediateCatchEvent') ? 'A variable or comparison, e.g. amount > 100. Continues once when true.' : 'A variable or a comparison, e.g. amount > 100. Triggers again after becoming false, then true.',
     getValue: () => event.condition?.body || '',
     validate: (value: string) => value?.trim() ? undefined : 'A condition is required.',
     setValue: (value: string) => {
@@ -143,6 +143,12 @@ export class EventSubprocessPropertiesProvider {
   constructor(propertiesPanel: any) { propertiesPanel.registerProvider(500, this); }
   getGroups(element: any) {
     return (groups: any[]) => {
+      if (is(element, 'bpmn:StartEvent') && is(element.businessObject.$parent, 'bpmn:Process') && is(eventDefinition(element), 'bpmn:ConditionalEventDefinition')) {
+        groups.push({ id: 'ConditionalStartGroup', label: 'Conditional start', shouldOpen: true, entries: [
+          { id: 'conditional-start-condition', element, component: ConditionalValue, isEdited: isTextFieldEntryEdited }
+        ] });
+        return groups;
+      }
       if ((is(element, 'bpmn:IntermediateCatchEvent') || is(element, 'bpmn:BoundaryEvent')) && is(eventDefinition(element), 'bpmn:ConditionalEventDefinition')) {
         groups.push({ id: 'ConditionalCatchGroup', label: 'Conditional catch', shouldOpen: true, entries: [
           { id: 'conditional-catch-condition', element, component: ConditionalValue, isEdited: isTextFieldEntryEdited },
