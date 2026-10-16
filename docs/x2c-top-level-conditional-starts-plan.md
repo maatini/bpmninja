@@ -1,6 +1,6 @@
 # X2c — Explicit top-level conditional starts
 
-Status: implementation authorized by the user’s renewed instruction to continue after the explicit X2c approval question, 2026-10-16. Implemented; acceptance in progress.
+Status: completed and verified after user authorization, 2026-10-16.
 Runtime contract: [conditional starts](conditional-starts.md).
 
 ## Scope and observable behavior
@@ -111,6 +111,46 @@ engine writer limitation (C6); this feature does not introduce HA ownership.
   Clippy, diff check, and graphify update. Keep Cargo commands sequential. Record
   actual passing totals and any limitations in this plan before closure.
 
-X2c would complete the planned top-level-start subset, not full BPMN conditional
+X2c completes the planned top-level-start subset, not full BPMN conditional
 coverage: call/loop/container boundary attachments and nested runtime scopes
-would remain explicitly unsupported.
+remain explicitly unsupported.
+
+## Umsetzung und Abnahme (2026-10-16)
+
+Implementiert sind `ConditionalStartEvent`, die ausgewählte Prozess-/XML-
+Validierung, strikte Condition-Kompilierung, explizite Evaluation und die
+Ablehnung manueller Umgehungen. Memory und NATS reservieren Request-Quittungen
+atomar; True und False bleiben an Ergebnis und ursprüngliche Definition
+gebunden. Initialsnapshot und Start-Continuation besitzen explizite
+Persistenzbarrieren. Die Größenprüfung des vollständig vorbereiteten Snapshots
+läuft vor Reservierung; gespeicherte aktive/archivierte Instanzen werden per ID
+abgeglichen. Startup-Recovery schlägt bei kritischen Lesefehlern fehl.
+
+REST, TypeSpec und beide OpenAPI-Dateien sind synchronisiert. Modeler-Condition,
+Undo und XML-Roundtrip funktionieren ohne Interrupting-Feld am Top-Level-Start.
+Lifecycle-History und SSE enthalten Request-/Definitions-IDs ohne Kopie der
+Request-Variablen. Vertrag und Grenzen: [Conditional-Starts](conditional-starts.md).
+
+Bestanden:
+
+- `cargo test --workspace -j 2 -- --test-threads=1` mit verpflichtendem realem
+  JetStream (`REQUIRE_NATS_TESTS=1`): **636 Tests**, keine Fehler oder ignorierten
+  Tests. Enthalten: 402 Core, 5 Core-Integration, 87 Parser, 29 Server-Unit,
+  91 Server-E2E (davon 8 X2/X9-REST), 2 Memory und 20 NATS.
+- NATS prüft atomare Reservierung über getrennte Verbindungen, reservierte
+  Quittung ohne Instanz, Initialsnapshot mit geleerter Ready-Queue, gespeicherte
+  Continuation ohne erste Aufgabe, ursprüngliche Definition nach Redeploy,
+  False-Retry und archivierte Instanz vor Quittierungsabschluss. Wiederholtes
+  Recovery erzeugt keine zusätzlichen Tasks oder committed Start-/End-Listener.
+- Zehn fokussierte X2/X9-Browsertests mit installiertem Chrome; die von dieser
+  Playwright-Version erwartete gebündelte Chromium-Version fehlt lokal.
+- Neun Frontend-Eventtests, Frontend-Build und Lint (0 Fehler, 277 Warnungen).
+- TypeSpec-Kompilierung, synchronisierte OpenAPI-Dateien, `cargo fmt --all --check`
+  und `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+
+Zusätzlich bestanden: `cargo test -p persistence-nats --all-features --lib x2c --
+--test-threads=1` gegen denselben realen JetStream-Testserver. Der gezielte
+Recovery-Test besteht mit kompakten Snapshots, separaten Audit-Daten und
+Delta-Persistenz (1 Test, 19 ausgefiltert). Graphify wurde mit
+`graphify update .` ohne LLM aktualisiert; die Diff-Prüfung ist erfolgreich. X2 bleibt wegen Call-/Loop-/Container-Boundaries
+und verschachtelter Runtime-Scopes ausdrücklich teilweise offen (X6).

@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "improvements.md": {
-    "mtime": 1792147000.7821307,
-    "seen": 1792147370.1038878,
-    "ast_hash": "5b237d4440516218dac5eb1791c2388c",
+    "mtime": 1792162511.8607466,
+    "seen": 1792162625.7611952,
+    "ast_hash": "4e03c7fc3d8cee99487711a8a1d9fa1e",
     "semantic_hash": ""
   },
   "desktop-tauri/app-icon.png": {
@@ -2988,9 +2988,9 @@
     "semantic_hash": ""
   },
   "docs/x2-conditional-events-plan.md": {
-    "mtime": 1792146467.7463257,
-    "seen": 1792147370.1038878,
-    "ast_hash": "c14b7004b810848e569d36e4fbf62171",
+    "mtime": 1792162511.897306,
+    "seen": 1792162625.7611952,
+    "ast_hash": "c963ac2af1178e4a5904e88ab1bd5f88",
     "semantic_hash": ""
   },
   "desktop-tauri/src-tauri/gen/schemas/acl-manifests.json": {
@@ -3042,9 +3042,9 @@
     "semantic_hash": ""
   },
   "docs/x2b-boundary-conditional-plan.md": {
-    "mtime": 1792146467.7473135,
-    "seen": 1792147370.1038878,
-    "ast_hash": "b97850ea6801b7bfea7a352e909b0986",
+    "mtime": 1792162511.924824,
+    "seen": 1792162625.7611952,
+    "ast_hash": "fc53870e3ab4705893b7b21ff60f3c1b",
     "semantic_hash": ""
   },
   "engine-core/src/engine/conditional_boundary.rs": {
@@ -3066,21 +3066,15 @@
     "semantic_hash": ""
   },
   "docs/x2c-top-level-conditional-starts-plan.md": {
-    "mtime": 1792146418.0149336,
-    "seen": 1792147370.1038878,
-    "ast_hash": "06e95f16601d9e6d60e22014b8447edf",
+    "mtime": 1792162511.8107045,
+    "seen": 1792162625.7611952,
+    "ast_hash": "395a2c7814c26964d65a98e98ae21c27",
     "semantic_hash": ""
   },
   "engine-core/src/engine/conditional_start.rs": {
     "mtime": 1792146868.8129642,
     "seen": 1792147370.1028888,
     "ast_hash": "61e8a1d0ac8bf1b8a8e10aeab9268dbe",
-    "semantic_hash": ""
-  },
-  "TASK_MEMORY.md": {
-    "mtime": 1792146725.5893402,
-    "seen": 1792147370.1038878,
-    "ast_hash": "699884ede85186e56a964dfc5401db2e",
     "semantic_hash": ""
   },
   "engine-core/src/engine/tests/conditional_starts.rs": {
