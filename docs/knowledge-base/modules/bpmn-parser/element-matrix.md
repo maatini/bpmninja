@@ -21,7 +21,7 @@ Only the deployed process is checked (first `isExecutable="true"` process, else 
 | Error | ✅ interrupting, process-level event sub-process [X9a] | — | — | ✅ | ✅ |
 | Escalation | ✅ process-level event sub-process [X9a] | — | ✅ | ✅ | ✅ |
 | Compensation | ❌ in event sub-process [X9] | — | ✅ | ✅ | ✅ |
-| Conditional | ✅ process-level event sub-process [X9b]; top-level ❌ [X2] | ✅ [X2a], normal flow and event-based gateway alternatives | — | ❌ [X2] | — |
+| Conditional | ✅ process-level event sub-process [X9b]; top-level ❌ [X2] | ✅ [X2a], normal flow and event-based gateway alternatives | — | ✅ non-loop task attachments [X2b] | — |
 | Signal | ✅ latest version for process starts; original version for process-level event sub-process handlers | ✅ | ✅ (broadcast after the step) | ✅ interrupting / non-interrupting | ✅ (not in embedded sub-processes) |
 | Link | — | ✅ (resolved at parse time) | ✅ (resolved at parse time) | — | — |
 | Cancel | — | — | — | ❌ [X7] | ❌ [X7] |

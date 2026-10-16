@@ -27,6 +27,8 @@ impl WorkflowEngine {
             }) {
                 continue;
             }
+            self.track_boundary_job(instance_id, token, t.id, Some(t.clone()), None)
+                .await?;
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
@@ -39,6 +41,8 @@ impl WorkflowEngine {
             }) {
                 continue;
             }
+            self.track_boundary_job(instance_id, token, m.id, None, Some(m.clone()))
+                .await?;
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -68,6 +72,11 @@ impl WorkflowEngine {
             },
         };
 
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::User(pending.task_id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(
@@ -173,6 +182,8 @@ impl WorkflowEngine {
             }) {
                 continue;
             }
+            self.track_boundary_job(instance_id, token, t.id, Some(t.clone()), None)
+                .await?;
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
@@ -185,6 +196,8 @@ impl WorkflowEngine {
             }) {
                 continue;
             }
+            self.track_boundary_job(instance_id, token, m.id, None, Some(m.clone()))
+                .await?;
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -221,6 +234,11 @@ impl WorkflowEngine {
             },
         };
 
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::Service(svc_task.id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(

@@ -98,9 +98,6 @@ impl WorkflowEngine {
                 }
                 continue;
             }
-            // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
-            self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
-                .await;
 
             let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await {
                 Some(lk.read().await.clone())
@@ -152,6 +149,7 @@ impl WorkflowEngine {
                 is_non_interrupting = true;
             }
 
+            let mut boundary_siblings = None;
             let mut token = {
                 let inst_arc = self
                     .instances
@@ -160,6 +158,49 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
                 let mut inst = inst_arc.write().await;
 
+                // A selected old boundary job must not consume a later task visit.
+                let expected = match def.nodes.get(&timer.node_id) {
+                    Some(crate::domain::BpmnElement::BoundaryTimerEvent {
+                        attached_to, ..
+                    }) => Some(attached_to.as_str()),
+                    _ => None,
+                };
+                if let Some(expected) = expected
+                    && inst.tokens.get(&timer.token_id).is_none_or(|token| {
+                        token.current_node != expected
+                            || !crate::engine::event_subprocess::token_valid(&inst, token)
+                    })
+                {
+                    drop(inst);
+                    self.remove_persisted_timer(timer.id).await;
+                    continue;
+                }
+                if let Some(source) = inst.tokens.get(&timer.token_id)
+                    && expected.is_some()
+                    && source.boundary_activation.is_some()
+                {
+                    let activation = inst
+                        .event_state
+                        .as_ref()
+                        .and_then(|state| state.boundary_activations.get(&source.id));
+                    if !activation.is_some_and(|activation| activation.jobs.contains(&timer.id)) {
+                        drop(inst);
+                        self.remove_persisted_timer(timer.id).await;
+                        continue;
+                    }
+                    boundary_siblings =
+                        Some(activation.unwrap().jobs.iter().copied().collect::<Vec<_>>());
+                    let source_id = source.id;
+                    if let Some(activation) = inst
+                        .event_state
+                        .as_mut()
+                        .and_then(|state| state.boundary_activations.get_mut(&source_id))
+                    {
+                        activation.jobs.clear();
+                        activation.timers.clear();
+                        activation.messages.clear();
+                    }
+                }
                 if is_non_interrupting {
                     // Clone the token, leave the original waiting
                     let mut original = inst
@@ -174,6 +215,7 @@ impl WorkflowEngine {
                         .clone();
 
                     original.id = uuid::Uuid::new_v4();
+                    original.boundary_activation = None;
 
                     // Add cloned token as parallel token
                     inst.tokens.insert(original.id, original.clone());
@@ -200,14 +242,28 @@ impl WorkflowEngine {
                     // Interrupting timer: Remove original token
 
                     // Clean up orphaned pending tasks that matched this token
-                    inst.tokens.remove(&timer.token_id).ok_or_else(|| {
-                        EngineError::InvalidDefinition(format!(
-                            "Token {} not found in instance",
-                            timer.token_id
-                        ))
-                    })?
+                    inst.tokens
+                        .remove(&timer.token_id)
+                        .map(|mut token| {
+                            Self::close_conditional_boundaries(&mut inst, &mut token);
+                            token
+                        })
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(format!(
+                                "Token {} not found in instance",
+                                timer.token_id
+                            ))
+                        })?
                 }
             };
+
+            let conditional_owner = boundary_siblings.is_some();
+            if let Some(jobs) = boundary_siblings {
+                self.cancel_boundary_job_ids(&jobs).await;
+            } else {
+                self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
+                    .await;
+            }
 
             // Clean up orphaned tasks outside the instance lock
             if !is_non_interrupting {
@@ -289,6 +345,31 @@ impl WorkflowEngine {
                             remaining_repetitions: new_remaining,
                         };
                         let new_id = new_pending.id;
+                        let source =
+                            if let Some(instance) = self.instances.get(&timer.instance_id).await {
+                                instance.read().await.tokens.get(&timer.token_id).cloned()
+                            } else {
+                                None
+                            };
+                        if let Some(source) =
+                            source.filter(|token| token.boundary_activation.is_some())
+                        {
+                            if self
+                                .track_boundary_job(
+                                    timer.instance_id,
+                                    &source,
+                                    new_id,
+                                    Some(new_pending.clone()),
+                                    None,
+                                )
+                                .await
+                                .is_err()
+                            {
+                                continue;
+                            }
+                        } else if conditional_owner {
+                            continue;
+                        }
                         self.insert_pending_timer(new_pending);
                         self.persist_timer(new_id).await;
                     }

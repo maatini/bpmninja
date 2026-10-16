@@ -26,8 +26,8 @@ function Interrupting(props: any) {
   const modeling = useService('modeling');
   return CheckboxEntry({ ...props, label: 'Interrupting',
     description: 'Cancel main execution and other active handlers when triggered.',
-    getValue: () => props.element.businessObject.isInterrupting !== false,
-    setValue: (value: boolean) => modeling.updateProperties(props.element, { isInterrupting: value })
+    getValue: () => props.element.businessObject[is(props.element, 'bpmn:BoundaryEvent') ? 'cancelActivity' : 'isInterrupting'] !== false,
+    setValue: (value: boolean) => modeling.updateProperties(props.element, { [is(props.element, 'bpmn:BoundaryEvent') ? 'cancelActivity' : 'isInterrupting']: value })
   });
 }
 
@@ -143,9 +143,10 @@ export class EventSubprocessPropertiesProvider {
   constructor(propertiesPanel: any) { propertiesPanel.registerProvider(500, this); }
   getGroups(element: any) {
     return (groups: any[]) => {
-      if (is(element, 'bpmn:IntermediateCatchEvent') && is(eventDefinition(element), 'bpmn:ConditionalEventDefinition')) {
+      if ((is(element, 'bpmn:IntermediateCatchEvent') || is(element, 'bpmn:BoundaryEvent')) && is(eventDefinition(element), 'bpmn:ConditionalEventDefinition')) {
         groups.push({ id: 'ConditionalCatchGroup', label: 'Conditional catch', shouldOpen: true, entries: [
-          { id: 'conditional-catch-condition', element, component: ConditionalValue, isEdited: isTextFieldEntryEdited }
+          { id: 'conditional-catch-condition', element, component: ConditionalValue, isEdited: isTextFieldEntryEdited },
+          ...(is(element, 'bpmn:BoundaryEvent') ? [{ id: 'conditional-boundary-interrupting', element, component: Interrupting, isEdited: isCheckboxEntryEdited }] : [])
         ] });
         return groups;
       }

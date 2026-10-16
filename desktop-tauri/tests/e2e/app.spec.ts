@@ -1918,6 +1918,31 @@ test.describe('bpmninja Desktop App – E2E', () => {
     expect(await exportedXml(page)).toContain('messageRef="AlertMessage"');
   });
 
+  test('X2b edits a conditional boundary condition and interrupting flag', async ({ page }) => {
+    const xml = X11_XML.replace('</bpmn:process>', '<bpmn:boundaryEvent id="boundary" attachedToRef="work" cancelActivity="false"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:boundaryEvent></bpmn:process>')
+      .replace('</bpmndi:BPMNPlane>', '<bpmndi:BPMNShape id="boundary_di" bpmnElement="boundary"><dc:Bounds x="300" y="142" width="36" height="36" /></bpmndi:BPMNShape></bpmndi:BPMNPlane>');
+    await loadXmlAndClickElement(page, xml, 'boundary');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    const interrupting = page.getByLabel('Interrupting', { exact: true });
+    await expect(interrupting).not.toBeChecked();
+    await interrupting.check();
+    const exported = await exportedXml(page);
+    expect(exported).not.toContain('cancelActivity="false"');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('boundary'));
+    }, exported);
+    await expect(condition).toHaveValue('amount > 100');
+    await expect(interrupting).toBeChecked();
+  });
+
   test('X2a edits an intermediate conditional catch with undo and XML roundtrip', async ({ page }) => {
     const xml = X11_XML.replace(/<bpmn:serviceTask id="work"[\s\S]*?<\/bpmn:serviceTask>/, '<bpmn:intermediateCatchEvent id="work"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:intermediateCatchEvent>');
     await loadXmlAndClickElement(page, xml, 'work');

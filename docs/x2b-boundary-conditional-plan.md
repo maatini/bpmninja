@@ -1,7 +1,6 @@
 # X2b — Conditional boundary catches
 
-Status: proposed for implementation, 2026-10-16. X2a is complete. This concrete
-plan is ready for the separate GO required by Phase 4 in improvements.md.
+Status: completed and verified after user GO, 2026-10-16. X2 remains partial.
 
 ## Scope
 
@@ -109,3 +108,32 @@ runtime scopes. Top-level conditional starts remain separate X2 work.
 
 This plan defines the supported engine contract. It does not claim complete BPMN
 conditional-event coverage. Call/loop boundaries and container scopes remain open.
+
+## Implementation checkpoint (2026-10-16)
+
+Implemented the boundary element/parser and same-scope task validation, strict
+compiled conditions, per-visit identities and per-boundary subscription IDs,
+persisted transition latches, atomic claim/completion ordering, cancellation
+intent, durable branch callbacks/continuations, and startup reconciliation.
+Receive tasks retain their existing MessageCatchEvent runtime mapping. Sibling
+boundary jobs retain their existing persisted schemas; activation-owned job IDs
+fence delayed timer/message/signal deliveries from later task visits.
+
+Modeler Condition/Interrupting editing and TypeSpec/OpenAPI pending metadata are
+implemented. The runtime contract is in [boundary conditional
+catches](boundary-conditional-catches.md). Acceptance passed: 396 core, 86 parser,
+19 real NATS, 29 server, 7 REST, 9 focused browser, and 9 frontend event tests.
+Frontend build/lint, TypeSpec compilation, synchronized OpenAPI, Rust formatting,
+strict workspace Clippy, and diff checks pass. Graphify was refreshed.
+Nine focused X2/X9 browser tests and frontend build/lint/nine event tests pass.
+A broader exploratory browser run encountered an unrelated Monaco initialization
+failure; the focused editor suite excludes that monitoring test.
+
+Final recovery review added exact task-ID cleanup for completion/self-loop crash
+points, per-visit start-listener reset, sibling descriptor/deadline restoration
+before task publication (including suspended restart/resume), delayed-job
+membership checks, and recurring-timer regression coverage. The resulting core
+suite passes 396 tests and strict workspace Clippy passes. The final real NATS
+and server/REST reruns pass (19, 29, and 7 tests respectively).
+
+The next proposed increment is [X2c explicit top-level conditional starts](x2c-top-level-conditional-starts-plan.md); its separate GO is pending.

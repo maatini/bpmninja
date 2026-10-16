@@ -226,6 +226,12 @@ pub struct ProcessInstance {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EventSubProcessState {
     #[serde(default)]
+    pub boundary_activations: HashMap<Uuid, BoundaryActivation>,
+    #[serde(default)]
+    pub boundary_cleanup: Vec<Uuid>,
+    #[serde(default)]
+    pub boundary_task_cleanup: Vec<BoundaryTask>,
+    #[serde(default)]
     pub conditional_waits: HashMap<Uuid, ConditionalWait>,
     #[serde(default)]
     pub gateway_waits: HashMap<Uuid, EventWaitGroup>,
@@ -257,6 +263,8 @@ pub struct EventSubProcessState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConditionalWait {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_activation: Option<Uuid>,
     #[serde(default)]
     pub registered_revision: u64,
     #[serde(default)]
@@ -492,4 +500,32 @@ mod tests {
         inst.variables.insert("x".into(), json!(42));
         assert!(inst.file_variable_names().is_empty());
     }
+}
+
+/// Conditional boundaries belong to an activity visit, not just a BPMN node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundaryActivation {
+    #[serde(default)]
+    pub tasks: Vec<BoundaryTask>,
+    #[serde(default)]
+    pub timers: Vec<PendingTimer>,
+    #[serde(default)]
+    pub messages: Vec<PendingMessageCatch>,
+    #[serde(default)]
+    pub jobs: std::collections::HashSet<Uuid>,
+    #[serde(default)]
+    pub subscriptions: HashMap<String, Uuid>,
+    #[serde(default)]
+    pub registered_revision: u64,
+    pub id: Uuid,
+    pub node_id: String,
+    pub token: Token,
+    pub latches: HashMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoundaryTask {
+    User(Uuid),
+    Service(Uuid),
+    Message(Uuid),
 }

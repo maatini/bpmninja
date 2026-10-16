@@ -153,6 +153,11 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::Message(pending.id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(

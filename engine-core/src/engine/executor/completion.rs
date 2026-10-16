@@ -63,6 +63,31 @@ impl WorkflowEngine {
         if !crate::engine::event_subprocess::token_valid(&inst, token) {
             return Err(EngineError::AlreadyCompleted);
         }
+        if token.boundary_activation.is_some() {
+            let mut candidate = token.clone();
+            let mut variables = inst.variables.clone();
+            let mut audits = Vec::new();
+            scripting::run_end_scripts(
+                &self.scripts,
+                instance_id,
+                &mut candidate,
+                def,
+                node_id,
+                &mut audits,
+                &mut variables,
+            )
+            .await?;
+            let next = super::resolve_next_target(def, node_id, &candidate.variables)?;
+            Self::close_conditional_boundaries(&mut inst, &mut candidate);
+            inst.variables = variables;
+            inst.audit_log.extend(audits);
+            let mut continuation = candidate.clone();
+            continuation.current_node = next;
+            inst.tokens.insert(continuation.id, continuation);
+            *token = candidate;
+            Self::evaluate_conditionals(&mut inst, def)?;
+            return Ok(());
+        }
         let crate::ProcessInstance {
             audit_log,
             variables,
@@ -78,6 +103,7 @@ impl WorkflowEngine {
             variables,
         )
         .await?;
+        Self::close_conditional_boundaries(&mut inst, token);
         Self::evaluate_conditionals(&mut inst, def)?;
         Ok(())
     }

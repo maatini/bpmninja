@@ -27,3 +27,5 @@ pub mod topic_index;
 pub mod xor_merge;
 
 mod conditional_catches;
+
+mod conditional_boundaries;

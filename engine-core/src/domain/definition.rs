@@ -123,6 +123,7 @@ impl ProcessDefinition {
         for (node_id, element) in &nodes {
             if let BpmnElement::BoundaryTimerEvent { attached_to, .. }
             | BpmnElement::BoundaryMessageEvent { attached_to, .. }
+            | BpmnElement::BoundaryConditionalEvent { attached_to, .. }
             | BpmnElement::BoundarySignalEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
@@ -275,7 +276,8 @@ impl ProcessDefinition {
             })
             .chain(self.nodes.values().filter_map(|node| {
                 match node {
-                    BpmnElement::ConditionalCatchEvent { condition } => {
+                    BpmnElement::ConditionalCatchEvent { condition }
+                    | BpmnElement::BoundaryConditionalEvent { condition, .. } => {
                         crate::condition::compile_event_condition(condition)
                             .ok()
                             .map(|compiled| (condition.clone(), compiled))
@@ -308,15 +310,18 @@ impl ProcessDefinition {
     }
 
     pub(crate) fn has_conditionals(&self) -> bool {
-        self.nodes
-            .values()
-            .any(|node| matches!(node, BpmnElement::ConditionalCatchEvent { .. }))
-            || self.event_subprocesses.iter().any(|handler| {
-                matches!(
-                    handler.trigger,
-                    crate::domain::EventSubProcessTrigger::Conditional(_)
-                )
-            })
+        self.nodes.values().any(|node| {
+            matches!(
+                node,
+                BpmnElement::ConditionalCatchEvent { .. }
+                    | BpmnElement::BoundaryConditionalEvent { .. }
+            )
+        }) || self.event_subprocesses.iter().any(|handler| {
+            matches!(
+                handler.trigger,
+                crate::domain::EventSubProcessTrigger::Conditional(_)
+            )
+        })
     }
 
     /// Returns the (id, element) of the start event.
@@ -528,6 +533,7 @@ impl ProcessDefinitionBuilder {
         }
         validate_loops(&def.nodes, &self.loops)?;
         def.loops = self.loops;
+        crate::engine::conditional_boundary::validate(&def)?;
         Ok(def)
     }
 }

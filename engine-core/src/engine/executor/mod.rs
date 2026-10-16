@@ -463,10 +463,14 @@ impl WorkflowEngine {
 
         if let Some(instance) = self.instances.get(&instance_id).await {
             let mut instance = instance.write().await;
+            Self::register_conditional_boundaries(&mut instance, &def_clone, token);
             Self::evaluate_conditionals(&mut instance, &def_clone)?;
             if !crate::engine::event_subprocess::token_valid(&instance, token) {
                 return Err(EngineError::AlreadyCompleted);
             }
+        }
+        if token.boundary_activation.is_some() {
+            self.persist_instance(instance_id).await;
         }
         if let Some(instance) = self.instances.get(&instance_id).await {
             let claimed = instance
@@ -541,7 +545,8 @@ impl WorkflowEngine {
                 self.handle_event_based_gateway(instance_id, token, &def_clone, &current_id)
                     .await
             }
-            BpmnElement::ConditionalCatchEvent { .. } => {
+            BpmnElement::BoundaryConditionalEvent { .. }
+            | BpmnElement::ConditionalCatchEvent { .. } => {
                 self.handle_conditional_catch(instance_id, token, &def_clone, &current_id)
                     .await
             }

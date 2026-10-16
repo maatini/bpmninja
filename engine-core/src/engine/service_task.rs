@@ -253,12 +253,14 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.tokens.remove(&task.token_id).ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "Token {} not found in instance",
-                    task.token_id
-                ))
-            })?
+            let retrieved = inst.tokens.remove(&task.token_id);
+            drop(inst);
+            if let Some(token) = retrieved {
+                token
+            } else {
+                self.remove_persisted_service_task(task_id).await;
+                return Err(EngineError::AlreadyCompleted);
+            }
         };
         let original_token = token.clone();
         for (k, v) in variables {
@@ -279,6 +281,8 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
             if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                drop(inst);
+                self.remove_persisted_service_task(task_id).await;
                 return Err(EngineError::AlreadyCompleted);
             }
             inst.push_audit_log(format!(
@@ -289,6 +293,8 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                drop(inst);
+                self.remove_persisted_service_task(task_id).await;
                 return Err(EngineError::AlreadyCompleted);
             }
             if token.event_context.is_none() {
@@ -315,6 +321,8 @@ impl WorkflowEngine {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    drop(inst);
+                    self.remove_persisted_service_task(task_id).await;
                     return Err(EngineError::AlreadyCompleted);
                 }
                 if let Some(old) = &old_state {
@@ -587,12 +595,14 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.tokens.remove(&task.token_id).ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "Token {} not found in instance",
-                    task.token_id
-                ))
-            })?
+            let retrieved = inst.tokens.remove(&task.token_id);
+            drop(inst);
+            if let Some(token) = retrieved {
+                token
+            } else {
+                self.remove_persisted_service_task(task_id).await;
+                return Err(EngineError::AlreadyCompleted);
+            }
         };
         let original_token = token.clone();
         for (k, v) in variables {
@@ -640,6 +650,8 @@ impl WorkflowEngine {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    drop(inst);
+                    self.remove_persisted_service_task(task_id).await;
                     return Err(EngineError::AlreadyCompleted);
                 }
                 if let Some(old) = &old_state {
@@ -881,12 +893,18 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.tokens.remove(&task.token_id).ok_or_else(|| {
-                    EngineError::InvalidDefinition(format!(
-                        "Token {} not found in instance",
-                        task.token_id
-                    ))
-                })?
+                inst.tokens
+                    .remove(&task.token_id)
+                    .map(|mut token| {
+                        Self::close_conditional_boundaries(&mut inst, &mut token);
+                        token
+                    })
+                    .ok_or_else(|| {
+                        EngineError::InvalidDefinition(format!(
+                            "Token {} not found in instance",
+                            task.token_id
+                        ))
+                    })?
             };
             token.discard_data_scope();
             token.variables.extend(variables);
@@ -909,6 +927,8 @@ impl WorkflowEngine {
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
                 if !crate::engine::event_subprocess::token_valid(&inst, &token) {
+                    drop(inst);
+                    self.remove_persisted_service_task(task_id).await;
                     return Err(EngineError::AlreadyCompleted);
                 }
                 if token.event_context.is_none() {

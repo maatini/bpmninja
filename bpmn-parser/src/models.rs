@@ -536,6 +536,10 @@ pub(crate) struct BpmnIntermediateCatchEvent {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnBoundaryEvent {
+    #[serde(rename = "extensionElements")]
+    pub extension_elements: Option<BpmnExtensionElements>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "@attachedToRef")]

@@ -1,6 +1,6 @@
 # X2 / X9b — Conditional events
 
-Status: X9b implemented and verified after user GO, 2026-10-15. X2a intermediate catches are complete. X2 remains partial; boundary catches and top-level conditional starts remain later increments.
+Status: X9b implemented and verified after user GO, 2026-10-15. X2a intermediate catches are complete. X2 remains partial; X2b task boundaries are complete and verified; call/loop/container boundaries and top-level conditional starts remain later increments.
 
 ## First increment: shared evaluation and X9b
 
@@ -153,10 +153,11 @@ a new global map alongside old central-token copies while another completion run
 - **Intermediate catches (X2a):** [Completed plan and acceptance](x2a-intermediate-conditional-plan.md); implementation and integration acceptance complete. Persisted per-token subscriptions, immediate
   evaluation on arrival, single consumption, event-based gateway competition,
   loop/parallel activation isolation, and restore/cancellation.
-- **Boundary catches (X2b):** [Concrete implementation and acceptance plan](x2b-boundary-conditional-plan.md), prepared 2026-10-16; awaiting separate GO. Per-activity activation identity, interrupting versus
-  repeated non-interrupting branches, task/child/loop cancellation, and precedence
-  with activity completion. Embedded-subprocess scope behavior still requires X6.
-- **Top-level starts:** a definition-level evaluation API and explicit input
+- **Boundary catches (X2b):** [Concrete implementation and acceptance plan](x2b-boundary-conditional-plan.md), completed and verified 2026-10-16. Per-activity activation identity, interrupting versus
+  repeated non-interrupting branches, exact task/job cancellation, and precedence
+  with activity completion are implemented for ordinary tasks. Call/loop/container
+  attachments remain excluded; subprocess scope behavior still requires X6.
+- **Top-level starts (X2c):** [Concrete next-increment plan](x2c-top-level-conditional-starts-plan.md), prepared 2026-10-16; awaiting separate GO. A definition-level evaluation API and explicit input
   context, definition-version selection, deduplication/retrigger ownership, and
   startup/redeploy behavior. An existing instance's variable update must not
   implicitly launch unrelated process instances.

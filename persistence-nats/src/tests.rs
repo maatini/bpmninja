@@ -1592,3 +1592,141 @@ async fn test_instance_journal_roundtrip_and_checkpointing() {
     assert!(nodes.get(&head.key).await.unwrap().is_none());
     engine.shutdown().await;
 }
+
+#[tokio::test]
+async fn x2b_boundary_claim_cleanup_and_version_survive_reconnect() {
+    use engine_core::domain::{BpmnElement, ProcessDefinitionBuilder};
+    use engine_core::{InstanceState, WorkflowEngine};
+    use std::collections::HashMap;
+    let stream = format!("TEST_X2B_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let definition = ProcessDefinitionBuilder::new("boundary_restore")
+        .node("start", BpmnElement::StartEvent)
+        .node("main", BpmnElement::UserTask("main".into()))
+        .node(
+            "boundary",
+            BpmnElement::BoundaryConditionalEvent {
+                attached_to: "main".into(),
+                condition: "flag".into(),
+                cancel_activity: true,
+                order: 0,
+            },
+        )
+        .node("work", BpmnElement::UserTask("original".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "main")
+        .flow("main", "end")
+        .flow("boundary", "work")
+        .flow("work", "end")
+        .build()
+        .unwrap();
+    let mut newer = definition.clone();
+    let (key, _) = engine.deploy_definition(definition).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    let state = snapshot.event_state.as_mut().unwrap();
+    let activation = state.boundary_activations.values().next().unwrap().clone();
+    state.boundary_activations.clear();
+    state.boundary_cleanup.push(activation.token.id);
+    snapshot.tokens.remove(&activation.token.id);
+    for active in &mut snapshot.active_tokens {
+        if active.token.id == activation.token.id {
+            active.completed = true;
+        }
+    }
+    let mut token = activation.token;
+    token.id = Uuid::new_v4();
+    token.current_node = "boundary".into();
+    token.boundary_activation = None;
+    let claim = Uuid::new_v4();
+    token.conditional_wait = Some(claim);
+    state.conditional_waits.insert(
+        claim,
+        engine_core::runtime::ConditionalWait {
+            boundary_activation: Some(activation.id),
+            id: claim,
+            token_id: token.id,
+            node_id: "boundary".into(),
+            generation: state.generation,
+            claimed: true,
+            group: None,
+            order: 0,
+            registered_revision: 0,
+            claimed_revision: Some(1),
+        },
+    );
+    state.ready_conditional_tokens.clear();
+    snapshot.tokens.insert(token.id, token);
+    snapshot
+        .variables
+        .insert("flag".into(), serde_json::json!(false));
+    persistence.save_instance(&snapshot).await.unwrap();
+    newer
+        .nodes
+        .insert("work".into(), BpmnElement::UserTask("newer".into()));
+    if let BpmnElement::BoundaryConditionalEvent { condition, .. } =
+        newer.nodes.get_mut("boundary").unwrap()
+    {
+        *condition = "never".into();
+    }
+    let (new_key, _) = engine.deploy_definition(newer).await;
+    drop(engine);
+    drop(persistence);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    for instance in fresh.list_instances().await.unwrap() {
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
+    }
+    for task in fresh.list_user_tasks().await.unwrap() {
+        if task.instance_id == id {
+            restored.restore_user_task(task);
+        }
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored.reconcile_event_subprocesses().await.unwrap();
+    let tasks = restored.get_pending_user_tasks();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].assignee, "original");
+    assert!(
+        restored
+            .get_instance_details(id)
+            .await
+            .unwrap()
+            .event_state
+            .unwrap()
+            .boundary_cleanup
+            .is_empty()
+    );
+    assert_eq!(
+        fresh
+            .list_user_tasks()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|task| task.instance_id == id)
+            .count(),
+        1
+    );
+    restored
+        .complete_user_task(tasks[0].task_id, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+}

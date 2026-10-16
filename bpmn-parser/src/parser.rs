@@ -768,7 +768,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     }
 
     // 9. Boundary Events
-    for bd in process.boundary_events {
+    for (order, bd) in process.boundary_events.into_iter().enumerate() {
         let node_id = bd.id.clone();
         let attached_to = bd.attached_to_ref.clone();
         // cancelActivity is true by default
@@ -830,6 +830,26 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     cancel_activity,
                 },
             );
+        } else if let Some(conditional) = bd.conditional_event_definition {
+            let condition = conditional
+                .condition
+                .ok_or_else(|| {
+                    EngineError::InvalidDefinition(
+                        "conditional boundary requires a condition".into(),
+                    )
+                })?
+                .value
+                .trim()
+                .to_string();
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
+                    cancel_activity,
+                    order,
+                },
+            );
         } else if bd.compensate_event_definition.is_some() {
             builder = builder.node(
                 bd.id,
@@ -841,7 +861,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 node_id
             )));
         }
-        builder = add_listeners(builder, &node_id, None);
+        builder = add_listeners(builder, &node_id, bd.extension_elements);
     }
 
     // 10. Process Sequence Flows
@@ -987,6 +1007,7 @@ fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
             "compensateEventDefinition",
         ],
         "boundaryEvent" => &[
+            "conditionalEventDefinition",
             "signalEventDefinition",
             "timerEventDefinition",
             "messageEventDefinition",
@@ -1417,7 +1438,8 @@ fn flatten_subprocess(
         }
     }
 
-    for bd in sp.boundary_events {
+    for (order, bd) in sp.boundary_events.into_iter().enumerate() {
+        let node_id = bd.id.clone();
         let attached_to = bd.attached_to_ref.clone();
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
@@ -1475,6 +1497,26 @@ fn flatten_subprocess(
                     cancel_activity,
                 },
             );
+        } else if let Some(conditional) = bd.conditional_event_definition {
+            let condition = conditional
+                .condition
+                .ok_or_else(|| {
+                    EngineError::InvalidDefinition(
+                        "conditional boundary requires a condition".into(),
+                    )
+                })?
+                .value
+                .trim()
+                .to_string();
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
+                    cancel_activity,
+                    order,
+                },
+            );
         } else if bd.compensate_event_definition.is_some() {
             builder = builder.node(
                 bd.id,
@@ -1486,6 +1528,7 @@ fn flatten_subprocess(
                 bd.id
             )));
         }
+        builder = add_listeners(builder, &node_id, bd.extension_elements);
     }
 
     for flow in sp.sequence_flows {

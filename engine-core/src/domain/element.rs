@@ -49,6 +49,13 @@ pub enum BpmnElement {
     },
     /// A timer intermediate catch event that pauses the token until the duration elapses.
     TimerCatchEvent(TimerDefinition),
+    BoundaryConditionalEvent {
+        #[serde(default)]
+        order: usize,
+        attached_to: String,
+        condition: String,
+        cancel_activity: bool,
+    },
     ConditionalCatchEvent {
         condition: String,
     },

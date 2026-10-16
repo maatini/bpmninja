@@ -1967,6 +1967,17 @@ components:
         - generation
         - claimed
       properties:
+        kind:
+          type: string
+          enum:
+            - intermediate
+            - boundary
+        activity_activation_id:
+          type: string
+        attached_to:
+          type: string
+        interrupting:
+          type: boolean
         id:
           type: string
         instance_id:

@@ -93,9 +93,34 @@ fn conditional_expression(start: &Node, event: &Node) -> EngineResult<String> {
 
 pub(crate) fn validate_conditional_catches(xml: &str, process_id: &str) -> EngineResult<()> {
     fn visit(node: &Node) -> EngineResult<()> {
-        if node.name == "intermediateCatchEvent" {
+        if node.name == "intermediateCatchEvent" || node.name == "boundaryEvent" {
             for event in node.children("conditionalEventDefinition") {
                 conditional_expression(node, event)?;
+            }
+        }
+        for boundary in node.children("boundaryEvent").filter(|boundary| {
+            boundary
+                .children("conditionalEventDefinition")
+                .next()
+                .is_some()
+        }) {
+            let attached = boundary.attr("attachedToRef");
+            if !node.children.iter().any(|target| {
+                target.attr("id") == attached
+                    && matches!(
+                        target.name.as_str(),
+                        "userTask"
+                            | "serviceTask"
+                            | "scriptTask"
+                            | "sendTask"
+                            | "receiveTask"
+                            | "manualTask"
+                            | "businessRuleTask"
+                    )
+            }) {
+                return Err(invalid(
+                    "conditional boundary requires an ordinary task in the same scope",
+                ));
             }
         }
         for child in &node.children {

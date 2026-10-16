@@ -45,12 +45,14 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.tokens.remove(&pending.token_id).ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "Token {} not found in instance",
-                    pending.token_id
-                ))
-            })?
+            let retrieved = inst.tokens.remove(&pending.token_id);
+            drop(inst);
+            if let Some(token) = retrieved {
+                token
+            } else {
+                self.remove_persisted_user_task(task_id).await;
+                return Err(EngineError::AlreadyCompleted);
+            }
         };
         let original_token = token.clone();
         for (k, v) in additional_vars {
@@ -106,6 +108,8 @@ impl WorkflowEngine {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    drop(inst);
+                    self.remove_persisted_user_task(task_id).await;
                     return Err(EngineError::AlreadyCompleted);
                 }
                 if let Some(old) = &old_state {

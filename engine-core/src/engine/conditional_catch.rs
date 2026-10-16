@@ -72,6 +72,7 @@ impl WorkflowEngine {
         state.conditional_waits.insert(
             id,
             ConditionalWait {
+                boundary_activation: None,
                 registered_revision: state.variable_revision,
                 claimed_revision: None,
                 id,
@@ -177,6 +178,8 @@ impl WorkflowEngine {
                     Some(BpmnElement::ConditionalCatchEvent { .. })
                 ) {
                     "Conditional catch consumed"
+                } else if wait.boundary_activation.is_some() {
+                    "Conditional boundary consumed"
                 } else {
                     "Event-gateway catch consumed"
                 },
@@ -187,6 +190,10 @@ impl WorkflowEngine {
             .with_context("occurrence_id", serde_json::json!(wait.id))
             .with_context("token_id", serde_json::json!(token.id))
             .with_context("generation", serde_json::json!(wait.generation))
+            .with_context(
+                "activity_activation_id",
+                serde_json::json!(wait.boundary_activation),
+            )
             .with_context("group_id", serde_json::json!(wait.group))
             .with_context(
                 "registered_revision",
@@ -294,6 +301,7 @@ impl WorkflowEngine {
         state.conditional_waits.insert(
             occurrence,
             ConditionalWait {
+                boundary_activation: None,
                 registered_revision: state.variable_revision,
                 claimed_revision: Some(state.variable_revision),
                 id: occurrence,
@@ -438,22 +446,26 @@ impl WorkflowEngine {
                             })
                     });
                     !waiting
-                        && !self
-                            .pending_user_tasks
-                            .iter()
-                            .any(|job| job.instance_id == id && job.token_id == token.id)
-                        && !self
-                            .pending_service_tasks
-                            .iter()
-                            .any(|job| job.instance_id == id && job.token_id == token.id)
-                        && !self
-                            .pending_timers
-                            .iter()
-                            .any(|job| job.instance_id == id && job.token_id == token.id)
-                        && !self
-                            .pending_message_catches
-                            .iter()
-                            .any(|job| job.instance_id == id && job.token_id == token.id)
+                        && !self.pending_user_tasks.iter().any(|job| {
+                            job.instance_id == id
+                                && job.token_id == token.id
+                                && job.node_id == token.current_node
+                        })
+                        && !self.pending_service_tasks.iter().any(|job| {
+                            job.instance_id == id
+                                && job.token_id == token.id
+                                && job.node_id == token.current_node
+                        })
+                        && !self.pending_timers.iter().any(|job| {
+                            job.instance_id == id
+                                && job.token_id == token.id
+                                && job.node_id == token.current_node
+                        })
+                        && !self.pending_message_catches.iter().any(|job| {
+                            job.instance_id == id
+                                && job.token_id == token.id
+                                && job.node_id == token.current_node
+                        })
                         && !instance
                             .outstanding_calls
                             .values()
@@ -484,13 +496,42 @@ impl WorkflowEngine {
                 let Some(definition) = self.definitions.get(&instance.definition_key) else {
                     continue;
                 };
+                for activation in state.boundary_activations.values() {
+                    for (node, element) in &definition.nodes {
+                        if let BpmnElement::BoundaryConditionalEvent {
+                            attached_to,
+                            cancel_activity,
+                            ..
+                        } = element
+                            && attached_to == &activation.node_id
+                        {
+                            result.push(serde_json::json!({"id":activation.subscriptions.get(node).unwrap_or(&activation.id), "instance_id":id, "node_id":node, "token_id":activation.token.id, "claimed":false, "generation":state.generation, "kind":"boundary", "activity_activation_id":activation.id, "attached_to":attached_to, "interrupting":cancel_activity}));
+                        }
+                    }
+                }
                 for wait in state.conditional_waits.values().filter(|wait| {
                     matches!(
                         definition.nodes.get(&wait.node_id),
-                        Some(BpmnElement::ConditionalCatchEvent { .. })
+                        Some(
+                            BpmnElement::ConditionalCatchEvent { .. }
+                                | BpmnElement::BoundaryConditionalEvent { .. }
+                        )
                     )
                 }) {
-                    result.push(serde_json::json!({ "id":wait.id, "instance_id":id, "node_id":wait.node_id, "token_id":wait.token_id, "claimed":wait.claimed, "generation":wait.generation }));
+                    let mut entry = serde_json::json!({ "id":wait.id, "instance_id":id, "node_id":wait.node_id, "token_id":wait.token_id, "claimed":wait.claimed, "generation":wait.generation, "kind": if matches!(definition.nodes.get(&wait.node_id), Some(BpmnElement::BoundaryConditionalEvent { .. })) { "boundary" } else { "intermediate" } });
+                    if let Some(BpmnElement::BoundaryConditionalEvent {
+                        attached_to,
+                        cancel_activity,
+                        ..
+                    }) = definition.nodes.get(&wait.node_id)
+                    {
+                        entry["attached_to"] = serde_json::json!(attached_to);
+                        entry["interrupting"] = serde_json::json!(cancel_activity);
+                        if let Some(activation) = wait.boundary_activation {
+                            entry["activity_activation_id"] = serde_json::json!(activation);
+                        }
+                    }
+                    result.push(entry);
                 }
             }
         }

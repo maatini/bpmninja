@@ -133,9 +133,6 @@ impl WorkflowEngine {
             }
             return Ok(());
         }
-        // Event-Based Gateway support: If this message catch triggered, clear any sibling wait states
-        self.clear_wait_states_for_token(catch.instance_id, &catch.token_id)
-            .await;
 
         if catch.token_id.is_nil() {
             self.pending_message_catches.insert(catch.id, catch);
@@ -174,6 +171,7 @@ impl WorkflowEngine {
         }
 
         // Retrieve token from central store
+        let mut boundary_siblings = None;
         let mut token = {
             let inst_arc = self
                 .instances
@@ -182,6 +180,52 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(catch.instance_id))?;
             let mut inst = inst_arc.write().await;
 
+            // A selected old boundary job must not consume a later task visit.
+            let expected = match def.nodes.get(&catch.node_id) {
+                Some(crate::domain::BpmnElement::BoundaryMessageEvent { attached_to, .. }) => {
+                    Some(attached_to.as_str())
+                }
+                Some(crate::domain::BpmnElement::BoundarySignalEvent { attached_to, .. }) => {
+                    Some(attached_to.as_str())
+                }
+                _ => None,
+            };
+            if let Some(expected) = expected
+                && inst.tokens.get(&catch.token_id).is_none_or(|token| {
+                    token.current_node != expected
+                        || !crate::engine::event_subprocess::token_valid(&inst, token)
+                })
+            {
+                drop(inst);
+                self.remove_persisted_message_catch(catch.id).await;
+                return Ok(());
+            }
+            if let Some(source) = inst.tokens.get(&catch.token_id)
+                && expected.is_some()
+                && source.boundary_activation.is_some()
+            {
+                let activation = inst
+                    .event_state
+                    .as_ref()
+                    .and_then(|state| state.boundary_activations.get(&source.id));
+                if !activation.is_some_and(|activation| activation.jobs.contains(&catch.id)) {
+                    drop(inst);
+                    self.remove_persisted_message_catch(catch.id).await;
+                    return Ok(());
+                }
+                boundary_siblings =
+                    Some(activation.unwrap().jobs.iter().copied().collect::<Vec<_>>());
+                let source_id = source.id;
+                if let Some(activation) = inst
+                    .event_state
+                    .as_mut()
+                    .and_then(|state| state.boundary_activations.get_mut(&source_id))
+                {
+                    activation.jobs.clear();
+                    activation.timers.clear();
+                    activation.messages.clear();
+                }
+            }
             if is_non_interrupting {
                 let mut original = inst
                     .tokens
@@ -195,6 +239,7 @@ impl WorkflowEngine {
                     .clone();
 
                 original.id = uuid::Uuid::new_v4();
+                original.boundary_activation = None;
                 inst.tokens.insert(original.id, original.clone());
 
                 let active = crate::runtime::ActiveToken {
@@ -213,14 +258,35 @@ impl WorkflowEngine {
 
                 original
             } else {
-                inst.tokens.remove(&catch.token_id).ok_or_else(|| {
-                    EngineError::InvalidDefinition(format!(
-                        "Token {} not found in instance",
-                        catch.token_id
-                    ))
-                })?
+                inst.tokens
+                    .remove(&catch.token_id)
+                    .map(|mut token| {
+                        if matches!(
+                            def.nodes.get(&catch.node_id),
+                            Some(
+                                crate::domain::BpmnElement::BoundaryMessageEvent { .. }
+                                    | crate::domain::BpmnElement::BoundarySignalEvent { .. }
+                            )
+                        ) {
+                            Self::close_conditional_boundaries(&mut inst, &mut token);
+                        }
+                        token
+                    })
+                    .ok_or_else(|| {
+                        EngineError::InvalidDefinition(format!(
+                            "Token {} not found in instance",
+                            catch.token_id
+                        ))
+                    })?
             }
         };
+
+        if let Some(jobs) = boundary_siblings {
+            self.cancel_boundary_job_ids(&jobs).await;
+        } else {
+            self.clear_wait_states_for_token(catch.instance_id, &catch.token_id)
+                .await;
+        }
 
         if !is_non_interrupting {
             self.interrupt_loop_activity(catch.instance_id, &mut token, &def, &catch.node_id)
@@ -256,7 +322,9 @@ impl WorkflowEngine {
             }
         }
 
-        token.discard_data_scope();
+        if token.boundary_activation.is_none() {
+            token.discard_data_scope();
+        }
         token.variables.extend(variables.clone());
 
         let old_state = if let Some(lk) = self.instances.get(&catch.instance_id).await {

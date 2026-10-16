@@ -430,3 +430,51 @@ async fn x2a_rest_native_and_camunda_commits_release_a_parallel_catch() {
         server.abort();
     }
 }
+
+#[tokio::test]
+async fn x2b_rest_boundary_is_visible_and_completion_outputs_close_its_subscription() {
+    for camunda in [false, true] {
+        let persistence = Arc::new(InMemoryPersistence::new());
+        let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+        let (base, server) = serve(engine, persistence).await;
+        let client = reqwest::Client::new();
+        let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn"><process id="boundary_condition" isExecutable="true"><startEvent id="s"/><serviceTask id="main" camunda:topic="main"/><boundaryEvent id="boundary" attachedToRef="main"><conditionalEventDefinition><condition>mainResult == 42</condition></conditionalEventDefinition></boundaryEvent><serviceTask id="work" camunda:topic="review"/><endEvent id="end"/><sequenceFlow id="a" sourceRef="s" targetRef="main"/><sequenceFlow id="b" sourceRef="main" targetRef="end"/><sequenceFlow id="c" sourceRef="boundary" targetRef="work"/><sequenceFlow id="d" sourceRef="work" targetRef="end"/></process></definitions>"#;
+        let deployed = post(
+            &client,
+            &base,
+            "/api/deploy",
+            json!({"xml":xml,"name":"boundary_condition"}),
+        )
+        .await;
+        assert_eq!(deployed["model_check"]["status"], "skipped");
+        let started = post(
+            &client,
+            &base,
+            "/api/start",
+            json!({"definition_key":deployed["definition_key"]}),
+        )
+        .await;
+        let id = started["instance_id"].as_str().unwrap();
+        let waits = get(&client, &base, "/api/conditional-catches").await;
+        assert_eq!(waits.as_array().unwrap().len(), 1);
+        assert_eq!(waits[0]["kind"], "boundary");
+        assert_eq!(waits[0]["attached_to"], "main");
+        if camunda {
+            let tasks = post(&client, &base, "/engine-rest/external-task/fetchAndLock", json!({"workerId":"worker","maxTasks":1,"topics":[{"topicName":"main","lockDuration":60000}]})).await;
+            let task = tasks[0]["id"].as_str().unwrap();
+            let response = client.post(format!("{base}/engine-rest/external-task/{task}/complete")).json(&json!({"workerId":"worker","variables":{"mainResult":{"value":42,"type":"Integer"}}})).send().await.unwrap();
+            assert_eq!(response.status(), 204, "{}", response.text().await.unwrap());
+        } else {
+            finish(&client, &base, "main", id).await;
+        }
+        assert_eq!(
+            get(&client, &base, "/api/conditional-catches").await,
+            json!([])
+        );
+        assert_eq!(
+            get(&client, &base, &format!("/api/instances/{id}")).await["state"],
+            "Completed"
+        );
+        server.abort();
+    }
+}

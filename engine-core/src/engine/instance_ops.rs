@@ -422,6 +422,7 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: resumed");
+        self.restore_conditional_boundary_jobs(instance_id).await;
         self.run_conditional_work(instance_id).await?;
         self.resume_claimed_catches(instance_id).await?;
         self.emit_instance_changed(instance_id).await;
@@ -569,6 +570,7 @@ impl WorkflowEngine {
 
         let token = crate::domain::Token {
             conditional_wait: None,
+            boundary_activation: None,
             id: Uuid::new_v4(),
             current_node: target_node_id.to_string(),
             variables: token_vars.clone(),

@@ -208,6 +208,10 @@ model PendingMessage {
 }
 
 model PendingConditionalCatch {
+  kind?: "intermediate" | "boundary";
+  activity_activation_id?: string;
+  attached_to?: string;
+  interrupting?: boolean;
   id: string;
   instance_id: string;
   node_id: string;

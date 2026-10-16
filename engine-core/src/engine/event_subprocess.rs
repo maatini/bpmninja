@@ -67,6 +67,16 @@ fn queue_cancelled_activations(instance: &mut ProcessInstance, reason: &str) {
 }
 
 pub(crate) fn token_valid(instance: &ProcessInstance, token: &Token) -> bool {
+    if let Some(id) = token.boundary_activation
+        && !instance.event_state.as_ref().is_some_and(|state| {
+            state
+                .boundary_activations
+                .get(&token.id)
+                .is_some_and(|activation| activation.id == id)
+        })
+    {
+        return false;
+    }
     if token.event_context.is_none() {
         return !matches!(&instance.state, InstanceState::CompletedWithError { error_code } if error_code == "SCOPE_INTERRUPTED");
     }
@@ -86,6 +96,7 @@ pub(crate) fn token_valid(instance: &ProcessInstance, token: &Token) -> bool {
 pub(crate) fn validate_definition(
     definition: &crate::domain::ProcessDefinition,
 ) -> EngineResult<()> {
+    super::conditional_boundary::validate(definition)?;
     let invalid = |message: &str| EngineError::InvalidDefinition(message.into());
     if !definition.event_listeners.is_empty() {
         return Err(invalid(
@@ -253,6 +264,7 @@ impl WorkflowEngine {
                 }
             }
         }
+        Self::evaluate_conditional_boundaries(instance, definition);
         Self::evaluate_conditional_catches(instance, definition);
         Ok(())
     }
@@ -263,6 +275,7 @@ impl WorkflowEngine {
         let Some(instance) = self.instances.get(&id).await else {
             return Ok(Vec::new());
         };
+        self.cleanup_conditional_boundaries(id).await;
         self.restore_gateway_jobs(id).await;
         self.cleanup_gateway_losers(id).await;
         let key = instance.read().await.definition_key;
@@ -736,6 +749,7 @@ impl WorkflowEngine {
             state.generation += 1;
             state.main_completed = true;
             state.subscriptions.clear();
+            state.boundary_activations.clear();
             state.conditional_waits.clear();
             state.ready_conditional_tokens.clear();
             state.gateway_waits.clear();
@@ -868,6 +882,10 @@ impl WorkflowEngine {
         for (id, instance) in self.instances.all().await {
             self.flush_event_lifecycle(id).await;
             self.upgrade_gateway_groups(id).await?;
+            self.cleanup_conditional_boundaries(id).await;
+            self.cleanup_stale_boundary_tasks(id).await;
+            self.upgrade_conditional_boundaries(id).await?;
+            self.restore_conditional_boundary_jobs(id).await;
             self.run_conditional_work(id).await?;
             let snapshot = instance.read().await.clone();
             let Some(state) = &snapshot.event_state else {
@@ -1004,27 +1022,18 @@ impl WorkflowEngine {
                     state.conditional_waits.values().any(|wait| {
                         wait.token_id == token.id && !wait.claimed && wait.group.is_none()
                     })
-                }) || self
-                    .pending_user_tasks
-                    .iter()
-                    .any(|t| t.instance_id == id && t.token_id == token.id)
-                    || self
-                        .pending_service_tasks
-                        .iter()
-                        .any(|t| t.instance_id == id && t.token_id == token.id)
-                    || self.pending_timers.iter().any(|t| {
-                        t.instance_id == id
-                            && t.token_id == token.id
-                            && t.node_id == token.current_node
-                    })
-                    || self
-                        .pending_message_catches
-                        .iter()
-                        .any(|t| t.instance_id == id && t.token_id == token.id)
-                    || snapshot
-                        .outstanding_calls
-                        .values()
-                        .any(|c| c.token.id == token.id)
+                }) || self.pending_user_tasks.iter().any(|t| {
+                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+                }) || self.pending_service_tasks.iter().any(|t| {
+                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+                }) || self.pending_timers.iter().any(|t| {
+                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+                }) || self.pending_message_catches.iter().any(|t| {
+                    t.instance_id == id && t.token_id == token.id && t.node_id == token.current_node
+                }) || snapshot
+                    .outstanding_calls
+                    .values()
+                    .any(|c| c.token.id == token.id)
                     || snapshot
                         .join_barriers
                         .values()
@@ -1183,6 +1192,7 @@ impl WorkflowEngine {
             instance.multi_instance_state.clear();
             let state = instance.event_state.as_mut().unwrap();
             state.subscriptions.clear();
+            state.boundary_activations.clear();
             state.conditional_waits.clear();
             state.ready_conditional_tokens.clear();
             state.gateway_waits.clear();
@@ -1284,6 +1294,7 @@ impl WorkflowEngine {
             if let Some(state) = &mut instance.event_state {
                 state.generation += 1;
                 state.subscriptions.clear();
+                state.boundary_activations.clear();
                 state.conditional_waits.clear();
                 state.ready_conditional_tokens.clear();
                 state.gateway_waits.clear();

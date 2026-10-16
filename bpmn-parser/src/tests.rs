@@ -1968,3 +1968,62 @@ fn x2a_intermediate_conditional_catches_validate_and_preserve_gateway_ownership(
     let nested = xml.replace("<intermediateCatchEvent", "<subProcess id=\"embedded\"><startEvent id=\"inner\"/><sequenceFlow id=\"in\" sourceRef=\"inner\" targetRef=\"wait\"/><intermediateCatchEvent").replace("</intermediateCatchEvent>", "</intermediateCatchEvent><endEvent id=\"out\"/><sequenceFlow id=\"outflow\" sourceRef=\"wait\" targetRef=\"out\"/></subProcess>").replace("targetRef=\"wait\"/><sequenceFlow id=\"b\" sourceRef=\"wait\"", "targetRef=\"embedded\"/><sequenceFlow id=\"b\" sourceRef=\"embedded\"");
     assert!(parse_bpmn_xml(&nested).is_ok());
 }
+
+#[test]
+fn x2b_boundary_conditions_validate_attachments_and_expressions() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="t"/><boundaryEvent id="b" attachedToRef="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></boundaryEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="c" sourceRef="t" targetRef="e"/><sequenceFlow id="d" sourceRef="b" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(
+        matches!(&def.nodes["b"], engine_core::domain::BpmnElement::BoundaryConditionalEvent { cancel_activity: true, condition, .. } if condition == "flag")
+    );
+    assert!(matches!(
+        &parse_bpmn_xml(&xml.replace(
+            "attachedToRef=\"t\"",
+            "attachedToRef=\"t\" cancelActivity=\"false\""
+        ))
+        .unwrap()
+        .nodes["b"],
+        engine_core::domain::BpmnElement::BoundaryConditionalEvent {
+            cancel_activity: false,
+            ..
+        }
+    ));
+    for condition in [
+        "<condition/>",
+        "<condition language=\"feel\">flag</condition>",
+        "<condition>flag &amp;&amp; other</condition>",
+    ] {
+        assert!(parse_bpmn_xml(&xml.replace("<condition>flag</condition>", condition)).is_err());
+    }
+    assert!(parse_bpmn_xml(&xml.replace("attachedToRef=\"t\"", "attachedToRef=\"s\"")).is_err());
+    assert!(parse_bpmn_xml(&xml.replace("<userTask id=\"t\"/>", "<userTask id=\"t\"><standardLoopCharacteristics><loopCondition>flag</loopCondition></standardLoopCharacteristics></userTask>")).is_err());
+}
+
+#[test]
+fn x2b_boundary_task_types_and_scope_validation() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="t"/><boundaryEvent id="b" attachedToRef="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></boundaryEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="c" sourceRef="t" targetRef="e"/><sequenceFlow id="d" sourceRef="b" targetRef="e"/>"#,
+    );
+    for task in [
+        "<manualTask id=\"t\"/>",
+        "<serviceTask id=\"t\" data-topic=\"work\"/>",
+        "<businessRuleTask id=\"t\" data-topic=\"work\"/>",
+        "<scriptTask id=\"t\" scriptFormat=\"rhai\"><script>flag = false;</script></scriptTask>",
+        "<receiveTask id=\"t\" messageRef=\"m\"/>",
+    ] {
+        let input = xml
+            .replace("<userTask id=\"t\"/>", task)
+            .replace("<process", "<message id=\"m\" name=\"received\"/><process");
+        assert!(parse_bpmn_xml(&input).is_ok(), "{input}");
+    }
+    for task in [
+        "<callActivity id=\"t\" calledElement=\"child\"/>",
+        "<intermediateCatchEvent id=\"t\"><messageEventDefinition messageRef=\"m\"/></intermediateCatchEvent>",
+    ] {
+        assert!(parse_bpmn_xml(&xml.replace("<userTask id=\"t\"/>", task)).is_err());
+    }
+    let foreign = xml.replace("</definitions>", "<process id=\"ignored\"><boundaryEvent id=\"bad\" attachedToRef=\"missing\"><conditionalEventDefinition><condition/></conditionalEventDefinition></boundaryEvent></process></definitions>");
+    assert!(parse_bpmn_xml(&foreign).is_ok());
+}

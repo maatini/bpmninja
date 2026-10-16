@@ -21,6 +21,7 @@ use std::time::Duration;
 use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
+pub(crate) mod conditional_boundary;
 mod conditional_catch;
 pub(crate) mod data_mappings;
 mod definition_ops;
