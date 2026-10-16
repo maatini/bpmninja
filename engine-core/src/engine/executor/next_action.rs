@@ -147,6 +147,21 @@ impl WorkflowEngine {
                 self.persist_service_task(task_id).await;
                 self.persist_instance(instance_id).await;
             }
+            NextAction::WaitForConditional { node_id } => {
+                if let Some(instance) = self.instances.get(&instance_id).await {
+                    let mut instance = instance.write().await;
+                    if crate::engine::event_subprocess::token_valid(&instance, source)
+                        && !matches!(
+                            instance.state,
+                            InstanceState::ParallelExecution { .. }
+                                | InstanceState::Suspended { .. }
+                        )
+                    {
+                        instance.state = InstanceState::WaitingOnConditional { node_id };
+                    }
+                }
+                self.persist_instance(instance_id).await;
+            }
             NextAction::WaitForTimer(pending) => {
                 let timer_id = pending.id;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -186,6 +201,18 @@ impl WorkflowEngine {
                 self.persist_instance(instance_id).await;
             }
             NextAction::WaitForEventGroup(actions) => {
+                self.persist_instance(instance_id).await;
+                if let Some(instance) = self.instances.get(&instance_id).await
+                    && instance
+                        .read()
+                        .await
+                        .event_state
+                        .as_ref()
+                        .and_then(|state| state.gateway_waits.get(&token_id))
+                        .is_some_and(|group| group.winner.is_some())
+                {
+                    return Ok(());
+                }
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
                     if !crate::engine::event_subprocess::token_valid(&inst, source) {
@@ -195,27 +222,9 @@ impl WorkflowEngine {
                         inst.state = InstanceState::WaitingOnEventBasedGateway;
                     }
                 }
-                for action in actions {
-                    match action {
-                        NextAction::WaitForTimer(pending) => {
-                            let timer_id = pending.id;
-                            self.insert_pending_timer(pending);
-                            if source.event_context.is_some() {
-                                self.persist_instance(instance_id).await;
-                            }
-                            self.persist_timer(timer_id).await;
-                        }
-                        NextAction::WaitForMessage(pending) => {
-                            let message_id = pending.id;
-                            self.pending_message_catches.insert(message_id, pending);
-                            if source.event_context.is_some() {
-                                self.persist_instance(instance_id).await;
-                            }
-                            self.persist_message_catch(message_id).await;
-                        }
-                        _ => {} // EventBasedGateway validation ensures this won't happen
-                    }
-                }
+                let _ = actions; // The durable group owns all alternative descriptors.
+                self.restore_gateway_jobs(instance_id).await;
+                self.cleanup_gateway_losers(instance_id).await;
                 self.persist_instance(instance_id).await;
             }
             NextAction::WaitForCallActivity {

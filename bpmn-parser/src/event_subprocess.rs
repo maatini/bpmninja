@@ -69,6 +69,52 @@ fn referenced(
     .into())
 }
 
+fn conditional_expression(start: &Node, event: &Node) -> EngineResult<String> {
+    let conditions: Vec<_> = event.children("condition").collect();
+    let [condition] = conditions.as_slice() else {
+        return Err(invalid("conditional start requires one inline condition"));
+    };
+    if [event, start].iter().any(|node| {
+        local_attribute(node, "variableName").is_some()
+            || local_attribute(node, "variableEvents").is_some()
+    }) || !condition.children.is_empty()
+        || local_attribute(condition, "language").is_some_and(|language| !language.is_empty())
+        || local_attribute(condition, "resource").is_some()
+        || local_attribute(condition, "type")
+            .is_some_and(|kind| kind.rsplit(':').next() != Some("tFormalExpression"))
+    {
+        return Err(invalid(
+            "conditional start supports inline simple conditions without language or variable filters",
+        ));
+    }
+    engine_core::condition::validate_event_condition(&condition.text)?;
+    Ok(condition.text.trim().into())
+}
+
+pub(crate) fn validate_conditional_catches(xml: &str, process_id: &str) -> EngineResult<()> {
+    fn visit(node: &Node) -> EngineResult<()> {
+        if node.name == "intermediateCatchEvent" {
+            for event in node.children("conditionalEventDefinition") {
+                conditional_expression(node, event)?;
+            }
+        }
+        for child in &node.children {
+            visit(child)?;
+        }
+        Ok(())
+    }
+    let document = tree(xml)?;
+    for definitions in &document.children {
+        for process in definitions
+            .children("process")
+            .filter(|process| process.attr("id") == Some(process_id))
+        {
+            visit(process)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct ParsedHandler {
     handler: EventSubProcess,
     body: ProcessDefinition,
@@ -163,26 +209,8 @@ pub(crate) fn extract(xml: &str, process_id: &str) -> EngineResult<(String, Vec<
         };
         let trigger = match event.name.as_str() {
             "conditionalEventDefinition" => {
-                let conditions: Vec<_> = event.children("condition").collect();
-                let [condition] = conditions.as_slice() else {
-                    return Err(invalid("conditional start requires one inline condition"));
-                };
-                if [*event, *start].iter().any(|node| {
-                    local_attribute(node, "variableName").is_some()
-                        || local_attribute(node, "variableEvents").is_some()
-                }) || !condition.children.is_empty()
-                    || local_attribute(condition, "language")
-                        .is_some_and(|language| !language.is_empty())
-                    || local_attribute(condition, "resource").is_some()
-                    || local_attribute(condition, "type")
-                        .is_some_and(|kind| kind.rsplit(':').next() != Some("tFormalExpression"))
-                {
-                    return Err(invalid(
-                        "conditional start supports inline simple conditions without language or variable filters",
-                    ));
-                }
-                engine_core::condition::validate_event_condition(&condition.text)?;
-                EventSubProcessTrigger::Conditional(condition.text.trim().into())
+                let expression = conditional_expression(start, event)?;
+                EventSubProcessTrigger::Conditional(expression)
             }
             "timerEventDefinition" => {
                 let timer: crate::models::BpmnTimerEventDefinition =

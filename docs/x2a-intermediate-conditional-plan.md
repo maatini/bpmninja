@@ -1,6 +1,6 @@
 # X2a — Intermediate conditional catches
 
-Status: proposed, 2026-10-15. Next implementation after completed X9b.
+Status: completed and verified after user GO, 2026-10-15.
 The backlog requires a separate plan and GO before each Phase 4 increment;
 the [X2/X9b plan](x2-conditional-events-plan.md) also requires a concrete
 acceptance plan for each remaining conditional-event increment.
@@ -160,3 +160,29 @@ engine choices. This plan does not claim full BPMN or Camunda conformance.
 
 Boundary conditional catches and top-level conditional starts remain separate
 X2 increments after X2a; nested/compensation event subprocesses remain X9c/X6/G1.
+
+## Implementation checkpoint (2026-10-15)
+
+- Implemented the conditional-catch variant, shared XML/grammar validation,
+  independent compiled conditions, catch-only execution initialization, and
+  listener preservation in flattened ordinary subprocesses.
+- Persisted occurrence identity, registration/claim revision, generation, phase,
+  optional group identity, and token marker. Callback writes and continuation
+  state commit together. A runtime execution lock plus occurrence validation
+  prevents replay from replacing newer work or repeating committed callbacks.
+- Gateway groups own the original timer/message descriptors and job-ID membership
+  rather than adding fields to every pending job. Existing pending-job formats
+  remain unchanged. All delivery kinds use the same atomic winner transaction.
+  Losing conditional records are removed in that transaction; cleanup remains
+  scoped to saved job IDs and original timer deadlines.
+- Recovery distinguishes parked catches, saved claims, missing continuation work,
+  and unambiguous legacy gateway groups. Suspension/resume can recover a consumed
+  catch whose next waiting task was not yet published. Cancellation clears its
+  queued claims as well as wait records.
+- Added pending/status/SSE visibility, the intermediate condition editor, and
+  `GET /api/conditional-catches` with synchronized TypeSpec/OpenAPI output.
+- Acceptance passed: 374 core, 84 parser, 18 real NATS, 29 server, 6 REST,
+  8 browser, and 9 frontend event tests. Frontend build/lint, API-spec compilation,
+  Rust formatting, and strict workspace Clippy also pass. Graphify was refreshed.
+
+Boundary catches and top-level conditional starts remain separate X2 increments.

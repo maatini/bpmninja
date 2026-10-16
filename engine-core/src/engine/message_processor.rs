@@ -102,19 +102,35 @@ impl WorkflowEngine {
                 .fire_event_subscription(catch.instance_id, catch.token_id, variables)
                 .await;
         }
-        let catch = self
+        let Some(catch) = self
             .pending_message_catches
             .remove(&catch_id)
-            .map(|(_, v)| v)
-            .ok_or_else(|| {
-                EngineError::InvalidDefinition(format!("Message catch {catch_id} disappeared"))
-            })?;
+            .map(|(_, catch)| catch)
+        else {
+            return Ok(()); // A concurrent gateway winner already consumed/cancelled this delivery.
+        };
 
         if !self
             .event_work_valid(catch.instance_id, catch.token_id)
             .await
         {
             self.remove_persisted_message_catch(catch.id).await;
+            return Ok(());
+        }
+        if let Some(won) = self
+            .claim_gateway_delivery(
+                catch.instance_id,
+                catch.token_id,
+                &catch.node_id,
+                catch.id,
+                variables,
+            )
+            .await?
+        {
+            self.remove_persisted_message_catch(catch.id).await;
+            if won {
+                self.run_conditional_work(catch.instance_id).await?;
+            }
             return Ok(());
         }
         // Event-Based Gateway support: If this message catch triggered, clear any sibling wait states
@@ -277,12 +293,7 @@ impl WorkflowEngine {
             .definitions
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
-        if def.event_subprocesses.iter().any(|handler| {
-            matches!(
-                handler.trigger,
-                crate::domain::EventSubProcessTrigger::Conditional(_)
-            )
-        }) {
+        if def.has_conditionals() {
             self.run_end_scripts(catch.instance_id, &mut token, &def, &catch.node_id)
                 .await?;
             self.run_conditional_work(catch.instance_id).await?;

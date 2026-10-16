@@ -238,3 +238,7 @@ pub(crate) async fn delete_instance(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+pub(crate) async fn pending_conditionals(State(state): State<Arc<AppState>>) -> Json<Vec<Value>> {
+    Json(state.engine.get_pending_conditional_catches().await)
+}

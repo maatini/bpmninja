@@ -207,6 +207,15 @@ model PendingMessage {
   kind?: "Message" | "Signal";
 }
 
+model PendingConditionalCatch {
+  id: string;
+  instance_id: string;
+  node_id: string;
+  token_id: string;
+  generation: uint64;
+  claimed: boolean;
+}
+
 model BackendInfo {
   backend_type: string;
   nats_url?: string;
@@ -416,6 +425,10 @@ namespace Api {
 
   @get @route("/messages")
   op getPendingMessages(): PendingMessage[] | AppError;
+
+  @doc("Live conditional catch occurrences, without process variables.")
+  @get @route("/conditional-catches")
+  op getPendingConditionalCatches(): PendingConditionalCatch[] | AppError;
 
   // ---- Service tasks (External-Task-Worker-kompatibel) ----
 

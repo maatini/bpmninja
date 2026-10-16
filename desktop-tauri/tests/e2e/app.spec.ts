@@ -1918,6 +1918,25 @@ test.describe('bpmninja Desktop App – E2E', () => {
     expect(await exportedXml(page)).toContain('messageRef="AlertMessage"');
   });
 
+  test('X2a edits an intermediate conditional catch with undo and XML roundtrip', async ({ page }) => {
+    const xml = X11_XML.replace(/<bpmn:serviceTask id="work"[\s\S]*?<\/bpmn:serviceTask>/, '<bpmn:intermediateCatchEvent id="work"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:intermediateCatchEvent>');
+    await loadXmlAndClickElement(page, xml, 'work');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    const exported = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('work'));
+    }, exported);
+    await expect(condition).toHaveValue('amount > 100');
+  });
+
   test('X9b edits a conditional start with undo and XML roundtrip', async ({ page }) => {
     await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:conditionalEventDefinition><bpmn:condition xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">flag</bpmn:condition></bpmn:conditionalEventDefinition>'), 'hs');
     const condition = page.getByLabel('Condition', { exact: true });

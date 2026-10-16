@@ -40,6 +40,7 @@ pub enum InstanceStatus {
     WaitingOnTimer { timer_id: Uuid },
     WaitingOnMessage { message_id: Uuid },
     WaitingOnEventBasedGateway,
+    WaitingOnConditional { node_id: String },
     ParallelExecution { active_token_count: usize },
     WaitingOnCallActivity { sub_instance_id: Uuid },
     Completed,
@@ -62,6 +63,9 @@ impl From<&InstanceState> for InstanceStatus {
             },
             InstanceState::WaitingOnMessage { message_id } => Self::WaitingOnMessage {
                 message_id: *message_id,
+            },
+            InstanceState::WaitingOnConditional { node_id } => Self::WaitingOnConditional {
+                node_id: node_id.clone(),
             },
             InstanceState::WaitingOnEventBasedGateway => Self::WaitingOnEventBasedGateway,
             InstanceState::ParallelExecution { active_token_count } => Self::ParallelExecution {

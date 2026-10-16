@@ -423,6 +423,7 @@ impl WorkflowEngine {
 
         tracing::info!("Instance {instance_id}: resumed");
         self.run_conditional_work(instance_id).await?;
+        self.resume_claimed_catches(instance_id).await?;
         self.emit_instance_changed(instance_id).await;
         Ok(())
     }
@@ -472,12 +473,7 @@ impl WorkflowEngine {
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
-        if def.event_subprocesses.iter().any(|handler| {
-            matches!(
-                handler.trigger,
-                crate::domain::EventSubProcessTrigger::Conditional(_)
-            )
-        }) {
+        if def.has_conditionals() {
             return Err(EngineError::InvalidDefinition(
                 "Token movement with conditional event subscriptions is not supported".into(),
             ));
@@ -572,6 +568,7 @@ impl WorkflowEngine {
         }
 
         let token = crate::domain::Token {
+            conditional_wait: None,
             id: Uuid::new_v4(),
             current_node: target_node_id.to_string(),
             variables: token_vars.clone(),
@@ -730,14 +727,9 @@ impl WorkflowEngine {
         if [old_state.definition_key, target_definition_key]
             .iter()
             .any(|key| {
-                self.definitions.get(key).is_some_and(|definition| {
-                    definition.event_subprocesses.iter().any(|handler| {
-                        matches!(
-                            handler.trigger,
-                            crate::domain::EventSubProcessTrigger::Conditional(_)
-                        )
-                    })
-                })
+                self.definitions
+                    .get(key)
+                    .is_some_and(|definition| definition.has_conditionals())
             })
         {
             return Err(EngineError::InvalidDefinition(

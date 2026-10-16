@@ -92,6 +92,29 @@ pub(crate) fn validate_definition(
             "Legacy ScopeEventListener requires migration to EventSubProcess",
         ));
     }
+    for node in definition.nodes.values() {
+        if let crate::domain::BpmnElement::ConditionalCatchEvent { condition } = node {
+            crate::condition::validate_event_condition(condition)?;
+        }
+    }
+    for (gateway, element) in &definition.nodes {
+        if matches!(element, crate::domain::BpmnElement::EventBasedGateway) {
+            for flow in definition.next_nodes(gateway) {
+                if definition
+                    .flows
+                    .values()
+                    .flatten()
+                    .filter(|other| other.target == flow.target)
+                    .count()
+                    != 1
+                {
+                    return Err(invalid(
+                        "Event-gateway targets require one owning incoming flow",
+                    ));
+                }
+            }
+        }
+    }
     if definition.event_subprocesses.is_empty() {
         return Ok(());
     }
@@ -169,18 +192,13 @@ impl WorkflowEngine {
         let Some(state) = &mut instance.event_state else {
             return Ok(());
         };
-        if !definition
-            .event_subprocesses
-            .iter()
-            .any(|handler| matches!(handler.trigger, Trigger::Conditional(_)))
-        {
+        if !definition.has_conditionals() {
             return Ok(());
         }
-        if state.conditional_variables.as_ref() == Some(&instance.variables) {
-            return Ok(());
+        if state.conditional_variables.as_ref() != Some(&instance.variables) {
+            state.variable_revision += 1;
+            state.conditional_variables = Some(instance.variables.clone());
         }
-        state.variable_revision += 1;
-        state.conditional_variables = Some(instance.variables.clone());
         let revision = state.variable_revision;
         let mut subscriptions: Vec<_> = state
             .subscriptions
@@ -235,6 +253,7 @@ impl WorkflowEngine {
                 }
             }
         }
+        Self::evaluate_conditional_catches(instance, definition);
         Ok(())
     }
 
@@ -244,6 +263,8 @@ impl WorkflowEngine {
         let Some(instance) = self.instances.get(&id).await else {
             return Ok(Vec::new());
         };
+        self.restore_gateway_jobs(id).await;
+        self.cleanup_gateway_losers(id).await;
         let key = instance.read().await.definition_key;
         let definition = self
             .definitions
@@ -570,7 +591,7 @@ impl WorkflowEngine {
         if !def.event_listeners.is_empty() {
             return Err(EngineError::InvalidDefinition("Legacy ScopeEventListener definitions are unsupported; migrate to EventSubProcess definitions".into()));
         }
-        if def.event_subprocesses.is_empty() {
+        if def.event_subprocesses.is_empty() && !def.has_conditionals() {
             return Ok(());
         }
         let mut state = EventSubProcessState::default();
@@ -715,6 +736,9 @@ impl WorkflowEngine {
             state.generation += 1;
             state.main_completed = true;
             state.subscriptions.clear();
+            state.conditional_waits.clear();
+            state.ready_conditional_tokens.clear();
+            state.gateway_waits.clear();
             state.activations.clear();
             state.started_activations.clear();
         } else if let Trigger::Timer(timer) = &handler.trigger {
@@ -843,6 +867,7 @@ impl WorkflowEngine {
     pub async fn reconcile_event_subprocesses(&self) -> EngineResult<()> {
         for (id, instance) in self.instances.all().await {
             self.flush_event_lifecycle(id).await;
+            self.upgrade_gateway_groups(id).await?;
             self.run_conditional_work(id).await?;
             let snapshot = instance.read().await.clone();
             let Some(state) = &snapshot.event_state else {
@@ -971,7 +996,15 @@ impl WorkflowEngine {
                 continue;
             }
             for token in snapshot.tokens.values() {
-                let parked = self
+                let parked = snapshot.event_state.as_ref().is_some_and(|state| {
+                    state.gateway_waits.get(&token.id).is_some_and(|group| {
+                        group.winner.is_none() && group.gateway == token.current_node
+                    })
+                }) || snapshot.event_state.as_ref().is_some_and(|state| {
+                    state.conditional_waits.values().any(|wait| {
+                        wait.token_id == token.id && !wait.claimed && wait.group.is_none()
+                    })
+                }) || self
                     .pending_user_tasks
                     .iter()
                     .any(|t| t.instance_id == id && t.token_id == token.id)
@@ -1150,6 +1183,9 @@ impl WorkflowEngine {
             instance.multi_instance_state.clear();
             let state = instance.event_state.as_mut().unwrap();
             state.subscriptions.clear();
+            state.conditional_waits.clear();
+            state.ready_conditional_tokens.clear();
+            state.gateway_waits.clear();
             state.activations.clear();
             state.started_activations.clear();
             children
@@ -1248,6 +1284,9 @@ impl WorkflowEngine {
             if let Some(state) = &mut instance.event_state {
                 state.generation += 1;
                 state.subscriptions.clear();
+                state.conditional_waits.clear();
+                state.ready_conditional_tokens.clear();
+                state.gateway_waits.clear();
                 state.activations.clear();
                 state.started_activations.clear();
             }

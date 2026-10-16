@@ -1934,3 +1934,37 @@ fn x4_rejects_non_interrupting_boundary_on_loop_activity() {
         "{err}"
     );
 }
+
+#[test]
+fn x2a_intermediate_conditional_catches_validate_and_preserve_gateway_ownership() {
+    let xml = r#"<definitions><process id="p" isExecutable="true"><startEvent id="s"/><intermediateCatchEvent id="wait"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></intermediateCatchEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="wait"/><sequenceFlow id="b" sourceRef="wait" targetRef="e"/></process></definitions>"#;
+    let foreign = xml.replace("</definitions>", "<process id=\"ignored\"><intermediateCatchEvent id=\"foreign_wait\"><conditionalEventDefinition><condition/></conditionalEventDefinition></intermediateCatchEvent></process></definitions>");
+    assert!(
+        parse_bpmn_xml(&foreign).is_ok(),
+        "Conditions in an undeployed pool must not be validated"
+    );
+    let definition = parse_bpmn_xml(xml).unwrap();
+    assert!(
+        matches!(&definition.nodes["wait"], engine_core::domain::BpmnElement::ConditionalCatchEvent { condition } if condition == "amount > 100")
+    );
+    for replacement in [
+        "<condition>flag &amp;&amp; ready</condition>",
+        "<condition language=\"feel\">flag</condition>",
+        "<condition camunda:resource=\"test\">flag</condition>",
+        "<condition/>",
+    ] {
+        assert!(
+            parse_bpmn_xml(&xml.replace("<condition>amount &gt; 100</condition>", replacement))
+                .is_err()
+        );
+    }
+    assert!(
+        parse_bpmn_xml(&xml.replace(
+            "<conditionalEventDefinition>",
+            "<conditionalEventDefinition camunda:variableName=\"flag\">"
+        ))
+        .is_err()
+    );
+    let nested = xml.replace("<intermediateCatchEvent", "<subProcess id=\"embedded\"><startEvent id=\"inner\"/><sequenceFlow id=\"in\" sourceRef=\"inner\" targetRef=\"wait\"/><intermediateCatchEvent").replace("</intermediateCatchEvent>", "</intermediateCatchEvent><endEvent id=\"out\"/><sequenceFlow id=\"outflow\" sourceRef=\"wait\" targetRef=\"out\"/></subProcess>").replace("targetRef=\"wait\"/><sequenceFlow id=\"b\" sourceRef=\"wait\"", "targetRef=\"embedded\"/><sequenceFlow id=\"b\" sourceRef=\"embedded\"");
+    assert!(parse_bpmn_xml(&nested).is_ok());
+}

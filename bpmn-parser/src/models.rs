@@ -506,11 +506,24 @@ pub(crate) struct BpmnGateway {
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalEventDefinition {
+    pub condition: Option<BpmnConditionalExpression>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalExpression {
+    #[serde(rename = "$text", default)]
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct BpmnIntermediateCatchEvent {
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "timerEventDefinition")]
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]

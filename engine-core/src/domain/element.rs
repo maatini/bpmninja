@@ -31,7 +31,9 @@ pub enum BpmnElement {
     /// An exclusive gateway (XOR) — exactly one outgoing path is taken based
     /// on condition evaluation. An optional `default` flow is followed when
     /// no condition matches.
-    ExclusiveGateway { default: Option<String> },
+    ExclusiveGateway {
+        default: Option<String>,
+    },
     /// An inclusive gateway (OR) — all outgoing paths whose condition
     /// evaluates to `true` are taken (token forking).
     InclusiveGateway,
@@ -47,6 +49,9 @@ pub enum BpmnElement {
     },
     /// A timer intermediate catch event that pauses the token until the duration elapses.
     TimerCatchEvent(TimerDefinition),
+    ConditionalCatchEvent {
+        condition: String,
+    },
     /// A boundary timer event attached to an activity.
     BoundaryTimerEvent {
         attached_to: String,
@@ -54,9 +59,13 @@ pub enum BpmnElement {
         cancel_activity: bool,
     },
     /// A start event triggered by a named message.
-    MessageStartEvent { message_name: String },
+    MessageStartEvent {
+        message_name: String,
+    },
     /// An intermediate catch event waiting for a named message.
-    MessageCatchEvent { message_name: String },
+    MessageCatchEvent {
+        message_name: String,
+    },
     /// A boundary message event attached to an activity.
     BoundaryMessageEvent {
         attached_to: String,
@@ -64,13 +73,21 @@ pub enum BpmnElement {
         cancel_activity: bool,
     },
     /// A start event triggered by a broadcast signal (X1).
-    SignalStartEvent { signal_name: String },
+    SignalStartEvent {
+        signal_name: String,
+    },
     /// An intermediate catch event waiting for a broadcast signal.
-    SignalCatchEvent { signal_name: String },
+    SignalCatchEvent {
+        signal_name: String,
+    },
     /// An intermediate throw event broadcasting a signal, then continuing.
-    SignalThrowEvent { signal_name: String },
+    SignalThrowEvent {
+        signal_name: String,
+    },
     /// An end event broadcasting a signal.
-    SignalEndEvent { signal_name: String },
+    SignalEndEvent {
+        signal_name: String,
+    },
     /// A boundary signal event attached to an activity.
     BoundarySignalEvent {
         attached_to: String,
@@ -83,11 +100,17 @@ pub enum BpmnElement {
         error_code: Option<String>,
     },
     /// An end event that throws a specific BPMN error.
-    ErrorEndEvent { error_code: String },
+    ErrorEndEvent {
+        error_code: String,
+    },
     /// An end event that throws a BPMN escalation (non-fatal, propagates to parent scope).
-    EscalationEndEvent { escalation_code: String },
+    EscalationEndEvent {
+        escalation_code: String,
+    },
     /// An intermediate throw event that fires an escalation signal.
-    EscalationThrowEvent { escalation_code: String },
+    EscalationThrowEvent {
+        escalation_code: String,
+    },
     /// A boundary escalation event attached to an activity.
     BoundaryEscalationEvent {
         attached_to: String,
@@ -95,17 +118,29 @@ pub enum BpmnElement {
         cancel_activity: bool,
     },
     /// An intermediate throw event that triggers compensation.
-    CompensationThrowEvent { activity_ref: Option<String> },
+    CompensationThrowEvent {
+        activity_ref: Option<String>,
+    },
     /// An end event that triggers compensation before completing.
-    CompensationEndEvent { activity_ref: Option<String> },
+    CompensationEndEvent {
+        activity_ref: Option<String>,
+    },
     /// A boundary compensation event attached to an activity (registered on successful completion).
-    BoundaryCompensationEvent { attached_to: String },
+    BoundaryCompensationEvent {
+        attached_to: String,
+    },
     /// A Call Activity that invokes another globally deployed process definition.
-    CallActivity { called_element: String },
+    CallActivity {
+        called_element: String,
+    },
     /// An Embedded Sub-Process acting as a nested scope within the same instance.
-    EmbeddedSubProcess { start_node_id: String },
+    EmbeddedSubProcess {
+        start_node_id: String,
+    },
     /// Internal end event of a Sub-Process, signaling completion to the parent scope.
-    SubProcessEndEvent { sub_process_id: String },
+    SubProcessEndEvent {
+        sub_process_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

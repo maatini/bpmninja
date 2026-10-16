@@ -82,6 +82,22 @@ impl WorkflowEngine {
                 self.remove_persisted_timer(tid).await;
                 continue;
             }
+            if let Some(won) = self
+                .claim_gateway_delivery(
+                    timer.instance_id,
+                    timer.token_id,
+                    &timer.node_id,
+                    timer.id,
+                    &std::collections::HashMap::new(),
+                )
+                .await?
+            {
+                self.remove_persisted_timer(timer.id).await;
+                if won {
+                    self.run_conditional_work(timer.instance_id).await?;
+                }
+                continue;
+            }
             // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
             self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
                 .await;

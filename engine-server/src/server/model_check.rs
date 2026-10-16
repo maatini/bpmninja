@@ -142,10 +142,18 @@ fn expand_empty_elements(xml: &str) -> Result<String, String> {
 
 /// Runs the analyzer synchronously (call from a blocking thread).
 fn analyze(xml: &str) -> ModelCheckReport {
-    if bpmn_parser::parse_bpmn_xml(xml).is_ok_and(|def| !def.event_subprocesses.is_empty()) {
+    if bpmn_parser::parse_bpmn_xml(xml).is_ok_and(|def| {
+        !def.event_subprocesses.is_empty()
+            || def.nodes.values().any(|node| {
+                matches!(
+                    node,
+                    engine_core::domain::BpmnElement::ConditionalCatchEvent { .. }
+                )
+            })
+    }) {
         return ModelCheckReport::without_result(
             ModelCheckStatus::Skipped,
-            "Event subprocess bodies are structurally validated; this analyzer does not model subscriptions, interruption, or repeated activations",
+            "Event subprocess bodies and conditional catches are structurally validated; this analyzer does not model subscriptions, conditional waiting, interruption, or repeated activations",
         );
     }
     let xml = match expand_empty_elements(xml) {

@@ -497,12 +497,7 @@ impl WorkflowEngine {
         iterations: usize,
     ) -> EngineResult<NextAction> {
         token.loop_instance = None;
-        if def.event_subprocesses.iter().any(|handler| {
-            matches!(
-                handler.trigger,
-                crate::domain::EventSubProcessTrigger::Conditional(_)
-            )
-        }) {
+        if token.event_context.is_some() {
             let instance = self
                 .instances
                 .get(&instance_id)

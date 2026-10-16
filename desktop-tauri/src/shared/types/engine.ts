@@ -25,6 +25,7 @@ export interface ProcessInstance {
     | { WaitingOnServiceTask: { task_id: string } }
     | { WaitingOnTimer: { timer_id: string } }
     | { WaitingOnMessage: { message_id: string } }
+    | { WaitingOnConditional: { node_id: string } }
     | { ParallelExecution: { active_token_count: number } }
     | { WaitingOnCallActivity: { sub_instance_id: string } }
     | { CompletedWithError: { error_code: string } }

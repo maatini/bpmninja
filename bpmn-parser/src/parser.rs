@@ -356,6 +356,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let mut process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
+    crate::event_subprocess::validate_conditional_catches(xml, &process_id)?;
     let (prepared_xml, handlers) = crate::event_subprocess::extract(xml, &process_id)?;
     let xml = prepared_xml.as_str();
     process
@@ -685,7 +686,23 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 7. Intermediate catch events
     for catch_evt in process.intermediate_catch_events {
         let node_id = catch_evt.id.clone();
-        if let Some(timer) = catch_evt.timer_event_definition {
+        if let Some(conditional) = catch_evt.conditional_event_definition {
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent {
+                    condition: conditional
+                        .condition
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(
+                                "Conditional catch requires one inline condition".into(),
+                            )
+                        })?
+                        .value
+                        .trim()
+                        .into(),
+                },
+            );
+        } else if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
         } else if let Some(msg) = catch_evt.message_event_definition {
@@ -956,6 +973,7 @@ fn supported_event_definitions(event_kind: &str) -> &'static [&'static str] {
             "signalEventDefinition",
         ],
         "intermediateCatchEvent" => &[
+            "conditionalEventDefinition",
             "timerEventDefinition",
             "messageEventDefinition",
             "linkEventDefinition",
@@ -1322,7 +1340,24 @@ fn flatten_subprocess(
     }
 
     for catch_evt in sp.intermediate_catch_events {
-        if let Some(timer) = catch_evt.timer_event_definition {
+        let node_id = catch_evt.id.clone();
+        if let Some(conditional) = catch_evt.conditional_event_definition {
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent {
+                    condition: conditional
+                        .condition
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(
+                                "Conditional catch requires one inline condition".into(),
+                            )
+                        })?
+                        .value
+                        .trim()
+                        .into(),
+                },
+            );
+        } else if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
         } else if let Some(msg) = catch_evt.message_event_definition {
@@ -1341,6 +1376,7 @@ fn flatten_subprocess(
                 catch_evt.id
             )));
         }
+        builder = add_listeners(builder, &node_id, catch_evt.extension_elements);
     }
 
     for evt in sp.intermediate_throw_events {

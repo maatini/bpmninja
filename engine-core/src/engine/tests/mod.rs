@@ -25,3 +25,5 @@ pub mod timer_due_index;
 pub mod timers_messages;
 pub mod topic_index;
 pub mod xor_merge;
+
+mod conditional_catches;

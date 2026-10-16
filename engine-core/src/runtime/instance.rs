@@ -17,21 +17,34 @@ pub enum NextAction {
     /// The engine must pause — an external task is pending.
     WaitForServiceTask(PendingServiceTask),
     /// Token arrived at a join gateway but must wait for sibling tokens.
-    WaitForJoin { gateway_id: String, token: Token },
+    WaitForJoin {
+        gateway_id: String,
+        token: Token,
+    },
     /// The engine must pause — a timer is pending.
     WaitForTimer(PendingTimer),
     /// The engine must pause — a message catch is pending.
     WaitForMessage(PendingMessageCatch),
     /// The engine must pause at an event-based gateway, registering multiple event listeners.
     WaitForEventGroup(Vec<NextAction>),
+    WaitForConditional {
+        node_id: String,
+    },
     /// The process reached an end event.
     Complete,
     /// Ends the current process instance with an error code (for error propagation).
-    ErrorEnd { error_code: String },
+    ErrorEnd {
+        error_code: String,
+    },
     /// Ends the current path with an escalation code (non-fatal, propagates to parent).
-    EscalationEnd { escalation_code: String },
+    EscalationEnd {
+        escalation_code: String,
+    },
     /// Spawns extra tokens (e.g. non-interrupting escalation handler) while the main token continues.
-    SpawnAndContinue { main: Token, spawned: Vec<Token> },
+    SpawnAndContinue {
+        main: Token,
+        spawned: Vec<Token>,
+    },
     /// Terminate End Event: kill all active tokens and complete the instance immediately.
     Terminate,
     /// The engine must pause — a call activity (sub-process) is pending.
@@ -40,9 +53,15 @@ pub enum NextAction {
         token: Token,
     },
     /// Multi-instance parallel: spawn N tokens that each execute the same task.
-    MultiInstanceFork { node_id: String, tokens: Vec<Token> },
+    MultiInstanceFork {
+        node_id: String,
+        tokens: Vec<Token>,
+    },
     /// Multi-instance sequential: re-execute the same task node.
-    MultiInstanceNext { node_id: String, token: Token },
+    MultiInstanceNext {
+        node_id: String,
+        token: Token,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +108,9 @@ pub enum InstanceState {
         message_id: Uuid,
     },
     WaitingOnEventBasedGateway,
+    WaitingOnConditional {
+        node_id: String,
+    },
     /// Multiple tokens are active; some may be waiting, some running.
     ParallelExecution {
         active_token_count: usize,
@@ -204,6 +226,11 @@ pub struct ProcessInstance {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EventSubProcessState {
     #[serde(default)]
+    pub conditional_waits: HashMap<Uuid, ConditionalWait>,
+    #[serde(default)]
+    pub gateway_waits: HashMap<Uuid, EventWaitGroup>,
+
+    #[serde(default)]
     pub conditional_variables: Option<HashMap<String, Value>>,
     #[serde(default)]
     pub variable_revision: u64,
@@ -226,6 +253,33 @@ pub struct EventSubProcessState {
     /// Stable history IDs survive a crash between snapshot and history writes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lifecycle_outbox: Vec<crate::history::HistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConditionalWait {
+    #[serde(default)]
+    pub registered_revision: u64,
+    #[serde(default)]
+    pub claimed_revision: Option<u64>,
+    pub id: Uuid,
+    pub token_id: Uuid,
+    pub node_id: String,
+    pub generation: u64,
+    pub claimed: bool,
+    pub group: Option<Uuid>,
+    pub order: usize,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventWaitGroup {
+    #[serde(default)]
+    pub timers: Vec<PendingTimer>,
+    #[serde(default)]
+    pub messages: Vec<PendingMessageCatch>,
+    pub id: Uuid,
+    pub gateway: String,
+    pub jobs: HashMap<Uuid, String>,
+    pub winner: Option<String>,
+    pub cleaned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

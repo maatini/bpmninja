@@ -322,3 +322,111 @@ async fn x9b_rest_native_and_camunda_completions_trigger_conditional_handlers() 
         server.abort();
     }
 }
+
+#[tokio::test]
+async fn x2a_rest_conditional_wait_is_visible_and_consumed_once() {
+    let persistence = Arc::new(InMemoryPersistence::new());
+    let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    let (base, server) = serve(engine, persistence).await;
+    let client = reqwest::Client::new();
+    let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn"><process id="conditional_catch" isExecutable="true"><startEvent id="s"/><intermediateCatchEvent id="wait"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></intermediateCatchEvent><serviceTask id="work" camunda:topic="review"/><endEvent id="end"/><sequenceFlow id="a" sourceRef="s" targetRef="wait"/><sequenceFlow id="b" sourceRef="wait" targetRef="work"/><sequenceFlow id="c" sourceRef="work" targetRef="end"/></process></definitions>"#;
+    let deployed = post(
+        &client,
+        &base,
+        "/api/deploy",
+        json!({"xml":xml,"name":"conditional_catch"}),
+    )
+    .await;
+    assert_eq!(deployed["model_check"]["status"], "skipped");
+    let started = post(
+        &client,
+        &base,
+        "/api/start",
+        json!({"definition_key":deployed["definition_key"]}),
+    )
+    .await;
+    let id = started["instance_id"].as_str().unwrap();
+    let waits = get(&client, &base, "/api/conditional-catches").await;
+    assert_eq!(waits.as_array().unwrap().len(), 1);
+    assert_eq!(waits[0]["instance_id"], id);
+    assert_eq!(waits[0]["node_id"], "wait");
+    assert_eq!(
+        get(&client, &base, &format!("/api/instances/{id}")).await["state"]["WaitingOnConditional"]
+            ["node_id"],
+        "wait"
+    );
+    for amount in [150, 160] {
+        assert_eq!(
+            client
+                .put(format!("{base}/api/instances/{id}/variables"))
+                .json(&json!({"variables":{"amount":amount}}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            204
+        );
+    }
+    assert_eq!(
+        get(&client, &base, "/api/conditional-catches").await,
+        json!([])
+    );
+    finish(&client, &base, "review", id).await;
+    assert_eq!(
+        get(&client, &base, &format!("/api/instances/{id}")).await["state"],
+        "Completed"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn x2a_rest_native_and_camunda_commits_release_a_parallel_catch() {
+    for camunda in [false, true] {
+        let persistence = Arc::new(InMemoryPersistence::new());
+        let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+        let (base, server) = serve(engine, persistence).await;
+        let client = reqwest::Client::new();
+        let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn"><process id="parallel_conditional" isExecutable="true"><startEvent id="s"/><parallelGateway id="fork"/><serviceTask id="main" camunda:topic="main"/><intermediateCatchEvent id="wait"><conditionalEventDefinition><condition>mainResult == 42</condition></conditionalEventDefinition></intermediateCatchEvent><serviceTask id="work" camunda:topic="review"/><endEvent id="end_main"/><endEvent id="end_review"/><sequenceFlow id="a" sourceRef="s" targetRef="fork"/><sequenceFlow id="b" sourceRef="fork" targetRef="main"/><sequenceFlow id="c" sourceRef="fork" targetRef="wait"/><sequenceFlow id="d" sourceRef="main" targetRef="end_main"/><sequenceFlow id="e" sourceRef="wait" targetRef="work"/><sequenceFlow id="f" sourceRef="work" targetRef="end_review"/></process></definitions>"#;
+        let deployed = post(
+            &client,
+            &base,
+            "/api/deploy",
+            json!({"xml":xml,"name":"parallel_conditional"}),
+        )
+        .await;
+        let started = post(
+            &client,
+            &base,
+            "/api/start",
+            json!({"definition_key":deployed["definition_key"]}),
+        )
+        .await;
+        let id = started["instance_id"].as_str().unwrap();
+        assert_eq!(
+            get(&client, &base, "/api/conditional-catches")
+                .await
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        if camunda {
+            let tasks = post(&client, &base, "/engine-rest/external-task/fetchAndLock", json!({"workerId":"worker","maxTasks":1,"topics":[{"topicName":"main","lockDuration":60000}]})).await;
+            let task = tasks[0]["id"].as_str().unwrap();
+            let response = client.post(format!("{base}/engine-rest/external-task/{task}/complete")).json(&json!({"workerId":"worker","variables":{"mainResult":{"value":42,"type":"Integer"}}})).send().await.unwrap();
+            assert_eq!(response.status(), 204, "{}", response.text().await.unwrap());
+        } else {
+            finish(&client, &base, "main", id).await;
+        }
+        assert_eq!(
+            get(&client, &base, "/api/conditional-catches").await,
+            json!([])
+        );
+        finish(&client, &base, "review", id).await;
+        assert_eq!(
+            get(&client, &base, &format!("/api/instances/{id}")).await["state"],
+            "Completed"
+        );
+        server.abort();
+    }
+}

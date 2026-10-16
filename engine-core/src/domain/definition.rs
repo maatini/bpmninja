@@ -192,12 +192,25 @@ impl ProcessDefinition {
                 && let Some(outgoing_flows) = flows.get(node_id)
             {
                 for sf in outgoing_flows {
+                    if flows
+                        .values()
+                        .flatten()
+                        .filter(|flow| flow.target == sf.target)
+                        .count()
+                        != 1
+                    {
+                        return Err(EngineError::InvalidDefinition(format!(
+                            "Event gateway target '{}' cannot have additional incoming flows",
+                            sf.target
+                        )));
+                    }
                     if let Some(target_element) = nodes.get(&sf.target)
                         && !matches!(
                             target_element,
                             BpmnElement::MessageCatchEvent { .. }
                                 | BpmnElement::SignalCatchEvent { .. }
                                 | BpmnElement::TimerCatchEvent(_)
+                                | BpmnElement::ConditionalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
@@ -260,6 +273,16 @@ impl ProcessDefinition {
                     None
                 }
             })
+            .chain(self.nodes.values().filter_map(|node| {
+                match node {
+                    BpmnElement::ConditionalCatchEvent { condition } => {
+                        crate::condition::compile_event_condition(condition)
+                            .ok()
+                            .map(|compiled| (condition.clone(), compiled))
+                    }
+                    _ => None,
+                }
+            }))
             .collect();
     }
 
@@ -282,6 +305,18 @@ impl ProcessDefinition {
             .get(expr)
             .map(|condition| condition.evaluate(variables))
             .unwrap_or_else(|| crate::condition::evaluate_condition(expr, variables))
+    }
+
+    pub(crate) fn has_conditionals(&self) -> bool {
+        self.nodes
+            .values()
+            .any(|node| matches!(node, BpmnElement::ConditionalCatchEvent { .. }))
+            || self.event_subprocesses.iter().any(|handler| {
+                matches!(
+                    handler.trigger,
+                    crate::domain::EventSubProcessTrigger::Conditional(_)
+                )
+            })
     }
 
     /// Returns the (id, element) of the start event.

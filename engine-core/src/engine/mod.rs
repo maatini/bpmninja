@@ -21,6 +21,7 @@ use std::time::Duration;
 use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
+mod conditional_catch;
 pub(crate) mod data_mappings;
 mod definition_ops;
 pub(crate) mod event_subprocess;
@@ -73,6 +74,7 @@ pub struct WorkflowEngine {
     pub(crate) retry_worker_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Serializes `save_instance` per instance without holding the instance lock.
     pub(crate) persist_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_step_locks: persistence_ops::PersistLocks,
     pub(crate) conditional_work_locks: persistence_ops::PersistLocks,
     pub(crate) event_lifecycle_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
@@ -112,6 +114,7 @@ impl WorkflowEngine {
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
             persist_locks: persistence_ops::PersistLocks::new(),
+            conditional_step_locks: persistence_ops::PersistLocks::new(),
             conditional_work_locks: persistence_ops::PersistLocks::new(),
             event_lifecycle_locks: persistence_ops::PersistLocks::new(),
             scripts: crate::scripting::ScriptRunner::new(script_config),
@@ -359,6 +362,16 @@ impl WorkflowEngine {
     /// Clears any pending wait states (timers, messages) associated with a specific token.
     /// Used by Event-Based Gateways to cancel alternative events when one fires.
     pub async fn clear_wait_states_for_token(&self, instance_id: Uuid, token_id: &Uuid) {
+        if let Some(instance) = self.instances.get(&instance_id).await
+            && let Some(state) = &mut instance.write().await.event_state
+        {
+            state
+                .conditional_waits
+                .retain(|_, wait| &wait.token_id != token_id);
+            state
+                .ready_conditional_tokens
+                .retain(|ready| ready != token_id);
+        }
         // Collect timer IDs to delete
         let timers_to_delete: Vec<Uuid> = self
             .pending_timers

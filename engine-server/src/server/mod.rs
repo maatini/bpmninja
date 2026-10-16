@@ -241,6 +241,10 @@ pub fn build_app_with_config(
         .route("/api/timers", get(timers::get_pending_timers))
         .route("/api/timers/process", post(timers::process_timers))
         .route("/api/messages", get(messages::get_pending_messages))
+        .route(
+            "/api/conditional-catches",
+            get(instances::pending_conditionals),
+        )
         // Service Task endpoints
         .route(
             "/engine-rest/external-task/fetchAndLock",

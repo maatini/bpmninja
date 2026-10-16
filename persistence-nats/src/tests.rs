@@ -538,6 +538,112 @@ async fn x9b_conditional_latch_and_missing_claimed_task_survive_nats_reconnect()
     fresh.delete_definition(&new_key.to_string()).await.unwrap();
 }
 
+#[tokio::test]
+async fn x2a_claimed_conditional_catch_recovers_with_false_value_and_original_definition() {
+    use engine_core::domain::{
+        BpmnElement, ExecutionListener, ListenerEvent, ProcessDefinitionBuilder,
+    };
+    use engine_core::{InstanceState, WorkflowEngine};
+    use serde_json::json;
+    use std::collections::HashMap;
+    let stream = format!("TEST_X2A_{}", Uuid::new_v4());
+    let Some(persistence) = connect_nats(&stream).await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut definition = ProcessDefinitionBuilder::new("conditional_restore")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "wait",
+            BpmnElement::ConditionalCatchEvent {
+                condition: "flag".into(),
+            },
+        )
+        .node("work", BpmnElement::UserTask("original".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "wait")
+        .flow("wait", "work")
+        .flow("work", "end")
+        .build()
+        .unwrap();
+    definition.variable_defaults.extend(HashMap::from([
+        ("starts".into(), json!(0)),
+        ("ends".into(), json!(0)),
+    ]));
+    definition.listeners.insert(
+        "wait".into(),
+        vec![
+            ExecutionListener {
+                event: ListenerEvent::Start,
+                script: "starts += 1;".into(),
+            },
+            ExecutionListener {
+                event: ListenerEvent::End,
+                script: "ends += 1;".into(),
+            },
+        ],
+    );
+    let mut newer = definition.clone();
+    let (key, _) = engine.deploy_definition(definition).await;
+    let id = engine.start_instance(key).await.unwrap();
+    let mut snapshot = engine.get_instance_details(id).await.unwrap();
+    let state = snapshot.event_state.as_mut().unwrap();
+    let wait = state.conditional_waits.values_mut().next().unwrap();
+    wait.claimed = true;
+    let token = snapshot.tokens.get_mut(&wait.token_id).unwrap();
+    token.conditional_wait = Some(wait.id);
+    snapshot.variables.insert("flag".into(), json!(false));
+    state.ready_conditional_tokens.clear(); // Crash after a claim was taken by the execution queue.
+    persistence.save_instance(&snapshot).await.unwrap();
+    newer.nodes.insert(
+        "wait".into(),
+        BpmnElement::ConditionalCatchEvent {
+            condition: "never".into(),
+        },
+    );
+    newer
+        .nodes
+        .insert("work".into(), BpmnElement::UserTask("newer".into()));
+    let (new_key, _) = engine.deploy_definition(newer).await;
+    drop(engine);
+    drop(persistence);
+    let fresh = Arc::new(
+        NatsPersistence::connect(&nats_url(), &stream)
+            .await
+            .unwrap(),
+    );
+    let restored = WorkflowEngine::new().with_persistence(fresh.clone());
+    for definition in fresh.list_definitions().await.unwrap() {
+        if definition.key == key || definition.key == new_key {
+            restored.deploy_definition(definition).await;
+        }
+    }
+    for instance in fresh.list_instances().await.unwrap() {
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored.reconcile_event_subprocesses().await.unwrap();
+    let tasks = restored.get_pending_user_tasks();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].assignee, "original");
+    let current = restored.get_instance_details(id).await.unwrap();
+    assert_eq!(current.variables["starts"], 1);
+    assert_eq!(current.variables["ends"], 1);
+    restored
+        .complete_user_task(tasks[0].task_id, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.get_instance_state(id).await.unwrap(),
+        InstanceState::Completed
+    );
+    fresh.delete_instance(&id.to_string()).await.unwrap();
+    fresh.delete_definition(&key.to_string()).await.unwrap();
+    fresh.delete_definition(&new_key.to_string()).await.unwrap();
+}
+
 async fn connect_nats(stream: &str) -> Option<Arc<NatsPersistence>> {
     let url = nats_url();
     match NatsPersistence::connect(&url, stream).await {

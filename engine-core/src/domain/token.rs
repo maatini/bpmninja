@@ -8,6 +8,8 @@ pub struct Token {
     #[allow(dead_code)]
     pub id: Uuid,
     pub current_node: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_wait: Option<Uuid>,
     pub variables: HashMap<String, Value>,
     #[serde(default)]
     pub is_merged: bool,
@@ -105,6 +107,7 @@ impl Token {
         Self {
             id: Uuid::new_v4(),
             current_node: start_node.to_string(),
+            conditional_wait: None,
             variables: HashMap::new(),
             is_merged: false,
             loop_instance: None,
@@ -119,6 +122,7 @@ impl Token {
         Self {
             id: Uuid::new_v4(),
             current_node: start_node.to_string(),
+            conditional_wait: None,
             variables,
             is_merged: false,
             loop_instance: None,

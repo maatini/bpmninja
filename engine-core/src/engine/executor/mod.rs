@@ -32,7 +32,6 @@ impl WorkflowEngine {
             .event_context
             .as_ref()
             .map(|context| context.generation);
-        let initial_has_event_context = initial_generation.is_some();
         let mut history = Vec::new();
         let mut failure_generation = initial_generation;
         let driven = self
@@ -45,7 +44,7 @@ impl WorkflowEngine {
             .await;
         self.flush_history(instance_id, history).await;
         if let Err(error) = driven {
-            if matches!(error, EngineError::DataMappingError(_)) || initial_has_event_context {
+            if matches!(error, EngineError::DataMappingError(_)) || failure_generation.is_some() {
                 if let Some(instance) = self.instances.get(&instance_id).await {
                     let mut instance = instance.write().await;
                     if failure_generation.is_some_and(|generation| {
@@ -100,6 +99,13 @@ impl WorkflowEngine {
         let mut conditional_count = 0usize;
 
         while let Some(mut token) = queue.pop_front() {
+            // Serialize a claimed occurrence through its start/end callbacks and
+            // durable continuation, so concurrent replay cannot repeat callbacks.
+            let _conditional_step_guard = if token.conditional_wait.is_some() {
+                Some(self.conditional_step_locks.lock(instance_id).await)
+            } else {
+                None
+            };
             step_count += 1;
 
             // Cooperative scheduling: yield to Tokio every N steps
@@ -150,6 +156,23 @@ impl WorkflowEngine {
                     continue;
                 };
                 let mut instance = instance.write().await;
+                if let Some(occurrence) = token.conditional_wait
+                    && instance
+                        .event_state
+                        .as_ref()
+                        .and_then(|state| state.conditional_waits.get(&occurrence))
+                        .is_none_or(|wait| {
+                            !wait.claimed
+                                || wait.token_id != token.id
+                                || wait.node_id != token.current_node
+                        })
+                {
+                    continue;
+                }
+                if matches!(instance.state, InstanceState::Suspended { .. }) {
+                    instance.tokens.insert(token.id, token.clone());
+                    continue;
+                }
                 if !crate::engine::event_subprocess::token_valid(&instance, &token) {
                     continue;
                 }
@@ -185,6 +208,10 @@ impl WorkflowEngine {
                 NextAction::ContinueMultiple(_) => (
                     crate::history::HistoryEventType::TokenForked,
                     "Token forked at gateway".to_string(),
+                ),
+                NextAction::WaitForConditional { .. } => (
+                    crate::history::HistoryEventType::TokenAdvanced,
+                    "Waiting for condition".into(),
                 ),
                 NextAction::WaitForJoin { .. } => (
                     crate::history::HistoryEventType::TokenAdvanced,
@@ -429,6 +456,9 @@ impl WorkflowEngine {
                     inst.variables = updates;
                 }
             }
+            if token.event_context.is_some() {
+                inst.tokens.insert(token.id, token.clone());
+            }
         }
 
         if let Some(instance) = self.instances.get(&instance_id).await {
@@ -436,6 +466,23 @@ impl WorkflowEngine {
             Self::evaluate_conditionals(&mut instance, &def_clone)?;
             if !crate::engine::event_subprocess::token_valid(&instance, token) {
                 return Err(EngineError::AlreadyCompleted);
+            }
+        }
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let claimed = instance
+                .read()
+                .await
+                .event_state
+                .as_ref()
+                .is_some_and(|state| {
+                    state.conditional_waits.values().any(|wait| {
+                        wait.token_id == token.id && wait.node_id == current_id && wait.claimed
+                    })
+                });
+            if claimed {
+                return self
+                    .handle_conditional_catch(instance_id, token, &def_clone, &current_id)
+                    .await;
             }
         }
         match &element {
@@ -492,6 +539,10 @@ impl WorkflowEngine {
             }
             BpmnElement::EventBasedGateway => {
                 self.handle_event_based_gateway(instance_id, token, &def_clone, &current_id)
+                    .await
+            }
+            BpmnElement::ConditionalCatchEvent { .. } => {
+                self.handle_conditional_catch(instance_id, token, &def_clone, &current_id)
                     .await
             }
             BpmnElement::TimerCatchEvent(timer_def) => {

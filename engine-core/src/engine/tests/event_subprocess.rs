@@ -6,7 +6,7 @@ use crate::domain::{
 use crate::persistence::WorkflowPersistence;
 use serde_json::json;
 
-fn definition(trigger: Trigger, interrupting: bool) -> ProcessDefinition {
+pub(super) fn definition(trigger: Trigger, interrupting: bool) -> ProcessDefinition {
     let mut def = ProcessDefinitionBuilder::new("events")
         .node("start", BpmnElement::StartEvent)
         .node("main", BpmnElement::UserTask("main".into()))

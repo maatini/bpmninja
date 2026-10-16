@@ -168,6 +168,6 @@ execution error and diagnostic audit/history instead of running indefinitely.
 
 Administrative token movement and migration involving conditional subscriptions
 are currently rejected before changing execution, because they cannot yet
-preserve subscription ownership and latch semantics. Top-level conditional
-starts, intermediate/boundary catches, nested scopes, and filters remain later
-X2 increments. See the [implementation plan](x2-conditional-events-plan.md).
+preserve subscription ownership and latch semantics. Intermediate catches are supported by [X2a](conditional-catches.md). Top-level
+conditional starts, boundary catches, nested scopes, and filters remain later
+increments. See the [implementation plan](x2-conditional-events-plan.md).
