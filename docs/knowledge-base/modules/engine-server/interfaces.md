@@ -50,7 +50,7 @@ See groups below. Key groups:
 | User Tasks | 2 | `GET /api/tasks`, `POST /api/complete/:id` |
 | Service Tasks | 8 | `GET /api/service-tasks`, `fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`, `retry`, `resolve` |
 | Files | 3 | `POST/GET/DELETE /api/instances/:id/files/:var` |
-| Events & Messages | 4 | `POST /api/message`, `GET /api/messages`, `GET /api/timers`, `POST /api/timers/process` |
+| Events & Messages | 5 | `POST /api/message`, `POST /api/signal`, `GET /api/messages` (incl. `kind`: `Message`/`Signal`), `GET /api/timers`, `POST /api/timers/process` |
 | History & Archive | 4 | `GET /api/instances/:id/history`, `GET /api/instances/:id/history/:event_id`, `GET /api/history/instances`, `GET /api/history/instances/:id` |
 | Monitoring & Health | 7 | `GET /api/health`, `/api/ready`, `/api/info`, `/api/monitoring`, bucket entries, `/metrics` |
 | Observability | 2 | `GET /api/logs`, `GET /api/events` (SSE) |
@@ -123,7 +123,9 @@ pub fn build_app_with_config(..., config: AppBuildConfig) -> Router
 | `BPMNINJA_API_KEY` | unset (auth off) | Bearer or `X-API-Key`. Health/ready stay public. |
 | `MAX_XML_BYTES` | `10485760` (10 MiB) | JSON/XML body + deploy cap. |
 
-// Public exports
+## Startup Restore
+
+```rust
 pub struct StartupCoordinator { ... }
 impl StartupCoordinator {
     pub fn new(nats: Arc<NatsPersistence>) -> Self

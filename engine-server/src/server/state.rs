@@ -32,7 +32,13 @@ impl IntoResponse for AppError {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             Self::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
-            Self::Engine(EngineError::InvalidDefinition(msg)) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(
+                EngineError::InvalidDefinition(msg) | EngineError::DataMappingError(msg),
+            ) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(EngineError::ConditionalStartConflict(id)) => (
+                StatusCode::CONFLICT,
+                format!("Request ID already used with different input: {id}"),
+            ),
             Self::Engine(EngineError::NoMatchingCondition(msg)) => (
                 StatusCode::BAD_REQUEST,
                 format!("No matching condition at gateway '{msg}'"),
@@ -112,6 +118,8 @@ pub struct AppState {
     pub(crate) api_key: Option<String>,
     /// Configured CORS origins (`*` means allow any — dev escape hatch only).
     pub(crate) cors_origins: Vec<String>,
+    /// Deploy-time model checking (`MODEL_CHECK`, `MODEL_CHECK_TIMEOUT_MS`).
+    pub(crate) model_checker: crate::server::model_check::ModelChecker,
 }
 
 /// `REQUIRE_NATS` is fail-closed: unset defaults to **true**.

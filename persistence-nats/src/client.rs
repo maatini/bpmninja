@@ -1,13 +1,59 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_nats::Client;
-use async_nats::jetstream::object_store::Config as ObjectStoreConfig;
-use async_nats::jetstream::{self, context::Context, stream::Config as StreamConfig};
+use async_nats::jetstream::object_store::{Config as ObjectStoreConfig, ObjectStore};
+use async_nats::jetstream::{self, context::Context, kv, stream::Config as StreamConfig};
 use engine_core::error::{EngineError, EngineResult};
 use futures::StreamExt;
+use tokio::sync::OnceCell;
+
+/// KV buckets created on connect; their handles are cached after first use.
+const KV_BUCKETS: [&str; 11] = [
+    "conditional_starts",
+    "tokens",
+    "instances",
+    "definitions",
+    "user_tasks",
+    "service_tasks",
+    "timers",
+    "messages",
+    "history_instances",
+    "instance_audit",
+    "instance_states",
+];
+
+/// Object stores created on connect; their handles are cached after first use.
+const OBJECT_STORES: [&str; 2] = ["bpmn_xml", "instance_files"];
+
+/// Cached bucket handles. Without the cache every operation paid an extra
+/// JetStream API round trip (`get_key_value` / `get_object_store`) before the
+/// actual read or write. A failed lookup is not cached, so the next call retries.
+pub(crate) struct HandleCache {
+    kv: HashMap<&'static str, OnceCell<kv::Store>>,
+    object_stores: HashMap<&'static str, OnceCell<ObjectStore>>,
+}
+
+impl HandleCache {
+    fn new() -> Self {
+        Self {
+            kv: KV_BUCKETS.iter().map(|b| (*b, OnceCell::new())).collect(),
+            object_stores: OBJECT_STORES
+                .iter()
+                .map(|b| (*b, OnceCell::new()))
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct NatsPersistence {
     pub(crate) client: Client,
     pub(crate) js: Context,
+    pub(crate) handles: Arc<HandleCache>,
+    #[cfg(feature = "delta-instances")]
+    pub(crate) snapshot_cache: Arc<tokio::sync::Mutex<crate::journal::SnapshotCache>>,
+    pub(crate) audit_cache: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl NatsPersistence {
@@ -127,7 +173,90 @@ impl NatsPersistence {
             })
             .await;
 
-        Ok(Self { client, js })
+        // Readers always need this bucket, including after disabling detached writes.
+        if js.get_key_value("instance_audit").await.is_err()
+            && let Err(create_error) = js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: "instance_audit".into(),
+                    description: "Immutable instance audit snapshots".into(),
+                    ..Default::default()
+                })
+                .await
+        {
+            // A concurrent connection may have created the same bucket.
+            js.get_key_value("instance_audit").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize audit bucket: {create_error}"
+                ))
+            })?;
+        }
+
+        if js.get_key_value("instance_states").await.is_err()
+            && let Err(error) = js
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: "instance_states".into(),
+                    description: "Immutable checkpoints and deltas".into(),
+                    ..Default::default()
+                })
+                .await
+        {
+            js.get_key_value("instance_states").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize state journal: {error}"
+                ))
+            })?;
+        }
+
+        if js.get_key_value("conditional_starts").await.is_err()
+            && let Err(error) = js
+                .create_key_value(kv::Config {
+                    bucket: "conditional_starts".into(),
+                    description: "Durable explicit conditional-start receipts; no TTL".into(),
+                    ..Default::default()
+                })
+                .await
+        {
+            js.get_key_value("conditional_starts").await.map_err(|_| {
+                EngineError::PersistenceError(format!(
+                    "Failed to initialize conditional starts: {error}"
+                ))
+            })?;
+        }
+
+        Ok(Self {
+            client,
+            js,
+            handles: Arc::new(HandleCache::new()),
+            #[cfg(feature = "delta-instances")]
+            snapshot_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            audit_cache: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+        })
+    }
+
+    /// Returns the KV handle for `bucket` (cached for known buckets).
+    pub(crate) async fn kv(&self, bucket: &str) -> EngineResult<kv::Store> {
+        let lookup = || async {
+            self.js.get_key_value(bucket).await.map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to get {bucket} KV: {e}"))
+            })
+        };
+        match self.handles.kv.get(bucket) {
+            Some(cell) => cell.get_or_try_init(lookup).await.cloned(),
+            None => lookup().await,
+        }
+    }
+
+    /// Returns the object store handle for `bucket` (cached for known stores).
+    pub(crate) async fn object_store(&self, bucket: &str) -> EngineResult<ObjectStore> {
+        let lookup = || async {
+            self.js.get_object_store(bucket).await.map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to get {bucket} Object Store: {e}"))
+            })
+        };
+        match self.handles.object_stores.get(bucket) {
+            Some(cell) => cell.get_or_try_init(lookup).await.cloned(),
+            None => lookup().await,
+        }
     }
 
     /// Gibt einen Klon des JetStream-Kontexts zurück, z. B. für den Log-Sink.
@@ -140,9 +269,8 @@ impl NatsPersistence {
         bucket: &str,
         entity_name: &str,
     ) -> EngineResult<Vec<T>> {
-        let store = self.js.get_key_value(bucket).await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get {bucket} KV: {}", e))
-        })?;
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let store = self.kv(bucket).await?;
 
         // keys() Err is a persistence failure, not an empty bucket — must propagate.
         let mut keys = store.keys().await.map_err(|e| {
@@ -153,16 +281,34 @@ impl NatsPersistence {
         while let Some(key_result) = keys.next().await {
             match key_result {
                 Ok(key) => match store.get(&key).await {
-                    Ok(Some(entry)) => match serde_json::from_slice::<T>(&entry) {
-                        Ok(item) => entries.push(item),
-                        Err(e) => {
-                            tracing::warn!("Failed to deserialize {entity_name} '{}': {}", key, e)
+                    Ok(Some(entry)) => {
+                        match if crate::codec::detached(&entry) || crate::journal::is_head(&entry) {
+                            let restored = self.restore_instance_record(&entry).await?;
+                            serde_json::to_value(restored)
+                                .and_then(serde_json::from_value::<T>)
+                                .map_err(|e| EngineError::PersistenceError(e.to_string()))
+                        } else {
+                            crate::codec::decode::<T>(&entry)
+                        } {
+                            Ok(item) => entries.push(item),
+                            // A recognized compact record must not disappear from
+                            // restore on corruption or an unsupported version.
+                            Err(e) if crate::codec::is_compact(&entry) => return Err(e),
+                            Err(e) => return Err(e),
                         }
-                    },
+                    }
                     Ok(None) => {}
-                    Err(e) => tracing::warn!("Failed to get {entity_name} '{key}': {}", e),
+                    Err(e) => {
+                        return Err(EngineError::PersistenceError(format!(
+                            "Failed to get {entity_name} '{key}': {e}"
+                        )));
+                    }
                 },
-                Err(e) => tracing::warn!("Failed to stream {entity_name} key: {}", e),
+                Err(e) => {
+                    return Err(EngineError::PersistenceError(format!(
+                        "Failed to stream {entity_name} key: {e}"
+                    )));
+                }
             }
         }
 

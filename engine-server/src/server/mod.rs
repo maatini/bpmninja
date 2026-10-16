@@ -1,5 +1,6 @@
 use tokio::sync::RwLock;
 pub(crate) mod auth;
+pub(crate) mod camunda;
 pub(crate) mod deploy;
 pub(crate) mod events;
 pub(crate) mod files;
@@ -7,6 +8,7 @@ pub(crate) mod history;
 pub(crate) mod instances;
 pub(crate) mod logs;
 pub(crate) mod messages;
+pub mod model_check;
 pub(crate) mod monitoring;
 pub(crate) mod state;
 pub(crate) mod tasks;
@@ -43,6 +45,10 @@ pub struct AppBuildConfig {
     pub max_xml_bytes: Option<usize>,
     pub api_key: Option<Option<String>>,
     pub cors_origins: Option<Vec<String>>,
+    /// `None` → env `MODEL_CHECK` (default `warn`).
+    pub model_check: Option<model_check::ModelCheckMode>,
+    /// `None` → env `MODEL_CHECK_TIMEOUT_MS` (default 2000).
+    pub model_check_timeout_ms: Option<u64>,
 }
 
 /// Builds the Axum router with all routes and middleware.
@@ -64,6 +70,8 @@ pub fn build_app() -> Router {
             max_xml_bytes: Some(MAX_XML_BYTES),
             api_key: Some(None),
             cors_origins: Some(default_cors_origins()),
+            model_check: Some(model_check::ModelCheckMode::Off),
+            model_check_timeout_ms: None,
         },
     )
 }
@@ -136,6 +144,14 @@ pub fn build_app_with_config(
         max_xml_bytes,
         api_key,
         cors_origins: cors_origins.clone(),
+        model_checker: model_check::ModelChecker::new(
+            config
+                .model_check
+                .unwrap_or_else(model_check::ModelCheckMode::from_env),
+            config
+                .model_check_timeout_ms
+                .unwrap_or_else(model_check::timeout_ms_from_env),
+        ),
     });
 
     tracing::info!(
@@ -149,6 +165,10 @@ pub fn build_app_with_config(
 
     let mut router = Router::new()
         .route("/api/deploy", post(deploy::deploy_definition))
+        .route(
+            "/api/conditional-starts/evaluate",
+            post(instances::evaluate_conditional_start),
+        )
         .route("/api/start", post(instances::start_instance))
         .route("/api/start/latest", post(instances::start_instance_latest))
         .route("/api/start/timer", post(instances::start_timer_instance))
@@ -221,10 +241,35 @@ pub fn build_app_with_config(
         )
         // Phase 1 endpoints
         .route("/api/message", post(messages::correlate_message))
+        .route("/api/signal", post(messages::broadcast_signal))
         .route("/api/timers", get(timers::get_pending_timers))
         .route("/api/timers/process", post(timers::process_timers))
         .route("/api/messages", get(messages::get_pending_messages))
+        .route(
+            "/api/conditional-catches",
+            get(instances::pending_conditionals),
+        )
         // Service Task endpoints
+        .route(
+            "/engine-rest/external-task/fetchAndLock",
+            post(camunda::fetch),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/complete",
+            post(camunda::complete),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/failure",
+            post(camunda::failure),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/extendLock",
+            post(camunda::extend),
+        )
+        .route(
+            "/engine-rest/external-task/{id}/bpmnError",
+            post(camunda::bpmn_error),
+        )
         .route("/api/service-tasks", get(tasks::get_service_tasks))
         .route(
             "/api/service-task/fetchAndLock",

@@ -67,6 +67,9 @@ impl WorkflowEngine {
         predetermined_id: Option<Uuid>,
     ) -> EngineResult<Uuid> {
         let (def, start_id) = self.validate_start_request(definition_key)?;
+        let mut initial = def.variable_defaults.clone();
+        initial.extend(variables);
+        variables = initial;
 
         let instance_id = predetermined_id.unwrap_or_else(Uuid::new_v4);
         let business_key = variables
@@ -103,7 +106,7 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::with_variables(&start_id, variables);
+        let mut token = Token::with_variables(&start_id, variables);
 
         for listener in &def.event_listeners {
             match listener {
@@ -136,6 +139,7 @@ impl WorkflowEngine {
                         node_id: target_definition.clone(),
                         message_name: message_name.clone(),
                         token_id: Uuid::nil(),
+                        kind: crate::runtime::CatchKind::Message,
                     };
                     self.pending_message_catches.insert(pending.id, pending);
                 }
@@ -143,6 +147,8 @@ impl WorkflowEngine {
             }
         }
 
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         Box::pin(self.run_instance_batch(instance_id, token)).await?;
         self.persist_instance(instance_id).await;
 
@@ -160,10 +166,16 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
 
+        if matches!(start_element, BpmnElement::ConditionalStartEvent { .. }) {
+            return Err(EngineError::InvalidDefinition(
+                "Use conditional-starts/evaluate for conditional start events".into(),
+            ));
+        }
         if matches!(start_element, BpmnElement::TimerStartEvent(_)) {
             return Err(EngineError::InvalidDefinition(
                 "Use trigger_timer_start() for timer start events".into(),
@@ -183,6 +195,7 @@ impl WorkflowEngine {
         parent_instance_id: Option<Uuid>,
     ) -> ProcessInstance {
         ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key: Uuid::new_v4().to_string(),
@@ -200,6 +213,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }
@@ -221,38 +235,6 @@ impl WorkflowEngine {
         .await
     }
 
-    /// Spawns a call activity sub-process
-    pub(crate) async fn spawn_call_activity(
-        &self,
-        child_def_key: Uuid,
-        parent_instance_id: Uuid,
-        called_node: String,
-        variables: HashMap<String, Value>,
-    ) -> EngineResult<Uuid> {
-        let child_id = self
-            .start_instance_with_variables_and_parent(
-                child_def_key,
-                variables,
-                Some(parent_instance_id),
-            )
-            .await?;
-
-        self.record_history_event(
-            parent_instance_id,
-            crate::history::HistoryEventType::CallActivityStarted,
-            &format!(
-                "Started Call Activity '{}' (child instance {})",
-                called_node, child_id
-            ),
-            crate::history::ActorType::Engine,
-            None,
-            None,
-        )
-        .await;
-
-        Ok(child_id)
-    }
-
     /// Spawns a Call Activity child and tracks it on the parent before the child runs.
     ///
     /// Registration happens first so a synchronously completing child can resume
@@ -265,9 +247,31 @@ impl WorkflowEngine {
     ) -> EngineResult<Uuid> {
         let child_id = Uuid::new_v4();
         let called_node = token.current_node.clone();
+        let parent = self
+            .instances
+            .get(&parent_instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(parent_instance_id))?;
+        let parent_def_key = parent.read().await.definition_key;
+        let parent_def = self
+            .definitions
+            .get(&parent_def_key)
+            .ok_or(EngineError::NoSuchDefinition(parent_def_key))?;
+        let child_variables = match parent_def
+            .data_mappings
+            .get(&called_node)
+            .and_then(|m| m.call_inputs.as_ref())
+        {
+            Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &token.variables)?,
+            None => token.variables.clone(),
+        };
 
         if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
             let mut parent = inst_arc.write().await;
+            if !crate::engine::event_subprocess::token_valid(&parent, &token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+            parent.tokens.remove(&token.id);
             parent.outstanding_calls.insert(
                 child_id,
                 OutstandingCall {
@@ -286,7 +290,7 @@ impl WorkflowEngine {
         match self
             .start_instance_with_variables_parent_and_id(
                 child_def_key,
-                token.variables.clone(),
+                child_variables,
                 Some(parent_instance_id),
                 Some(child_id),
             )
@@ -351,9 +355,15 @@ impl WorkflowEngine {
             let remaining_calls = parent.outstanding_calls.len();
             let was_parallel = matches!(parent.state, InstanceState::ParallelExecution { .. });
 
-            let (called_node_id, mut token_to_resume) = if let Some(call) = tracked {
+            let (called_node_id, token_to_resume) = if let Some(call) = tracked {
                 (call.node_id, Some(call.token))
-            } else if let InstanceState::WaitingOnCallActivity { token, .. } = &parent.state {
+            } else if let InstanceState::WaitingOnCallActivity {
+                token,
+                sub_instance_id,
+            } = &parent.state
+                && *sub_instance_id == completed_instance_id
+                && crate::engine::event_subprocess::token_valid(&parent, token)
+            {
                 (parent.current_node.clone(), Some(token.clone()))
             } else {
                 return Ok(());
@@ -377,17 +387,6 @@ impl WorkflowEngine {
 
             let def_key = parent.definition_key;
 
-            if let Some(active) = parent
-                .active_tokens
-                .iter_mut()
-                .find(|at| at.token.current_node == called_node_id && !at.completed)
-            {
-                active.token.variables.extend(child_vars.clone());
-                token_to_resume = Some(active.token.clone());
-            } else if let Some(ref mut linear_token) = token_to_resume {
-                linear_token.variables.extend(child_vars.clone());
-            }
-
             (called_node_id, token_to_resume, def_key)
         };
 
@@ -410,13 +409,59 @@ impl WorkflowEngine {
                 .get(&def_key)
                 .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
+            if !crate::engine::event_subprocess::token_valid(
+                &*self
+                    .instances
+                    .get(&parent_id)
+                    .await
+                    .ok_or(EngineError::NoSuchInstance(parent_id))?
+                    .read()
+                    .await,
+                &token,
+            ) {
+                return Ok(());
+            }
+            if let Some(code) = &error_code
+                && crate::engine::executor::find_boundary_error_event(&def, &called_node_id, code)
+                    .is_none()
+                && let Some(handler) = self
+                    .prepare_event_code(parent_id, code, false, &token)
+                    .await?
+            {
+                Box::pin(self.run_instance_batch(parent_id, handler)).await?;
+                return Ok(());
+            }
+            self.cancel_boundary_timers(parent_id, &called_node_id, Some(token.id))
+                .await;
+            self.cancel_boundary_message_catches(parent_id, &called_node_id, Some(token.id))
+                .await;
             // End-Scripts der Call-Activity ausführen. Bei Fehler: Eltern-Instanz als
             // fehlerhaft markieren, damit sie nicht in `Running`-Zustand ohne Token
             // hängen bleibt.
-            if let Err(e) = self
-                .run_end_scripts(parent_id, &mut token, &def, &called_node_id)
-                .await
-            {
+            let completion = async {
+                if error_code.is_none() {
+                    let transferred = match def
+                        .data_mappings
+                        .get(&called_node_id)
+                        .and_then(|m| m.call_outputs.as_ref())
+                    {
+                        Some(mappings) => {
+                            crate::domain::data::evaluate_mappings(mappings, &child_vars)?
+                        }
+                        None => child_vars.clone(),
+                    };
+                    token.variables.extend(transferred.clone());
+                    // Call outputs are process writes even if ordinary activity outputs exist.
+                    if let Some(scope) = &mut token.data_scope {
+                        scope.original_variables.extend(transferred);
+                    }
+                    self.run_end_scripts(parent_id, &mut token, &def, &called_node_id)
+                        .await?;
+                }
+                Ok::<(), EngineError>(())
+            }
+            .await;
+            if let Err(e) = completion {
                 tracing::error!(
                     "Instanz {parent_id}: End-Script der Call Activity '{}' fehlgeschlagen: {e} — markiere als fehlerhaft",
                     called_node_id
@@ -434,6 +479,12 @@ impl WorkflowEngine {
                 return Err(e);
             }
 
+            self.run_conditional_work(parent_id).await?;
+            if let Some(instance) = self.instances.get(&parent_id).await
+                && !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token)
+            {
+                return Ok(());
+            }
             // Check for BPMN Error handling first
             let mut handle_as_incident = false;
             let mut target_boundary = None;
@@ -460,11 +511,13 @@ impl WorkflowEngine {
                     token: token.clone(),
                 };
                 inst.push_audit_log(format!("💥 INCIDENT: Child {completed_instance_id} failed with unhandled BPMN error '{}'", error_code.as_deref().unwrap_or_default()));
+                drop(inst);
                 self.persist_instance(parent_id).await;
                 return Ok(());
             }
 
             let next_node = if let Some(bound_id) = target_boundary {
+                token.discard_data_scope();
                 bound_id
             } else {
                 crate::engine::executor::resolve_next_target(
@@ -501,6 +554,7 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -532,6 +586,7 @@ impl WorkflowEngine {
         let instance_id = Uuid::new_v4();
         let business_key = Uuid::new_v4().to_string();
         let instance = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key,
@@ -542,13 +597,14 @@ impl WorkflowEngine {
                 "⏰ Timer fired ({}s) — started at node '{start_id}'",
                 provided_duration.as_secs()
             )],
-            variables: HashMap::new(),
+            variables: def.variable_defaults.clone(),
             tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -571,8 +627,10 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::new(&start_id);
+        let mut token = Token::with_variables(&start_id, def.variable_defaults.clone());
 
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 
@@ -597,6 +655,7 @@ impl WorkflowEngine {
             .get(&definition_key)
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
+        crate::engine::event_subprocess::validate_definition(&def)?;
         let (start_id, start_element) = def
             .start_event()
             .ok_or_else(|| EngineError::InvalidDefinition("No start event".into()))?;
@@ -692,7 +751,8 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchDefinition(definition_key))?;
 
         let instance_id = Uuid::new_v4();
-        let mut vars = variables.clone();
+        let mut vars = def.variable_defaults.clone();
+        vars.extend(variables.clone());
         let business_key = vars
             .remove("business_key")
             .and_then(|v| v.as_str().map(String::from))
@@ -710,6 +770,7 @@ impl WorkflowEngine {
         }
 
         let instance = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: instance_id,
             definition_key,
             business_key,
@@ -720,13 +781,14 @@ impl WorkflowEngine {
                 "⏰ Timer instance #{iteration}/{total} started at node '{start_id}' with {} variable(s)",
                 vars.len()
             )],
-            variables: vars,
+            variables: vars.clone(),
             tokens: HashMap::new(),
             active_tokens: Vec::new(),
             join_barriers: std::collections::HashMap::new(),
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -745,7 +807,9 @@ impl WorkflowEngine {
         )
         .await;
 
-        let token = Token::new(start_id);
+        let mut token = Token::with_variables(start_id, vars);
+        self.initialize_event_subprocesses(instance_id, &mut token)
+            .await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 

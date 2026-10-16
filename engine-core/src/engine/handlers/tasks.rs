@@ -20,11 +20,29 @@ impl WorkflowEngine {
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
+            if self.pending_timers.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == t.node_id
+            }) {
+                continue;
+            }
+            self.track_boundary_job(instance_id, token, t.id, Some(t.clone()), None)
+                .await?;
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {
+            if self.pending_message_catches.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == m.node_id
+            }) {
+                continue;
+            }
+            self.track_boundary_job(instance_id, token, m.id, None, Some(m.clone()))
+                .await?;
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -36,6 +54,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
 
         let pending = PendingUserTask {
             task_id: Uuid::new_v4(),
@@ -51,6 +72,11 @@ impl WorkflowEngine {
             },
         };
 
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::User(pending.task_id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(
@@ -73,9 +99,7 @@ impl WorkflowEngine {
         current_id: &str,
         script: &str,
     ) -> EngineResult<NextAction> {
-        let result =
-            crate::scripting::execute_script_safe(&self.script_config, script, &token.variables)
-                .await?;
+        let result = self.scripts.execute(script, &token.variables).await?;
         token.variables = result;
 
         self.run_end_scripts(instance_id, token, def_clone, current_id)
@@ -94,8 +118,15 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
         inst.current_node = next;
-        inst.variables = token.variables.clone();
+        // Event-context writes were already merged atomically by run_end_scripts.
+        // A second wholesale copy could overwrite a concurrent process commit.
+        if token.event_context.is_none() {
+            inst.variables = token.variables.clone();
+        }
         inst.push_audit_log(format!("📜 Script task '{current_id}' executed"));
         Ok(NextAction::Continue(token.clone()))
     }
@@ -123,6 +154,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
         inst.current_node = next;
         inst.push_audit_log(format!(
             "📤 Send task '{current_id}' published message '{message_name}'"
@@ -141,11 +175,29 @@ impl WorkflowEngine {
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
+            if self.pending_timers.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == t.node_id
+            }) {
+                continue;
+            }
+            self.track_boundary_job(instance_id, token, t.id, Some(t.clone()), None)
+                .await?;
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
         for m in pending_msgs {
+            if self.pending_message_catches.iter().any(|existing| {
+                existing.instance_id == instance_id
+                    && existing.token_id == token.id
+                    && existing.node_id == m.node_id
+            }) {
+                continue;
+            }
+            self.track_boundary_job(instance_id, token, m.id, None, Some(m.clone()))
+                .await?;
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
@@ -157,6 +209,9 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
 
         let svc_task = PendingServiceTask {
             id: Uuid::new_v4(),
@@ -179,6 +234,11 @@ impl WorkflowEngine {
             },
         };
 
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::Service(svc_task.id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(

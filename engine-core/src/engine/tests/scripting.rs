@@ -192,3 +192,60 @@ async fn test_script_start_vs_end_listener_distinction() {
     let inst = engine.get_instance_details(inst_id).await.unwrap();
     assert!(inst.variables.contains_key("end_ran"));
 }
+
+/// P6: the shared runner compiles each distinct script once and reuses it.
+#[tokio::test]
+async fn script_runner_compiles_each_script_once() {
+    let runner = crate::scripting::ScriptRunner::new(crate::scripting::ScriptConfig::default());
+    let vars = HashMap::from([("x".to_string(), serde_json::json!(1))]);
+
+    for _ in 0..3 {
+        let out = runner.execute("x = x + 1;", &vars).await.unwrap();
+        assert_eq!(out.get("x"), Some(&serde_json::json!(2)));
+    }
+    assert_eq!(runner.cached_scripts(), 1);
+
+    runner.execute("let y = x * 10;", &vars).await.unwrap();
+    assert_eq!(runner.cached_scripts(), 2);
+
+    // A compile error is reported and not cached.
+    assert!(runner.execute("let = ;", &vars).await.is_err());
+    assert_eq!(runner.cached_scripts(), 2);
+}
+
+/// P6: limits still apply with the shared engine (operation budget).
+#[tokio::test]
+async fn script_runner_keeps_operation_limit() {
+    let runner = crate::scripting::ScriptRunner::new(crate::scripting::ScriptConfig {
+        max_operations: 1_000,
+        ..Default::default()
+    });
+    let result = runner
+        .execute("let i = 0; while true { i += 1; }", &HashMap::new())
+        .await;
+    assert!(matches!(
+        result,
+        Err(crate::domain::EngineError::ScriptError(_))
+    ));
+}
+
+#[tokio::test]
+async fn script_runner_returns_the_visible_shadowed_binding() {
+    let runner = crate::scripting::ScriptRunner::new(crate::scripting::ScriptConfig::default());
+    let vars = HashMap::from([("value".into(), serde_json::json!(1))]);
+    let first = runner
+        .execute("let value = value + 1;", &vars)
+        .await
+        .unwrap();
+    assert_eq!(first["value"], 2);
+    let second = runner
+        .execute("let value = value + 1;", &first)
+        .await
+        .unwrap();
+    assert_eq!(second["value"], 3);
+    let shadowed = runner
+        .execute("let value = 10; let value = 20;", &vars)
+        .await
+        .unwrap();
+    assert_eq!(shadowed["value"], 20);
+}

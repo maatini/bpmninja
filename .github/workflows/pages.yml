@@ -32,7 +32,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          # Upload the docs folder containing index.html and openapi.yaml
+          # Upload the docs folder: index.html (website), api.html (Redoc) and openapi.yaml
           path: './docs'
       - name: Deploy to GitHub Pages
         id: deployment

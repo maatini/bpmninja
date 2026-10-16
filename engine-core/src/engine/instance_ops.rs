@@ -13,6 +13,16 @@ use crate::runtime::{
 };
 
 impl WorkflowEngine {
+    /// Lock metadata without cloning the queue or the task's variable snapshot.
+    pub fn service_task_lock(&self, task_id: Uuid) -> Option<crate::runtime::ServiceTaskLease> {
+        self.pending_service_tasks
+            .get(&task_id)
+            .map(|task| crate::runtime::ServiceTaskLease {
+                instance_id: task.instance_id,
+                worker_id: task.worker_id.clone(),
+                lock_expiration: task.lock_expiration,
+            })
+    }
     /// Returns summary statistics for monitoring dashboards.
     pub async fn get_stats(&self) -> EngineStats {
         let all_insts = self.instances.all().await;
@@ -226,7 +236,8 @@ impl WorkflowEngine {
             None
         };
 
-        let updated_vars = {
+        let updates = variables.clone();
+        {
             let instance_arc = self
                 .instances
                 .get(&instance_id)
@@ -239,6 +250,7 @@ impl WorkflowEngine {
             let mut deleted: usize = 0;
 
             for (key, value) in variables {
+                instance.variable_types.remove(&key);
                 if value.is_null() {
                     // Delete
                     if instance.variables.remove(&key).is_some() {
@@ -268,28 +280,23 @@ impl WorkflowEngine {
                 "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
                 instance_id
             );
-
-            instance.variables.clone()
-        };
-
-        // With centralized tokens, we also update instance.tokens so that
-        // when a pending task is completed, it picks up the latest variables.
-        {
-            let instance_arc = self
-                .instances
-                .get(&instance_id)
-                .await
-                .ok_or(EngineError::NoSuchInstance(instance_id))?;
-            let mut instance = instance_arc.write().await;
             for token in instance.tokens.values_mut() {
-                for (key, value) in &updated_vars {
-                    if value.is_null() {
-                        token.variables.remove(key);
-                    } else {
-                        token.variables.insert(key.clone(), value.clone());
-                    }
-                }
+                token.apply_process_updates(&updates);
             }
+            for call in instance.outstanding_calls.values_mut() {
+                call.token.apply_process_updates(&updates);
+            }
+            for active in &mut instance.active_tokens {
+                active.token.apply_process_updates(&updates);
+            }
+            if let InstanceState::WaitingOnCallActivity { token, .. } = &mut instance.state {
+                token.apply_process_updates(&updates);
+            }
+            let definition = self
+                .definitions
+                .get(&instance.definition_key)
+                .ok_or(EngineError::NoSuchDefinition(instance.definition_key))?;
+            Self::evaluate_conditionals(&mut instance, &definition)?;
         }
 
         self.record_history_event(
@@ -303,6 +310,8 @@ impl WorkflowEngine {
         .await;
 
         self.persist_instance(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
+        self.emit_instance_changed(instance_id).await;
 
         Ok(())
     }
@@ -362,6 +371,7 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: suspended");
+        self.emit_instance_changed(instance_id).await;
         Ok(())
     }
 
@@ -412,6 +422,10 @@ impl WorkflowEngine {
         self.persist_instance(instance_id).await;
 
         tracing::info!("Instance {instance_id}: resumed");
+        self.restore_conditional_boundary_jobs(instance_id).await;
+        self.run_conditional_work(instance_id).await?;
+        self.resume_claimed_catches(instance_id).await?;
+        self.emit_instance_changed(instance_id).await;
         Ok(())
     }
 
@@ -460,6 +474,11 @@ impl WorkflowEngine {
             .get(&def_key)
             .ok_or(EngineError::NoSuchDefinition(def_key))?;
 
+        if def.has_conditionals() {
+            return Err(EngineError::InvalidDefinition(
+                "Token movement with conditional event subscriptions is not supported".into(),
+            ));
+        }
         if !def.nodes.contains_key(target_node_id) {
             return Err(EngineError::NoSuchNode(target_node_id.to_string()));
         }
@@ -540,6 +559,7 @@ impl WorkflowEngine {
             inst.variables.clone()
         };
         // Merge provided variables
+        let updated_names: Vec<_> = variables.keys().cloned().collect();
         for (k, v) in variables {
             if v.is_null() {
                 token_vars.remove(&k);
@@ -549,10 +569,15 @@ impl WorkflowEngine {
         }
 
         let token = crate::domain::Token {
+            conditional_wait: None,
+            boundary_activation: None,
             id: Uuid::new_v4(),
             current_node: target_node_id.to_string(),
             variables: token_vars.clone(),
             is_merged: false,
+            loop_instance: None,
+            data_scope: None,
+            event_context: None,
         };
 
         // --- 5. Reset instance state ---
@@ -579,6 +604,9 @@ impl WorkflowEngine {
 
             // Sync variables to instance level
             inst.variables = token_vars;
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
 
             inst.push_audit_log(format!(
                 "🎯 Token moved: '{}' → '{}'",
@@ -698,6 +726,18 @@ impl WorkflowEngine {
             }
         }
 
+        if [old_state.definition_key, target_definition_key]
+            .iter()
+            .any(|key| {
+                self.definitions
+                    .get(key)
+                    .is_some_and(|definition| definition.has_conditionals())
+            })
+        {
+            return Err(EngineError::InvalidDefinition(
+                "Migration of conditional event subscriptions is not supported".into(),
+            ));
+        }
         // --- 5. Apply migration (write) ---
         {
             let inst_arc = self
@@ -794,6 +834,7 @@ impl WorkflowEngine {
 
         // --- 8. Persist updated instance ---
         self.persist_instance(instance_id).await;
+        self.emit_instance_changed(instance_id).await;
 
         tracing::info!(
             "Instance {instance_id}: migriert zu Definition '{target_id}' (v{target_version})"
@@ -871,6 +912,12 @@ impl WorkflowEngine {
         self.pending_message_catches
             .retain(|_, t| t.instance_id != instance_id);
 
+        self.emit_event(crate::engine::events::EngineEvent::InstanceChanged {
+            instance_id,
+            definition_key: removed_inst.definition_key,
+            removed: true,
+            delta: None,
+        });
         Ok(())
     }
 }

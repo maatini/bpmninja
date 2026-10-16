@@ -1,5 +1,9 @@
+pub mod data;
+pub use data::{ActivityMappings, DataMapping, DataScope, MappingValue};
 pub mod definition;
 pub mod element;
+pub mod event_subprocess;
+pub use event_subprocess::{EventSubProcess, EventSubProcessTrigger};
 pub mod error;
 pub mod file_ref;
 pub mod flow;
@@ -14,9 +18,9 @@ pub use error::{EngineError, EngineResult};
 pub use file_ref::FileReference;
 pub use flow::SequenceFlow;
 pub use listener::{ExecutionListener, ListenerEvent, ScopeEventListener};
-pub use multi_instance::MultiInstanceDef;
+pub use multi_instance::{LoopCharacteristics, MultiInstanceDef, StandardLoopDef};
 pub use timer::TimerDefinition;
-pub use token::Token;
+pub use token::{LoopInstance, Token};
 
 #[cfg(test)]
 mod tests;

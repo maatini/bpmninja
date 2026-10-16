@@ -11,7 +11,7 @@
 - Clear boundaries between pure logic and I/O
 
 **Consequences:**
-- `WorkflowPersistence` trait is large (30+ methods) — any new persistence operation requires trait changes
+- `WorkflowPersistence` trait is large (35 async methods) — any new persistence operation requires trait changes
 - Two backends must be kept in sync (NATS + in-memory)
 - The in-memory adapter is a HashMap implementation in `engine-core::adapter` (no I/O). `persistence-memory` re-exports that type so unit tests and the same crate identity stay aligned (a `[dev-dependency]` on `persistence-memory` would duplicate `engine-core` under `cfg(test)`).
 

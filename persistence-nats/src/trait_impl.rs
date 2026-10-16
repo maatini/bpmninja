@@ -11,10 +11,105 @@ use crate::client::NatsPersistence;
 
 #[async_trait]
 impl WorkflowPersistence for NatsPersistence {
+    async fn reserve_conditional_start(
+        &self,
+        receipt: &engine_core::ConditionalStartReceipt,
+    ) -> EngineResult<engine_core::ConditionalStartReceipt> {
+        let store = self.kv("conditional_starts").await?;
+        let payload = serde_json::to_vec(receipt)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        match store
+            .create(receipt.request.request_id.to_string(), payload.into())
+            .await
+        {
+            Ok(_) => Ok(receipt.clone()),
+            Err(error) => {
+                let stored = self
+                    .get_conditional_start(receipt.request.request_id)
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::PersistenceError(format!(
+                            "Receipt reservation failed: {error}"
+                        ))
+                    })?;
+                if stored.request != receipt.request {
+                    return Err(EngineError::ConditionalStartConflict(
+                        receipt.request.request_id,
+                    ));
+                }
+                Ok(stored)
+            }
+        }
+    }
+    async fn get_conditional_start(
+        &self,
+        id: Uuid,
+    ) -> EngineResult<Option<engine_core::ConditionalStartReceipt>> {
+        let store = self.kv("conditional_starts").await?;
+        store
+            .get(id.to_string())
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+            .map(|bytes| {
+                serde_json::from_slice(&bytes)
+                    .map_err(|e| EngineError::PersistenceError(e.to_string()))
+            })
+            .transpose()
+    }
+    async fn list_conditional_starts(
+        &self,
+    ) -> EngineResult<Vec<engine_core::ConditionalStartReceipt>> {
+        let store = self.kv("conditional_starts").await?;
+        let mut keys = store
+            .keys()
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        let mut receipts = Vec::new();
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            let id =
+                Uuid::parse_str(&key).map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            if let Some(receipt) = self.get_conditional_start(id).await? {
+                receipts.push(receipt);
+            }
+        }
+        Ok(receipts)
+    }
+    async fn complete_conditional_start(
+        &self,
+        receipt: &engine_core::ConditionalStartReceipt,
+    ) -> EngineResult<()> {
+        let store = self.kv("conditional_starts").await?;
+        let key = receipt.request.request_id.to_string();
+        let entry = store
+            .entry(&key)
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+            .ok_or_else(|| {
+                EngineError::PersistenceError("Missing conditional-start receipt".into())
+            })?;
+        let mut stored: engine_core::ConditionalStartReceipt = serde_json::from_slice(&entry.value)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        if stored.request != receipt.request || stored.result != receipt.result {
+            return Err(EngineError::ConditionalStartConflict(
+                receipt.request.request_id,
+            ));
+        }
+        if stored.dispatched {
+            return Ok(());
+        }
+        stored.dispatched = true;
+        let payload = serde_json::to_vec(&stored)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        store
+            .update(key, payload.into(), entry.revision)
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        Ok(())
+    }
+
     async fn save_token(&self, instance_id: Uuid, token: &Token) -> EngineResult<()> {
-        let store = self.js.get_key_value("tokens").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get tokens KV: {}", e))
-        })?;
+        let store = self.kv("tokens").await?;
         let key = format!("token-{instance_id}-{}", token.id);
         let payload = serde_json::to_vec(token).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize token: {}", e))
@@ -26,9 +121,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn load_tokens(&self, instance_id: Uuid) -> EngineResult<Vec<Token>> {
-        let store = self.js.get_key_value("tokens").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get tokens KV: {}", e))
-        })?;
+        let store = self.kv("tokens").await?;
         let prefix = format!("token-{instance_id}-");
         let mut keys = store.keys().await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to list token keys: {}", e))
@@ -54,9 +147,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_token(&self, instance_id: Uuid, token_id: Uuid) -> EngineResult<()> {
-        let store = self.js.get_key_value("tokens").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get tokens KV: {}", e))
-        })?;
+        let store = self.kv("tokens").await?;
         let key = format!("token-{instance_id}-{token_id}");
         store.delete(key).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete token from KV: {}", e))
@@ -65,22 +156,63 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn save_instance(&self, instance: &ProcessInstance) -> EngineResult<()> {
-        let store = self.js.get_key_value("instances").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get instances KV: {}", e))
-        })?;
+        #[cfg(feature = "separate-audit-log")]
+        let json = crate::codec::prepare_detached(instance)?;
+        #[cfg(not(feature = "separate-audit-log"))]
+        let json = crate::codec::encode_instance(instance)?;
+        self.put_instance_json(instance.id, json).await
+    }
 
-        let json = serde_json::to_vec(instance).map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to serialize instance: {}", e))
-        })?;
+    async fn save_instance_json(
+        &self,
+        instance: &ProcessInstance,
+        json: &[u8],
+    ) -> EngineResult<()> {
+        let payload = self.prepare_instance_payload(instance, json.to_vec())?;
+        self.save_instance_payload(instance, &payload).await
+    }
 
-        store
-            .put(instance.id.to_string(), json.into())
+    fn prepare_instance_payload(
+        &self,
+        instance: &ProcessInstance,
+        json: Vec<u8>,
+    ) -> EngineResult<Vec<u8>> {
+        #[cfg(feature = "separate-audit-log")]
+        {
+            let _ = json;
+            crate::codec::prepare_detached(instance)
+        }
+        #[cfg(all(not(feature = "separate-audit-log"), feature = "compact-instances"))]
+        {
+            let _ = json;
+            crate::codec::encode_instance(instance)
+        }
+        #[cfg(not(any(feature = "separate-audit-log", feature = "compact-instances")))]
+        {
+            let _ = instance;
+            Ok(json)
+        }
+    }
+
+    async fn save_instance_payload(
+        &self,
+        instance: &ProcessInstance,
+        payload: &[u8],
+    ) -> EngineResult<()> {
+        self.put_instance_json(instance.id, payload.to_vec()).await
+    }
+
+    async fn get_active_instance(&self, id: Uuid) -> EngineResult<Option<ProcessInstance>> {
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let store = self.kv("instances").await?;
+        match store
+            .get(id.to_string())
             .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!("Failed to put instance to KV: {}", e))
-            })?;
-
-        Ok(())
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+        {
+            Some(bytes) => Ok(Some(self.restore_instance_record(&bytes).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {
@@ -88,21 +220,36 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_instance(&self, id: &str) -> EngineResult<()> {
-        let store = self.js.get_key_value("instances").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get instances KV: {}", e))
-        })?;
+        let _audit_access = crate::audit::AUDIT_ACCESS.write().await;
+        #[cfg(feature = "delta-instances")]
+        self.snapshot_cache.lock().await.remove(&(
+            "instances".to_string(),
+            Uuid::parse_str(id).map_err(|e| EngineError::PersistenceError(e.to_string()))?,
+        ));
+        let store = self.kv("instances").await?;
 
         store.delete(id).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete instance from KV: {}", e))
         })?;
 
+        // Completed archives retain their audit snapshots after active deletion.
+        if self
+            .kv("history_instances")
+            .await?
+            .get(id)
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+            .is_none()
+        {
+            self.delete_instance_audits(id).await?;
+            self.delete_instance_states(id).await?;
+        }
+
         Ok(())
     }
 
     async fn save_definition(&self, definition: &ProcessDefinition) -> EngineResult<()> {
-        let store = self.js.get_key_value("definitions").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get definitions KV: {}", e))
-        })?;
+        let store = self.kv("definitions").await?;
 
         let json = serde_json::to_vec(definition).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize definition: {}", e))
@@ -123,17 +270,13 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_definition(&self, key: &str) -> EngineResult<()> {
-        let store = self.js.get_key_value("definitions").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get definitions KV: {}", e))
-        })?;
+        let store = self.kv("definitions").await?;
 
         store.delete(key).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete definition from KV: {}", e))
         })?;
 
-        let obj_store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
-        })?;
+        let obj_store = self.object_store("bpmn_xml").await?;
 
         let _ = obj_store.delete(key).await;
 
@@ -141,9 +284,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn save_user_task(&self, task: &PendingUserTask) -> EngineResult<()> {
-        let store = self.js.get_key_value("user_tasks").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get user_tasks KV: {}", e))
-        })?;
+        let store = self.kv("user_tasks").await?;
 
         let json = serde_json::to_vec(task).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize user task: {}", e))
@@ -160,9 +301,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_user_task(&self, task_id: uuid::Uuid) -> EngineResult<()> {
-        let store = self.js.get_key_value("user_tasks").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get user_tasks KV: {}", e))
-        })?;
+        let store = self.kv("user_tasks").await?;
 
         store.delete(task_id.to_string()).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete user task from KV: {}", e))
@@ -176,9 +315,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn save_service_task(&self, task: &PendingServiceTask) -> EngineResult<()> {
-        let store = self.js.get_key_value("service_tasks").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get service_tasks KV: {}", e))
-        })?;
+        let store = self.kv("service_tasks").await?;
 
         let json = serde_json::to_vec(task).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize service task: {}", e))
@@ -195,9 +332,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_service_task(&self, task_id: uuid::Uuid) -> EngineResult<()> {
-        let store = self.js.get_key_value("service_tasks").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get service_tasks KV: {}", e))
-        })?;
+        let store = self.kv("service_tasks").await?;
 
         store.delete(task_id.to_string()).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete service task from KV: {}", e))
@@ -211,9 +346,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn save_timer(&self, timer: &engine_core::PendingTimer) -> EngineResult<()> {
-        let store = self.js.get_key_value("timers").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get timers KV: {}", e))
-        })?;
+        let store = self.kv("timers").await?;
 
         let json = serde_json::to_vec(timer).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize timer: {}", e))
@@ -230,9 +363,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_timer(&self, timer_id: uuid::Uuid) -> EngineResult<()> {
-        let store = self.js.get_key_value("timers").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get timers KV: {}", e))
-        })?;
+        let store = self.kv("timers").await?;
 
         store.delete(timer_id.to_string()).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete timer from KV: {}", e))
@@ -249,9 +380,7 @@ impl WorkflowPersistence for NatsPersistence {
         &self,
         catch: &engine_core::PendingMessageCatch,
     ) -> EngineResult<()> {
-        let store = self.js.get_key_value("messages").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get messages KV: {}", e))
-        })?;
+        let store = self.kv("messages").await?;
 
         let json = serde_json::to_vec(catch).map_err(|e| {
             EngineError::PersistenceError(format!("Failed to serialize message catch: {}", e))
@@ -268,9 +397,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_message_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()> {
-        let store = self.js.get_key_value("messages").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get messages KV: {}", e))
-        })?;
+        let store = self.kv("messages").await?;
 
         store.delete(catch_id.to_string()).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to delete message catch from KV: {}", e))
@@ -291,16 +418,7 @@ impl WorkflowPersistence for NatsPersistence {
                 data.len()
             )));
         }
-        let store = self
-            .js
-            .get_object_store("instance_files")
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!(
-                    "Failed to get instance_files Object Store: {}",
-                    e
-                ))
-            })?;
+        let store = self.object_store("instance_files").await?;
         let mut data_mut = data;
         store
             .put(object_key, &mut data_mut)
@@ -311,16 +429,7 @@ impl WorkflowPersistence for NatsPersistence {
 
     async fn load_file(&self, object_key: &str) -> EngineResult<Vec<u8>> {
         use tokio::io::AsyncReadExt;
-        let store = self
-            .js
-            .get_object_store("instance_files")
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!(
-                    "Failed to get instance_files Object Store: {}",
-                    e
-                ))
-            })?;
+        let store = self.object_store("instance_files").await?;
         let mut result = store.get(object_key).await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to load file '{}': {}", object_key, e))
         })?;
@@ -332,24 +441,13 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_file(&self, object_key: &str) -> EngineResult<()> {
-        let store = self
-            .js
-            .get_object_store("instance_files")
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!(
-                    "Failed to get instance_files Object Store: {}",
-                    e
-                ))
-            })?;
+        let store = self.object_store("instance_files").await?;
         let _ = store.delete(object_key).await;
         Ok(())
     }
 
     async fn save_bpmn_xml(&self, definition_id: &str, xml: &str) -> EngineResult<()> {
-        let store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
-        })?;
+        let store = self.object_store("bpmn_xml").await?;
 
         store
             .put(definition_id, &mut xml.as_bytes())
@@ -364,9 +462,7 @@ impl WorkflowPersistence for NatsPersistence {
     async fn load_bpmn_xml(&self, definition_id: &str) -> EngineResult<String> {
         use tokio::io::AsyncReadExt;
 
-        let store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
-        })?;
+        let store = self.object_store("bpmn_xml").await?;
 
         let mut result = store.get(definition_id).await.map_err(|e| {
             EngineError::PersistenceError(format!(
@@ -387,9 +483,7 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn list_bpmn_xml_ids(&self) -> EngineResult<Vec<String>> {
-        let store = self.js.get_object_store("bpmn_xml").await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get bpmn_xml Object Store: {}", e))
-        })?;
+        let store = self.object_store("bpmn_xml").await?;
 
         let mut list = store.list().await.map_err(|e| {
             EngineError::PersistenceError(format!("Failed to list bpmn_xml objects: {}", e))
@@ -422,6 +516,10 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "history_instances",
+            "instance_audit",
+            "instance_states",
+            "conditional_starts",
         ];
         for name in &kv_bucket_names {
             match self.js.get_key_value(*name).await {
@@ -506,21 +604,45 @@ impl WorkflowPersistence for NatsPersistence {
         &self,
         entry: &engine_core::history::HistoryEntry,
     ) -> EngineResult<()> {
-        let subject = format!("history.instance.{}", entry.instance_id);
-        let payload = serde_json::to_vec(entry).map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to serialize history entry: {}", e))
-        })?;
-
-        self.js
-            .publish(subject, payload.into())
+        self.append_history_entries(std::slice::from_ref(entry))
             .await
-            .map_err(|e| {
+    }
+
+    /// Publishes all entries first, then awaits every JetStream ack: one
+    /// round trip for the batch instead of one per entry. `Nats-Msg-Id` =
+    /// entry id lets JetStream drop duplicates when a failed batch is retried.
+    async fn append_history_entries(
+        &self,
+        entries: &[engine_core::history::HistoryEntry],
+    ) -> EngineResult<()> {
+        let mut acks = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let subject = format!("history.instance.{}", entry.instance_id);
+            let payload = serde_json::to_vec(entry).map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to serialize history entry: {}", e))
+            })?;
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", entry.id.to_string().as_str());
+            let ack = self
+                .js
+                .publish_with_headers(subject, headers, payload.into())
+                .await
+                .map_err(|e| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to publish history entry to JetStream: {}",
+                        e
+                    ))
+                })?;
+            acks.push(ack);
+        }
+        for ack in acks {
+            ack.await.map_err(|e| {
                 EngineError::PersistenceError(format!(
-                    "Failed to publish history entry to JetStream: {}",
+                    "History entry not acknowledged by JetStream: {}",
                     e
                 ))
             })?;
-
+        }
         Ok(())
     }
 
@@ -620,6 +742,10 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "history_instances",
+            "instance_audit",
+            "instance_states",
+            "conditional_starts",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -754,6 +880,7 @@ impl WorkflowPersistence for NatsPersistence {
         bucket_name: &str,
         key: &str,
     ) -> EngineResult<engine_core::persistence::BucketEntryDetail> {
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
         use engine_core::persistence::BucketEntryDetail;
 
         let obj_bucket_names = ["bpmn_xml", "instance_files"];
@@ -764,6 +891,10 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "history_instances",
+            "instance_audit",
+            "instance_states",
+            "conditional_starts",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -772,9 +903,19 @@ impl WorkflowPersistence for NatsPersistence {
             })?;
 
             if let Ok(Some(entry)) = store.get(key).await {
-                let data = match String::from_utf8(entry.to_vec()) {
-                    Ok(s) => s,
-                    Err(_) => "Binary Data".to_string(), // Fallback if somehow not UTF8 json
+                if bucket_name == "instance_states" {
+                    use base64::{Engine as _, engine::general_purpose::STANDARD};
+                    return Ok(BucketEntryDetail {
+                        key: key.to_string(),
+                        data: STANDARD.encode(&entry),
+                        encoding: "base64".into(),
+                    });
+                }
+                let data = if crate::codec::detached(&entry) || crate::journal::is_head(&entry) {
+                    serde_json::to_string(&self.restore_instance_record(&entry).await?)
+                        .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+                } else {
+                    crate::codec::monitoring_json(&entry)?
                 };
                 return Ok(BucketEntryDetail {
                     key: key.to_string(),
@@ -865,29 +1006,12 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn save_completed_instance(&self, instance: &ProcessInstance) -> EngineResult<()> {
-        let store = self
-            .js
-            .get_key_value("history_instances")
+        #[cfg(feature = "separate-audit-log")]
+        let payload = crate::codec::prepare_detached(instance)?;
+        #[cfg(not(feature = "separate-audit-log"))]
+        let payload = crate::codec::encode_instance(instance)?;
+        self.put_instance_record("history_instances", instance.id, payload)
             .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!("Failed to get history_instances KV: {}", e))
-            })?;
-
-        let json = serde_json::to_vec(instance).map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to serialize completed instance: {}", e))
-        })?;
-
-        store
-            .put(instance.id.to_string(), json.into())
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!(
-                    "Failed to put completed instance to KV: {}",
-                    e
-                ))
-            })?;
-
-        Ok(())
     }
 
     async fn query_completed_instances(
@@ -955,22 +1079,12 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn get_completed_instance(&self, id: &str) -> EngineResult<Option<ProcessInstance>> {
-        let store = self
-            .js
-            .get_key_value("history_instances")
-            .await
-            .map_err(|e| {
-                EngineError::PersistenceError(format!("Failed to get history_instances KV: {}", e))
-            })?;
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let store = self.kv("history_instances").await?;
 
         match store.get(id).await {
             Ok(Some(data)) => {
-                let inst: ProcessInstance = serde_json::from_slice(&data).map_err(|e| {
-                    EngineError::PersistenceError(format!(
-                        "Failed to deserialize completed instance: {}",
-                        e
-                    ))
-                })?;
+                let inst = self.restore_instance_record(&data).await?;
                 Ok(Some(inst))
             }
             Ok(None) => Ok(None),
@@ -979,5 +1093,147 @@ impl WorkflowPersistence for NatsPersistence {
                 id, e
             ))),
         }
+    }
+}
+
+impl NatsPersistence {
+    async fn put_instance_json(&self, id: Uuid, payload: Vec<u8>) -> EngineResult<()> {
+        self.put_instance_record("instances", id, payload).await
+    }
+
+    async fn put_instance_record(
+        &self,
+        bucket: &str,
+        id: Uuid,
+        payload: Vec<u8>,
+    ) -> EngineResult<()> {
+        let _audit_access = crate::audit::AUDIT_ACCESS.read().await;
+        let _snapshot_lock = crate::journal::lock_snapshot(id).await;
+        let record = if crate::codec::is_prepared(&payload) {
+            let (record, audit) = crate::codec::split_prepared(&payload)?;
+            let (instance, key) = crate::codec::decode_instance_record(record)?;
+            let key =
+                key.ok_or_else(|| EngineError::PersistenceError("Missing audit reference".into()))?;
+            if instance.id != id || key != crate::codec::audit_key(id, audit) {
+                return Err(EngineError::PersistenceError(
+                    "Audit snapshot does not match instance".into(),
+                ));
+            }
+            self.ensure_instance_audit(&key, audit).await?;
+            record
+        } else {
+            &payload
+        };
+        #[cfg(feature = "delta-instances")]
+        {
+            self.put_journal_snapshot(bucket, id, record).await
+        }
+        #[cfg(not(feature = "delta-instances"))]
+        {
+            self.kv(bucket)
+                .await?
+                .put(id.to_string(), record.to_vec().into())
+                .await
+                .map_err(|e| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to put instance to {bucket}: {e}"
+                    ))
+                })?;
+            Ok(())
+        }
+    }
+
+    async fn ensure_instance_audit(&self, key: &str, bytes: &[u8]) -> EngineResult<()> {
+        if self.audit_cache.lock().await.contains(key) {
+            return Ok(());
+        }
+        let store = self.kv("instance_audit").await?;
+        if let Err(error) = store.create(key, bytes.to_vec().into()).await {
+            // Retry/another writer may have created the immutable snapshot.
+            let existing = store
+                .get(key)
+                .await
+                .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            if existing.as_deref() != Some(bytes) {
+                return Err(EngineError::PersistenceError(format!(
+                    "Failed to create audit snapshot: {error}"
+                )));
+            }
+        }
+        let mut cache = self.audit_cache.lock().await;
+        if cache.len() >= 1024 {
+            cache.clear();
+        }
+        cache.insert(key.to_string());
+        Ok(())
+    }
+
+    pub(crate) async fn restore_instance_record(
+        &self,
+        bytes: &[u8],
+    ) -> EngineResult<ProcessInstance> {
+        let record = self.resolve_snapshot(bytes).await?;
+        let (mut instance, key) = crate::codec::decode_instance_record(&record)?;
+        if let Some(key) = key {
+            let audit = self
+                .kv("instance_audit")
+                .await?
+                .get(&key)
+                .await
+                .map_err(|e| {
+                    EngineError::PersistenceError(format!("Failed to load audit snapshot: {e}"))
+                })?
+                .ok_or_else(|| {
+                    EngineError::PersistenceError(format!("Missing audit snapshot {key}"))
+                })?;
+            if crate::codec::audit_key(instance.id, &audit) != key {
+                return Err(EngineError::PersistenceError(format!(
+                    "Audit snapshot digest mismatch: {key}"
+                )));
+            }
+            instance.audit_log = serde_json::from_slice(&audit).map_err(|e| {
+                EngineError::PersistenceError(format!("Invalid audit snapshot: {e}"))
+            })?;
+        }
+        Ok(instance)
+    }
+
+    async fn delete_instance_audits(&self, id: &str) -> EngineResult<()> {
+        let prefix = format!("{id}.");
+        self.audit_cache
+            .lock()
+            .await
+            .retain(|key| !key.starts_with(&prefix));
+        let store = self.kv("instance_audit").await?;
+        let mut keys = store
+            .keys()
+            .await
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            if key.starts_with(&prefix) {
+                store
+                    .purge(&key)
+                    .await
+                    .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+            }
+        }
+        self.audit_cache
+            .lock()
+            .await
+            .retain(|key| !key.starts_with(&prefix));
+        Ok(())
+    }
+    async fn delete_instance_states(&self, id: &str) -> EngineResult<()> {
+        let prefix = format!("{id}.");
+        let store = self.kv("instance_states").await?;
+        let mut keys = store.keys().await.map_err(crate::journal::failure)?;
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(crate::journal::failure)?;
+            if key.starts_with(&prefix) {
+                store.purge(&key).await.map_err(crate::journal::failure)?;
+            }
+        }
+        Ok(())
     }
 }

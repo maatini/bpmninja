@@ -51,6 +51,22 @@ impl WorkflowEngine {
         let topic = task.topic.clone();
         self.pending_service_tasks.insert(id, task);
         insert(&self.service_task_topic_index, &topic, id);
+        self.notify_service_tasks_available();
+    }
+
+    /// Wakes long-polling `fetchAndLock` callers. Call after a task became
+    /// fetchable (inserted or unlocked) and no DashMap guard is held.
+    pub(crate) fn notify_service_tasks_available(&self) {
+        self.service_task_notify.notify_waiters();
+    }
+
+    /// Completes when service tasks may have become fetchable.
+    ///
+    /// Create the future and call `Notified::enable` *before* fetching, so a
+    /// notification between the fetch and the wait is not lost. Lock expiry is
+    /// time-based and not signalled — long-pollers still need a fallback tick.
+    pub fn service_tasks_changed(&self) -> tokio::sync::futures::Notified<'_> {
+        self.service_task_notify.notified()
     }
 
     pub(crate) fn remove_pending_service_task(

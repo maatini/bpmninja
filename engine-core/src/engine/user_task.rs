@@ -25,6 +25,7 @@ impl WorkflowEngine {
             })?;
 
         let instance_id = pending.instance_id;
+        let updated_names: Vec<String> = additional_vars.keys().cloned().collect();
 
         // Reject if instance is suspended
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -44,22 +45,19 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.tokens.remove(&pending.token_id).ok_or_else(|| {
-                EngineError::InvalidDefinition(format!(
-                    "Token {} not found in instance",
-                    pending.token_id
-                ))
-            })?
+            let retrieved = inst.tokens.remove(&pending.token_id);
+            drop(inst);
+            if let Some(token) = retrieved {
+                token
+            } else {
+                self.remove_persisted_user_task(task_id).await;
+                return Err(EngineError::AlreadyCompleted);
+            }
         };
+        let original_token = token.clone();
         for (k, v) in additional_vars {
             token.variables.insert(k, v);
         }
-
-        self.remove_persisted_user_task(task_id).await;
-        self.cancel_boundary_timers(instance_id, &pending.node_id)
-            .await;
-        self.cancel_boundary_message_catches(instance_id, &pending.node_id)
-            .await;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {
             Some(lk.read().await.clone())
@@ -86,6 +84,9 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.current_node = pending.node_id.clone();
+            for name in updated_names {
+                inst.variable_types.remove(&name);
+            }
             inst.definition_key
         };
 
@@ -106,17 +107,39 @@ impl WorkflowEngine {
             // Restore token into instance so the task is completable again
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
-                inst.state = InstanceState::WaitingOnUserTask { task_id };
-                inst.tokens.insert(token.id, token);
+                if !crate::engine::event_subprocess::token_valid(&inst, &original_token) {
+                    drop(inst);
+                    self.remove_persisted_user_task(task_id).await;
+                    return Err(EngineError::AlreadyCompleted);
+                }
+                if let Some(old) = &old_state {
+                    inst.state = old.state.clone();
+                    inst.current_node = old.current_node.clone();
+                    inst.variable_types = old.variable_types.clone();
+                }
+                inst.tokens.insert(original_token.id, original_token);
             }
             self.pending_user_tasks.insert(task_id, pending);
+            self.persist_instance(instance_id).await;
             return Err(e);
         }
+
+        self.remove_persisted_user_task(task_id).await;
+        self.cancel_boundary_timers(instance_id, &pending.node_id, Some(pending.token_id))
+            .await;
+        self.cancel_boundary_message_catches(instance_id, &pending.node_id, Some(pending.token_id))
+            .await;
 
         // Register compensation handler if this activity has a BoundaryCompensationEvent
         self.register_compensation_handler(instance_id, &pending.node_id, &def)
             .await;
 
+        self.run_conditional_work(instance_id).await?;
+        if let Some(instance) = self.instances.get(&instance_id).await
+            && !crate::engine::event_subprocess::token_valid(&*instance.read().await, &token)
+        {
+            return Ok(());
+        }
         let next =
             crate::engine::executor::resolve_next_target(&def, &pending.node_id, &token.variables)?;
 
@@ -145,6 +168,7 @@ impl WorkflowEngine {
         .await;
 
         // Continue running
+        self.emit_task_changed(instance_id, task_id).await;
         self.run_instance_batch(instance_id, token).await
     }
 }

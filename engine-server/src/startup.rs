@@ -29,22 +29,23 @@ impl StartupCoordinator {
         &self,
         engine: &mut WorkflowEngine,
         deployed_xml: &mut HashMap<String, String>,
-    ) -> RestoreStats {
+    ) -> engine_core::EngineResult<RestoreStats> {
         let definitions = self.restore_definitions(engine, deployed_xml).await;
-        let instances = self.restore_instances(engine).await;
-        let user_tasks = self.restore_user_tasks(engine).await;
-        let service_tasks = self.restore_service_tasks(engine).await;
-        let timers = self.restore_timers(engine).await;
-        let message_catches = self.restore_message_catches(engine).await;
+        let instances = self.restore_instances(engine).await?;
+        let user_tasks = self.restore_user_tasks(engine).await?;
+        let service_tasks = self.restore_service_tasks(engine).await?;
+        let timers = self.restore_timers(engine).await?;
+        let message_catches = self.restore_message_catches(engine).await?;
+        engine.reconcile_conditional_starts().await?;
 
-        RestoreStats {
+        Ok(RestoreStats {
             definitions,
             instances,
             user_tasks,
             service_tasks,
             timers,
             message_catches,
-        }
+        })
     }
 
     async fn restore_definitions(
@@ -137,7 +138,10 @@ impl StartupCoordinator {
         count
     }
 
-    async fn restore_instances(&self, engine: &mut WorkflowEngine) -> usize {
+    async fn restore_instances(
+        &self,
+        engine: &mut WorkflowEngine,
+    ) -> engine_core::EngineResult<usize> {
         match self.nats.list_instances().await {
             Ok(instances) => {
                 let num = instances.len();
@@ -145,16 +149,19 @@ impl StartupCoordinator {
                     engine.restore_instance(inst).await;
                 }
                 tracing::info!("{num} Prozessinstanz(en) wiederhergestellt.");
-                num
+                Ok(num)
             }
             Err(e) => {
                 tracing::error!("Instanzen aus NATS laden fehlgeschlagen: {:?}", e);
-                0
+                Err(e)
             }
         }
     }
 
-    async fn restore_user_tasks(&self, engine: &mut WorkflowEngine) -> usize {
+    async fn restore_user_tasks(
+        &self,
+        engine: &mut WorkflowEngine,
+    ) -> engine_core::EngineResult<usize> {
         match self.nats.list_user_tasks().await {
             Ok(tasks) => {
                 let num = tasks.len();
@@ -162,16 +169,19 @@ impl StartupCoordinator {
                     engine.restore_user_task(task);
                 }
                 tracing::info!("{num} User-Task(s) wiederhergestellt.");
-                num
+                Ok(num)
             }
             Err(e) => {
                 tracing::error!("User-Tasks aus NATS laden fehlgeschlagen: {:?}", e);
-                0
+                Err(e)
             }
         }
     }
 
-    async fn restore_service_tasks(&self, engine: &mut WorkflowEngine) -> usize {
+    async fn restore_service_tasks(
+        &self,
+        engine: &mut WorkflowEngine,
+    ) -> engine_core::EngineResult<usize> {
         match self.nats.list_service_tasks().await {
             Ok(tasks) => {
                 let num = tasks.len();
@@ -179,16 +189,19 @@ impl StartupCoordinator {
                     engine.restore_service_task(task);
                 }
                 tracing::info!("{num} Service-Task(s) wiederhergestellt.");
-                num
+                Ok(num)
             }
             Err(e) => {
                 tracing::error!("Service-Tasks aus NATS laden fehlgeschlagen: {:?}", e);
-                0
+                Err(e)
             }
         }
     }
 
-    async fn restore_timers(&self, engine: &mut WorkflowEngine) -> usize {
+    async fn restore_timers(
+        &self,
+        engine: &mut WorkflowEngine,
+    ) -> engine_core::EngineResult<usize> {
         match self.nats.list_timers().await {
             Ok(timers) => {
                 let num = timers.len();
@@ -196,16 +209,19 @@ impl StartupCoordinator {
                     engine.restore_timer(timer);
                 }
                 tracing::info!("{num} Timer wiederhergestellt.");
-                num
+                Ok(num)
             }
             Err(e) => {
                 tracing::error!("Timer aus NATS laden fehlgeschlagen: {:?}", e);
-                0
+                Err(e)
             }
         }
     }
 
-    async fn restore_message_catches(&self, engine: &mut WorkflowEngine) -> usize {
+    async fn restore_message_catches(
+        &self,
+        engine: &mut WorkflowEngine,
+    ) -> engine_core::EngineResult<usize> {
         match self.nats.list_message_catches().await {
             Ok(catches) => {
                 let num = catches.len();
@@ -213,11 +229,11 @@ impl StartupCoordinator {
                     engine.restore_message_catch(catch);
                 }
                 tracing::info!("{num} Message-Catch(es) wiederhergestellt.");
-                num
+                Ok(num)
             }
             Err(e) => {
                 tracing::error!("Message-Catches aus NATS laden fehlgeschlagen: {:?}", e);
-                0
+                Err(e)
             }
         }
     }

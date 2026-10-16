@@ -50,3 +50,5 @@ deny = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# rust_bpmn_analyzer (deploy-time model checking) is only published on GitHub.
+allow-git = ["https://github.com/timKraeuter/rust_bpmn_analyzer"]

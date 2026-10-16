@@ -21,25 +21,37 @@ use std::time::Duration;
 use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
+pub(crate) mod conditional_boundary;
+mod conditional_catch;
+pub(crate) mod conditional_start;
+pub use conditional_start::{
+    ConditionalStartReceipt, ConditionalStartRequest, ConditionalStartResult,
+};
+pub(crate) mod data_mappings;
 mod definition_ops;
+pub(crate) mod event_subprocess;
 pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;
 pub(crate) mod handlers;
 mod instance_ops;
 pub(crate) mod instance_store;
+mod loops;
 mod message_processor;
 mod persistence_ops;
 mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+mod signal;
+mod task_handler;
 mod timer_index;
 mod timer_processor;
 mod topic_index;
 mod user_task;
 
-pub use events::EngineEvent;
+pub use events::{EngineEvent, InstanceDelta, InstanceStatus};
+pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
@@ -49,16 +61,31 @@ pub struct WorkflowEngine {
     pub(crate) pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
     /// Secondary index topic → task IDs. SSOT remains `pending_service_tasks`.
     pub(crate) service_task_topic_index: topic_index::TopicIndex,
+    /// Wakes long-polling `fetchAndLock` callers when tasks become fetchable.
+    pub(crate) service_task_notify: tokio::sync::Notify,
+    /// In-process handlers per topic, executed by the task-handler dispatcher.
+    pub(crate) task_handlers: DashMap<String, Arc<dyn TaskHandler>>,
+    /// Signals thrown during a batch, delivered once the batch has finished.
+    pub(crate) signal_outbox: signal::SignalOutbox,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
+    /// Wakes the timer scheduler when a timer is added.
+    pub(crate) timer_notify: tokio::sync::Notify,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
     pub(crate) retry_worker_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Serializes `save_instance` per instance without holding the instance lock.
+    pub(crate) persist_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_step_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_work_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_start_locks: persistence_ops::PersistLocks,
+    pub(crate) conditional_start_receipts: DashMap<Uuid, ConditionalStartReceipt>,
+    pub(crate) event_lifecycle_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
-    pub(crate) script_config: crate::scripting::ScriptConfig,
+    pub(crate) scripts: crate::scripting::ScriptRunner,
     /// Broadcast channel — feuert bei jeder relevanten Zustandsänderung.
     pub(crate) event_tx: tokio::sync::broadcast::Sender<EngineEvent>,
 }
@@ -82,14 +109,24 @@ impl WorkflowEngine {
             pending_user_tasks: Arc::new(DashMap::new()),
             pending_service_tasks: Arc::new(DashMap::new()),
             service_task_topic_index: DashMap::new(),
+            service_task_notify: tokio::sync::Notify::new(),
+            task_handlers: DashMap::new(),
+            signal_outbox: signal::SignalOutbox::default(),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
+            timer_notify: tokio::sync::Notify::new(),
             pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
-            script_config,
+            persist_locks: persistence_ops::PersistLocks::new(),
+            conditional_step_locks: persistence_ops::PersistLocks::new(),
+            conditional_work_locks: persistence_ops::PersistLocks::new(),
+            conditional_start_locks: persistence_ops::PersistLocks::new(),
+            conditional_start_receipts: DashMap::new(),
+            event_lifecycle_locks: persistence_ops::PersistLocks::new(),
+            scripts: crate::scripting::ScriptRunner::new(script_config),
             event_tx,
         }
     }
@@ -205,7 +242,12 @@ impl WorkflowEngine {
     }
 
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
-    pub(crate) async fn cancel_boundary_timers(&self, instance_id: Uuid, task_node_id: &str) {
+    pub(crate) async fn cancel_boundary_timers(
+        &self,
+        instance_id: Uuid,
+        task_node_id: &str,
+        token_id: Option<Uuid>,
+    ) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             inst.definition_key
@@ -237,12 +279,18 @@ impl WorkflowEngine {
         let timer_ids_to_delete: std::collections::HashSet<Uuid> = self
             .pending_timers
             .iter()
-            .filter(|r| r.instance_id == instance_id && bound_timers.contains(&r.node_id))
+            .filter(|r| {
+                r.instance_id == instance_id
+                    && bound_timers.contains(&r.node_id)
+                    && token_id.is_none_or(|id| r.token_id == id)
+            })
             .map(|r| r.id)
             .collect();
 
         self.retain_pending_timers(|_, t| {
-            !(t.instance_id == instance_id && bound_timers.contains(&t.node_id))
+            !(t.instance_id == instance_id
+                && bound_timers.contains(&t.node_id)
+                && token_id.is_none_or(|id| t.token_id == id))
         });
 
         // Delete from persistence
@@ -260,6 +308,7 @@ impl WorkflowEngine {
         &self,
         instance_id: Uuid,
         task_node_id: &str,
+        token_id: Option<Uuid>,
     ) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
@@ -274,7 +323,8 @@ impl WorkflowEngine {
                 .filter_map(|(id, node)| {
                     if let crate::domain::BpmnElement::BoundaryMessageEvent {
                         attached_to, ..
-                    } = node
+                    }
+                    | crate::domain::BpmnElement::BoundarySignalEvent { attached_to, .. } = node
                     {
                         if attached_to == task_node_id {
                             Some(id.clone())
@@ -294,7 +344,11 @@ impl WorkflowEngine {
         let msg_ids_to_delete: std::collections::HashSet<Uuid> = self
             .pending_message_catches
             .iter()
-            .filter(|r| r.instance_id == instance_id && bound_messages.contains(&r.node_id))
+            .filter(|r| {
+                r.instance_id == instance_id
+                    && bound_messages.contains(&r.node_id)
+                    && token_id.is_none_or(|id| r.token_id == id)
+            })
             .map(|r| r.id)
             .collect();
 
@@ -317,6 +371,16 @@ impl WorkflowEngine {
     /// Clears any pending wait states (timers, messages) associated with a specific token.
     /// Used by Event-Based Gateways to cancel alternative events when one fires.
     pub async fn clear_wait_states_for_token(&self, instance_id: Uuid, token_id: &Uuid) {
+        if let Some(instance) = self.instances.get(&instance_id).await
+            && let Some(state) = &mut instance.write().await.event_state
+        {
+            state
+                .conditional_waits
+                .retain(|_, wait| &wait.token_id != token_id);
+            state
+                .ready_conditional_tokens
+                .retain(|ready| ready != token_id);
+        }
         // Collect timer IDs to delete
         let timers_to_delete: Vec<Uuid> = self
             .pending_timers

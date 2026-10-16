@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:deps": "node scripts/assert-typescript-peer.mjs",
+    "test:events": "node --experimental-strip-types --test tests/engine-events.test.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

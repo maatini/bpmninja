@@ -9,20 +9,24 @@
 let inst = instance_arc.write().await;
 self.some_async_persistence_call().await; // DEADLOCK!
 
-// ✅ CORRECT
-let persistence_call;
+// ❌ ALSO WRONG — the guard is still alive while awaiting
 {
-    let mut inst = instance_arc.write().await;
-    persistence_call = self.persistence.save_instance(&inst).await; // ALSO WRONG — still inside lock
+    let inst = instance_arc.write().await;
+    self.persistence.save_instance(&inst).await;
 }
-// MUST drop lock first, THEN await:
-let persistence_call;
-{
+
+// ✅ CORRECT — mutate (or clone what you need) inside the scope, await after it
+let snapshot = {
     let mut inst = instance_arc.write().await;
     inst.state = InstanceState::Running;
-} // Lock dropped here
-self.persistence.save_instance(&updated_inst).await; // SAFE
+    inst.clone()
+}; // Lock dropped here
+self.persistence.save_instance(&snapshot).await; // SAFE
 ```
+
+`persist_instance` (`engine/persistence_ops.rs`) follows this: it snapshots the instance under a short write lock and saves the clone afterwards. Saves of the same instance are serialized by striped `PersistLocks` (256 stripes, held across the save) so an older snapshot can never overwrite a newer one.
+
+> **Known exceptions:** the retry worker (`retry_queue.rs`, `PersistJob::SaveInstance`) holds the instance *read* lock across `save_instance` — this is intentional, it orders the retry against `persist_instance`'s snapshot. `run_end_scripts` (`executor/completion.rs`) holds the instance write lock while end-listener scripts run (not yet fixed).
 
 ### ⚠️ Tokens live in ONE place
 
@@ -49,6 +53,14 @@ Rhai scripts are sandboxed with limits:
 - `timeout_ms: 1,000` (default) — configurable via `RHAI_TIMEOUT_MS`
 
 Heavy scripts will be killed by timeout or collection-size limits. The error is recoverable — just means the script didn't complete.
+
+### ⚠️ Executor history is buffered per batch
+
+`run_instance_batch` collects the history entries of all steps (`build_history_entry_from_snapshot`) and writes them with **one** `append_history_entries` call at the end — also when the batch fails part-way (`flush_history`). Entries outside the executor (`record_history_event`) are still written immediately. Without persistence no pre-step snapshot is taken at all. On final failure every entry is queued for background retry; backends must deduplicate by `HistoryEntry::id` (NATS: `Nats-Msg-Id`).
+
+### ⚠️ Scripts share one Rhai engine
+
+`WorkflowEngine.scripts` is a `ScriptRunner`: one `rhai::Engine` built from `ScriptConfig` plus a cache of compiled scripts (keyed by script text, max 1024, cleared when full). Limits apply per evaluation as before. `execute_script_safe(&ScriptConfig, …)` still exists for one-off use but builds a fresh engine each call — don't use it on hot paths.
 
 ### ⚠️ History snapshots
 
@@ -105,6 +117,14 @@ Parallel Call-Activities keep `InstanceState::ParallelExecution`. Resume looks u
 ### ⚠️ Service-task topic index is secondary
 
 `pending_service_tasks` is SSOT. `service_task_topic_index` maps topic → task ids for `fetch_and_lock`. Insert into the map first, then the index. Orphan index entries are dropped at fetch. Incidents (`retries <= 0`) stay in the index but are not locked.
+
+### ⚠️ Long-poll wake-ups need `notify_service_tasks_available()`
+
+`fetch_and_lock_service_tasks_long_poll` waits on `service_task_notify`. Anything that makes a task fetchable must call `notify_service_tasks_available()` **after** releasing DashMap guards: `insert_pending_service_task` does it, as do the unlock in `fail_service_task` and `retry_incident`. Lock expiry is time-based and not signalled — callers pass a fallback tick (server: 500 ms). A new unlock path without a notify still works, but only at fallback-tick latency.
+
+### ⚠️ Timer scheduler is event-driven
+
+`wait_for_timer_work(max_idle)` sleeps until `TimerDueIndex::next_due_after(now)`, a timer insert (`timer_notify`, fired by `insert_pending_timer`), or `max_idle`. Overdue timers are excluded from the wait computation on purpose: a timer that stays overdue without firing (suspended instance) would otherwise cause a busy loop. Always insert timers through `insert_pending_timer` / `restore_timer`, or the scheduler is not woken.
 
 ### ⚠️ Timer due-index is secondary
 

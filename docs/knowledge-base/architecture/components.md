@@ -20,8 +20,8 @@ flowchart TD
 
     subgraph "engine-core"
         Engine["WorkflowEngine<br>orchestrates everything"]
-        DefReg["DefinitionRegistry<br>Arc<RwLock<HashMap>>"]
-        InstStore["InstanceStore<br>per-instance RwLock"]
+        DefReg["DefinitionRegistry<br>Arc<DashMap>"]
+        InstStore["InstanceStore<br>DashMap + per-instance RwLock"]
         Executor["Executor<br>run_instance_batch + execute_step"]
         Gateways["Gateway Routing<br>XOR/AND/OR/EventBased/Complex"]
         Handlers["Element Handlers<br>tasks, events, sub-processes"]
@@ -34,7 +34,7 @@ flowchart TD
 
     subgraph Persistence
         WP["WorkflowPersistence trait<br>port/persistence.rs"]
-        NATS["persistence-nats<br>9 KV buckets + Object Store"]
+        NATS["persistence-nats<br>8 KV buckets + 2 Object Stores + Streams"]
         Mem["persistence-memory<br>HashMap + Vec"]
     end
 

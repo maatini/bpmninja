@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { DataViewer } from '@/shared/components/DataViewer';
+import { useEngineEvents } from '../hooks/use-engine-events';
 
 interface HistoryTimelineProps {
   instanceId: string;
@@ -48,10 +49,15 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, eventTypes, actorTypes, refreshTrigger]);
+  useEngineEvents(() => { void fetchHistory(); }, ['event_subprocess_changed', 'conditional_start_changed'], true, { instanceId });
 
   const getEventIcon = (type: string) => {
     switch (type) {
       case 'InstanceStarted': return <Play className="h-4 w-4 text-blue-500" />;
+      case 'EventSubprocessActivated': return <Play className="h-4 w-4 text-blue-500" />;
+      case 'EventSubprocessCompleted': return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'EventSubprocessInterrupted':
+      case 'EventSubprocessScopeInterrupted': return <XCircle className="h-4 w-4 text-destructive" />;
       case 'InstanceCompleted': return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'InstanceFailed': return <XCircle className="h-4 w-4 text-destructive" />;
       case 'TokenAdvanced': return <ArrowRightCircle className="h-4 w-4 text-muted-foreground" />;
@@ -99,6 +105,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
          >
            <option value="">All Events</option>
            <option value="InstanceStarted,InstanceCompleted,InstanceFailed">Lifecycle Only</option>
+           <option value="EventSubprocessActivated,EventSubprocessScopeInterrupted,EventSubprocessInterrupted,EventSubprocessCompleted">Event Subprocess Lifecycle</option>
            <option value="TokenAdvanced">Token Movements</option>
            <option value="VariablesChanged">Variable Changes</option>
          </select>

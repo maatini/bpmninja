@@ -95,6 +95,7 @@ mod tests {
         p.save_file("file2", &[0u8; 200]).await.unwrap();
 
         let inst = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: uuid::Uuid::new_v4(),
             definition_key: uuid::Uuid::new_v4(),
             business_key: String::new(),
@@ -109,6 +110,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };

@@ -1,22 +1,24 @@
 # bpmninja — Architecture Documentation
 
 > BPMN 2.0 workflow engine in Rust, token-based execution
-> As of: 2026-04-10
+> As of: 2026-10-12 (synced with code; v0.7.24)
 
 ---
 
 ## 1. Workspace Overview
 
-The project is a Cargo workspace with 6 crates, a Tauri desktop app and an API spec:
+The project is a Cargo workspace with 6 crates, plus a Tauri desktop app, a TypeScript worker client, an API spec and a fuzz workspace:
 
-| Crate | Lib LoC | Test LoC | Purpose |
-|---|---|---|---|
-| **engine-core** | ~7,191 | ~3,545 | Pure state machine, token execution, gateways, scripting |
-| **bpmn-parser** | ~1,963 | (inline) | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
-| **persistence-nats** | ~1,149 | (inline) | `WorkflowPersistence` via NATS JetStream KV/ObjectStore |
-| **engine-server** | ~1,280 | ~1,934 | Axum REST API (HTTP adapter) + background timer scheduler |
-| **desktop-tauri** | ~5,186 (TS) + ~623 (Rust) | — | Tauri + React + TailwindCSS + bpmn-js modeler (thin client) |
-| **agent-orchestrator** | demo | — | One-shot example worker (not a production loop) |
+| Crate | LoC (incl. tests) | Purpose |
+|---|---|---|
+| **engine-core** | ~19,100 | Pure state machine, token execution, gateways, scripting, history |
+| **bpmn-parser** | ~3,040 | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
+| **persistence-nats** | ~1,440 | `WorkflowPersistence` via NATS JetStream KV / Object Store / Streams |
+| **persistence-memory** | ~120 | Re-export of `engine_core::adapter::InMemoryPersistence` |
+| **engine-server** | ~6,740 | Axum REST API, SSE, timer scheduler, auth/CORS, startup restore |
+| **agent-orchestrator** | ~130 | One-shot demo worker (not a production loop) |
+| **desktop-tauri** | ~9,250 TS + ~1,130 Rust | Tauri + React + Tailwind + bpmn-js (thin client) |
+| **external-task-client** | ~1,070 (+ tests) | TypeScript Camunda-style worker SDK |
 
 ### Workspace Dependency Graph
 
@@ -55,71 +57,49 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph "engine-core"
-        LIB["lib.rs<br/><i>Public Exports</i>"]
-        
-        subgraph "model layer"
-            MODEL["model.rs<br/>ProcessDefinition<br/>Token<br/>BpmnElement<br/>SequenceFlow"]
-            ERROR["error.rs<br/>EngineError<br/>EngineResult"]
-        end
-        
-        subgraph "engine module"
+    subgraph "engine-core/src"
+        LIB["lib.rs<br/><i>public exports + legacy aliases</i>"]
+        DOMAIN["domain/<br/>definition, element (29 variants),<br/>token, flow, timer, listener, error"]
+        RUNTIME["runtime/<br/>ProcessInstance, InstanceState,<br/>NextAction, Pending*, stats"]
+        PORT["port/persistence.rs<br/>WorkflowPersistence (35 async fns)"]
+        ADAPTER["adapter/in_memory.rs<br/>InMemoryPersistence"]
+        HIST["history/<br/>HistoryEntry, DiffSnapshot, diffs"]
+        SCRIPT["scripting/runner.rs<br/>Rhai sandbox"]
+        COND["condition.rs<br/>expression evaluator"]
+
+        subgraph "engine/"
             MOD["mod.rs<br/>WorkflowEngine"]
-            TYPES["types.rs<br/>ProcessInstance<br/>PendingTasks<br/>InstanceState"]
-            EXEC["executor.rs<br/>run_instance_batch<br/>execute_step"]
-            GW["gateway.rs<br/>XOR / AND / OR / Event-Based"]
-            SVC["service_task.rs<br/>fetch-and-lock<br/>complete/fail"]
-            BOUND["boundary.rs<br/>Timer/Error Events"]
-            REG["registry.rs<br/>DefinitionRegistry"]
-            STORE["instance_store.rs<br/>InstanceStore"]
-            DEFOPS["definition_ops.rs<br/>Deploy/Delete/List"]
-            INSTOPS["instance_ops.rs<br/>Start/Complete/Delete"]
-            PROCSTART["process_start.rs<br/>Process Instantiation"]
-            MSGPROC["message_processor.rs<br/>Message Correlation"]
-            TIMERPROC["timer_processor.rs<br/>Timer Processing"]
-            PERSISTOPS["persistence_ops.rs<br/>Save/Restore State"]
-            RETRY["retry_queue.rs<br/>Fault-Tolerant Retry"]
-            USERTASK["user_task.rs<br/>User Task Ops"]
-        end
-        
-        subgraph "support"
-            COND["condition.rs<br/>Expression Evaluator"]
-            SCRIPT["script_runner.rs<br/>Rhai Scripts"]
-            HIST["history.rs<br/>Audit Trail & Diffs"]
-            PERSIST["persistence.rs<br/>WorkflowPersistence Trait"]
-            INMEM["persistence_in_memory.rs<br/>InMemoryPersistence"]
+            EXEC["executor/<br/>run_instance_batch, execute_step,<br/>next_action, parallel, completion"]
+            HANDLERS["handlers/<br/>tasks, events, gateways, sub_processes"]
+            GW["gateway.rs"]
+            BOUND["boundary.rs"]
+            OPS["definition_ops / instance_ops /<br/>process_start / user_task / service_task"]
+            PROC["timer_processor / message_processor"]
+            IDX["topic_index / timer_index<br/>(secondary indexes)"]
+            STORE["registry.rs / instance_store.rs"]
+            PERSIST["persistence_ops.rs + retry_queue.rs"]
+            EVT["events.rs<br/>EngineEvent broadcast"]
         end
     end
-    
-    LIB --> MODEL
-    LIB --> MOD
-    MOD --> TYPES
-    MOD --> EXEC
-    MOD --> GW
-    MOD --> SVC
-    MOD --> BOUND
-    MOD --> REG
-    MOD --> STORE
-    MOD --> DEFOPS
-    MOD --> INSTOPS
-    MOD --> PROCSTART
-    MOD --> MSGPROC
-    MOD --> TIMERPROC
-    MOD --> PERSISTOPS
-    MOD --> RETRY
-    MOD --> USERTASK
-    EXEC --> GW
-    EXEC --> BOUND
-    EXEC --> SCRIPT
-    GW --> COND
-    SVC --> EXEC
-    MOD --> HIST
-    MOD --> PERSIST
 
-    style MOD fill:#4a9eff,stroke:#333,color:#fff
-    style EXEC fill:#4a9eff,stroke:#333,color:#fff
-    style MODEL fill:#ff9f43,stroke:#333,color:#fff
-    style TYPES fill:#ff9f43,stroke:#333,color:#fff
+    LIB --> DOMAIN
+    LIB --> MOD
+    MOD --> EXEC
+    EXEC --> HANDLERS
+    HANDLERS --> GW
+    HANDLERS --> BOUND
+    HANDLERS --> SCRIPT
+    GW --> COND
+    MOD --> OPS
+    MOD --> PROC
+    MOD --> IDX
+    MOD --> STORE
+    MOD --> PERSIST
+    MOD --> EVT
+    PERSIST --> PORT
+    PERSIST --> HIST
+    ADAPTER -. implements .-> PORT
+    EXEC --> RUNTIME
 ```
 
 ### 2.2 WorkflowEngine — Component Breakdown (K2)
@@ -128,28 +108,29 @@ The engine is split into focused components:
 
 ```rust
 pub struct WorkflowEngine {
-    // K2: components instead of a god object
-    pub(crate) definitions:             DefinitionRegistry,                  // Immutable definition store
-    pub(crate) instances:               InstanceStore,                       // Per-instance locking (K1)
-    
-    // Wait-State Queues (DashMap for lock-free sharding/concurrency)
-    pub(crate) pending_user_tasks:      Arc<DashMap<Uuid, PendingUserTask>>,
-    pub(crate) pending_service_tasks:   Arc<DashMap<Uuid, PendingServiceTask>>,
-    pub(crate) pending_timers:          Arc<DashMap<Uuid, PendingTimer>>,
-    pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
-    
-    // Infrastructure
-    pub(crate) persistence:             Option<Arc<dyn WorkflowPersistence>>,
-    pub(crate) persistence_error_count: AtomicU64,
-    pub(crate) retry_tx:                Option<retry_queue::RetryQueueTx>,
+    pub(crate) definitions:              DefinitionRegistry,          // Arc<DashMap<Uuid, Arc<ProcessDefinition>>>
+    pub(crate) instances:                InstanceStore,               // Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>
+    pub(crate) pending_user_tasks:       Arc<DashMap<Uuid, PendingUserTask>>,
+    pub(crate) pending_service_tasks:    Arc<DashMap<Uuid, PendingServiceTask>>,
+    pub(crate) service_task_topic_index: TopicIndex,                  // secondary: topic -> task ids
+    pub(crate) pending_timers:           Arc<DashMap<Uuid, PendingTimer>>,
+    pub(crate) timer_due_index:          TimerDueIndex,               // secondary: BTreeMap<(expires_at, id)>
+    pub(crate) pending_message_catches:  Arc<DashMap<Uuid, PendingMessageCatch>>,
+    pub(crate) persistence:              Option<Arc<dyn WorkflowPersistence>>,
+    pub(crate) persistence_error_count:  Arc<AtomicU64>,
+    pub(crate) retry_tx:                 Option<RetryQueueTx>,        // bounded mpsc
+    pub(crate) retry_worker_handle:      Mutex<Option<JoinHandle<()>>>,
+    pub(crate) script_config:            ScriptConfig,
+    pub(crate) event_tx:                 broadcast::Sender<EngineEvent>,
 }
 ```
 
 | Component | Struct | Locking Strategy |
 |---|---|---|
-| **DefinitionRegistry** | `Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Shared, immutable after deploy |
-| **InstanceStore** | `Arc<RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>>` | Per-instance fine-grained (K1) |
-| **PendingTask queues** | `Arc<DashMap<Uuid, Pending*>>` | Lock-free sharding, concurrent O(1) ops |
+| **DefinitionRegistry** | `Arc<DashMap<Uuid, Arc<ProcessDefinition>>>` | Sharded map, definitions immutable after deploy |
+| **InstanceStore** | `Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>` | Sharded map + per-instance `RwLock` (K1) |
+| **PendingTask queues** | `Arc<DashMap<Uuid, Pending*>>` | Sharded, concurrent O(1) ops |
+| **Secondary indexes** | `TopicIndex`, `TimerDueIndex` | Derived from the queues (SSOT stays in the DashMaps) |
 
 ---
 
@@ -225,30 +206,44 @@ classDiagram
 
 ### 3.2 BPMN Element Types
 
+29 variants in `engine-core/src/domain/element.rs` (closed enum, exhaustive matching):
+
 ```rust
 pub enum BpmnElement {
+    // Start / end
     StartEvent,
-    TimerStartEvent(TimerDefinition),              // Duration | AbsoluteDate | CronCycle | RepeatingInterval
+    TimerStartEvent(TimerDefinition),             // Duration | AbsoluteDate | CronCycle | RepeatingInterval
     MessageStartEvent { message_name: String },
     EndEvent,
     TerminateEndEvent,
     ErrorEndEvent { error_code: String },
-    UserTask(String),                               // assignee
+    EscalationEndEvent { escalation_code: String },
+    CompensationEndEvent { activity_ref: Option<String> },
+    // Tasks (multi_instance is always None — MI is rejected at parse time)
     ServiceTask { topic: String, multi_instance: Option<MultiInstanceDef> },
+    UserTask(String),                             // assignee
     ScriptTask { script: String, multi_instance: Option<MultiInstanceDef> },
     SendTask { message_name: String, multi_instance: Option<MultiInstanceDef> },
-    ExclusiveGateway { default: Option<String> },   // XOR
-    InclusiveGateway,                               // OR
-    ParallelGateway,                                // AND
-    EventBasedGateway,                              // waits for first catch event
+    // Gateways
+    ExclusiveGateway { default: Option<String> },
+    InclusiveGateway,
+    ParallelGateway,
+    EventBasedGateway,
+    ComplexGateway { join_condition: Option<String>, default: Option<String> },
+    // Intermediate / boundary events
     TimerCatchEvent(TimerDefinition),
-    BoundaryTimerEvent { attached_to, timer: TimerDefinition, cancel_activity },
-    BoundaryMessageEvent { attached_to, message_name, cancel_activity },
-    BoundaryErrorEvent { attached_to, error_code: Option<String> },
     MessageCatchEvent { message_name: String },
+    EscalationThrowEvent { escalation_code: String },
+    CompensationThrowEvent { activity_ref: Option<String> },
+    BoundaryTimerEvent { attached_to: String, timer: TimerDefinition, cancel_activity: bool },
+    BoundaryMessageEvent { attached_to: String, message_name: String, cancel_activity: bool },
+    BoundaryErrorEvent { attached_to: String, error_code: Option<String> },
+    BoundaryEscalationEvent { attached_to: String, escalation_code: Option<String>, cancel_activity: bool },
+    BoundaryCompensationEvent { attached_to: String },
+    // Sub-processes
     CallActivity { called_element: String },
-    EmbeddedSubProcess { start_node_id: String },   // embedded sub-process (flattened)
-    SubProcessEndEvent { sub_process_id: String },  // synthetic end event
+    EmbeddedSubProcess { start_node_id: String },  // flattened at parse time
+    SubProcessEndEvent { sub_process_id: String }, // synthetic end event
 }
 ```
 
@@ -372,38 +367,20 @@ Inclusive join is a taken-path barrier: after a matching split (`find_downstream
 
 ### 5.1 WorkflowPersistence Trait
 
-```rust
-#[async_trait]
-pub trait WorkflowPersistence: Send + Sync {
-    // Instance & Definition CRUD
-    async fn save_instance(&self, instance: &ProcessInstance) -> EngineResult<()>;
-    async fn list_instances(&self)                             -> EngineResult<Vec<ProcessInstance>>;
-    async fn delete_instance(&self, id: &str)                  -> EngineResult<()>;
-    async fn save_definition(&self, def: &ProcessDefinition)   -> EngineResult<()>;
-    async fn list_definitions(&self)                           -> EngineResult<Vec<ProcessDefinition>>;
-    
-    // Task Queues
-    async fn save_user_task(&self, task: &PendingUserTask)           -> EngineResult<()>;
-    async fn save_service_task(&self, task: &PendingServiceTask)     -> EngineResult<()>;
-    async fn save_timer(&self, timer: &PendingTimer)                 -> EngineResult<()>;
-    async fn save_message_catch(&self, catch: &PendingMessageCatch) -> EngineResult<()>;
-    
-    // File Storage (Object Store)
-    async fn save_file(&self, key: &str, data: &[u8])  -> EngineResult<()>;
-    async fn load_file(&self, key: &str)                -> EngineResult<Vec<u8>>;
-    
-    // BPMN XML Storage
-    async fn save_bpmn_xml(&self, key: &str, xml: &str) -> EngineResult<()>;
-    async fn load_bpmn_xml(&self, key: &str)             -> EngineResult<String>;
-    
-    // History
-    async fn append_history_entry(&self, entry: &HistoryEntry) -> EngineResult<()>;
-    async fn query_history(&self, query: HistoryQuery)         -> EngineResult<Vec<HistoryEntry>>;
-    
-    // Monitoring
-    async fn get_storage_info(&self) -> EngineResult<Option<StorageInfo>>;
-}
-```
+`engine-core/src/port/persistence.rs` defines **35 async methods**, grouped as:
+
+| Group | Methods |
+|---|---|
+| Tokens | `save_token`, `load_tokens`, `delete_token` |
+| Instances / Definitions | `save_instance`, `list_instances`, `delete_instance`, `save_definition`, `list_definitions`, `delete_definition` |
+| Wait states | save / delete / list for user tasks, service tasks, timers, message catches |
+| Files | `save_file`, `load_file`, `delete_file` |
+| BPMN XML | `save_bpmn_xml`, `load_bpmn_xml`, `list_bpmn_xml_ids` |
+| History | `append_history_entry`, `query_history` |
+| Archive | `save_completed_instance`, `query_completed_instances`, `get_completed_instance` |
+| Monitoring | `get_storage_info`, `get_bucket_entries`, `get_bucket_entry_detail` |
+
+The full signature list lives in [knowledge-base/modules/engine-core/interfaces.md](knowledge-base/modules/engine-core/interfaces.md).
 
 ### 5.2 Implementations
 
@@ -412,19 +389,20 @@ pub trait WorkflowPersistence: Send + Sync {
 | `InMemoryPersistence` | `persistence-memory` | `HashMap` + `Vec` (tests & dev) |
 | `NatsPersistence` | `persistence-nats` | NATS JetStream KV + ObjectStore |
 
-**NATS KV stores:**
-| KV bucket | Contents | Key format |
-|---|---|---|
-| `bpm_definitions` | `ProcessDefinition` (JSON) | `def-{uuid}` |
-| `bpm_instances` | `ProcessInstance` (JSON) | `inst-{uuid}` |
-| `bpm_user_tasks` | `PendingUserTask` (JSON) | `ut-{uuid}` |
-| `bpm_service_tasks` | `PendingServiceTask` (JSON) | `st-{uuid}` |
-| `bpm_timers` | `PendingTimer` (JSON) | `tmr-{uuid}` |
-| `bpm_msg_catches` | `PendingMessageCatch` (JSON) | `msg-{uuid}` |
-| `bpm_tokens` | `Token` (JSON) | `tok-{uuid}` |
-| `bpm_bpmn_xml` | BPMN 2.0 XML (string) | `xml-{uuid}` |
-| `bpm_history` | `HistoryEntry` (JSON) | `hist-{uuid}` |
-| **ObjectStore** `instance_files` | Binary files | `file:{instance}-{var}-{filename}` |
+**NATS storage layout** (source: `persistence-nats/src/client.rs`, `trait_impl.rs`):
+
+| Bucket / Store | Type | Contents | Key |
+|---|---|---|---|
+| `definitions` | KV | `ProcessDefinition` (JSON) | `{definition_uuid}` |
+| `instances` | KV | Active `ProcessInstance` (JSON) | `{instance_uuid}` |
+| `user_tasks` / `service_tasks` / `timers` / `messages` | KV | Pending wait states (JSON) | `{uuid}` |
+| `tokens` | KV | `Token` (JSON) | `token-{instance_uuid}-{token_uuid}` |
+| `history_instances` | KV | Archived (completed) instances | `{instance_uuid}` |
+| `bpmn_xml` | Object Store | BPMN XML source | `{definition_uuid}` |
+| `instance_files` | Object Store | File variables | `file:{instance}-{var}-{filename}` |
+| `WORKFLOW_HISTORY` | Stream | `HistoryEntry`, subject `history.instance.{id}` | — |
+| `WORKFLOW_EVENTS` | Stream | subjects `WORKFLOW_EVENTS.*` | — |
+| `ENGINE_LOGS` | Stream | Log buffer backup (created by engine-server) | — |
 
 ### 5.3 Fault-Tolerant Retry Queue (K6)
 
@@ -512,40 +490,42 @@ graph LR
 ### 6.2 Server Architecture
 
 ```rust
-struct AppState {
-    pub(crate) engine:            Arc<WorkflowEngine>,                  // Global shared instance (no RwLock needed!)
-    pub(crate) persistence:       Option<Arc<dyn WorkflowPersistence>>, // Optional NATS backend
-    pub(crate) deployed_xml:      Arc<RwLock<HashMap<String, String>>>, // XML cache (key → XML)
-    pub(crate) nats_url:          String,                               // For /api/info endpoint
-    pub(crate) log_buffer:        Arc<LogBuffer>,
-    pub(crate) require_nats:      bool,                                 // REQUIRE_NATS → readiness / durability
-    pub(crate) max_upload_bytes:  usize,                                // MAX_UPLOAD_BYTES (default 5 MiB)
+pub struct AppState {
+    pub(crate) engine:           Arc<WorkflowEngine>,                  // Shared engine (no outer lock)
+    pub(crate) persistence:      Option<Arc<dyn WorkflowPersistence>>, // NATS backend if connected
+    pub(crate) deployed_xml:     Arc<RwLock<HashMap<String, String>>>, // XML cache (definition key → XML)
+    pub(crate) nats_url:         String,                               // For /api/info
+    pub(crate) log_buffer:       Arc<LogBuffer>,
+    pub(crate) require_nats:     bool,                                 // REQUIRE_NATS → readiness / durability
+    pub(crate) max_upload_bytes: usize,                                // MAX_UPLOAD_BYTES (default 5 MiB)
+    pub(crate) max_xml_bytes:    usize,                                // MAX_XML_BYTES (default 10 MiB)
+    pub(crate) api_key:          Option<String>,                       // BPMNINJA_API_KEY; None = auth off
+    pub(crate) cors_origins:     Vec<String>,                          // CORS_ORIGINS allowlist; "*" = any (dev)
 }
 ```
 
-> The server shares the engine only via `Arc<WorkflowEngine>`. Because all inner collections (`DashMap`, `RwLock<HashMap>`) are thread-safe and mutations go through `&self`, there is no longer a monolithic read/write lock over the entire engine. This eliminates contention under heavy HTTP traffic. Instances are isolated via **K1 (per-instance locking)** through `InstanceStore`.
+> The server shares the engine only via `Arc<WorkflowEngine>`. Because all inner collections (`DashMap`, per-instance `RwLock`) are thread-safe and mutations go through `&self`, there is no longer a monolithic read/write lock over the entire engine. This eliminates contention under heavy HTTP traffic. Instances are isolated via **K1 (per-instance locking)** through `InstanceStore`.
 
 ### 6.3 Background Timer Scheduler
 
-The server spawns a Tokio background task that periodically calls `engine.process_timers()`:
+The server spawns a Tokio background task that sleeps until the next timer is due and then calls `engine.process_timers()`:
 
 ```rust
-// main.rs — automatic timer polling (lock-free via Arc<WorkflowEngine>)
-let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
-    .ok().and_then(|v| v.parse().ok()).unwrap_or(1000);
-
-tokio::spawn(async move {
-    loop {
-        tokio::time::sleep(Duration::from_millis(timer_interval_ms)).await;
-        match timer_engine.process_timers().await {
-            Ok(n) => tracing::info!("Timer scheduler: processed {} expired timer(s)", n),
-            Err(e) => tracing::warn!("Timer scheduler error: {}", e),
+// main.rs — event-driven timer scheduler (lock-free via Arc<WorkflowEngine>)
+let max_idle = Duration::from_millis(timer_interval_ms); // TIMER_INTERVAL_MS, default 1000
+loop {
+    tokio::select! {
+        // Wakes at the earliest due time (TimerDueIndex), when a timer is added
+        // (Notify), or after max_idle — whichever comes first.
+        _ = timer_engine.wait_for_timer_work(max_idle) => {
+            match timer_engine.process_timers().await { /* log */ }
         }
+        _ = shutdown_rx.changed() => break,
     }
-});
+}
 ```
 
-> **Configuration**: `TIMER_INTERVAL_MS` (default: 1000ms). No external cron required.
+> **Configuration**: `TIMER_INTERVAL_MS` (default: 1000ms) is the **maximum idle wait**, not a polling period. Timers fire at their due time. Overdue timers that do not fire (suspended instances) are re-checked at most every `TIMER_INTERVAL_MS`. No external cron required.
 
 ### 6.4 Health & Readiness
 
@@ -611,8 +591,8 @@ graph TD
 
 ```
 WorkflowEngine (Arc)
-├── DefinitionRegistry       → Arc<RwLock<HashMap>>          (1 global lock)
-├── InstanceStore             → Arc<RwLock<HashMap>>          (1 global lock for the map)
+├── DefinitionRegistry       → Arc<DashMap>                  (sharded)
+├── InstanceStore             → Arc<DashMap>                  (sharded map)
 │   └── ProcessInstance[i]   → Arc<RwLock<ProcessInstance>>  (per-instance lock!)
 ├── pending_user_tasks       → Arc<DashMap>                  (lock-free / sharded)
 ├── pending_service_tasks    → Arc<DashMap>                  (lock-free / sharded)
@@ -658,29 +638,30 @@ Every state transition is stored as a `HistoryEntry`:
 
 ## 10. Code Statistics
 
-> As of: 2026-04-06 — measured via `wc -l` and `cargo test --workspace`
+> As of: 2026-10-12 — measured via `wc -l` (Rust totals include inline/test modules) and by counting test attributes
 
 | Area | Files | LOC |
 |---|---|---|
-| engine-core (lib) | 25 | 7,191 |
-| engine-core (tests) | 2 | 3,545 |
-| bpmn-parser | 4 | 1,963 |
-| persistence-nats | 5 | 1,149 |
-| engine-server (lib + main) | 12 | 1,280 |
-| engine-server (E2E tests) | 12 | 1,934 |
-| **Rust workspace total** | **60** | **~17,062** |
-| desktop-tauri (TypeScript + CSS) | 38 | 5,186 |
-| desktop-tauri (Rust backend) | 10 | 623 |
-| **Project total** | **~108** | **~22,871** |
+| engine-core | 74 | ~19,100 |
+| bpmn-parser | 4 | ~3,040 |
+| persistence-nats | 5 | ~1,440 |
+| persistence-memory | 1 | ~120 |
+| engine-server (lib + E2E tests) | 37 | ~6,740 |
+| agent-orchestrator | 1 | ~130 |
+| desktop-tauri (TypeScript) | 63 | ~9,250 |
+| desktop-tauri (Rust backend) | — | ~1,130 |
+| external-task-client (lib) | — | ~1,070 |
+| fuzz targets | 9 | ~710 |
 
-### Test Overview (workspace, approximate)
+### Test Overview (approximate)
 
 | Crate | Unit | E2E / Integration | Total |
 |---|---|---|---|
-| engine-core | 217 | 5 | 222 |
-| bpmn-parser | 32 | — | 32 |
-| persistence-nats | 4 | — | 4 |
-| engine-server | 1 | ~56 | ~57 |
-| **Rust workspace (cargo test)** | | | **all green** |
+| engine-core | 259 | 5 | 264 |
+| bpmn-parser | 46 | — | 46 |
+| persistence-nats | 5 | — | 5 |
+| engine-server | 17 | 74 | 91 |
+| desktop-tauri (Playwright) | — | 52 | 52 |
+| external-task-client (Vitest) | 76 | — | 76 |
 
 Source of truth: `cargo test --workspace`.

@@ -16,6 +16,8 @@
 | metrics / metrics-exporter-prometheus | External crate | Prometheus metrics endpoint |
 | serde / serde_json | External crate | JSON request/response serialization |
 | futures | External crate | Stream extensions for SSE |
+| rust_bpmn_analyzer | Git dependency (pinned rev, MIT) | Deploy-time model checking (`server/model_check.rs`) |
+| quick-xml | External crate | Normalizes deploy XML for the analyzer |
 
 ## Inbound
 
@@ -36,8 +38,10 @@
 | `REQUIRE_NATS` | `true` | main.rs: fail-fast if NATS unavailable; ready fails without persistence. Opt out with `false` |
 | `MAX_UPLOAD_BYTES` | `5242880` (5 MiB) | files.rs: multipart upload size limit |
 | `PORT` | `8081` | main.rs: HTTP listen port |
-| `TIMER_INTERVAL_MS` | `1000` | main.rs: timer scheduler interval |
+| `TIMER_INTERVAL_MS` | `1000` | main.rs: timer scheduler max idle wait (timers fire at due time) |
 | `RUST_LOG` | `info` | main.rs: log level filter |
 | `LOG_FORMAT` | `text` | main.rs: `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | main.rs: log file path, `off` to disable |
+| `MODEL_CHECK` | `warn` | deploy: `off` / `warn` / `enforce` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | deploy: max wait for the model check |
 

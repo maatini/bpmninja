@@ -25,7 +25,7 @@
 ```mermaid
 graph TD
     subgraph "engine-core"
-        WP["WorkflowPersistence trait<br>30+ methods"]
+        WP["WorkflowPersistence trait<br>35 async methods"]
         ADAPTER["adapter::InMemoryPersistence<br>HashMap + Vec"]
     end
     
@@ -51,21 +51,22 @@ graph TD
     LN["NatsLogSink"] --> NATS_CLIENT
 ```
 
-## NATS KV Bucket Map
+## NATS Bucket / Store Map
 
-| Bucket Name | Content Type | Key Prefix | Purpose |
-|------------|-------------|------------|---------|
-| `definitions` | `ProcessDefinition` (JSON) | `def-{uuid}` | Immutable process definitions |
-| `instances` | `ProcessInstance` (JSON) | `inst-{uuid}` | Live process instances |
-| `user_tasks` | `PendingUserTask` (JSON) | `ut-{uuid}` | Awaiting user completion |
-| `service_tasks` | `PendingServiceTask` (JSON) | `st-{uuid}` | External worker tasks |
-| `timers` | `PendingTimer` (JSON) | `tmr-{uuid}` | Active timer triggers |
-| `message_catches` | `PendingMessageCatch` (JSON) | `msg-{uuid}` | Message subscriptions |
-| `tokens` | `Token` (JSON) | `token-{inst}-{token}` | Per-instance tokens |
-| `bpmn_xml` | BPMN XML string | `xml-{uuid}` | Original BPMN source |
-| `history` | `HistoryEntry` (JSON) | `hist-{uuid}` | Instance history events |
+| Bucket / Store | Type | Content | Key |
+|----------------|-----|--------|-----|
+| `definitions` | KV | `ProcessDefinition` (JSON) | `{definition_uuid}` |
+| `instances` | KV | Active `ProcessInstance` (JSON) | `{instance_uuid}` |
+| `user_tasks` | KV | `PendingUserTask` (JSON) | `{task_uuid}` |
+| `service_tasks` | KV | `PendingServiceTask` (JSON) | `{task_uuid}` |
+| `timers` | KV | `PendingTimer` (JSON) | `{timer_uuid}` |
+| `messages` | KV | `PendingMessageCatch` (JSON) | `{catch_uuid}` |
+| `tokens` | KV | `Token` (JSON) | `token-{instance_uuid}-{token_uuid}` |
+| `history_instances` | KV | Archived (completed) `ProcessInstance` | `{instance_uuid}` |
+| `bpmn_xml` | Object Store | BPMN XML source | `{definition_uuid}` |
+| `instance_files` | Object Store | File variables (binary) | `file:{instance_id}-{var_name}-{filename}` |
+| `WORKFLOW_HISTORY` | Stream | `HistoryEntry` (JSON), Subject `history.instance.{instance_uuid}` | — |
+| `WORKFLOW_EVENTS` | Stream | Subjects `WORKFLOW_EVENTS.*` (created on connect) | — |
+| `ENGINE_LOGS` | Stream | Log buffer backup (max 50,000 entries, `engine-server/log_nats.rs`) | — |
 
-Additional:
-- **Object Store** `instance_files`: Binary files, keyed by `file:{instance_id}-{var_name}-{filename}`
-- **Stream** `WORKFLOW_EVENTS`: History event stream
-- **Stream** `ENGINE_LOGS`: Persistent log buffer (50,000 entries)
+Source: `persistence-nats/src/client.rs` (creation) and `trait_impl.rs` (access). Keys carry **no** prefix except `tokens` and `instance_files`.

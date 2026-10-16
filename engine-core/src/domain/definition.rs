@@ -21,7 +21,23 @@ pub struct ProcessDefinition {
     #[serde(default)]
     pub event_listeners: Vec<ScopeEventListener>,
     #[serde(default)]
+    pub event_subprocesses: Vec<crate::domain::EventSubProcess>,
+    #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
+    /// Loop / multi-instance characteristics per activity node (X4/X5).
+    #[serde(default)]
+    pub loops: HashMap<String, crate::domain::LoopCharacteristics>,
+    /// X11: declarations do not invent values.
+    #[serde(default)]
+    pub data_variables: Vec<String>,
+    #[serde(default)]
+    pub variable_defaults: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub data_mappings: HashMap<String, crate::domain::ActivityMappings>,
+    #[serde(skip)]
+    compiled_conditions: HashMap<String, crate::condition::CompiledCondition>,
+    #[serde(skip)]
+    compiled_event_conditions: HashMap<String, crate::condition::CompiledCondition>,
 }
 
 impl ProcessDefinition {
@@ -53,6 +69,8 @@ impl ProcessDefinition {
                     BpmnElement::StartEvent
                         | BpmnElement::TimerStartEvent(_)
                         | BpmnElement::MessageStartEvent { .. }
+                        | BpmnElement::SignalStartEvent { .. }
+                        | BpmnElement::ConditionalStartEvent { .. }
                 )
             })
             .count();
@@ -77,6 +95,7 @@ impl ProcessDefinition {
                     BpmnElement::EndEvent
                         | BpmnElement::ErrorEndEvent { .. }
                         | BpmnElement::EscalationEndEvent { .. }
+                        | BpmnElement::SignalEndEvent { .. }
                         | BpmnElement::CompensationEndEvent { .. }
                         | BpmnElement::TerminateEndEvent
                         | BpmnElement::SubProcessEndEvent { .. }
@@ -105,6 +124,8 @@ impl ProcessDefinition {
         for (node_id, element) in &nodes {
             if let BpmnElement::BoundaryTimerEvent { attached_to, .. }
             | BpmnElement::BoundaryMessageEvent { attached_to, .. }
+            | BpmnElement::BoundaryConditionalEvent { attached_to, .. }
+            | BpmnElement::BoundarySignalEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
             | BpmnElement::BoundaryCompensationEvent { attached_to, .. } = element
@@ -123,6 +144,7 @@ impl ProcessDefinition {
                 BpmnElement::EndEvent
                     | BpmnElement::ErrorEndEvent { .. }
                     | BpmnElement::EscalationEndEvent { .. }
+                    | BpmnElement::SignalEndEvent { .. }
                     | BpmnElement::CompensationEndEvent { .. }
                     | BpmnElement::TerminateEndEvent
                     | BpmnElement::SubProcessEndEvent { .. }
@@ -172,14 +194,29 @@ impl ProcessDefinition {
                 && let Some(outgoing_flows) = flows.get(node_id)
             {
                 for sf in outgoing_flows {
+                    if flows
+                        .values()
+                        .flatten()
+                        .filter(|flow| flow.target == sf.target)
+                        .count()
+                        != 1
+                    {
+                        return Err(EngineError::InvalidDefinition(format!(
+                            "Event gateway target '{}' cannot have additional incoming flows",
+                            sf.target
+                        )));
+                    }
                     if let Some(target_element) = nodes.get(&sf.target)
                         && !matches!(
                             target_element,
-                            BpmnElement::MessageCatchEvent { .. } | BpmnElement::TimerCatchEvent(_)
+                            BpmnElement::MessageCatchEvent { .. }
+                                | BpmnElement::SignalCatchEvent { .. }
+                                | BpmnElement::TimerCatchEvent(_)
+                                | BpmnElement::ConditionalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
-                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
+                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
                             sf.target
                         )));
                     }
@@ -195,18 +232,118 @@ impl ProcessDefinition {
             flows,
             listeners,
             event_listeners,
+            event_subprocesses: Vec::new(),
             sub_processes,
+            loops: HashMap::new(),
+            data_variables: Vec::new(),
+            variable_defaults: HashMap::new(),
+            data_mappings: HashMap::new(),
+            compiled_conditions: HashMap::new(),
+            compiled_event_conditions: HashMap::new(),
+        })
+    }
+
+    /// Rebuild derived data whenever a definition is deployed or restored.
+    pub(crate) fn compile_conditions(&mut self) {
+        self.compiled_conditions = self
+            .flows
+            .values()
+            .flatten()
+            .filter_map(|flow| flow.condition.as_ref())
+            .chain(self.nodes.values().filter_map(|node| match node {
+                BpmnElement::ComplexGateway { join_condition, .. } => join_condition.as_ref(),
+                _ => None,
+            }))
+            .map(|expr| {
+                (
+                    expr.clone(),
+                    crate::condition::CompiledCondition::parse(expr),
+                )
+            })
+            .collect();
+        self.compiled_event_conditions = self
+            .event_subprocesses
+            .iter()
+            .filter_map(|handler| {
+                if let crate::domain::EventSubProcessTrigger::Conditional(expression) =
+                    &handler.trigger
+                {
+                    crate::condition::compile_event_condition(expression)
+                        .ok()
+                        .map(|condition| (expression.clone(), condition))
+                } else {
+                    None
+                }
+            })
+            .chain(self.nodes.values().filter_map(|node| {
+                match node {
+                    BpmnElement::ConditionalStartEvent { condition }
+                    | BpmnElement::ConditionalCatchEvent { condition }
+                    | BpmnElement::BoundaryConditionalEvent { condition, .. } => {
+                        crate::condition::compile_event_condition(condition)
+                            .ok()
+                            .map(|compiled| (condition.clone(), compiled))
+                    }
+                    _ => None,
+                }
+            }))
+            .collect();
+    }
+
+    pub(crate) fn evaluate_event_condition(
+        &self,
+        expression: &str,
+        variables: &HashMap<String, serde_json::Value>,
+    ) -> bool {
+        self.compiled_event_conditions
+            .get(expression)
+            .is_some_and(|condition| condition.evaluate(variables))
+    }
+
+    pub(crate) fn evaluate_condition(
+        &self,
+        expr: &str,
+        variables: &HashMap<String, serde_json::Value>,
+    ) -> bool {
+        self.compiled_conditions
+            .get(expr)
+            .map(|condition| condition.evaluate(variables))
+            .unwrap_or_else(|| crate::condition::evaluate_condition(expr, variables))
+    }
+
+    pub(crate) fn has_conditionals(&self) -> bool {
+        self.nodes.values().any(|node| {
+            matches!(
+                node,
+                BpmnElement::ConditionalStartEvent { .. }
+                    | BpmnElement::ConditionalCatchEvent { .. }
+                    | BpmnElement::BoundaryConditionalEvent { .. }
+            )
+        }) || self.event_subprocesses.iter().any(|handler| {
+            matches!(
+                handler.trigger,
+                crate::domain::EventSubProcessTrigger::Conditional(_)
+            )
         })
     }
 
     /// Returns the (id, element) of the start event.
     pub fn start_event(&self) -> Option<(&str, &BpmnElement)> {
         self.nodes.iter().find_map(|(id, e)| {
+            if self
+                .event_subprocesses
+                .iter()
+                .any(|handler| handler.node_ids.contains(id))
+            {
+                return None;
+            }
             if matches!(
                 e,
                 BpmnElement::StartEvent
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
+                    | BpmnElement::SignalStartEvent { .. }
+                    | BpmnElement::ConditionalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {
@@ -286,6 +423,7 @@ pub struct ProcessDefinitionBuilder {
     listeners: HashMap<String, Vec<ExecutionListener>>,
     event_listeners: Vec<ScopeEventListener>,
     sub_processes: Vec<ProcessDefinition>,
+    loops: HashMap<String, crate::domain::LoopCharacteristics>,
 }
 
 impl ProcessDefinitionBuilder {
@@ -299,7 +437,18 @@ impl ProcessDefinitionBuilder {
             listeners: HashMap::new(),
             event_listeners: Vec::new(),
             sub_processes: Vec::new(),
+            loops: HashMap::new(),
         }
+    }
+
+    /// Marks `node_id` as a multi-instance or loop activity (X4/X5).
+    pub fn loop_characteristics(
+        mut self,
+        node_id: impl Into<String>,
+        characteristics: crate::domain::LoopCharacteristics,
+    ) -> Self {
+        self.loops.insert(node_id.into(), characteristics);
+        self
     }
 
     /// Sets an explicit key for the definition (used during restore).
@@ -386,10 +535,112 @@ impl ProcessDefinitionBuilder {
         if let Some(key) = self.key {
             def.key = key;
         }
+        validate_loops(&def.nodes, &self.loops)?;
+        def.loops = self.loops;
+        crate::engine::conditional_boundary::validate(&def)?;
+        crate::engine::conditional_start::validate(&def)?;
         Ok(def)
     }
+}
+
+/// Loops only on activities without sub-process scope; non-interrupting
+/// boundary events would fire once per instance, so they are rejected.
+fn validate_loops(
+    nodes: &HashMap<String, BpmnElement>,
+    loops: &HashMap<String, crate::domain::LoopCharacteristics>,
+) -> EngineResult<()> {
+    for (node_id, characteristics) in loops {
+        match nodes.get(node_id) {
+            Some(
+                BpmnElement::UserTask(_)
+                | BpmnElement::ServiceTask { .. }
+                | BpmnElement::ScriptTask { .. }
+                | BpmnElement::SendTask { .. }
+                | BpmnElement::CallActivity { .. },
+            ) => {}
+            Some(_) => {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "Loop / multi-instance is only supported on tasks and call activities (node '{node_id}')"
+                )));
+            }
+            None => return Err(EngineError::NoSuchNode(node_id.clone())),
+        }
+        if let crate::domain::LoopCharacteristics::MultiInstance(mi) = characteristics
+            && mi.loop_cardinality.is_none()
+            && mi.collection.is_none()
+        {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance activity '{node_id}' needs loopCardinality or collection"
+            )));
+        }
+        let non_interrupting = nodes.iter().find(|(_, element)| {
+            matches!(
+                element,
+                BpmnElement::BoundaryTimerEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundaryMessageEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundarySignalEvent { attached_to, cancel_activity: false, .. }
+                | BpmnElement::BoundaryEscalationEvent { attached_to, cancel_activity: false, .. }
+                    if attached_to == node_id
+            )
+        });
+        if let Some((boundary_id, _)) = non_interrupting {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Non-interrupting boundary event '{boundary_id}' on loop activity '{node_id}' is not supported"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod condition_cache_tests {
+    use super::*;
+    use crate::engine::WorkflowEngine;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn conditions_are_compiled_on_deploy_and_restore() {
+        let definition = ProcessDefinitionBuilder::new("cached")
+            .node("start", BpmnElement::StartEvent)
+            .node(
+                "gateway",
+                BpmnElement::ComplexGateway {
+                    default: None,
+                    join_condition: Some("ready".into()),
+                },
+            )
+            .node("yes", BpmnElement::EndEvent)
+            .node("no", BpmnElement::EndEvent)
+            .flow("start", "gateway")
+            .conditional_flow("gateway", "yes", "amount >= 100")
+            .flow("gateway", "no")
+            .build()
+            .unwrap();
+        let engine = WorkflowEngine::new();
+        let (key, _) = engine.deploy_definition(definition).await;
+        let deployed = engine.get_definition(&key).await.unwrap();
+        assert_eq!(deployed.compiled_conditions.len(), 2);
+        let mut variables =
+            HashMap::from([("amount".into(), json!(150)), ("ready".into(), json!(true))]);
+        assert!(deployed.evaluate_condition("amount >= 100", &variables));
+        assert!(deployed.evaluate_condition("ready", &variables));
+        variables.insert("amount".into(), json!(50));
+        assert!(!deployed.evaluate_condition("amount >= 100", &variables));
+
+        let encoded = serde_json::to_value(&*deployed).unwrap();
+        assert!(encoded.get("compiled_conditions").is_none());
+        let restored: ProcessDefinition = serde_json::from_value(encoded.clone()).unwrap();
+        assert!(restored.compiled_conditions.is_empty());
+        let restarted = WorkflowEngine::new();
+        let (restored_key, _) = restarted.deploy_definition(restored).await;
+        let restored = restarted.get_definition(&restored_key).await.unwrap();
+        assert_eq!(restored.compiled_conditions.len(), 2);
+        assert_eq!(serde_json::to_value(&*restored).unwrap(), encoded);
+        assert!(!restored.evaluate_condition("amount >= 100", &variables));
+        assert!(restored.evaluate_condition("ready", &variables));
+    }
+}

@@ -42,6 +42,53 @@ macro_rules! inline_retry {
     };
 }
 
+const PERSIST_LOCK_STRIPES: usize = 256;
+
+/// Striped async locks that serialize `save_instance` per instance.
+///
+/// `persist_instance` snapshots the instance under a short write lock and saves
+/// the snapshot after releasing it. Without this lock two concurrent saves of
+/// the same instance could land out of order (older snapshot written last).
+/// Striping keeps memory bounded — no per-instance entries to clean up.
+pub(crate) struct PersistLocks {
+    stripes: Vec<tokio::sync::Mutex<()>>,
+}
+
+impl PersistLocks {
+    pub(crate) fn new() -> Self {
+        Self {
+            stripes: (0..PERSIST_LOCK_STRIPES)
+                .map(|_| tokio::sync::Mutex::new(()))
+                .collect(),
+        }
+    }
+
+    pub(crate) async fn lock(&self, instance_id: Uuid) -> tokio::sync::MutexGuard<'_, ()> {
+        let idx = (instance_id.as_u128() % PERSIST_LOCK_STRIPES as u128) as usize;
+        self.stripes[idx].lock().await
+    }
+}
+
+/// JSON buffer that stops serialization at the instance payload limit.
+struct InstancePayload(Vec<u8>);
+
+impl std::io::Write for InstancePayload {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES.saturating_sub(self.0.len()) {
+            return Err(std::io::Error::other(format!(
+                "Instance payload exceeds limit {} bytes",
+                crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
+            )));
+        }
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl WorkflowEngine {
     /// Logs and counts a persistence error.
     pub(crate) fn log_persistence_error(&self, context: &str, err: impl std::fmt::Display) {
@@ -75,7 +122,10 @@ impl WorkflowEngine {
         }
     }
 
-    pub(crate) async fn record_history_event_from_snapshot(
+    /// Builds the history entry for one executor step (diff against the
+    /// pre-step snapshot). `None` without persistence or when a plain token
+    /// move changed nothing. The caller buffers it and flushes per batch.
+    pub(crate) async fn build_history_entry_from_snapshot(
         &self,
         instance_id: Uuid,
         event_type: crate::history::HistoryEventType,
@@ -83,8 +133,8 @@ impl WorkflowEngine {
         actor_type: crate::history::ActorType,
         actor_id: Option<String>,
         old_snapshot: Option<&crate::history::DiffSnapshot>,
-    ) {
-        if let Some(p) = &self.persistence {
+    ) -> Option<crate::history::HistoryEntry> {
+        if self.persistence.is_some() {
             let inst_arc = self.instances.get(&instance_id).await;
 
             let diff = match (old_snapshot, &inst_arc) {
@@ -104,7 +154,7 @@ impl WorkflowEngine {
             if diff.is_empty()
                 && matches!(event_type, crate::history::HistoryEventType::TokenAdvanced)
             {
-                return;
+                return None;
             }
 
             let mut entry = crate::history::HistoryEntry::new(
@@ -133,13 +183,57 @@ impl WorkflowEngine {
                 }
             }
 
-            inline_retry!(
-                self,
-                p.append_history_entry(&entry),
-                format!("record_history_event_from_snapshot({})", instance_id),
-                PersistJob::AppendHistoryEntry(Box::new(entry))
-            );
+            return Some(entry);
         }
+        None
+    }
+
+    /// Writes the history entries buffered during one `run_instance_batch` in a
+    /// single backend call (inline retries as everywhere else). On final failure
+    /// every entry is queued for background retry; retries are idempotent
+    /// because backends deduplicate by entry id.
+    pub(crate) async fn flush_history(
+        &self,
+        instance_id: Uuid,
+        entries: Vec<crate::history::HistoryEntry>,
+    ) -> bool {
+        let Some(p) = &self.persistence else {
+            return true;
+        };
+        if entries.is_empty() {
+            return true;
+        }
+        let desc = format!(
+            "append_history_entries({instance_id}, {} entries)",
+            entries.len()
+        );
+        let mut last_err = None;
+        for attempt in 0..=INLINE_RETRIES {
+            match p.append_history_entries(&entries).await {
+                Ok(()) => return true,
+                Err(e) if attempt < INLINE_RETRIES => {
+                    let delay = INLINE_BACKOFF_MS * 2u64.pow(attempt);
+                    tracing::warn!(
+                        "{} retry {}/{}: {} — backoff {}ms",
+                        desc,
+                        attempt + 1,
+                        INLINE_RETRIES,
+                        e,
+                        delay
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                    last_err = Some(e);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if let Some(e) = last_err {
+            self.log_persistence_error(&desc, &e);
+            for entry in entries {
+                self.enqueue_retry(PersistJob::AppendHistoryEntry(Box::new(entry)));
+            }
+        }
+        false
     }
 
     /// Helper to record a history entry for an instance, calculating the diff automatically.
@@ -221,44 +315,90 @@ impl WorkflowEngine {
         }
     }
 
+    pub(crate) fn encode_checked_instance(
+        &self,
+        snapshot: &ProcessInstance,
+    ) -> crate::EngineResult<Vec<u8>> {
+        let mut payload = InstancePayload(Vec::new());
+        serde_json::to_writer(&mut payload, snapshot)
+            .map_err(|e| crate::EngineError::PersistenceError(e.to_string()))?;
+        let payload = match &self.persistence {
+            Some(p) => p.prepare_instance_payload(snapshot, payload.0)?,
+            None => payload.0,
+        };
+        if payload.len() > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
+            return Err(crate::EngineError::PersistenceError(
+                "Instance payload exceeds limit".into(),
+            ));
+        }
+        Ok(payload)
+    }
+
+    /// Persistence barrier for explicit-start receipts. Never enqueue and continue on failure.
+    pub(crate) async fn persist_instance_required(&self, id: Uuid) -> crate::EngineResult<()> {
+        if let Some(p) = &self.persistence {
+            let _guard = self.persist_locks.lock(id).await;
+            let instance = self
+                .instances
+                .get(&id)
+                .await
+                .ok_or(crate::EngineError::NoSuchInstance(id))?;
+            let snapshot = instance.read().await.clone();
+            let payload = self.encode_checked_instance(&snapshot)?;
+            p.save_instance_payload(&snapshot, &payload).await?;
+        }
+        Ok(())
+    }
+
     /// Persists the current state of a process instance.
     pub(crate) async fn persist_instance(&self, instance_id: Uuid) {
         if let (Some(p), Some(inst_arc)) =
             (&self.persistence, self.instances.get(&instance_id).await)
         {
-            let mut inst = inst_arc.write().await;
-            if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
-                let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
-                inst.audit_log = inst.audit_log.split_off(overflow);
-                inst.audit_log.insert(
-                    0,
-                    format!("... ({} older entries trimmed, see History API)", overflow),
-                );
-            }
+            // Held across the save: keeps saves of this instance in order.
+            let _persist_guard = self.persist_locks.lock(instance_id).await;
 
-            // Size guard: check serialized payload before NATS write
-            let estimated_size = serde_json::to_vec(&*inst).map(|v| v.len()).unwrap_or(0);
-            if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
-                tracing::error!(
-                    "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",
-                    instance_id,
-                    estimated_size,
-                    crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                );
-                self.log_persistence_error(
-                    &format!("save_instance({})", instance_id),
-                    format!(
-                        "Payload size {} exceeds limit {}",
-                        estimated_size,
-                        crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                    ),
-                );
+            let inst = {
+                let mut inst = inst_arc.write().await;
+                if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
+                    let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
+                    inst.audit_log = inst.audit_log.split_off(overflow);
+                    inst.audit_log.insert(
+                        0,
+                        format!("... ({} older entries trimmed, see History API)", overflow),
+                    );
+                }
+                inst.clone()
+            }; // Instance lock released before any network I/O.
+
+            // Serialize once, enforcing the size limit as bytes are produced.
+            // Keep the same payload for every inline attempt.
+            let mut payload = InstancePayload(Vec::new());
+            if let Err(error) = serde_json::to_writer(&mut payload, &inst) {
+                self.log_persistence_error(&format!("save_instance({})", instance_id), error);
                 return;
             }
 
+            let payload = match p.prepare_instance_payload(&inst, payload.0) {
+                Ok(payload) if payload.len() <= crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES => {
+                    payload
+                }
+                Ok(_) => {
+                    self.log_persistence_error(
+                        &format!("save_instance({})", instance_id),
+                        "Prepared payload exceeds instance size limit",
+                    );
+                    return;
+                }
+                Err(error) => {
+                    self.log_persistence_error(&format!("save_instance({})", instance_id), error);
+                    return;
+                }
+            };
+
             inline_retry!(
                 self,
-                p.save_instance(&inst),
+                p.save_instance_payload(&inst, &payload),
                 format!("save_instance({})", instance_id),
                 PersistJob::SaveInstance(instance_id)
             );
@@ -289,6 +429,13 @@ impl WorkflowEngine {
                 PersistJob::SaveUserTask(task_id)
             );
         }
+        let instance_id = self
+            .pending_user_tasks
+            .get(&task_id)
+            .map(|task| task.instance_id);
+        if let Some(instance_id) = instance_id {
+            self.emit_task_changed(instance_id, task_id).await;
+        }
     }
 
     /// Deletes a completed pending user task from the KV store.
@@ -314,6 +461,13 @@ impl WorkflowEngine {
                 format!("save_service_task({})", task_id),
                 PersistJob::SaveServiceTask(task_id)
             );
+        }
+        let instance_id = self
+            .pending_service_tasks
+            .get(&task_id)
+            .map(|task| task.instance_id);
+        if let Some(instance_id) = instance_id {
+            self.emit_task_changed(instance_id, task_id).await;
         }
     }
 
@@ -401,5 +555,28 @@ impl WorkflowEngine {
         }
         // Deliberately NOT deleting from active persistence bucket or DashMap.
         // Completed instances stay available via list_instances() and GET /api/instances/{id}.
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::InstancePayload;
+    use std::io::Write;
+
+    #[test]
+    fn payload_accepts_exact_limit_and_rejects_the_next_byte() {
+        let limit = crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES;
+        let mut payload = InstancePayload(Vec::new());
+        payload.write_all(&vec![b'x'; limit]).unwrap();
+        assert!(payload.write_all(b"x").is_err());
+        assert_eq!(payload.0.len(), limit);
+    }
+
+    #[test]
+    fn serialization_bounds_escaped_json_bytes() {
+        let mut payload = InstancePayload(Vec::new());
+        let input = "\n".repeat(crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES / 2);
+        assert!(serde_json::to_writer(&mut payload, &input).is_err());
+        assert!(payload.0.len() <= crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES);
     }
 }

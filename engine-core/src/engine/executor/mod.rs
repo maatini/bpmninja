@@ -26,11 +26,90 @@ impl WorkflowEngine {
         instance_id: Uuid,
         initial_token: Token,
     ) -> EngineResult<()> {
+        // History of this batch is buffered and written in one call — also when
+        // the batch fails, so no recorded step is lost.
+        let initial_generation = initial_token
+            .event_context
+            .as_ref()
+            .map(|context| context.generation);
+        let mut history = Vec::new();
+        let mut failure_generation = initial_generation;
+        let driven = self
+            .drive_instance_batch(
+                instance_id,
+                initial_token,
+                &mut history,
+                &mut failure_generation,
+            )
+            .await;
+        self.flush_history(instance_id, history).await;
+        if let Err(error) = driven {
+            if matches!(error, EngineError::PersistenceError(_)) {
+                // A failed durability barrier leaves the saved occurrence/continuation retryable.
+                return Err(error);
+            }
+            if matches!(error, EngineError::DataMappingError(_)) || failure_generation.is_some() {
+                if let Some(instance) = self.instances.get(&instance_id).await {
+                    let mut instance = instance.write().await;
+                    if failure_generation.is_some_and(|generation| {
+                        instance
+                            .event_state
+                            .as_ref()
+                            .is_some_and(|state| state.generation != generation)
+                    }) {
+                        return Ok(());
+                    }
+                    instance.state = InstanceState::CompletedWithError {
+                        error_code: if matches!(error, EngineError::DataMappingError(_)) {
+                            "DATA_MAPPING_ERROR"
+                        } else {
+                            "EVENT_SUBPROCESS_EXECUTION_ERROR"
+                        }
+                        .into(),
+                    };
+                    instance.completed_at = Some(chrono::Utc::now());
+                    instance.push_audit_log(error.to_string());
+                }
+                self.persist_instance(instance_id).await;
+            }
+            self.cleanup_finished_event_scope(instance_id).await;
+            self.emit_instance_changed(instance_id).await;
+            self.deliver_queued_signals().await;
+            return Err(error);
+        }
+
+        let finished = self.finish_instance_batch(instance_id).await;
+        self.deliver_queued_signals().await;
+        finished
+    }
+
+    /// Runs tokens until the queue is empty; collects history entries.
+    async fn drive_instance_batch(
+        &self,
+        instance_id: Uuid,
+        initial_token: Token,
+        history: &mut Vec<crate::history::HistoryEntry>,
+        failure_generation: &mut Option<u64>,
+    ) -> EngineResult<()> {
         let mut queue = VecDeque::new();
+        queue.extend(
+            self.conditional_work(instance_id)
+                .await?
+                .into_iter()
+                .filter(|token| token.id != initial_token.id),
+        );
         queue.push_back(initial_token);
         let mut step_count: u32 = 0;
+        let mut conditional_count = 0usize;
 
         while let Some(mut token) = queue.pop_front() {
+            // Serialize a claimed occurrence through its start/end callbacks and
+            // durable continuation, so concurrent replay cannot repeat callbacks.
+            let _conditional_step_guard = if token.conditional_wait.is_some() {
+                Some(self.conditional_step_locks.lock(instance_id).await)
+            } else {
+                None
+            };
             step_count += 1;
 
             // Cooperative scheduling: yield to Tokio every N steps
@@ -64,16 +143,66 @@ impl WorkflowEngine {
                 )));
             }
 
-            let old_snapshot = if let Some(lk) = self.instances.get(&instance_id).await {
-                Some(crate::history::DiffSnapshot::from_instance(
-                    &*lk.read().await,
-                ))
-            } else {
-                None
+            // The pre-step snapshot only feeds history, which needs persistence.
+            let old_snapshot = match &self.persistence {
+                Some(_) => match self.instances.get(&instance_id).await {
+                    Some(lk) => Some(crate::history::DiffSnapshot::from_instance(
+                        &*lk.read().await,
+                    )),
+                    None => None,
+                },
+                None => None,
             };
             let current_gateway_id = token.current_node.clone();
 
-            let action = self.execute_step(instance_id, &mut token).await?;
+            if token.event_context.is_some() {
+                let Some(instance) = self.instances.get(&instance_id).await else {
+                    continue;
+                };
+                let mut instance = instance.write().await;
+                if let Some(occurrence) = token.conditional_wait
+                    && instance
+                        .event_state
+                        .as_ref()
+                        .and_then(|state| state.conditional_waits.get(&occurrence))
+                        .is_none_or(|wait| {
+                            !wait.claimed
+                                || wait.token_id != token.id
+                                || wait.node_id != token.current_node
+                        })
+                {
+                    continue;
+                }
+                if matches!(instance.state, InstanceState::Suspended { .. }) {
+                    instance.tokens.insert(token.id, token.clone());
+                    continue;
+                }
+                if !crate::engine::event_subprocess::token_valid(&instance, &token) {
+                    continue;
+                }
+                instance.tokens.insert(token.id, token.clone());
+            }
+            *failure_generation = token
+                .event_context
+                .as_ref()
+                .map(|context| context.generation);
+            let action = match self.execute_step(instance_id, &mut token).await {
+                Ok(action) => action,
+                Err(EngineError::AlreadyCompleted) if token.event_context.is_some() => {
+                    let conditional = self.conditional_work(instance_id).await?;
+                    conditional_count += conditional.len();
+                    if conditional_count > 256 {
+                        return Err(EngineError::ExecutionLimitExceeded(
+                            "Conditional activation chain exceeded 256 activations".into(),
+                        ));
+                    }
+                    queue.extend(conditional);
+                    self.clear_wait_states_for_token(instance_id, &token.id)
+                        .await;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
 
             let (event_type, description) = match &action {
                 NextAction::Continue(_) => (
@@ -83,6 +212,10 @@ impl WorkflowEngine {
                 NextAction::ContinueMultiple(_) => (
                     crate::history::HistoryEventType::TokenForked,
                     "Token forked at gateway".to_string(),
+                ),
+                NextAction::WaitForConditional { .. } => (
+                    crate::history::HistoryEventType::TokenAdvanced,
+                    "Waiting for condition".into(),
                 ),
                 NextAction::WaitForJoin { .. } => (
                     crate::history::HistoryEventType::TokenAdvanced,
@@ -142,30 +275,58 @@ impl WorkflowEngine {
                 ),
             };
 
-            self.record_history_event_from_snapshot(
-                instance_id,
-                event_type,
-                &description,
-                crate::history::ActorType::Engine,
-                None,
-                old_snapshot.as_ref(),
-            )
-            .await;
+            if let Some(entry) = self
+                .build_history_entry_from_snapshot(
+                    instance_id,
+                    event_type,
+                    &description,
+                    crate::history::ActorType::Engine,
+                    None,
+                    old_snapshot.as_ref(),
+                )
+                .await
+            {
+                history.push(entry);
+            }
 
+            let conditional = self.conditional_work(instance_id).await?;
+            conditional_count += conditional.len();
+            if conditional_count > 256 {
+                return Err(EngineError::ExecutionLimitExceeded(
+                    "Conditional activation chain exceeded 256 activations".into(),
+                ));
+            }
+            queue.extend(conditional);
             let token_id = token.id;
             self.handle_next_action(
                 action,
                 instance_id,
                 token_id,
                 &current_gateway_id,
+                &token,
                 &mut queue,
             )
             .await?;
+            let conditional = self.conditional_work(instance_id).await?;
+            conditional_count += conditional.len();
+            if conditional_count > 256 {
+                return Err(EngineError::ExecutionLimitExceeded(
+                    "Conditional activation chain exceeded 256 activations".into(),
+                ));
+            }
+            queue.extend(conditional);
         } // end while
 
+        Ok(())
+    }
+
+    /// Persists the instance after a batch and handles completion.
+    pub(crate) async fn finish_instance_batch(&self, instance_id: Uuid) -> EngineResult<()> {
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
+        self.flush_event_lifecycle(instance_id).await;
 
+        self.cleanup_finished_event_scope(instance_id).await;
         // After batch finishes for this instance, if it completed, check parent
         let mut completed = false;
         let mut error_code_to_propagate = None;
@@ -187,7 +348,7 @@ impl WorkflowEngine {
             self.archive_completed_instance(instance_id).await;
         }
 
-        self.emit_event(crate::engine::events::EngineEvent::InstanceChanged);
+        self.emit_instance_changed(instance_id).await;
 
         Ok(())
     }
@@ -204,6 +365,9 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let instance = instance_arc.read().await;
+            if !crate::engine::event_subprocess::token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             instance.definition_key
         };
 
@@ -219,31 +383,125 @@ impl WorkflowEngine {
             .clone();
 
         let def_clone = Arc::clone(&def);
+        self.start_event_container(instance_id, token, &def_clone)
+            .await?;
+
+        // X4/X5: a marked token that left its loop activity finishes an iteration.
+        if let Some(marker) = token.loop_instance.clone()
+            && marker.node_id != current_id
+            && let Some(action) = self
+                .leave_loop_instance(instance_id, token, &def_clone, marker)
+                .await?
+        {
+            return Ok(action);
+        }
+        // X4/X5: entering a loop activity starts its iterations.
+        if let Some(characteristics) = def_clone.loops.get(&current_id)
+            && token
+                .loop_instance
+                .as_ref()
+                .is_none_or(|marker| marker.node_id != current_id)
+        {
+            return self
+                .enter_loop_activity(
+                    instance_id,
+                    token.clone(),
+                    &def_clone,
+                    &current_id,
+                    characteristics,
+                )
+                .await;
+        }
+
+        crate::engine::data_mappings::enter(token, &def_clone, &current_id)?;
 
         let mut start_audits = Vec::new();
-        scripting::run_node_scripts(
-            &self.script_config,
-            instance_id,
-            token,
-            &def_clone,
-            &current_id,
-            ListenerEvent::Start,
-            &mut start_audits,
-        )
-        .await?;
+        if token
+            .event_context
+            .as_ref()
+            .is_none_or(|c| c.started_node.as_deref() != Some(&current_id))
+        {
+            scripting::run_node_scripts(
+                &self.scripts,
+                instance_id,
+                token,
+                &def_clone,
+                &current_id,
+                ListenerEvent::Start,
+                &mut start_audits,
+            )
+            .await?;
+            if let Some(context) = &mut token.event_context {
+                context.started_node = Some(current_id.clone());
+            }
+        }
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
+            if !crate::engine::event_subprocess::token_valid(&inst, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
             inst.audit_log.append(&mut start_audits);
             // Only sync variables if a script listener potentially modified them
             if def_clone.listeners.contains_key(&current_id) {
-                inst.variables = token.variables.clone();
+                let updates = token.process_variables();
+                if let Some(context) = &mut token.event_context {
+                    for key in context.baseline.keys() {
+                        if !updates.contains_key(key) {
+                            inst.variables.remove(key);
+                        }
+                    }
+                    for (key, value) in updates {
+                        if context.baseline.get(&key) != Some(&value) {
+                            inst.variables.insert(key, value);
+                        }
+                    }
+                    context.baseline = inst.variables.clone();
+                } else {
+                    inst.variables = updates;
+                }
+            }
+            if token.event_context.is_some() {
+                inst.tokens.insert(token.id, token.clone());
             }
         }
 
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let mut instance = instance.write().await;
+            Self::register_conditional_boundaries(&mut instance, &def_clone, token);
+            Self::evaluate_conditionals(&mut instance, &def_clone)?;
+            if !crate::engine::event_subprocess::token_valid(&instance, token) {
+                return Err(EngineError::AlreadyCompleted);
+            }
+        }
+        if token.boundary_activation.is_some() {
+            self.persist_instance(instance_id).await;
+        }
+        if let Some(instance) = self.instances.get(&instance_id).await {
+            let claimed = instance
+                .read()
+                .await
+                .event_state
+                .as_ref()
+                .is_some_and(|state| {
+                    state.conditional_waits.values().any(|wait| {
+                        wait.token_id == token.id && wait.node_id == current_id && wait.claimed
+                    })
+                });
+            if claimed {
+                return self
+                    .handle_conditional_catch(instance_id, token, &def_clone, &current_id)
+                    .await;
+            }
+        }
         match &element {
+            BpmnElement::ConditionalStartEvent { .. } => {
+                self.handle_conditional_catch(instance_id, token, &def_clone, &current_id)
+                    .await
+            }
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)
-            | BpmnElement::MessageStartEvent { .. } => {
+            | BpmnElement::MessageStartEvent { .. }
+            | BpmnElement::SignalStartEvent { .. } => {
                 self.handle_start_event(instance_id, token, &def_clone, &current_id)
                     .await
             }
@@ -295,13 +553,51 @@ impl WorkflowEngine {
                 self.handle_event_based_gateway(instance_id, token, &def_clone, &current_id)
                     .await
             }
+            BpmnElement::BoundaryConditionalEvent { .. }
+            | BpmnElement::ConditionalCatchEvent { .. } => {
+                self.handle_conditional_catch(instance_id, token, &def_clone, &current_id)
+                    .await
+            }
             BpmnElement::TimerCatchEvent(timer_def) => {
                 self.handle_timer_catch_event(instance_id, token, &current_id, timer_def)
                     .await
             }
             BpmnElement::MessageCatchEvent { message_name } => {
-                self.handle_message_catch_event(instance_id, token, &current_id, message_name)
-                    .await
+                self.handle_message_catch_event(
+                    instance_id,
+                    token,
+                    &current_id,
+                    message_name,
+                    crate::runtime::CatchKind::Message,
+                )
+                .await
+            }
+            BpmnElement::SignalCatchEvent { signal_name } => {
+                self.handle_message_catch_event(
+                    instance_id,
+                    token,
+                    &current_id,
+                    signal_name,
+                    crate::runtime::CatchKind::Signal,
+                )
+                .await
+            }
+            BpmnElement::SignalThrowEvent { signal_name } => {
+                self.handle_signal_throw_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
+            BpmnElement::SignalEndEvent { signal_name } => {
+                let action = self
+                    .handle_end_event(instance_id, token, &def_clone, &current_id)
+                    .await?;
+                self.signal_outbox.push(signal_name.clone());
+                Ok(action)
             }
             BpmnElement::CallActivity { called_element } => {
                 self.handle_call_activity(
@@ -364,6 +660,7 @@ impl WorkflowEngine {
             }
             BpmnElement::BoundaryTimerEvent { .. }
             | BpmnElement::BoundaryMessageEvent { .. }
+            | BpmnElement::BoundarySignalEvent { .. }
             | BpmnElement::BoundaryErrorEvent { .. }
             | BpmnElement::BoundaryEscalationEvent { .. } => {
                 self.handle_boundary_event(instance_id, token, &def_clone, &current_id)

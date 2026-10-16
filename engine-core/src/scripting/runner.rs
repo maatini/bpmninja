@@ -5,6 +5,7 @@
 //! - `max_memory` approximates heap budget via string/array/map size caps
 //!   (Rhai has no `set_max_memory` API; limits are derived from the budget)
 //! - `timeout` aborts runaway scripts via `spawn_blocking` + `tokio::time::timeout`
+//! - [`ScriptRunner`] shares one configured engine and caches compiled scripts
 
 use std::collections::HashMap;
 
@@ -120,61 +121,142 @@ impl ScriptConfig {
 /// Result of a successful script evaluation: the mutated variables.
 pub type ScriptResult = HashMap<String, Value>;
 
-/// Evaluates a Rhai script inside a hardened sandbox.
+/// Maximum number of compiled scripts kept in a [`ScriptRunner`] cache.
+/// Scripts come from deployed definitions, so the set is normally small; the
+/// cap only guards against unbounded growth (the cache is cleared when full).
+const MAX_CACHED_SCRIPTS: usize = 1024;
+
+/// Executes Rhai scripts with one shared, pre-configured engine and a cache of
+/// compiled scripts.
 ///
-/// The script runs on a blocking thread (`spawn_blocking`) so that the Tokio
-/// runtime is never blocked. A wall-clock timeout aborts the evaluation if
-/// `ScriptConfig::timeout_ms` elapses.
+/// Building a `rhai::Engine` registers all standard packages and compiling a
+/// script parses it — both used to happen on every evaluation. The engine is
+/// immutable after construction and `Send + Sync` (Rhai `sync` feature), so
+/// one instance serves all evaluations. It is built on first use, so workflow
+/// engines that never run a script do not pay for it.
+pub struct ScriptRunner {
+    config: ScriptConfig,
+    engine: std::sync::OnceLock<std::sync::Arc<rhai::Engine>>,
+    compiled: dashmap::DashMap<String, std::sync::Arc<rhai::AST>>,
+}
+
+impl ScriptRunner {
+    pub fn new(config: ScriptConfig) -> Self {
+        Self {
+            config,
+            engine: std::sync::OnceLock::new(),
+            compiled: dashmap::DashMap::new(),
+        }
+    }
+
+    pub fn config(&self) -> &ScriptConfig {
+        &self.config
+    }
+
+    /// Evaluates `script` inside the hardened sandbox.
+    ///
+    /// Compilation and evaluation run on a blocking thread (`spawn_blocking`)
+    /// so the Tokio runtime is never blocked. A wall-clock timeout aborts the
+    /// evaluation if `ScriptConfig::timeout_ms` elapses.
+    ///
+    /// On success the returned `HashMap` contains the full variable scope after
+    /// evaluation — callers merge this back into the token.
+    pub async fn execute(
+        &self,
+        script: &str,
+        variables: &HashMap<String, Value>,
+    ) -> EngineResult<ScriptResult> {
+        let engine = std::sync::Arc::clone(
+            self.engine
+                .get_or_init(|| std::sync::Arc::new(self.config.build_engine())),
+        );
+        let cached = self.compiled.get(script).map(|ast| ast.value().clone());
+        let source = script.to_owned();
+        let timeout = std::time::Duration::from_millis(self.config.timeout_ms);
+        let vars = variables.clone();
+
+        let start = std::time::Instant::now();
+        let handle = tokio::task::spawn_blocking(move || {
+            let (ast, newly_compiled) = match cached {
+                Some(ast) => (ast, false),
+                None => {
+                    let ast = engine
+                        .compile(&source)
+                        .map_err(|e| EngineError::ScriptError(e.to_string()))?;
+                    (std::sync::Arc::new(ast), true)
+                }
+            };
+
+            let mut scope = rhai::Scope::new();
+            for (k, v) in &vars {
+                scope.push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(Dynamic::UNIT));
+            }
+
+            engine
+                .eval_ast_with_scope::<()>(&mut scope, &ast)
+                .map_err(|e| EngineError::ScriptError(e.to_string()))?;
+
+            let mut result = vars;
+            let mut visible = std::collections::HashSet::new();
+            for (k, _, v) in scope.iter_raw() {
+                // iter_raw visits newest bindings first. Do not overwrite a
+                // visible `let` binding with the older variable it shadows.
+                if !visible.insert(k) {
+                    continue;
+                }
+                if let Ok(json_val) = rhai::serde::from_dynamic(v) {
+                    result.insert(k.to_string(), json_val);
+                }
+            }
+            Ok((result, newly_compiled.then_some(ast)))
+        });
+
+        let result = match tokio::time::timeout(timeout, handle).await {
+            Ok(Ok(Ok((result, new_ast)))) => {
+                if let Some(ast) = new_ast {
+                    if self.compiled.len() >= MAX_CACHED_SCRIPTS {
+                        self.compiled.clear();
+                    }
+                    self.compiled.insert(script.to_owned(), ast);
+                }
+                Ok(result)
+            }
+            Ok(Ok(Err(e))) => Err(e),
+            Ok(Err(join_err)) => Err(EngineError::ScriptError(format!(
+                "Script thread panicked: {join_err}"
+            ))),
+            Err(_elapsed) => Err(EngineError::ScriptError(format!(
+                "Script execution timed out after {}ms",
+                self.config.timeout_ms
+            ))),
+        };
+
+        let elapsed = start.elapsed().as_secs_f64();
+        metrics::histogram!("bpmn_script_execution_duration_seconds").record(elapsed);
+        if result.is_err() {
+            metrics::counter!("bpmn_errors_total", "type" => "script").increment(1);
+        }
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_scripts(&self) -> usize {
+        self.compiled.len()
+    }
+}
+
+/// Evaluates a Rhai script inside a hardened sandbox (one-off).
 ///
-/// On success the returned `HashMap` contains the full variable scope after
-/// evaluation — callers merge this back into the token.
+/// Builds a fresh engine per call; the workflow engine uses a shared
+/// [`ScriptRunner`] instead. Kept for callers that only have a config.
 pub async fn execute_script_safe(
     config: &ScriptConfig,
     script: &str,
     variables: &HashMap<String, Value>,
 ) -> EngineResult<ScriptResult> {
-    let engine = config.build_engine();
-    let timeout = std::time::Duration::from_millis(config.timeout_ms);
-    let script = script.to_owned();
-    let vars = variables.clone();
-
-    let start = std::time::Instant::now();
-    let handle = tokio::task::spawn_blocking(move || {
-        let mut scope = rhai::Scope::new();
-        for (k, v) in &vars {
-            scope.push_dynamic(k, rhai::serde::to_dynamic(v).unwrap_or(Dynamic::UNIT));
-        }
-
-        engine
-            .eval_with_scope::<()>(&mut scope, &script)
-            .map_err(|e| EngineError::ScriptError(e.to_string()))?;
-
-        let mut result = vars;
-        for (k, _, v) in scope.iter_raw() {
-            if let Ok(json_val) = rhai::serde::from_dynamic(v) {
-                result.insert(k.to_string(), json_val);
-            }
-        }
-        Ok(result)
-    });
-
-    let result = match tokio::time::timeout(timeout, handle).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(join_err)) => Err(EngineError::ScriptError(format!(
-            "Script thread panicked: {join_err}"
-        ))),
-        Err(_elapsed) => Err(EngineError::ScriptError(format!(
-            "Script execution timed out after {}ms",
-            config.timeout_ms
-        ))),
-    };
-
-    let elapsed = start.elapsed().as_secs_f64();
-    metrics::histogram!("bpmn_script_execution_duration_seconds").record(elapsed);
-    if result.is_err() {
-        metrics::counter!("bpmn_errors_total", "type" => "script").increment(1);
-    }
-    result
+    ScriptRunner::new(config.clone())
+        .execute(script, variables)
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +267,7 @@ pub async fn execute_script_safe(
 ///
 /// Mutates token variables based on script output and appends audit entries.
 pub async fn run_node_scripts(
-    config: &ScriptConfig,
+    runner: &ScriptRunner,
     _instance_id: Uuid,
     token: &mut Token,
     def: &ProcessDefinition,
@@ -196,20 +278,22 @@ pub async fn run_node_scripts(
     if let Some(listeners) = def.listeners.get(node_id) {
         for l in listeners {
             if l.event == event {
-                let result = execute_script_safe(config, &l.script, &token.variables)
-                    .await
-                    .map_err(|e| match e {
-                        EngineError::ScriptError(msg) => EngineError::ScriptError(format!(
-                            "Knoten '{}' ({}-Listener): {}",
-                            node_id,
-                            match event {
-                                ListenerEvent::Start => "start",
-                                ListenerEvent::End => "end",
-                            },
-                            msg
-                        )),
-                        other => other,
-                    })?;
+                let result =
+                    runner
+                        .execute(&l.script, &token.variables)
+                        .await
+                        .map_err(|e| match e {
+                            EngineError::ScriptError(msg) => EngineError::ScriptError(format!(
+                                "Knoten '{}' ({}-Listener): {}",
+                                node_id,
+                                match event {
+                                    ListenerEvent::Start => "start",
+                                    ListenerEvent::End => "end",
+                                },
+                                msg
+                            )),
+                            other => other,
+                        })?;
                 token.variables = result;
 
                 let event_name = match event {
@@ -232,7 +316,7 @@ pub async fn run_node_scripts(
 /// This is a convenience wrapper around `run_node_scripts` that also
 /// updates the `variables` field on the `ProcessInstance`.
 pub async fn run_end_scripts(
-    config: &ScriptConfig,
+    runner: &ScriptRunner,
     instance_id: Uuid,
     token: &mut Token,
     def: &ProcessDefinition,
@@ -240,11 +324,13 @@ pub async fn run_end_scripts(
     instance_audit_log: &mut Vec<String>,
     instance_variables: &mut HashMap<String, Value>,
 ) -> EngineResult<()> {
+    let mut candidate = token.clone();
+    crate::engine::data_mappings::leave(&mut candidate, def, node_id)?;
     let mut end_audits = Vec::new();
     run_node_scripts(
-        config,
+        runner,
         instance_id,
-        token,
+        &mut candidate,
         def,
         node_id,
         ListenerEvent::End,
@@ -252,6 +338,50 @@ pub async fn run_end_scripts(
     )
     .await?;
     instance_audit_log.append(&mut end_audits);
-    *instance_variables = token.variables.clone();
+    let mut updates = candidate.process_variables();
+    if let Some(context) = &mut candidate.event_context {
+        let mut locals = std::collections::HashSet::new();
+        if let Some(marker) = &candidate.loop_instance {
+            locals.extend(
+                [
+                    "loopCounter",
+                    "nrOfInstances",
+                    "nrOfActiveInstances",
+                    "nrOfCompletedInstances",
+                ]
+                .into_iter()
+                .map(String::from),
+            );
+            if let Some(crate::domain::LoopCharacteristics::MultiInstance(mi)) =
+                def.loops.get(&marker.node_id)
+            {
+                locals.extend(mi.element_variable.iter().cloned());
+            }
+        }
+        updates.retain(|key, _| !locals.contains(key));
+        for key in context.baseline.keys() {
+            if !updates.contains_key(key) {
+                instance_variables.remove(key);
+            }
+        }
+        for (key, value) in updates {
+            if context.baseline.get(&key) != Some(&value) {
+                instance_variables.insert(key, value);
+            }
+        }
+        context.baseline = instance_variables.clone();
+        context.started_node = None;
+        let local_values: HashMap<_, _> = candidate
+            .variables
+            .iter()
+            .filter(|(key, _)| locals.contains(*key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        candidate.variables = instance_variables.clone();
+        candidate.variables.extend(local_values);
+    } else {
+        *instance_variables = updates;
+    }
+    *token = candidate;
     Ok(())
 }

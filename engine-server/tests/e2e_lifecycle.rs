@@ -199,3 +199,153 @@ async fn correlate_message_with_no_match_returns_empty() {
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["affectedInstances"].as_array().unwrap().len(), 0);
 }
+
+const RECEIVE_START_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="Definitions_1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <message id="msg_order" name="OrderPlaced" />
+  <process id="ReceiveStartProcess" isExecutable="true">
+    <receiveTask id="receive_order" messageRef="msg_order" instantiate="true" />
+    <endEvent id="end" />
+    <sequenceFlow id="f1" sourceRef="receive_order" targetRef="end" />
+  </process>
+</definitions>"#;
+
+#[tokio::test]
+async fn instantiating_receive_task_starts_instance_on_message() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{}/api/deploy", base))
+        .json(&serde_json::json!({ "xml": RECEIVE_START_XML, "name": "ReceiveStart" }))
+        .send()
+        .await
+        .unwrap();
+    let text = res.text().await.unwrap();
+    assert!(text.contains("definition_key"), "deploy failed: {text}");
+
+    let res = client
+        .post(format!("{}/api/message", base))
+        .json(&serde_json::json!({
+            "messageName": "OrderPlaced",
+            "variables": { "orderId": 7 }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let affected = body["affectedInstances"].as_array().unwrap();
+    assert_eq!(affected.len(), 1, "message must start one instance");
+
+    let details: Value = client
+        .get(format!(
+            "{}/api/instances/{}",
+            base,
+            affected[0].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(details["state"], "Completed");
+    assert_eq!(details["variables"]["orderId"], 7);
+}
+
+const SIGNAL_CATCH_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="Definitions_1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <signal id="sig_alarm" name="Alarm" />
+  <process id="SignalCatchProcess" isExecutable="true">
+    <startEvent id="start" />
+    <intermediateCatchEvent id="wait"><signalEventDefinition signalRef="sig_alarm" /></intermediateCatchEvent>
+    <endEvent id="end" />
+    <sequenceFlow id="f1" sourceRef="start" targetRef="wait" />
+    <sequenceFlow id="f2" sourceRef="wait" targetRef="end" />
+  </process>
+</definitions>"#;
+
+const SIGNAL_START_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="Definitions_2" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <signal id="sig_alarm" name="Alarm" />
+  <process id="SignalStartProcess" isExecutable="true">
+    <startEvent id="start"><signalEventDefinition signalRef="sig_alarm" /></startEvent>
+    <endEvent id="end" />
+    <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+  </process>
+</definitions>"#;
+
+#[tokio::test]
+async fn signal_broadcast_resumes_catch_and_starts_signal_start_process() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let mut def_keys = Vec::new();
+    for (xml, name) in [
+        (SIGNAL_CATCH_XML, "SignalCatch"),
+        (SIGNAL_START_XML, "SignalStart"),
+    ] {
+        let text = client
+            .post(format!("{}/api/deploy", base))
+            .json(&serde_json::json!({ "xml": xml, "name": name }))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(text.contains("definition_key"), "deploy failed: {text}");
+        let body: Value = serde_json::from_str(&text).unwrap();
+        def_keys.push(body["definition_key"].as_str().unwrap().to_string());
+    }
+
+    let res = client
+        .post(format!("{}/api/start", base))
+        .json(&serde_json::json!({ "definition_key": def_keys[0] }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let waiting_id = body["instance_id"].as_str().unwrap().to_string();
+
+    let pending: Value = client
+        .get(format!("{}/api/messages", base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pending[0]["kind"], "Signal");
+
+    let res = client
+        .post(format!("{}/api/signal", base))
+        .json(&serde_json::json!({ "signalName": "Alarm", "variables": { "level": 3 } }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let affected: Vec<String> = body["affectedInstances"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(affected.len(), 2, "one resumed + one started: {body}");
+    assert!(affected.contains(&waiting_id));
+
+    for id in &affected {
+        let details: Value = client
+            .get(format!("{}/api/instances/{}", base, id))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(details["state"], "Completed");
+        assert_eq!(details["variables"]["level"], 3);
+    }
+}

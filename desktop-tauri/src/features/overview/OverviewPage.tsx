@@ -10,7 +10,7 @@ import {
 import { usePolling } from '../../shared/hooks/use-polling';
 import { useEngineEvents } from '../../shared/hooks/use-engine-events';
 import { useToast } from '@/hooks/use-toast';
-import { Eye, RefreshCw, Timer, Mail, Briefcase, ExternalLink } from 'lucide-react';
+import { Eye, RefreshCw, Timer, Mail, Radio, Briefcase, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -193,7 +193,10 @@ export function OverviewPage({ onViewInstance }: { onViewInstance?: (id: string)
                     <Card key={msg.id} className="border-amber-500/30 flex flex-col hover:border-amber-500/60 transition-colors">
                       <CardHeader className="pb-3 border-b bg-amber-500/5">
                         <CardTitle className="text-lg flex items-center gap-2 font-mono">
-                          <Mail className="h-5 w-5 text-amber-500" /> {msg.message_name}
+                          {msg.kind === 'Signal'
+                            ? <Radio className="h-5 w-5 text-amber-500" aria-label="Signal" />
+                            : <Mail className="h-5 w-5 text-amber-500" aria-label="Message" />}{' '}
+                          {msg.message_name}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="pt-4 space-y-3 flex-1">

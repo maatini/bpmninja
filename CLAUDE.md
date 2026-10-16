@@ -18,9 +18,9 @@ Ziel: Eine Camunda-kompatible, aber deutlich schlankere Alternative mit Fokus au
 | Rust Edition       | 2024 (Tauri: 2021)                   | stable       |
 | Async Runtime      | Tokio                                | 1.x          |
 | Web Framework      | Axum                                 | 0.8          |
-| XML Parser         | quick-xml                            | 0.39         |
-| Scripting          | Rhai                                 | 1.19         |
-| Persistence        | NATS JetStream (async-nats)          | 0.47         |
+| XML Parser         | quick-xml                            | 0.42         |
+| Scripting          | Rhai                                 | 1.25         |
+| Persistence        | NATS JetStream (async-nats)          | 0.50         |
 | Concurrency        | DashMap                              | 6.x          |
 | Desktop            | Tauri 2.10 + React 19 + bpmn-js 18  | -            |
 | Styling            | Tailwind CSS 4                       | -            |
@@ -32,6 +32,7 @@ Ziel: Eine Camunda-kompatible, aber deutlich schlankere Alternative mit Fokus au
 engine-core/                  # Kern-Engine (Token-Execution, Gateways, Events, Rhai)
 bpmn-parser/                  # BPMN 2.0 XML → ProcessDefinition
 persistence-nats/             # NATS JetStream Adapter (KV, Object Store, Streams)
+persistence-memory/           # Re-Export des In-Memory-Adapters aus engine-core (Tests/Dev)
 engine-server/                # Axum REST API + Incident Management
 agent-orchestrator/           # Beispiel External Task Worker
 desktop-tauri/                # Tauri Desktop-App (React + bpmn-js + Live-Tracking)
@@ -103,7 +104,7 @@ Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
 
 ## Claude Workflow (unbedingt einhalten)
 
-1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `graphify-out/GRAPH_REPORT.md` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
+1. **Graphify zuerst:** Bei Fragen zu Code, Architektur, Abhängigkeiten oder Abläufen zuerst `graphify query "<Frage>"` ausführen; `GRAPH_REPORT.md` nur für breite Architekturübersichten nutzen. Quellcode danach gezielt zur Verifikation oder Implementierung lesen. Den Graphen nach Codeänderungen inkrementell mit `devbox run graphify` aktualisieren; der Git-Hook aktualisiert ihn zusätzlich nach Commit und Branch-Wechsel. Keinen vollständigen Rebuild vor jeder Anfrage ausführen. Falls Graphify fehlt: `devbox run graphify:install`.
 2. **Plan nur bei Bedarf:** Plan verpflichtend bei unklaren Anforderungen, Architekturentscheidungen oder Multi-Crate-Änderungen. Bei klaren, kleinen Tasks direkte Umsetzung. Wenn ein Plan erstellt wurde: Vor Implementierung auf `GO` warten.
 3. **Task Memory anlegen:** Bei Aufgaben die ≥2 Crates oder ≥3 Dateien berühren → `TASK_MEMORY.md` im Projekt-Root anlegen (siehe `.agent/rules/04_TASK_MEMORY_PROTOCOL.md`).
 4. Nach jeder großen Task: `/clear` oder neue Session
@@ -176,7 +177,8 @@ cargo run -p engine-server
 - `NextAction` Enum steuert den Executor-Loop
 - Rhai-Scripte: `let x = 1;` für neue Variablen, `x = 2;` für bestehende
 - Compensation- und Escalation-Events voll unterstützt
-- Multi-Instance Tasks und Incident Management implementiert
+- Incident Management implementiert
+- Multi-Instance (parallel/sequenziell) und Standard-Loop auf Tasks und Call Activities: `ProcessDefinition.loops`, Token-Marker `loop_instance`, Ablauf in `engine/loops.rs` (Entry-/Exit-Hook in `execute_step`). Auf Sub-Prozessen abgelehnt (braucht Laufzeit-Scopes, X6); nicht-unterbrechende Boundary-Events an Loop-Aktivitäten werden beim Deploy abgelehnt
 
 ## Coding-Konventionen
 
@@ -206,3 +208,14 @@ cargo run -p engine-server
 
 Alle Crates synchron auf Version **0.7.24** (aktuell).  
 Git-Tags: `v0.7.24`
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

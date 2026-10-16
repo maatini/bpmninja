@@ -37,9 +37,67 @@ impl WorkflowEngine {
                 continue;
             };
 
-            // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
-            self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
-                .await;
+            if self
+                .is_event_subscription(timer.instance_id, timer.token_id)
+                .await
+            {
+                self.remove_persisted_timer(tid).await;
+                if let Some(token) = self
+                    .prepare_event_activation(
+                        timer.instance_id,
+                        timer.token_id,
+                        &std::collections::HashMap::new(),
+                    )
+                    .await?
+                {
+                    let next = if let Some(instance) = self.instances.get(&timer.instance_id).await
+                    {
+                        instance
+                            .read()
+                            .await
+                            .event_state
+                            .as_ref()
+                            .and_then(|s| s.subscriptions.get(&timer.token_id))
+                            .cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(subscription) = next
+                        && let Some(due) = subscription.next_due
+                    {
+                        let mut next_timer = timer.clone();
+                        next_timer.expires_at = due;
+                        next_timer.remaining_repetitions = subscription.remaining;
+                        self.insert_pending_timer(next_timer);
+                        self.persist_timer(tid).await;
+                    }
+                    self.run_instance_batch(timer.instance_id, token).await?;
+                }
+                continue;
+            }
+            if !self
+                .event_work_valid(timer.instance_id, timer.token_id)
+                .await
+            {
+                self.remove_persisted_timer(tid).await;
+                continue;
+            }
+            if let Some(won) = self
+                .claim_gateway_delivery(
+                    timer.instance_id,
+                    timer.token_id,
+                    &timer.node_id,
+                    timer.id,
+                    &std::collections::HashMap::new(),
+                )
+                .await?
+            {
+                self.remove_persisted_timer(timer.id).await;
+                if won {
+                    self.run_conditional_work(timer.instance_id).await?;
+                }
+                continue;
+            }
 
             let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await {
                 Some(lk.read().await.clone())
@@ -70,43 +128,10 @@ impl WorkflowEngine {
             .await;
 
             if timer.token_id.is_nil() {
-                // This is a Scope Event Listener (Event Sub-Process) trigger
-                let child_bpmn_id = timer.node_id.clone();
-                let child_def_key = {
-                    let (k, _) = self
-                        .definitions
-                        .find_latest_by_bpmn_id(&child_bpmn_id)
-                        .ok_or_else(|| {
-                            EngineError::InvalidDefinition(format!(
-                                "Event Subprocess '{child_bpmn_id}' not found"
-                            ))
-                        })?;
-                    k
-                };
-
-                // Get the instance variables to pass down
-                let instance_vars = {
-                    let inst_arc = self
-                        .instances
-                        .get(&timer.instance_id)
-                        .await
-                        .ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
-                    let inst = inst_arc.read().await;
-                    inst.variables.clone()
-                };
-
-                // Spawn the call activity loosely (it will track parent_instance_id automatically)
-                let _child_id = self
-                    .spawn_call_activity(
-                        child_def_key,
-                        timer.instance_id,
-                        child_bpmn_id.clone(),
-                        instance_vars,
-                    )
-                    .await?;
-
-                self.remove_persisted_timer(tid).await;
-                continue;
+                self.insert_pending_timer(timer);
+                return Err(EngineError::InvalidDefinition(
+                    "Legacy nil-token scope subscription requires migration".into(),
+                ));
             }
 
             // Retrieve token from central store
@@ -124,6 +149,7 @@ impl WorkflowEngine {
                 is_non_interrupting = true;
             }
 
+            let mut boundary_siblings = None;
             let mut token = {
                 let inst_arc = self
                     .instances
@@ -132,6 +158,49 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(timer.instance_id))?;
                 let mut inst = inst_arc.write().await;
 
+                // A selected old boundary job must not consume a later task visit.
+                let expected = match def.nodes.get(&timer.node_id) {
+                    Some(crate::domain::BpmnElement::BoundaryTimerEvent {
+                        attached_to, ..
+                    }) => Some(attached_to.as_str()),
+                    _ => None,
+                };
+                if let Some(expected) = expected
+                    && inst.tokens.get(&timer.token_id).is_none_or(|token| {
+                        token.current_node != expected
+                            || !crate::engine::event_subprocess::token_valid(&inst, token)
+                    })
+                {
+                    drop(inst);
+                    self.remove_persisted_timer(timer.id).await;
+                    continue;
+                }
+                if let Some(source) = inst.tokens.get(&timer.token_id)
+                    && expected.is_some()
+                    && source.boundary_activation.is_some()
+                {
+                    let activation = inst
+                        .event_state
+                        .as_ref()
+                        .and_then(|state| state.boundary_activations.get(&source.id));
+                    if !activation.is_some_and(|activation| activation.jobs.contains(&timer.id)) {
+                        drop(inst);
+                        self.remove_persisted_timer(timer.id).await;
+                        continue;
+                    }
+                    boundary_siblings =
+                        Some(activation.unwrap().jobs.iter().copied().collect::<Vec<_>>());
+                    let source_id = source.id;
+                    if let Some(activation) = inst
+                        .event_state
+                        .as_mut()
+                        .and_then(|state| state.boundary_activations.get_mut(&source_id))
+                    {
+                        activation.jobs.clear();
+                        activation.timers.clear();
+                        activation.messages.clear();
+                    }
+                }
                 if is_non_interrupting {
                     // Clone the token, leave the original waiting
                     let mut original = inst
@@ -146,6 +215,7 @@ impl WorkflowEngine {
                         .clone();
 
                     original.id = uuid::Uuid::new_v4();
+                    original.boundary_activation = None;
 
                     // Add cloned token as parallel token
                     inst.tokens.insert(original.id, original.clone());
@@ -172,17 +242,33 @@ impl WorkflowEngine {
                     // Interrupting timer: Remove original token
 
                     // Clean up orphaned pending tasks that matched this token
-                    inst.tokens.remove(&timer.token_id).ok_or_else(|| {
-                        EngineError::InvalidDefinition(format!(
-                            "Token {} not found in instance",
-                            timer.token_id
-                        ))
-                    })?
+                    inst.tokens
+                        .remove(&timer.token_id)
+                        .map(|mut token| {
+                            Self::close_conditional_boundaries(&mut inst, &mut token);
+                            token
+                        })
+                        .ok_or_else(|| {
+                            EngineError::InvalidDefinition(format!(
+                                "Token {} not found in instance",
+                                timer.token_id
+                            ))
+                        })?
                 }
             };
 
+            let conditional_owner = boundary_siblings.is_some();
+            if let Some(jobs) = boundary_siblings {
+                self.cancel_boundary_job_ids(&jobs).await;
+            } else {
+                self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
+                    .await;
+            }
+
             // Clean up orphaned tasks outside the instance lock
             if !is_non_interrupting {
+                self.interrupt_loop_activity(timer.instance_id, &mut token, &def, &timer.node_id)
+                    .await;
                 let node_to_cancel = &token.current_node;
 
                 // Remove User Tasks
@@ -216,6 +302,7 @@ impl WorkflowEngine {
                 }
             }
 
+            token.discard_data_scope();
             let next = crate::engine::executor::resolve_next_target(
                 &def,
                 &timer.node_id,
@@ -258,6 +345,31 @@ impl WorkflowEngine {
                             remaining_repetitions: new_remaining,
                         };
                         let new_id = new_pending.id;
+                        let source =
+                            if let Some(instance) = self.instances.get(&timer.instance_id).await {
+                                instance.read().await.tokens.get(&timer.token_id).cloned()
+                            } else {
+                                None
+                            };
+                        if let Some(source) =
+                            source.filter(|token| token.boundary_activation.is_some())
+                        {
+                            if self
+                                .track_boundary_job(
+                                    timer.instance_id,
+                                    &source,
+                                    new_id,
+                                    Some(new_pending.clone()),
+                                    None,
+                                )
+                                .await
+                                .is_err()
+                            {
+                                continue;
+                            }
+                        } else if conditional_owner {
+                            continue;
+                        }
                         self.insert_pending_timer(new_pending);
                         self.persist_timer(new_id).await;
                     }

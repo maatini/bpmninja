@@ -23,6 +23,7 @@ fn dummy_instance(
     started_at: Option<chrono::DateTime<Utc>>,
 ) -> ProcessInstance {
     ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id,
         definition_key,
         business_key: String::new(),
@@ -37,6 +38,7 @@ fn dummy_instance(
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        event_state: None,
         started_at,
         completed_at: None,
     }

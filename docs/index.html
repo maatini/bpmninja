@@ -1,18 +1,249 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>BPMNinja API Documentation</title>
-    <!-- Redoc head elements -->
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
-    <style> body { margin: 0; padding: 0; } </style>
-  </head>
-  <body>
-    <!-- Zeigt auf die existierende YAML Datei im selben Ordner -->
-    <redoc spec-url='./openapi.yaml'></redoc>
-    
-    <!-- Lade Redoc Script -->
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"> </script>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BPMNinja — BPMN 2.0 Workflow Engine in Rust</title>
+  <meta name="description" content="BPMNinja is an open-source BPMN 2.0 workflow engine written in Rust: token-based execution, NATS JetStream persistence, Camunda-style external tasks, REST API and a Tauri desktop modeler.">
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --surface: #ffffff;
+      --text: #172033;
+      --muted: #5a6478;
+      --border: #e1e5ee;
+      --accent: #c2410c;
+      --accent-soft: #fff1e8;
+      --code-bg: #f1f3f8;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0e131d;
+        --surface: #161d2b;
+        --text: #e6e9f0;
+        --muted: #9aa4b8;
+        --border: #263044;
+        --accent: #fb923c;
+        --accent-soft: #2a1c12;
+        --code-bg: #1d2638;
+        --shadow: none;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0e131d;
+      --surface: #161d2b;
+      --text: #e6e9f0;
+      --muted: #9aa4b8;
+      --border: #263044;
+      --accent: #fb923c;
+      --accent-soft: #2a1c12;
+      --code-bg: #1d2638;
+      --shadow: none;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+    header.nav { border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; }
+    header.nav .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); }
+    .brand img { width: 28px; height: 28px; }
+    nav.links { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+    nav.links a { color: var(--muted); font-size: 15px; }
+    nav.links a:hover { color: var(--text); text-decoration: none; }
+
+    .hero { padding: 64px 0 40px; display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center; }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
+    .hero p.lead { font-size: 1.15rem; color: var(--muted); margin: 0 0 24px; max-width: 620px; }
+    .hero img.logo { width: 200px; height: 200px; }
+    .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-weight: 600; border: 1px solid var(--border); color: var(--text); background: var(--surface); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn:hover { text-decoration: none; filter: brightness(1.05); }
+
+    section { padding: 40px 0; border-top: 1px solid var(--border); }
+    section h2 { font-size: 1.6rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+    section p.sub { color: var(--muted); margin: 0 0 24px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; box-shadow: var(--shadow); }
+    .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: .9rem; margin: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-size: .95rem; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .good { color: #15803d; font-weight: 600; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .good { color: #4ade80; } }
+    :root[data-theme="dark"] .good { color: #4ade80; }
+    .table-scroll { overflow-x: auto; }
+    .note { color: var(--muted); font-size: .85rem; margin-top: 10px; }
+
+    .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .person { display: flex; gap: 14px; align-items: center; }
+    .avatar { width: 52px; height: 52px; border-radius: 50%; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 1.1rem; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--border); }
+    .person h3 { margin: 0; }
+    .person p { margin: 2px 0 0; }
+
+    footer { border-top: 1px solid var(--border); padding: 28px 0 40px; color: var(--muted); font-size: .9rem; }
+    footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
+
+    @media (max-width: 720px) {
+      .hero { grid-template-columns: 1fr; padding-top: 40px; }
+      .hero img.logo { width: 120px; height: 120px; order: -1; }
+      nav.links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="#top"><img src="./assets/favicon.svg" alt="">BPMNinja</a>
+      <nav class="links" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#performance">Performance</a>
+        <a href="#docs">Docs</a>
+        <a href="#contributors">Contributors</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top" class="wrap">
+    <div class="hero">
+      <div>
+        <h1>A fast BPMN&nbsp;2.0 workflow engine, written in Rust</h1>
+        <p class="lead">Token-based execution, NATS JetStream persistence, Camunda-style external tasks, deploy-time model checking, a REST API and a desktop modeler — in one lean, open-source stack.</p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/yasir2000/bpmninja">View on GitHub</a>
+          <a class="btn" href="./api.html">API reference</a>
+          <a class="btn" href="#quickstart">Quick start</a>
+        </div>
+      </div>
+      <img class="logo" src="./assets/logo.png" alt="BPMNinja logo" width="200" height="200">
+    </div>
+
+    <section id="features">
+      <h2>Features</h2>
+      <p class="sub">What the engine does today (v0.7.24).</p>
+      <div class="grid">
+        <div class="card"><h3>Token-based execution</h3><p>Each path is an independent token. 29 BPMN element types: events, tasks, XOR/AND/OR/complex/event-based gateways, boundary events, call activities, sub-processes.</p></div>
+        <div class="card"><h3>NATS JetStream persistence</h3><p>KV buckets for state, object store for files and BPMN XML, streams for history. Fail-closed durability and a bounded retry queue.</p></div>
+        <div class="card"><h3>Camunda-style external tasks</h3><p>Fetch-and-lock with long polling — waiting workers are woken the moment a task becomes available. TypeScript worker client included.</p></div>
+        <div class="card"><h3>Deploy-time model checking</h3><p>Every deployed model is checked for deadlocks, livelocks, unsafe parallelism and dead activities with rust_bpmn_analyzer.</p></div>
+        <div class="card"><h3>Timers &amp; messages</h3><p>ISO&nbsp;8601 durations, dates, cron and repeating cycles. Event-driven scheduler fires timers when due. Message correlation by name and business key.</p></div>
+        <div class="card"><h3>Sandboxed scripting</h3><p>Rhai scripts with operation, memory and time limits — one shared engine with a cache of compiled scripts.</p></div>
+        <div class="card"><h3>Operations</h3><p>Suspend/resume, token move, version migration, incidents with retry/resolve, history with diffs, Prometheus metrics, SSE push events.</p></div>
+        <div class="card"><h3>Desktop modeler</h3><p>Tauri + React + bpmn-js: model, deploy, watch instances live, inspect history, browse storage.</p></div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Architecture</h2>
+      <p class="sub">Hexagonal: the core engine has no network or disk code; storage is a trait with NATS and in-memory adapters.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Crate / package</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>engine-core</code></td><td>State machine, token execution, gateways, scripting, history</td></tr>
+            <tr><td><code>bpmn-parser</code></td><td>BPMN 2.0 XML → process definition (sub-processes flattened)</td></tr>
+            <tr><td><code>persistence-nats</code></td><td>NATS JetStream adapter (KV, object store, streams)</td></tr>
+            <tr><td><code>persistence-memory</code></td><td>In-memory adapter for tests and local runs</td></tr>
+            <tr><td><code>engine-server</code></td><td>Axum REST API, SSE, timer scheduler, auth, model checking</td></tr>
+            <tr><td><code>desktop-tauri</code></td><td>Desktop modeler and monitoring UI</td></tr>
+            <tr><td><code>@bpmninja/external-task-client</code></td><td>TypeScript worker SDK</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="quickstart">
+      <h2>Quick start</h2>
+      <p class="sub">Start NATS and the engine, then deploy a model.</p>
+<pre><code># 1. NATS with JetStream
+docker compose up -d nats
+
+# 2. Engine server on http://localhost:8081
+cargo run -p engine-server
+
+# 3. Deploy a BPMN file
+curl -X POST http://localhost:8081/api/deploy \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"order.bpmn\",\"xml\":$(jq -Rs . &lt; order.bpmn)}"</code></pre>
+    </section>
+
+    <section id="performance">
+      <h2>Performance</h2>
+      <p class="sub">Measured improvements from the current optimization work (Criterion medians, before → after).</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Benchmark</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
+          <tbody>
+            <tr><td>NATS <code>save_instance</code></td><td class="num">496 µs</td><td class="num">194 µs</td><td class="num good">−61%</td></tr>
+            <tr><td>Process with 10 script tasks</td><td class="num">6.54 ms</td><td class="num">0.46 ms</td><td class="num good">−93%</td></tr>
+            <tr><td>Parallel fork/join, 16 script branches</td><td class="num">10.3 ms</td><td class="num">0.81 ms</td><td class="num good">−92%</td></tr>
+            <tr><td>Engine with NATS: start → 5 script tasks → end</td><td class="num">7.78 ms</td><td class="num">2.11 ms</td><td class="num good">−73%</td></tr>
+            <tr><td>External task hand-off to a waiting worker</td><td class="num">up to 500 ms</td><td class="num">immediate</td><td class="num good">event-driven</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Local measurements on a development machine with a local NATS server; absolute numbers vary by hardware. Run them yourself with <code>cargo bench -p engine-core</code> and <code>cargo bench -p persistence-nats</code>.</p>
+    </section>
+
+    <section id="docs">
+      <h2>Documentation</h2>
+      <p class="sub">Everything lives in the repository.</p>
+      <div class="grid">
+        <a class="card" href="./api.html"><h3>REST API reference</h3><p>OpenAPI 3 spec rendered with Redoc.</p></a>
+        <a class="card" href="https://github.com/yasir2000/bpmninja#readme"><h3>README</h3><p>Features, configuration, endpoints, test metrics.</p></a>
+        <a class="card" href="https://github.com/yasir2000/bpmninja/tree/main/docs/knowledge-base"><h3>Knowledge base</h3><p>Module responsibilities, interfaces, data flows, gotchas.</p></a>
+        <a class="card" href="https://github.com/yasir2000/bpmninja/blob/main/improvements.md"><h3>Roadmap</h3><p>Performance, messaging, Dapr, serverless and full BPMN 2.0.2 coverage.</p></a>
+      </div>
+    </section>
+
+    <section id="contributors">
+      <h2>Contributors</h2>
+      <p class="sub">People and tools building BPMNinja. Based on the original project <a href="https://github.com/maatini/bpmninja">maatini/bpmninja</a> by <a href="https://github.com/maatini">@maatini</a>.</p>
+      <div class="people">
+        <div class="card person">
+          <div class="avatar" aria-hidden="true">YK</div>
+          <div>
+            <h3>Yasir Karam</h3>
+            <p><a href="https://github.com/yasir2000">@yasir2000</a> · Maintainer</p>
+          </div>
+        </div>
+        <div class="card person">
+          <div class="avatar" aria-hidden="true">CC</div>
+          <div>
+            <h3>Claude Code</h3>
+            <p><a href="https://claude.com/claude-code">AI coding agent</a> · Co-author</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>BPMNinja · MIT OR Apache-2.0 · Based on <a href="https://github.com/maatini/bpmninja">maatini/bpmninja</a></span>
+      <span><a href="https://github.com/yasir2000/bpmninja">GitHub</a> · <a href="./api.html">API</a></span>
+    </div>
+  </footer>
+</body>
 </html>

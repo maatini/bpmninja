@@ -23,6 +23,14 @@ pub struct PendingUserTask {
 // External task item (Camunda-style)
 // ---------------------------------------------------------------------------
 
+/// Lightweight ownership information without a variable snapshot.
+#[derive(Debug, Clone)]
+pub struct ServiceTaskLease {
+    pub instance_id: Uuid,
+    pub worker_id: Option<String>,
+    pub lock_expiration: Option<DateTime<Utc>>,
+}
+
 /// A service task that can be fetched and completed by remote workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingServiceTask {
@@ -73,6 +81,15 @@ pub struct PendingTimer {
     pub remaining_repetitions: Option<u32>,
 }
 
+/// What a [`PendingMessageCatch`] waits for. Signals are broadcast to every
+/// waiting catch; messages are correlated (optionally by business key).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CatchKind {
+    #[default]
+    Message,
+    Signal,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingMessageCatch {
     pub id: Uuid,
@@ -81,4 +98,7 @@ pub struct PendingMessageCatch {
     pub message_name: String,
     /// Reference to the token stored in ProcessInstance.tokens
     pub token_id: Uuid,
+    /// Defaults to `Message` for catches persisted before signals existed.
+    #[serde(default)]
+    pub kind: CatchKind,
 }

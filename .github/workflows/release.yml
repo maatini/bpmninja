@@ -1,78 +1,65 @@
-name: Release
+name: Desktop Packages
 
 on:
   push:
-    tags:
-      - 'v*'               # Trigger bei v0.1.0, v1.2.3 etc.
-  workflow_dispatch:       # Für manuelle Tests
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'desktop-tauri/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/desktop-packages.yml'
+      - '.github/workflows/release.yml'
+  pull_request:
+    paths:
+      - 'desktop-tauri/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/desktop-packages.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: desktop-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux
-          - os: ubuntu-latest
-            name: linux
-            target: x86_64-unknown-linux-gnu
+  packages:
+    uses: ./.github/workflows/desktop-packages.yml
 
-          # Windows
-          - os: windows-latest
-            name: windows
-            target: x86_64-pc-windows-msvc
-
-          # macOS Apple Silicon (M1/M2/M3/M4)
-          - os: macos-latest
-            name: macos-arm
-            target: aarch64-apple-darwin
-
-          # macOS Intel (x86_64)
-          - os: macos-15-intel
-            name: macos-intel
-            target: x86_64-apple-darwin
-
-    runs-on: ${{ matrix.os }}
-
+  release:
+    name: Attach installers to draft release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/download-artifact@v8
         with:
-          node-version: 24
-          cache: 'npm'
-          cache-dependency-path: desktop-tauri/package-lock.json
+          pattern: desktop-*
+          path: packages
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: ${{ matrix.target }}
-
-      - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-
-      - name: Install UI Dependencies
-        working-directory: desktop-tauri
-        run: npm ci
-
-      - name: Build Tauri App
-        uses: tauri-apps/tauri-action@v1
+      - name: Create draft and upload installers
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: desktop-tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: 'bpmninja-desktop ${{ github.ref_name }}'
-          releaseDraft: true          # Draft → du kannst noch prüfen & dann publishen
-          prerelease: false
-          args: --target ${{ matrix.target }}
-          
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json; then
+            python -c 'import json; assert json.load(open("release.json"))["isDraft"], "Refusing to modify a published release"'
+          else
+            prerelease=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft "${prerelease[@]}" \
+              --title "bpmninja-desktop $RELEASE_TAG" \
+              --notes "Desktop installers for Linux x64, Windows x64, and macOS Intel and Apple Silicon."
+          fi
+          mapfile -d '' installers < <(find packages -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.exe' -o -name '*.msi' -o -name '*.dmg' \) -print0)
+          test "${#installers[@]}" -eq 6
+          gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber

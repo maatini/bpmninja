@@ -34,15 +34,13 @@ Assignee and topic are read from desktop `data-*` attributes first, then Camunda
 
 The desktop modeler writes both `data-assignee`/`data-topic` and `camunda:assignee`/`camunda:topic`. XML exported from Camunda Modeler deploys with the Camunda attributes. `quick-xml` strips the `camunda:` prefix on attributes, so the parser binds `camunda:assignee` as `@assignee` (with alias `@camunda:assignee`).
 
-### ⚠️ Multi-instance is rejected at parse time
+### ⚠️ Loop characteristics go to `ProcessDefinition.loops`, not to the element
 
-`multiInstanceLoopCharacteristics` is **not supported**. The runtime never emits `MultiInstanceFork`; mapping MI to `MultiInstanceDef` used to let diagrams run silently as single-instance.
+`multiInstanceLoopCharacteristics` / `standardLoopCharacteristics` on tasks and call activities are registered via `with_loop` → `ProcessDefinitionBuilder::loop_characteristics` (X4/X5). The legacy `multi_instance` field on `ServiceTask`/`ScriptTask`/`SendTask` stays `None`.
 
-If the element is present on a task (`userTask`, `serviceTask`, `scriptTask`, `sendTask`, `receiveTask`, `manualTask`, `businessRuleTask`), parse fails with `EngineError::InvalidDefinition`:
-
-`Multi-instance is not supported (element '<id>')`
-
-Deploy must fail. Do not reintroduce a silent single-instance fallback.
+- `camunda:collection`, `elementVariable`, `outputCollection`, `outputElement` are read without prefix (quick-xml strips it).
+- On a `subProcess` both are rejected by `reject_unsupported_elements` (needs runtime scopes, X6) — flattening would let parallel instances share join barriers.
+- `build()` rejects multi-instance without `loopCardinality`/`collection`, loops on non-activities and non-interrupting boundary events on loop activities.
 
 ### ⚠️ Unsupported tasks are rejected, not queued
 
