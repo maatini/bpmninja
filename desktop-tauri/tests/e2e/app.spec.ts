@@ -2277,15 +2277,29 @@ test.describe('bpmninja Desktop App – E2E', () => {
       await expect(migrateBtn).toBeVisible({ timeout: 5_000 });
       await migrateBtn.click();
 
-      // Shadcn Select rendert Optionen nur wenn Dropdown offen ist
-      await page.locator('[role="combobox"]').click();
-      // Version v2 muss als Option erscheinen
-      await expect(page.getByText(/v2/)).toBeVisible({ timeout: 5_000 });
-      // Dropdown schließen bevor Dialog-Buttons geklickt werden
-      await page.keyboard.press('Escape');
+      const migrationDialog = page.getByRole('dialog', { name: 'Instanz migrieren' });
+      await expect(migrationDialog).toBeVisible({ timeout: 5_000 });
 
-      // Dialog kann geschlossen werden
-      await page.locator('button', { hasText: 'Schließen' }).click();
+      // Shadcn Select rendert Optionen nur wenn Dropdown offen ist
+      await migrationDialog.getByRole('combobox').click();
+      // Version v2 muss als Option erscheinen
+      const versionOption = page.getByRole('option', { name: /v2/ });
+      await expect(versionOption).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(/v2/)).toBeVisible();
+
+      // Escape nicht verwenden: der Dialog-Dismiss-Layer kann die Taste
+      // bekommen, bevor das Select registriert ist. Die Exit-Animation
+      // hält „Schließen“ dann unstabil und hängt den Button aus dem DOM.
+      // Die Option wählen schließt nur das Dropdown und lässt den Dialog offen.
+      await versionOption.click();
+      await expect(versionOption).toBeHidden();
+      await expect(migrationDialog.getByRole('combobox')).toContainText(/v2/);
+      await expect(migrationDialog).toBeVisible();
+
+      const closeButton = migrationDialog.getByRole('button', { name: 'Schließen' });
+      await expect(closeButton).toBeVisible();
+      await closeButton.click();
+      await expect(migrationDialog).toBeHidden();
       await expect(page.getByText(/v2/)).not.toBeVisible();
     });
 
