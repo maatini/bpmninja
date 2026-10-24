@@ -30,6 +30,7 @@ devbox run build             # cargo build --workspace
 devbox run lint              # cargo clippy --workspace -- -D warnings
 devbox run fmt               # cargo fmt --all --check
 devbox run test              # cargo test --workspace
+devbox run coverage          # cargo llvm-cov --workspace --all-targets --summary-only
 cargo deny check             # Lizenzen und Advisories (deny.toml)
 
 # Desktop und Client
@@ -50,6 +51,11 @@ npm exec -- nx affected -t fmt clippy test deny   # nur Rust
 `cargo-nextest` ist in der Devbox enthalten und nach `devbox shell` verfügbar; die CI
 installiert es über `taiki-e/install-action`. Außerhalb der Devbox installierst du es mit
 `cargo install cargo-nextest --locked`.
+
+`cargo-llvm-cov` ist ebenfalls Teil der Devbox. Die CI misst die Zeilenabdeckung im Job
+**Rust line coverage**, schlägt unter **75 %** fehl und legt `lcov.info` als Artefakt ab.
+Die NATS-Testläufe begrenzen die Stream-Größe über `BPMNINJA_STREAM_MAX_BYTES` (Devbox-Skripts:
+64 MiB), damit viele Test-Streams nicht das JetStream-Speicherkontingent reservieren.
 
 ## Testpflichten pro Änderungsbereich
 

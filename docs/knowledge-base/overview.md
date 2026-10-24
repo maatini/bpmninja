@@ -100,16 +100,16 @@ flowchart LR
 
 | Crate | Unit | E2E | Total |
 |-------|------|-----|-------|
-| engine-core | 269 | 5 | 274 |
-| bpmn-parser | 56 | — | 56 |
-| persistence-nats | 14 | — | 14 |
+| engine-core | 319 | 5 | 324 |
+| bpmn-parser | 91 | — | 91 |
+| persistence-nats | 20 | — | 20 |
 | persistence-memory | 2 | — | 2 |
-| engine-server | 29 | 93 | 122 |
+| engine-server | 40 | 97 | 137 |
 | desktop-tauri | — | 52 | 52 |
 | external-task-client | 85 | — | 85 |
-| **Total** | **456** | **151** | **607** |
+| **Total** | **557** | **154** | **711** |
 
-> Snapshot 2026-10-24. Source of truth: `cargo test --workspace -- --list`, the Playwright and Vitest listings. See [README test metrics](../../README.md#test-metrics) for the module breakdown.
+> Snapshot 2026-10-24. Source of truth: `cargo test --workspace -- --list`, the Playwright and Vitest listings. See [README test metrics](../../README.md#test-metrics) for the module breakdown and line coverage.
 
 ## Production Hardening (env)
 

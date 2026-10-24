@@ -261,6 +261,7 @@ devbox shell
 |--------|--------|-------|
 | **Build** | `devbox run build` | `cargo build --workspace` |
 | **Test** | `devbox run test` | `cargo test --workspace` |
+| **Coverage** | `devbox run coverage` | `cargo llvm-cov --workspace --all-targets --summary-only` |
 | **Lint** | `devbox run lint` | `cargo clippy --workspace -- -D warnings` |
 | **Format** | `devbox run fmt` | `cargo fmt --all --check` |
 
@@ -601,14 +602,31 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 |---------|------|-----|-------|
 | **engine-core** | 319 | 5 | 324 |
 | **bpmn-parser** | 91 | — | 91 |
-| **persistence-nats** | 16 | — | 16 |
+| **persistence-nats** | 20 | — | 20 |
 | **persistence-memory** | 2 | — | 2 |
-| **engine-server** | 30 | 97 | 127 |
+| **engine-server** | 40 | 97 | 137 |
 | **desktop-tauri** | — | 52 | 52 |
 | **bpmn-ninja-external-task-client** | 85 | — | 85 |
-| **Total** | **543** | **154** | **697** |
+| **Total** | **557** | **154** | **711** |
 
 > Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
+
+### Line Coverage
+
+Measured with `cargo llvm-cov --workspace --all-targets` (LLVM source-based coverage, test code excluded).
+CI job **Rust line coverage** runs the same measurement, fails below **75 %** lines and uploads `lcov.info`.
+
+| Crate | Lines | Line coverage |
+|-------|-------|---------------|
+| **engine-core** | 9,868 | 86.7 % |
+| **bpmn-parser** | 1,336 | 74.8 % |
+| **engine-server** | 2,728 | 78.6 % |
+| **persistence-nats** | 805 | 54.0 % |
+| **persistence-memory** | 101 | 100.0 % |
+| **agent-orchestrator** | 115 | 0.0 % (demo binary, no tests) |
+| **Total** | **14,953** | **81.8 %** |
+
+Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
 
 ### engine-core Breakdown (324 tests)
 
@@ -713,7 +731,7 @@ The unit tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no
 | persistence-nats | 5 | 1,282 |
 | persistence-memory | 2 | ~450 |
 | engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 18 | ~2,700 |
+| engine-server (E2E tests) | 19 | ~4,600 |
 | desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
 | desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
