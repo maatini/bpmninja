@@ -4,13 +4,34 @@
 // Die Ausgabe landet als bpmninja-<name>.sha256 im Workspace-Root.
 
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
 const BUNDLE_EXTENSIONS = [".deb", ".AppImage", ".msi", ".exe", ".dmg", ".app.tar.gz"];
 const DEFAULT_ROOT = path.join("desktop-tauri", "src-tauri", "target");
+
+// Tauri legt das Updater-Bundle auf macOS als `bpmninja-desktop.app.tar.gz` ab,
+// lädt es aber als `bpmninja-desktop_<version>_<arch>.app.tar.gz` hoch (Archivname
+// aus Produktname, Version und Architektur). Die Prüfsummenzeile muss den
+// veröffentlichten Namen nennen, sonst findet `sha256sum -c` die Datei nicht.
+const APP_TAR_SUFFIX = ".app.tar.gz";
+const MACOS_ARCH = {
+  "aarch64-apple-darwin": "aarch64",
+  "x86_64-apple-darwin": "x64",
+};
+
+function publishedBundleName(basename, target, version) {
+  if (!basename.endsWith(APP_TAR_SUFFIX)) {
+    return basename;
+  }
+  const arch = MACOS_ARCH[target];
+  if (!arch) {
+    return basename;
+  }
+  return `bpmninja-desktop_${version}_${arch}${APP_TAR_SUFFIX}`;
+}
 
 function parseArgs(argv) {
   const options = { target: "", name: "", root: DEFAULT_ROOT };
@@ -108,9 +129,13 @@ async function main() {
   }
 
   files.sort();
+  const version = JSON.parse(
+    readFileSync(new URL("../version.json", import.meta.url), "utf8"),
+  ).version;
   const lines = [];
   for (const file of files) {
-    lines.push(`${await sha256(file)}  ${path.basename(file)}`);
+    const published = publishedBundleName(path.basename(file), options.target, version);
+    lines.push(`${await sha256(file)}  ${published}`);
   }
 
   const outputFileName = `bpmninja-${name}.sha256`;
