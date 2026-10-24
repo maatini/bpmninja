@@ -1,4 +1,4 @@
-use crate::domain::{FileReference, Token};
+use crate::domain::{FileReference, Incident, IncidentKind, MAX_INCIDENTS_PER_INSTANCE, Token};
 use crate::runtime::{PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -180,6 +180,9 @@ pub struct ProcessInstance {
     /// Timestamp when this instance reached a terminal state.
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+    /// Offene und aufgelöste Incidents dieser Instanz (begrenzt).
+    #[serde(default)]
+    pub incidents: Vec<Incident>,
 }
 
 impl ProcessInstance {
@@ -216,6 +219,81 @@ impl ProcessInstance {
             self.audit_log.drain(0..overflow);
         }
     }
+
+    /// Legt einen Incident an oder führt ihn mit einem offenen Incident
+    /// gleicher Art und gleicher Zuordnung (`node_id`, `task_id`) zusammen.
+    ///
+    /// Gibt die ID des angelegten bzw. aktualisierten Incidents zurück.
+    pub fn push_or_touch_incident(
+        &mut self,
+        kind: IncidentKind,
+        node_id: Option<String>,
+        task_id: Option<Uuid>,
+        message: impl Into<String>,
+        details: Option<String>,
+    ) -> Uuid {
+        let now = Utc::now();
+        let message = message.into();
+
+        if let Some(existing) = self.incidents.iter_mut().find(|incident| {
+            incident.resolved_at.is_none()
+                && incident.kind == kind
+                && incident.node_id == node_id
+                && incident.task_id == task_id
+        }) {
+            existing.occurrences = existing.occurrences.saturating_add(1);
+            existing.last_seen_at = now;
+            existing.message = message;
+            if details.is_some() {
+                existing.details = details;
+            }
+            return existing.id;
+        }
+
+        let incident = Incident {
+            id: Uuid::new_v4(),
+            kind,
+            node_id,
+            task_id,
+            message,
+            details,
+            created_at: now,
+            last_seen_at: now,
+            occurrences: 1,
+            resolved_at: None,
+            resolved_by: None,
+        };
+        let id = incident.id;
+        self.incidents.push(incident);
+        self.trim_incidents();
+        id
+    }
+
+    /// Begrenzt die Incident-Liste; aufgelöste Incidents werden zuerst verworfen.
+    fn trim_incidents(&mut self) {
+        while self.incidents.len() > MAX_INCIDENTS_PER_INSTANCE {
+            let index = self
+                .incidents
+                .iter()
+                .enumerate()
+                .filter(|(_, incident)| incident.resolved_at.is_some())
+                .min_by_key(|(_, incident)| incident.created_at)
+                .map(|(index, _)| index)
+                .or_else(|| {
+                    self.incidents
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, incident)| incident.created_at)
+                        .map(|(index, _)| index)
+                });
+            match index {
+                Some(index) => {
+                    self.incidents.remove(index);
+                }
+                None => break,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +321,7 @@ mod tests {
             outstanding_calls: HashMap::new(),
             started_at: None,
             completed_at: None,
+            incidents: Vec::new(),
         }
     }
 
@@ -382,5 +461,117 @@ mod tests {
         let mut inst = make_instance();
         inst.variables.insert("x".into(), json!(42));
         assert!(inst.file_variable_names().is_empty());
+    }
+
+    #[test]
+    fn push_or_touch_incident_merges_open_entries() {
+        let mut inst = make_instance();
+        let first = inst.push_or_touch_incident(
+            IncidentKind::Timer,
+            Some("timer_1".into()),
+            None,
+            "boom".to_string(),
+            None,
+        );
+        let second = inst.push_or_touch_incident(
+            IncidentKind::Timer,
+            Some("timer_1".into()),
+            None,
+            "boom again".to_string(),
+            Some("details".into()),
+        );
+
+        assert_eq!(first, second);
+        assert_eq!(inst.incidents.len(), 1);
+        assert_eq!(inst.incidents[0].occurrences, 2);
+        assert_eq!(inst.incidents[0].message, "boom again");
+        assert_eq!(inst.incidents[0].details.as_deref(), Some("details"));
+
+        // Andere Node oder andere Art bleibt ein eigener Incident.
+        inst.push_or_touch_incident(
+            IncidentKind::Timer,
+            Some("timer_2".into()),
+            None,
+            "other".to_string(),
+            None,
+        );
+        inst.push_or_touch_incident(
+            IncidentKind::Persistence,
+            Some("timer_1".into()),
+            None,
+            "other kind".to_string(),
+            None,
+        );
+        assert_eq!(inst.incidents.len(), 3);
+    }
+
+    #[test]
+    fn resolved_incident_is_not_reopened() {
+        let mut inst = make_instance();
+        let id = inst.push_or_touch_incident(
+            IncidentKind::Timer,
+            Some("timer_1".into()),
+            None,
+            "boom".to_string(),
+            None,
+        );
+        inst.incidents[0].resolved_at = Some(Utc::now());
+
+        let new_id = inst.push_or_touch_incident(
+            IncidentKind::Timer,
+            Some("timer_1".into()),
+            None,
+            "boom again".to_string(),
+            None,
+        );
+
+        assert_ne!(id, new_id);
+        assert_eq!(inst.incidents.len(), 2);
+        assert_eq!(
+            inst.incidents
+                .iter()
+                .filter(|incident| incident.resolved_at.is_none())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn incidents_are_capped_and_prefer_open_entries() {
+        let mut inst = make_instance();
+        for i in 0..MAX_INCIDENTS_PER_INSTANCE + 10 {
+            inst.push_or_touch_incident(
+                IncidentKind::Timer,
+                Some(format!("timer_{i}")),
+                None,
+                "boom".to_string(),
+                None,
+            );
+        }
+        assert_eq!(inst.incidents.len(), MAX_INCIDENTS_PER_INSTANCE);
+
+        // Alle bestehenden auflösen, dann neue offene Incidents anlegen:
+        // beim Trimmen müssen aufgelöste zuerst weichen.
+        for incident in &mut inst.incidents {
+            incident.resolved_at = Some(Utc::now());
+        }
+        for i in 0..5 {
+            inst.push_or_touch_incident(
+                IncidentKind::Timer,
+                Some(format!("new_{i}")),
+                None,
+                "boom".to_string(),
+                None,
+            );
+        }
+
+        assert_eq!(inst.incidents.len(), MAX_INCIDENTS_PER_INSTANCE);
+        assert_eq!(
+            inst.incidents
+                .iter()
+                .filter(|incident| incident.resolved_at.is_none())
+                .count(),
+            5
+        );
     }
 }

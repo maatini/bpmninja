@@ -14,6 +14,8 @@ using TypeSpec.OpenAPI;
 Optional API-key auth when env BPMNINJA_API_KEY is set.
 Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
+JSON bodies are limited to 10 MiB (413). Malformed JSON returns 400, schema mismatches 422,
+and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`.
 """)
 @useAuth(BearerAuth | ApiKeyAuth<ApiKeyLocation.header, "X-API-Key"> | NoAuth)
 namespace MiniBpm;
@@ -65,7 +67,8 @@ model StartRequest {
 }
 
 model StartLatestRequest {
-  bpmn_id: string;
+  @doc("BPMN process ID (not the definition UUID). Legacy clients may send `bpmn_id`.")
+  bpmn_process_id: string;
   business_key?: string;
   variables?: Record<unknown>;
 }
@@ -256,7 +259,7 @@ namespace Api {
   op start(@body request: StartRequest): StartResponse | AppError;
 
   @post @route("/start/latest")
-  @doc("Start an instance of the latest deployed version of a BPMN definition (by bpmn_id).")
+  @doc("Start an instance of the latest deployed version of a BPMN definition (by bpmn_process_id; `bpmn_id` is accepted as a legacy alias).")
   op startLatest(@body request: StartLatestRequest): StartResponse | AppError;
 
   @post @route("/start/timer")

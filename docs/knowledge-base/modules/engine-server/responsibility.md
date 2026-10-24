@@ -12,8 +12,8 @@
 8. **@tag:health-endpoints** — `/api/health` (liveness, always 200) and `/api/ready` (readiness: required durability + live NATS storage check).
 9. **@tag:cors** — CORS allowlist via `CORS_ORIGINS` (default Tauri/localhost origins; `*` is the only Allow-Any escape). Methods GET/POST/PUT/DELETE/OPTIONS; headers Authorization, Content-Type, Accept, X-API-Key.
 10. **@tag:request-size-limit** — JSON/XML body limit via `DefaultBodyLimit` = `MAX_XML_BYTES` (10 MiB, OpenAPI). Multipart instance files remain `MAX_UPLOAD_BYTES` (5 MiB).
-11. **@tag:api-auth** — Optional shared API key (`BPMNINJA_API_KEY`): Bearer or `X-API-Key`. Public: `GET /api/health`, `GET /api/ready`.
-12. **@tag:lock-duration-ms** — HTTP `lockDuration`/`newDuration` are milliseconds; converted to seconds at the engine-server boundary.
+11. **@tag:api-auth** — API-Key-Gate mit Rollen: `BPMNINJA_API_KEY` (Admin, alles) und optional `BPMNINJA_WORKER_API_KEY` (nur Service-Task-Routen, sonst 403). Fail-closed ohne Key bei Nicht-Loopback-Bind (401). Öffentlich: `GET /api/health`, `GET /api/ready`.
+12. **@tag:lock-duration-ms** — HTTP `lockDuration`/`newDuration` sind Millisekunden; Validierung (1_000..=3_600_000 ms, `maxTasks` 1..=100, 1..=32 Topics) und Umrechnung in Sekunden an der Server-Grenze. Jedes Topic behält seine eigene Lock-Dauer.
 
 ## Invariants
 
@@ -24,9 +24,9 @@
 5. **Graceful shutdown**: `Ctrl+C` / `SIGTERM` shuts down timer scheduler, flushes persistence queue, and stops Axum.
 6. **Deployment size limit**: BPMN XML/JSON bodies capped at 10 MiB (`MAX_XML_BYTES`, same as `DefaultBodyLimit`). Multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB).
 7. **NATS required by default**: `REQUIRE_NATS` defaults to true — startup fails if NATS is unavailable. Set `REQUIRE_NATS=false` only for ephemeral local runs (in-memory, state lost on restart).
-8. **Prometheus optional**: `/metrics` only mounted if `prometheus_handle` is `Some`. Protected by API-key auth when `BPMNINJA_API_KEY` is set.
-9. **Auth off unless configured**: Unset `BPMNINJA_API_KEY` means no auth. Tests use `AppBuildConfig.api_key` (never process env).
-10. **Bind address**: `BIND_ADDR` / `BIND_ADDRESS` default `0.0.0.0` (required for Docker).
+8. **Prometheus optional**: `/metrics` only mounted if `prometheus_handle` is `Some`. Protected by the API-key gate (Worker-Key → 403).
+9. **Auth ist fail-closed**: kein Key gesetzt + Nicht-Loopback-Bind → 401 auf allen `/api`-Routen außer health/ready. `BPMNINJA_ALLOW_UNAUTHENTICATED=true` ist der einzige bewusste Opt-out; Tests deaktivieren das Gate über `AppBuildConfig { api_key: Some(None), worker_api_key: Some(None) }` (nie über Prozess-Env).
+10. **Bind address**: `BIND_ADDR` / `BIND_ADDRESS` default `0.0.0.0` (required for Docker). Ohne Key ist dieser Default nur noch mit explizitem Opt-out ungeschützt nutzbar; lokal `BIND_ADDR=127.0.0.1` setzen.
 
 ## Internal Module Responsibilities
 
@@ -38,7 +38,7 @@
 | `log_nats.rs` | `src/log_nats.rs` | `NatsLogSink`: syncs log buffer to NATS JetStream `ENGINE_LOGS` stream |
 | `observability.rs` | `src/observability.rs` | Prometheus recorder setup, metrics handler, HTTP metrics middleware |
 | `server/state.rs` | `src/server/state.rs` | `AppState`, `AppError` → HTTP status mapping, env parsers, `lock_duration_ms_to_secs` |
-| `server/auth.rs` | `src/server/auth.rs` | Optional API-key middleware (Bearer / `X-API-Key`) |
+| `server/auth.rs` | `src/server/auth.rs` | API-Key-Gate (fail-closed), Rollen (Admin/Worker), 401/403, `bpmn_auth_failures_total` |
 | `server/mod.rs` | `src/server/mod.rs` | Route registration, CORS layer, `DefaultBodyLimit`, `build_app*` |
 | `server/deploy.rs` | `src/server/deploy.rs` | Deploy, list, get XML, delete definitions |
 | `server/instances.rs` | `src/server/instances.rs` | Start, list, get, delete, suspend, resume, move token, migrate, update variables |

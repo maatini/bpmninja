@@ -11,9 +11,11 @@
 use super::super::runtime::*;
 use dashmap::DashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::domain::IncidentKind;
 use crate::history::HistoryEntry;
 use crate::persistence::WorkflowPersistence;
 
@@ -35,6 +37,9 @@ pub(crate) const INLINE_BACKOFF_MS: u64 = 50;
 /// Default capacity of the background retry queue.
 pub(crate) const DEFAULT_RETRY_QUEUE_CAPACITY: usize = 10_000;
 
+/// Default time budget for draining the queue after `PersistJob::Shutdown`.
+pub(crate) const DEFAULT_SHUTDOWN_DRAIN_MS: u64 = 5_000;
+
 /// Resolves retry queue capacity from `PERSISTENCE_RETRY_QUEUE_CAPACITY` or default.
 pub(crate) fn retry_queue_capacity_from_env() -> usize {
     std::env::var("PERSISTENCE_RETRY_QUEUE_CAPACITY")
@@ -42,6 +47,15 @@ pub(crate) fn retry_queue_capacity_from_env() -> usize {
         .and_then(|v| v.parse().ok())
         .filter(|&n| n > 0)
         .unwrap_or(DEFAULT_RETRY_QUEUE_CAPACITY)
+}
+
+/// Resolves the shutdown drain budget from `PERSISTENCE_SHUTDOWN_DRAIN_MS` or default.
+pub(crate) fn shutdown_drain_budget_from_env() -> Duration {
+    let ms = std::env::var("PERSISTENCE_SHUTDOWN_DRAIN_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_SHUTDOWN_DRAIN_MS);
+    Duration::from_millis(ms)
 }
 
 /// A persistence operation that can be retried.
@@ -69,7 +83,7 @@ pub(crate) enum PersistJob {
     DeleteMessageCatch(Uuid),
     /// Append a history entry to NATS.
     AppendHistoryEntry(Box<HistoryEntry>),
-    /// Instructs the worker to flush remaining jobs and exit.
+    /// Instructs the worker to drain the remaining jobs and exit.
     Shutdown,
 }
 
@@ -115,6 +129,10 @@ pub(crate) fn create_retry_queue_with_capacity(capacity: usize) -> (RetryQueueTx
 /// provided data sources (instance_store, definition_registry, pending maps)
 /// so it always persists the *latest* state, not a stale snapshot.
 ///
+/// On `PersistJob::Shutdown` the worker drains all jobs still queued in the
+/// channel with a single attempt each, bounded by
+/// `PERSISTENCE_SHUTDOWN_DRAIN_MS` (default 5s), before exiting.
+///
 /// The `persistence`, `instances`, and `definitions` parameters are shared
 /// references from the WorkflowEngine.
 #[allow(clippy::too_many_arguments)]
@@ -134,7 +152,45 @@ pub(crate) fn spawn_retry_worker(
 
         while let Some(job) = rx.recv().await {
             if matches!(job, PersistJob::Shutdown) {
-                tracing::info!("Retry worker received shutdown signal, exiting.");
+                let budget = shutdown_drain_budget_from_env();
+                tracing::info!(
+                    "Retry worker received shutdown signal, draining queued jobs (budget: {}ms)",
+                    budget.as_millis()
+                );
+                let ctx = DrainContext {
+                    persistence: &persistence,
+                    instances: &instances,
+                    definitions: &definitions,
+                    pending_user_tasks: &pending_user_tasks,
+                    pending_service_tasks: &pending_service_tasks,
+                    pending_timers: &pending_timers,
+                    pending_message_catches: &pending_message_catches,
+                    error_counter: &error_counter,
+                };
+                let drained = drain_retry_queue(&mut rx, budget, &ctx).await;
+
+                if drained.remaining > 0 {
+                    metrics::gauge!("bpmn_persistence_retry_drain_remaining")
+                        .set(drained.remaining as f64);
+                    tracing::error!(
+                        processed = drained.processed,
+                        failed = drained.failed,
+                        remaining = drained.remaining,
+                        "Persistence shutdown drain budget exhausted; {} job(s) left in queue",
+                        drained.remaining
+                    );
+                } else if drained.failed > 0 {
+                    tracing::warn!(
+                        processed = drained.processed,
+                        failed = drained.failed,
+                        "Persistence shutdown drain finished with failed job(s)"
+                    );
+                } else {
+                    tracing::info!(
+                        processed = drained.processed,
+                        "Persistence shutdown drain finished"
+                    );
+                }
                 break;
             }
 
@@ -163,6 +219,16 @@ pub(crate) fn spawn_retry_worker(
                     Err(e) if attempt >= MAX_RETRIES => {
                         error_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         metrics::counter!("bpmn_persistence_retry_exhausted_total").increment(1);
+                        record_exhausted_job(
+                            &job,
+                            &e,
+                            &instances,
+                            &pending_user_tasks,
+                            &pending_service_tasks,
+                            &pending_timers,
+                            &pending_message_catches,
+                        )
+                        .await;
                         tracing::error!(
                             "PERMANENT PERSISTENCE FAILURE after {} retries for {}: {}",
                             MAX_RETRIES,
@@ -187,8 +253,93 @@ pub(crate) fn spawn_retry_worker(
             }
         }
 
-        tracing::warn!("Persistence retry worker stopped (channel closed)");
+        tracing::info!("Persistence retry worker stopped");
     })
+}
+
+/// Outcome of a shutdown drain.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct DrainResult {
+    /// Jobs executed successfully (single attempt, no backoff).
+    pub(crate) processed: usize,
+    /// Jobs whose single attempt failed or timed out.
+    pub(crate) failed: usize,
+    /// Jobs that were still queued when the budget expired and were not attempted.
+    pub(crate) remaining: usize,
+}
+
+/// Borrowed dependencies required to execute queued persist jobs.
+struct DrainContext<'a> {
+    persistence: &'a Arc<dyn WorkflowPersistence>,
+    instances: &'a crate::engine::instance_store::InstanceStore,
+    definitions: &'a crate::engine::registry::DefinitionRegistry,
+    pending_user_tasks: &'a Arc<DashMap<Uuid, PendingUserTask>>,
+    pending_service_tasks: &'a Arc<DashMap<Uuid, PendingServiceTask>>,
+    pending_timers: &'a Arc<DashMap<Uuid, PendingTimer>>,
+    pending_message_catches: &'a Arc<DashMap<Uuid, PendingMessageCatch>>,
+    error_counter: &'a Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl DrainContext<'_> {
+    async fn execute(&self, job: &PersistJob) -> Result<(), String> {
+        execute_job(
+            job,
+            self.persistence,
+            self.instances,
+            self.definitions,
+            self.pending_user_tasks,
+            self.pending_service_tasks,
+            self.pending_timers,
+            self.pending_message_catches,
+        )
+        .await
+    }
+}
+
+/// Drains the queue after a shutdown signal with a hard time budget.
+///
+/// Each job gets exactly one attempt (no exponential backoff) so the budget can
+/// be honored. Jobs that cannot be started before the deadline are counted as
+/// `remaining`; their count is logged by the worker.
+async fn drain_retry_queue(
+    rx: &mut RetryQueueRx,
+    budget: Duration,
+    ctx: &DrainContext<'_>,
+) -> DrainResult {
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut result = DrainResult::default();
+
+    while let Ok(job) = rx.try_recv() {
+        // A duplicate shutdown carries no work.
+        if matches!(job, PersistJob::Shutdown) {
+            continue;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            result.remaining += 1;
+            continue;
+        }
+
+        match tokio::time::timeout_at(deadline, ctx.execute(&job)).await {
+            Ok(Ok(())) => result.processed += 1,
+            Ok(Err(e)) => {
+                result.failed += 1;
+                ctx.error_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                metrics::counter!("bpmn_persistence_shutdown_drain_failed_total").increment(1);
+                tracing::error!("Shutdown drain failed for {}: {}", job, e);
+            }
+            Err(_) => {
+                result.failed += 1;
+                ctx.error_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                metrics::counter!("bpmn_persistence_shutdown_drain_failed_total").increment(1);
+                tracing::error!("Shutdown drain timed out for {}", job);
+            }
+        }
+    }
+
+    result
 }
 
 /// Executes a single persist job against the persistence backend.
@@ -294,6 +445,72 @@ async fn execute_job(
     }
 }
 
+/// Ermittelt die betroffene Prozessinstanz eines Persistenz-Jobs.
+///
+/// `Delete*`-Jobs lassen sich nur zuordnen, solange der Eintrag noch in der
+/// Pending-Map liegt; nach dem Entfernen wird der Job sauber übersprungen.
+fn job_instance_id(
+    job: &PersistJob,
+    pending_user_tasks: &DashMap<Uuid, PendingUserTask>,
+    pending_service_tasks: &DashMap<Uuid, PendingServiceTask>,
+    pending_timers: &DashMap<Uuid, PendingTimer>,
+    pending_message_catches: &DashMap<Uuid, PendingMessageCatch>,
+) -> Option<Uuid> {
+    match job {
+        PersistJob::SaveInstance(id) => Some(*id),
+        PersistJob::SaveDefinition(_) | PersistJob::Shutdown => None,
+        PersistJob::AppendHistoryEntry(entry) => Some(entry.instance_id),
+        PersistJob::SaveUserTask(id) | PersistJob::DeleteUserTask(id) => {
+            pending_user_tasks.get(id).map(|task| task.instance_id)
+        }
+        PersistJob::SaveServiceTask(id) | PersistJob::DeleteServiceTask(id) => {
+            pending_service_tasks.get(id).map(|task| task.instance_id)
+        }
+        PersistJob::SaveTimer(id) | PersistJob::DeleteTimer(id) => {
+            pending_timers.get(id).map(|timer| timer.instance_id)
+        }
+        PersistJob::SaveMessageCatch(id) | PersistJob::DeleteMessageCatch(id) => {
+            pending_message_catches
+                .get(id)
+                .map(|catch| catch.instance_id)
+        }
+    }
+}
+
+/// Hält einen endgültig fehlgeschlagenen Persistenz-Job als Incident an der
+/// betroffenen Instanz fest. Existiert die Instanz nicht mehr, passiert nichts.
+#[allow(clippy::too_many_arguments)]
+async fn record_exhausted_job(
+    job: &PersistJob,
+    error: &str,
+    instances: &crate::engine::instance_store::InstanceStore,
+    pending_user_tasks: &Arc<DashMap<Uuid, PendingUserTask>>,
+    pending_service_tasks: &Arc<DashMap<Uuid, PendingServiceTask>>,
+    pending_timers: &Arc<DashMap<Uuid, PendingTimer>>,
+    pending_message_catches: &Arc<DashMap<Uuid, PendingMessageCatch>>,
+) {
+    let Some(instance_id) = job_instance_id(
+        job,
+        pending_user_tasks,
+        pending_service_tasks,
+        pending_timers,
+        pending_message_catches,
+    ) else {
+        return;
+    };
+
+    super::incidents::record_incident_on(
+        instances,
+        instance_id,
+        IncidentKind::Persistence,
+        None,
+        None,
+        format!("Persistence job '{job}' failed after {MAX_RETRIES} retries"),
+        Some(error.to_string()),
+    )
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,5 +610,183 @@ mod tests {
             .try_send(PersistJob::SaveInstance(Uuid::new_v4()))
             .expect_err("second send must hit Full");
         assert!(matches!(err, mpsc::error::TrySendError::Full(_)));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_drains_jobs_queued_behind_signal() {
+        // Shutdown is queued before the work so the worker must drain afterwards.
+        let (tx, rx) = create_retry_queue_with_capacity(16);
+        let persistence = Arc::new(crate::adapter::in_memory::InMemoryPersistence::new());
+        let instances = crate::engine::instance_store::InstanceStore::new();
+        let definitions = crate::engine::registry::DefinitionRegistry::new();
+        let pending_user_tasks = Arc::new(DashMap::new());
+        let pending_service_tasks = Arc::new(DashMap::new());
+        let pending_timers = Arc::new(DashMap::new());
+        let pending_message_catches = Arc::new(DashMap::new());
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let instance_id = Uuid::new_v4();
+        let task_ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
+        for task_id in &task_ids {
+            pending_user_tasks.insert(
+                *task_id,
+                PendingUserTask {
+                    task_id: *task_id,
+                    instance_id,
+                    node_id: "ut".into(),
+                    assignee: "alice".into(),
+                    token_id: Uuid::new_v4(),
+                    created_at: chrono::Utc::now(),
+                    business_key: None,
+                },
+            );
+        }
+
+        tx.send(PersistJob::Shutdown).await.unwrap();
+        for task_id in &task_ids {
+            tx.send(PersistJob::SaveUserTask(*task_id)).await.unwrap();
+        }
+
+        let handle = spawn_retry_worker(
+            rx,
+            Arc::clone(&persistence) as Arc<dyn WorkflowPersistence>,
+            instances,
+            definitions,
+            pending_user_tasks,
+            pending_service_tasks,
+            pending_timers,
+            pending_message_catches,
+            Arc::clone(&error_counter),
+        );
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("worker did not shut down in time")
+            .expect("worker panicked");
+
+        let persisted = persistence.list_user_tasks().await.unwrap();
+        assert_eq!(persisted.len(), task_ids.len());
+        assert_eq!(error_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn test_exhausted_persist_job_records_persistence_incident() {
+        use crate::domain::{BpmnElement, IncidentKind, ProcessDefinitionBuilder};
+        use crate::engine::WorkflowEngine;
+
+        let engine = WorkflowEngine::new();
+        let def = ProcessDefinitionBuilder::new("retry_incident")
+            .node("start", BpmnElement::StartEvent)
+            .node("end", BpmnElement::EndEvent)
+            .flow("start", "end")
+            .build()
+            .unwrap();
+        let (def_key, _) = engine.deploy_definition(def).await;
+        let instance_id = engine.start_instance(def_key).await.unwrap();
+
+        let instances = engine.instances.clone();
+        let pending_user_tasks = Arc::new(DashMap::new());
+        let pending_service_tasks = Arc::new(DashMap::new());
+        let pending_timers = Arc::new(DashMap::new());
+        let pending_message_catches = Arc::new(DashMap::new());
+
+        record_exhausted_job(
+            &PersistJob::SaveInstance(instance_id),
+            "nats down",
+            &instances,
+            &pending_user_tasks,
+            &pending_service_tasks,
+            &pending_timers,
+            &pending_message_catches,
+        )
+        .await;
+
+        let incidents = engine.get_instance_incidents(instance_id).await.unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].kind, IncidentKind::Persistence);
+        assert!(incidents[0].message.contains("SaveInstance"));
+        assert_eq!(incidents[0].details.as_deref(), Some("nats down"));
+        assert_eq!(incidents[0].occurrences, 1);
+
+        // SaveUserTask lässt sich über die Pending-Map zuordnen und wird
+        // mit demselben offenen Persistenz-Incident zusammengeführt.
+        let task_id = Uuid::new_v4();
+        pending_user_tasks.insert(
+            task_id,
+            PendingUserTask {
+                task_id,
+                instance_id,
+                node_id: "ut".into(),
+                assignee: "alice".into(),
+                token_id: Uuid::new_v4(),
+                created_at: chrono::Utc::now(),
+                business_key: None,
+            },
+        );
+        record_exhausted_job(
+            &PersistJob::SaveUserTask(task_id),
+            "nats still down",
+            &instances,
+            &pending_user_tasks,
+            &pending_service_tasks,
+            &pending_timers,
+            &pending_message_catches,
+        )
+        .await;
+
+        let incidents = engine.get_instance_incidents(instance_id).await.unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].occurrences, 2);
+
+        // Unbekannte Instanz wird sauber übersprungen.
+        record_exhausted_job(
+            &PersistJob::SaveInstance(Uuid::new_v4()),
+            "gone",
+            &instances,
+            &pending_user_tasks,
+            &pending_service_tasks,
+            &pending_timers,
+            &pending_message_catches,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_drain_budget_exhaustion_counts_remaining_jobs() {
+        let (tx, mut rx) = create_retry_queue_with_capacity(8);
+        for _ in 0..3 {
+            tx.try_send(PersistJob::SaveInstance(Uuid::new_v4()))
+                .unwrap();
+        }
+        let persistence: Arc<dyn WorkflowPersistence> =
+            Arc::new(crate::adapter::in_memory::InMemoryPersistence::new());
+        let instances = crate::engine::instance_store::InstanceStore::new();
+        let definitions = crate::engine::registry::DefinitionRegistry::new();
+        let pending_user_tasks = Arc::new(DashMap::new());
+        let pending_service_tasks = Arc::new(DashMap::new());
+        let pending_timers = Arc::new(DashMap::new());
+        let pending_message_catches = Arc::new(DashMap::new());
+        let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let ctx = DrainContext {
+            persistence: &persistence,
+            instances: &instances,
+            definitions: &definitions,
+            pending_user_tasks: &pending_user_tasks,
+            pending_service_tasks: &pending_service_tasks,
+            pending_timers: &pending_timers,
+            pending_message_catches: &pending_message_catches,
+            error_counter: &error_counter,
+        };
+        let drained = drain_retry_queue(&mut rx, Duration::ZERO, &ctx).await;
+
+        assert_eq!(
+            drained,
+            DrainResult {
+                processed: 0,
+                failed: 0,
+                remaining: 3,
+            }
+        );
     }
 }

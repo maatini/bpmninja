@@ -12,6 +12,7 @@
 8. **@tag:persistence-port** — `WorkflowPersistence` trait defining the persistence contract.
 9. **@tag:retry-queue** / **@tag:fault-tolerant-retry** — Two-stage persistence retry: inline (2× ~50ms) + **bounded** background worker (`mpsc::channel`, default 10 000; drop + `bpmn_persistence_retry_dropped_total` when full; max 50 retries with exponential backoff).
 10. **@tag:engine-events** — Broadcast channel for state-change events (`EngineEvent` enum).
+11. **@tag:incidents** — Einheitliches Incident-Modell pro `ProcessInstance` (`Incident`, `IncidentKind`: ServiceTask, Timer, Persistence, BpmnError). Dedupliziert offene Einträge über (kind, node_id, task_id), begrenzt auf 100 pro Instanz (aufgelöste weichen zuerst).
 
 ## Invariants (Must Always Be True)
 
@@ -46,6 +47,8 @@
 | `.move_token(id, token_id, target_node)` | `()` | Manually move a token to a different node |
 | `.migrate_instance(id, new_key, mapping)` | `()` | Migrate to a different definition version |
 | `.update_variables(id, vars)` | `()` | Update instance variables at runtime |
+| `.get_instance_incidents(id)` | `Vec<Incident>` | Listet offene und aufgelöste Incidents einer Instanz |
+| `.resolve_instance_incident(id, incident_id, resolved_by)` | `Incident` | Löst einen Incident auf und persistiert die Instanz |
 | `.shutdown()` | `()` | Gracefully shut down retry worker |
 | `.subscribe_events()` | `broadcast::Receiver` | Subscribe to engine event stream |
 | `.get_engine_stats()` | `EngineStats` | Monitoring stats (instances, tasks, timers, etc.) |
@@ -65,6 +68,7 @@
 | `timer_processor.rs` | `src/engine/timer_processor.rs` | Timer scanning, expiry processing, repeating timer setup |
 | `message_processor.rs` | `src/engine/message_processor.rs` | Message correlation logic |
 | `process_start.rs` | `src/engine/process_start.rs` | Instance creation from various start triggers |
+| `incidents.rs` | `src/engine/incidents.rs` | Incident-Liste/Resolve am `ProcessInstance`, gemeinsame Anlage-/Dedup-Helfer für Engine und Retry-Worker |
 | `definition_ops.rs` | `src/engine/definition_ops.rs` | Definition CRUD, list, versioning, deploy |
 | `instance_ops.rs` | `src/engine/instance_ops.rs` | Instance CRUD, suspend, resume, migrate, move token |
 | `persistence_ops.rs` | `src/engine/persistence_ops.rs` | Save/restore orchestrator (dispatches PersistJobs) |
@@ -74,5 +78,4 @@
 | `events.rs` | `src/engine/events.rs` | `EngineEvent` enum + broadcast sender |
 | `history/mod.rs` | `src/history/mod.rs` | `HistoryEntry`, `HistoryDiff`, `VariableDiff`, `calculate_diff`, `calculate_diff_from_snapshot` |
 | `scripting/` | `src/scripting/` | `ScriptConfig`, `build_engine`, `derived_collection_limits`, `execute_script_safe` / listeners |
-| `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `NextAction`, pending types, `ActiveToken`, `JoinBarrier` |
-| `condition.rs` | `src/condition.rs` | Gateway condition evaluation: `evaluate_condition(expr, vars) -> bool` |
+| `runtime/` | `src/runtime/` | `ProcessInstance`, `InstanceState`, `NextAction`, pending types, `ActiveToken`, `JoinBarrier` || `condition.rs` | `src/condition.rs` | Gateway condition evaluation: `evaluate_condition(expr, vars) -> bool` |

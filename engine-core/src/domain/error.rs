@@ -30,7 +30,6 @@ pub enum EngineError {
 
     /// The process instance has already completed.
     #[error("Process instance has already completed")]
-    #[allow(dead_code)]
     AlreadyCompleted,
 
     /// The timer duration does not match the start event's configuration.
@@ -76,6 +75,14 @@ pub enum EngineError {
     /// The instance is suspended and cannot accept operations.
     #[error("Instance '{0}' is suspended")]
     InstanceSuspended(Uuid),
+
+    /// The requested incident does not exist on the instance.
+    #[error("Incident not found: {0}")]
+    IncidentNotFound(Uuid),
+
+    /// The incident was already resolved.
+    #[error("Incident already resolved: {0}")]
+    IncidentAlreadyResolved(Uuid),
 }
 
 /// Convenience alias used throughout the engine.

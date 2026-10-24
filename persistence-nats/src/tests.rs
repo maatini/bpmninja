@@ -166,6 +166,7 @@ async fn test_definition_instance_restore_roundtrip() {
         multi_instance_state: HashMap::new(),
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
         started_at: Some(chrono::Utc::now()),
         completed_at: None,
     };
@@ -253,4 +254,49 @@ async fn test_user_task_restore_roundtrip() {
     persistence.delete_user_task(task.task_id).await.unwrap();
     let after = persistence.list_user_tasks().await.unwrap();
     assert!(after.iter().all(|t| t.task_id != task.task_id));
+}
+
+/// R7: neu angelegte Workflow-Streams tragen explizite Retention-Limits.
+#[tokio::test]
+async fn test_stream_retention_limits_are_applied() {
+    use std::time::Duration;
+
+    let stream = format!("TEST_RETENTION_{}", Uuid::new_v4());
+    let persistence = match connect_nats(&stream).await {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut handle = persistence
+        .jetstream()
+        .get_stream(&stream)
+        .await
+        .expect("stream must exist after connect");
+    let info = handle.info().await.expect("stream info must be available");
+    let config = &info.config;
+
+    assert!(
+        config.max_age > Duration::ZERO,
+        "WORKFLOW_EVENTS must have a bounded max_age"
+    );
+    assert!(
+        config.max_bytes > 0,
+        "WORKFLOW_EVENTS must have a bounded max_bytes"
+    );
+    assert!(
+        config.num_replicas >= 1,
+        "WORKFLOW_EVENTS must have at least one replica"
+    );
+    assert_eq!(config.subjects, vec![format!("{stream}.*")]);
+
+    // Der Bootstrap-Bericht muss den History-Stream ausweisen.
+    let report = persistence.bootstrap_report();
+    assert!(
+        report
+            .existing()
+            .iter()
+            .chain(report.created().iter())
+            .any(|resource| resource.as_str() == "stream:WORKFLOW_HISTORY"),
+        "bootstrap report must mention WORKFLOW_HISTORY: {report:?}"
+    );
 }

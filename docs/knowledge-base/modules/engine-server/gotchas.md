@@ -1,5 +1,9 @@
 # engine-server — Gotchas
 
+### ⚠️ Incident-Routen sind Admin-only
+
+`GET /api/instances/{id}/incidents` und `POST /api/instances/{id}/incidents/{incident_id}/resolve` stehen nicht auf der Worker-Whitelist (`auth.rs`), ein Worker-Key erhält also **403**. Der Resolve-Body ist optional (`{ "resolvedBy": "..." }`); ein bereits aufgelöster Incident liefert **409**, eine unbekannte Incident-ID **404**. Die Incident-Liste lebt im `ProcessInstance`-Dokument und wird mit diesem persistiert — es gibt keine separate Persistence-Trait-Methode.
+
 ### ⚠️ Route handlers MUST NOT hold engine locks across `.await`
 
 The `AppState.engine` is `Arc<WorkflowEngine>`. All engine methods take `&self`. However, if a route handler acquires a lock from engine internals (e.g., `instances.get(&id).await`), it must drop that lock before any other `.await` point.
@@ -19,17 +23,40 @@ This is especially relevant in:
 
 Allowed methods: GET, POST, PUT, DELETE, OPTIONS. Allowed headers: `Authorization`, `Content-Type`, `Accept`, `X-API-Key`.
 
-### ⚠️ Optional API-key auth (`BPMNINJA_API_KEY`)
+### ⚠️ API-Auth ist fail-closed, sobald nicht an Loopback gebunden wird
 
-When `BPMNINJA_API_KEY` is set, every route except `GET /api/health` and `GET /api/ready` requires `Authorization: Bearer <key>` **or** `X-API-Key: <key>`. Missing/wrong key → **401** `{ "error": "Unauthorized" }`. Unset → no auth (E2E/`build_app()` stay green). `/metrics` and `/api/events` are protected when a key is configured. Tests must inject the key via `AppBuildConfig.api_key`, never via process env (parallel-test races).
+Das Gate ist aktiv, wenn `BPMNINJA_API_KEY` (Admin) oder `BPMNINJA_WORKER_API_KEY` (Worker) gesetzt ist. Zusätzlich gilt **fail-closed**: ohne jeden Key und mit Nicht-Loopback-Bind (`BIND_ADDR` ≠ `127.0.0.1`/`::1`/`localhost`) antworten alle `/api`-Routen mit **401**, ausgenommen `GET /api/health` und `GET /api/ready`. Ein bewusster Dev-Opt-out ist `BPMNINJA_ALLOW_UNAUTHENTICATED=true`; `AppBuildConfig { api_key: Some(None) }` schaltet das Gate nur explizit für Tests/Helfer aus.
+
+Rollen: Admin-Key darf alles, Worker-Key nur `fetchAndLock`, `complete`, `failure`, `extendLock`, `bpmnError` — alles andere (inkl. `retry`/`resolve`, `/metrics`) ist **403**. Ist kein Worker-Key gesetzt, darf der Admin-Key auch Worker-Routen nutzen. Fehlversuche werden mit Methode + Pfad geloggt (keine Secrets) und als `bpmn_auth_failures_total{reason}` gezählt. Tests müssen Keys über `AppBuildConfig` injizieren, nie über Prozess-Env (parallele Testläufe).
 
 ### ⚠️ Body size limit is 10 MiB for XML/JSON
 
 `DefaultBodyLimit` and the deploy-path cap share `MAX_XML_BYTES` (**10 MiB** = `10 * 1024 * 1024`, OpenAPI contract). Override with env `MAX_XML_BYTES`. Multipart instance-file uploads stay at `MAX_UPLOAD_BYTES` (default **5 MiB**) in `files.rs` — oversized uploads return **413 Payload Too Large**.
 
-### ⚠️ `lockDuration` / `newDuration` are milliseconds at the HTTP boundary
+### ⚠️ Alle Fehlerantworten sind `{ "error": ... }`
 
-Camunda/OpenAPI send milliseconds. `engine-server` converts to seconds for `engine-core` (`TimeDelta::seconds`): `ms <= 0 → 0`, otherwise `(ms + 999) / 1000` (ceil). Empty `topics` defaults to **30_000 ms** (30 s), not 30. Do not change engine-core to milliseconds.
+JSON-Handler nutzen `ApiJson<T>` statt `axum::Json<T>` (definiert in `state.rs`). Dessen `FromRequest`/`OptionalFromRequest` mappen `JsonRejection` auf `AppError::Rejected` und rendern damit dieselbe Fehlerform wie alle anderen Fehler:
+
+| Ursache | Status |
+|---|---|
+| JSON-Syntaxfehler | 400 |
+| Body über `DefaultBodyLimit` | 413 |
+| fehlender/falscher `Content-Type` | 415 |
+| gültiges JSON, aber Schema-Mismatch | 422 |
+
+Der Deploy-Handler prüft `payload.xml.len() > max_xml_bytes` zusätzlich und liefert 413. Neue JSON-Handler müssen `ApiJson` verwenden, sonst antwortet Axum wieder mit Plain-Text.
+
+### ⚠️ `GET /api/definitions/{id}/xml` liefert `text/plain`
+
+Erfolg ist der rohe XML-String (`content-type: text/plain`), kein `{ "xml": ... }`-Objekt. Fehlt das XML in Cache und Persistence, antwortet der Endpunkt mit **404** und `{ "error": "No XML found for definition '…'" }`.
+
+### ⚠️ Start-Felder: `bpmn_process_id` mit Legacy-Alias
+
+`POST /api/start/latest` erwartet `bpmn_process_id`; `bpmn_id` bleibt per `#[serde(alias)]` gültig. `business_key` ist auf `StartRequest` und `StartLatestRequest` top-level erlaubt und hat Vorrang vor einem `business_key`-Eintrag in `variables` (engine-core entfernt den Schlüssel aus den Variablen und setzt `ProcessInstance.business_key`).
+
+### ⚠️ `lockDuration` / `newDuration` sind Millisekunden an der HTTP-Grenze
+
+Camunda/OpenAPI senden Millisekunden. `engine-server` validiert `topics[].lockDuration` auf **1_000..=3_600_000 ms**, `maxTasks` auf **1..=100** und `topics` auf **1..=32** (sonst `400`). Danach rechnet es in Sekunden um (`(ms + 999) / 1000`). Jedes Topic behält seine eigene Dauer (`fetch_and_lock_service_tasks_with_durations`). engine-core clampt Sekunden defensiv auf `1..=3600` und nutzt `TimeDelta::try_seconds` — extreme Werte (z. B. `i64::MAX`, negativ) dürfen keine Panic auslösen.
 
 ### ⚠️ Startup restore prefers Definitions-KV
 

@@ -175,3 +175,69 @@ async fn restore_service_task_updates_topic_index() {
 
     assert_eq!(topic_ids(&engine, "restore_topic"), vec![svc_id]);
 }
+
+/// Lock expiration must reflect the duration requested for each topic.
+#[tokio::test]
+async fn fetch_and_lock_applies_per_topic_lock_durations() {
+    let engine = WorkflowEngine::new();
+    deploy_two_topic_instance(&engine).await;
+
+    let before = chrono::Utc::now();
+    let locked = engine
+        .fetch_and_lock_service_tasks_with_durations(
+            "w",
+            10,
+            &[("topic_a".to_string(), 5), ("topic_b".to_string(), 60)],
+        )
+        .await;
+    assert_eq!(locked.len(), 2);
+
+    let expiration = |topic: &str| {
+        locked
+            .iter()
+            .find(|task| task.topic == topic)
+            .and_then(|task| task.lock_expiration)
+            .expect("locked task with expiration")
+    };
+
+    let a_secs = (expiration("topic_a") - before).num_seconds();
+    let b_secs = (expiration("topic_b") - before).num_seconds();
+    assert!((4..=6).contains(&a_secs), "topic_a locked for {a_secs}s");
+    assert!((59..=61).contains(&b_secs), "topic_b locked for {b_secs}s");
+}
+
+/// Extreme durations must be clamped instead of panicking in `chrono`.
+#[tokio::test]
+async fn fetch_and_lock_clamps_extreme_lock_durations() {
+    let engine = WorkflowEngine::new();
+    deploy_two_topic_instance(&engine).await;
+
+    let before = chrono::Utc::now();
+    let locked = engine
+        .fetch_and_lock_service_tasks_with_durations(
+            "w",
+            10,
+            &[
+                ("topic_a".to_string(), i64::MAX),
+                ("topic_b".to_string(), -60),
+            ],
+        )
+        .await;
+    assert_eq!(locked.len(), 2);
+
+    let expiration = |topic: &str| {
+        locked
+            .iter()
+            .find(|task| task.topic == topic)
+            .and_then(|task| task.lock_expiration)
+            .expect("locked task with expiration")
+    };
+
+    let a_secs = (expiration("topic_a") - before).num_seconds();
+    let b_secs = (expiration("topic_b") - before).num_seconds();
+    assert!(
+        (3_598..=3_601).contains(&a_secs),
+        "clamped to 1h, got {a_secs}s"
+    );
+    assert_eq!(b_secs, 1, "negative duration clamped to 1s");
+}

@@ -1,4 +1,4 @@
-use crate::server::state::{AppError, AppState};
+use crate::server::state::{ApiJson, AppError, AppState};
 use axum::{Json, extract::State};
 use engine_core::runtime::PendingMessageCatch;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub(crate) struct CorrelateMessageResponse {
 
 pub(crate) async fn correlate_message(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<CorrelateMessageRequest>,
+    ApiJson(payload): ApiJson<CorrelateMessageRequest>,
 ) -> Result<Json<CorrelateMessageResponse>, AppError> {
     let engine = &state.engine;
     let vars = payload.variables.unwrap_or_default();

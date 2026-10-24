@@ -10,11 +10,27 @@ use chrono::{TimeDelta, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::domain::{EngineError, EngineResult};
+use crate::domain::{BpmnElement, EngineError, EngineResult, IncidentKind};
 
 use super::WorkflowEngine;
 use super::topic_index;
 use crate::runtime::{InstanceState, PendingServiceTask};
+
+/// Lower bound for a service-task lock duration in seconds.
+const MIN_LOCK_SECONDS: i64 = 1;
+/// Upper bound for a service-task lock duration in seconds (1 h).
+const MAX_LOCK_SECONDS: i64 = 3_600;
+/// Duration used when a requested topic carries no explicit duration.
+const FALLBACK_LOCK_SECONDS: i64 = 30;
+
+/// Converts a requested lock duration (seconds) into a safe `TimeDelta`.
+///
+/// Values are clamped to [`MIN_LOCK_SECONDS`]..=[`MAX_LOCK_SECONDS`] because
+/// `TimeDelta`/`DateTime` arithmetic panics on extreme inputs.
+fn lock_time_delta(seconds: i64) -> TimeDelta {
+    TimeDelta::try_seconds(seconds.clamp(MIN_LOCK_SECONDS, MAX_LOCK_SECONDS))
+        .unwrap_or(TimeDelta::seconds(MAX_LOCK_SECONDS))
+}
 
 /// Verifies that the given worker holds the lock on an service task.
 ///
@@ -48,11 +64,36 @@ impl WorkflowEngine {
         topics: &[String],
         lock_duration: i64,
     ) -> Vec<PendingServiceTask> {
+        let topics: Vec<(String, i64)> = topics
+            .iter()
+            .map(|topic| (topic.clone(), lock_duration))
+            .collect();
+        self.fetch_and_lock_service_tasks_with_durations(worker_id, max_tasks, &topics)
+            .await
+    }
+
+    /// Like [`Self::fetch_and_lock_service_tasks`], but with a lock duration
+    /// (in seconds) per topic.
+    ///
+    /// Topics not present in the slice are ignored; duplicate names keep the
+    /// last duration. Durations are clamped to 1..=3600 s.
+    pub async fn fetch_and_lock_service_tasks_with_durations(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[(String, i64)],
+    ) -> Vec<PendingServiceTask> {
         let now = Utc::now();
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
 
-        let candidates = topic_index::candidate_ids(&self.service_task_topic_index, topics);
+        let durations: HashMap<&str, i64> = topics
+            .iter()
+            .map(|(name, seconds)| (name.as_str(), *seconds))
+            .collect();
+        let topic_names: Vec<String> = topics.iter().map(|(name, _)| name.clone()).collect();
+
+        let candidates = topic_index::candidate_ids(&self.service_task_topic_index, &topic_names);
 
         for (topic, task_id) in candidates {
             if result.len() >= max_tasks {
@@ -78,15 +119,22 @@ impl WorkflowEngine {
                 tracing::info!("Service task {}: lock expired, releasing", task.id);
             }
 
+            let lock = lock_time_delta(
+                durations
+                    .get(topic.as_str())
+                    .copied()
+                    .unwrap_or(FALLBACK_LOCK_SECONDS),
+            );
+
             // Lock the task
             task.worker_id = Some(worker_id.to_string());
-            task.lock_expiration = Some(now + TimeDelta::seconds(lock_duration));
+            task.lock_expiration = Some(now + lock);
 
             tracing::info!(
                 "Service task {} locked by worker '{}' for {}s",
                 task.id,
                 worker_id,
-                lock_duration
+                lock.num_seconds()
             );
 
             result.push(task.clone());
@@ -98,6 +146,25 @@ impl WorkflowEngine {
         }
 
         result
+    }
+
+    /// ID des nächsten noch offenen Tasks derselben Multi-Instance-Gruppe.
+    fn next_open_multi_instance_task_id(
+        &self,
+        instance_id: Uuid,
+        node_id: &str,
+        token_id: Uuid,
+        exclude: Uuid,
+    ) -> Option<Uuid> {
+        self.pending_service_tasks
+            .iter()
+            .find(|entry| {
+                entry.instance_id == instance_id
+                    && entry.node_id == node_id
+                    && entry.token_id == token_id
+                    && entry.id != exclude
+            })
+            .map(|entry| entry.id)
     }
 
     /// Completes an service task, advancing the process instance.
@@ -149,7 +216,45 @@ impl WorkflowEngine {
             None
         };
 
-        // Retrieve token from central store and merge variables
+        // Definition und MI-Fortschritt lesen, bevor der Token entfernt wird.
+        let def_key = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+            inst.definition_key
+        };
+        let def = self
+            .definitions
+            .get(&def_key)
+            .ok_or(EngineError::NoSuchDefinition(def_key))?;
+        let def = Arc::clone(&def);
+
+        let mi_progress = {
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let inst = inst_arc.read().await;
+            inst.multi_instance_state.get(&task.node_id).cloned()
+        };
+        let is_multi_instance = mi_progress.is_some();
+        let is_last_item = mi_progress
+            .as_ref()
+            .is_some_and(|p| p.completed.saturating_add(1) >= p.total);
+        let mi_element_variable = match def.get_node(&task.node_id) {
+            Some(BpmnElement::ServiceTask {
+                multi_instance: Some(mi),
+                ..
+            }) => mi.element_variable.clone(),
+            _ => None,
+        };
+
+        // Retrieve token from central store and merge variables. Bei MI bleibt
+        // der Token bis zum letzten Item in der Instanz.
         let mut token = {
             let inst_arc = self
                 .instances
@@ -157,15 +262,100 @@ impl WorkflowEngine {
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
-            inst.tokens.remove(&task.token_id).ok_or_else(|| {
+            let mut token = if is_multi_instance && !is_last_item {
+                inst.tokens.get(&task.token_id).cloned()
+            } else {
+                inst.tokens.remove(&task.token_id)
+            }
+            .ok_or_else(|| {
                 EngineError::InvalidDefinition(format!(
                     "Token {} not found in instance",
                     task.token_id
                 ))
-            })?
+            })?;
+
+            if is_multi_instance {
+                // Item-Variablen des abgeschlossenen Tasks in den zentralen Token mergen.
+                if let Some(loop_counter) = task.variables_snapshot.get("loopCounter") {
+                    token
+                        .variables
+                        .insert("loopCounter".to_string(), loop_counter.clone());
+                }
+                if let Some(element_variable) = &mi_element_variable
+                    && let Some(value) = task.variables_snapshot.get(element_variable)
+                {
+                    token
+                        .variables
+                        .insert(element_variable.clone(), value.clone());
+                }
+            }
+
+            token
         };
         for (k, v) in variables {
             token.variables.insert(k, v);
+        }
+
+        // Vor dem letzten Item: nur Fortschritt fortschreiben, Token behalten.
+        if is_multi_instance && !is_last_item {
+            let (completed, total) = mi_progress
+                .as_ref()
+                .map(|p| (p.completed.saturating_add(1), p.total))
+                .unwrap_or((0, 0));
+            let next_task_id = self
+                .next_open_multi_instance_task_id(
+                    instance_id,
+                    &task.node_id,
+                    task.token_id,
+                    task_id,
+                )
+                .unwrap_or(task_id);
+
+            {
+                let inst_arc = self
+                    .instances
+                    .get(&instance_id)
+                    .await
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.variables = token.variables.clone();
+                inst.tokens.insert(token.id, token);
+                if let Some(progress) = inst.multi_instance_state.get_mut(&task.node_id) {
+                    progress.completed = progress.completed.saturating_add(1);
+                }
+                inst.state = InstanceState::WaitingOnServiceTask {
+                    task_id: next_task_id,
+                };
+                inst.push_audit_log(format!(
+                    "✅ Multi-instance service task '{}' item {completed}/{total} completed by worker '{}'",
+                    task.node_id, worker_id
+                ));
+            }
+
+            tracing::info!(
+                "Instance {}: completed multi-instance service task '{}' item {completed}/{total} (task_id: {task_id})",
+                instance_id,
+                task.node_id
+            );
+
+            self.remove_persisted_service_task(task_id).await;
+            metrics::counter!("bpmn_tasks_completed_total", "type" => "service").increment(1);
+
+            self.record_history_event(
+                instance_id,
+                crate::history::HistoryEventType::TaskCompleted,
+                &format!(
+                    "Multi-instance service task '{}' item {completed}/{total} completed",
+                    task.node_id
+                ),
+                crate::history::ActorType::ServiceWorker,
+                Some(worker_id.to_string()),
+                old_state.as_ref(),
+            )
+            .await;
+
+            self.persist_instance(instance_id).await;
+            return Ok(());
         }
 
         self.cancel_boundary_timers(instance_id, &task.node_id)
@@ -179,13 +369,16 @@ impl WorkflowEngine {
             task.node_id
         );
 
-        let def_key = {
+        {
             let inst_arc = self
                 .instances
                 .get(&instance_id)
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut inst = inst_arc.write().await;
+            if is_multi_instance {
+                inst.multi_instance_state.remove(&task.node_id);
+            }
             inst.push_audit_log(format!(
                 "✅ Service task '{}' completed by worker '{}'",
                 task.node_id, worker_id
@@ -194,15 +387,7 @@ impl WorkflowEngine {
                 inst.state = InstanceState::Running;
             }
             inst.variables = token.variables.clone();
-            inst.definition_key
-        };
-
-        // Advance token to the next node
-        let def = self
-            .definitions
-            .get(&def_key)
-            .ok_or(EngineError::NoSuchDefinition(def_key))?;
-        let def = Arc::clone(&def);
+        }
 
         // Run end scripts
         {
@@ -299,11 +484,22 @@ impl WorkflowEngine {
                 // Incident: log and record on the instance
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
-                    let msg = error_message.unwrap_or_else(|| "Unknown error".into());
+                    let msg = error_message
+                        .clone()
+                        .unwrap_or_else(|| "Unknown error".into());
                     inst.push_audit_log(format!(
                         "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
                         node_id, msg
                     ));
+                    inst.push_or_touch_incident(
+                        IncidentKind::ServiceTask,
+                        Some(node_id.clone()),
+                        Some(task_id),
+                        msg,
+                        error_details.clone(),
+                    );
+                    metrics::counter!("bpmn_incidents_total", "kind" => "service_task")
+                        .increment(1);
                 }
                 tracing::warn!("Service task {task_id}: incident created (retries exhausted)");
             } else {
@@ -533,9 +729,13 @@ impl WorkflowEngine {
 
             verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
-            task.lock_expiration = Some(Utc::now() + TimeDelta::seconds(additional_duration));
+            let lock = lock_time_delta(additional_duration);
+            task.lock_expiration = Some(Utc::now() + lock);
 
-            tracing::info!("Service task {task_id}: lock extended by {additional_duration}s");
+            tracing::info!(
+                "Service task {task_id}: lock extended by {}s",
+                lock.num_seconds()
+            );
         }
 
         self.persist_service_task(task_id).await;
@@ -677,6 +877,14 @@ impl WorkflowEngine {
                 "🚨 BPMN error '{}' thrown by worker '{}' at service task '{}' (No boundary event caught it)",
                 error_code, worker_id, incident.node_id
             ));
+            inst.push_or_touch_incident(
+                IncidentKind::ServiceTask,
+                Some(incident.node_id.clone()),
+                Some(task_id),
+                format!("Unhandled BPMN error '{error_code}'"),
+                None,
+            );
+            metrics::counter!("bpmn_incidents_total", "kind" => "service_task").increment(1);
         }
 
         tracing::warn!(

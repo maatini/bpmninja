@@ -3,6 +3,6 @@
 **Description:** Turn any folder of files into a navigable knowledge graph
 
 ## Steps
-Follow the graphify skill installed at ~/.agent/skills/graphify/SKILL.md to run the full pipeline.
+Run `graphify update .` for the AST-only refresh (no LLM cost) or `graphify build .` for a full rebuild. A full rebuild only after an explicit request.
 
 If no path argument is given, use `.` (current directory).

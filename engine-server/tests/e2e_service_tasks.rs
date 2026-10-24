@@ -252,3 +252,244 @@ async fn complete_nonexistent_task_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404, "Completing non-existent task should 404");
 }
+
+// ---------------------------------------------------------------------------
+// fetchAndLock input validation (R2)
+// ---------------------------------------------------------------------------
+
+async fn fetch_and_lock(base: &str, body: Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("{base}/api/service-task/fetchAndLock"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn fetch_and_lock_rejects_lock_duration_above_one_hour() {
+    let base = start_server().await;
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({
+            "workerId": "w1",
+            "maxTasks": 1,
+            "topics": [{ "topicName": "t", "lockDuration": 3_600_001 }]
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("lockDuration"),
+        "unexpected body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn fetch_and_lock_rejects_huge_and_negative_lock_duration() {
+    let base = start_server().await;
+    for duration in [i64::MAX, 0, -1] {
+        let res = fetch_and_lock(
+            &base,
+            serde_json::json!({
+                "workerId": "w1",
+                "maxTasks": 1,
+                "topics": [{ "topicName": "t", "lockDuration": duration }]
+            }),
+        )
+        .await;
+        assert_eq!(
+            res.status(),
+            400,
+            "lockDuration {duration} must be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn fetch_and_lock_rejects_more_than_100_tasks() {
+    let base = start_server().await;
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({
+            "workerId": "w1",
+            "maxTasks": 101,
+            "topics": [{ "topicName": "t", "lockDuration": 30_000 }]
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("maxTasks"),
+        "unexpected body: {body}"
+    );
+
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({
+            "workerId": "w1",
+            "maxTasks": 0,
+            "topics": [{ "topicName": "t", "lockDuration": 30_000 }]
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), 400, "maxTasks 0 must be rejected");
+}
+
+#[tokio::test]
+async fn fetch_and_lock_rejects_empty_topics_and_topic_name() {
+    let base = start_server().await;
+
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({ "workerId": "w1", "maxTasks": 1, "topics": [] }),
+    )
+    .await;
+    assert_eq!(res.status(), 400, "empty topics must be rejected");
+
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({
+            "workerId": "w1",
+            "maxTasks": 1,
+            "topics": [{ "topicName": "  ", "lockDuration": 30_000 }]
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), 400, "blank topicName must be rejected");
+}
+
+#[tokio::test]
+async fn fetch_and_lock_applies_per_topic_duration() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base}/api/deploy"))
+        .json(&serde_json::json!({ "xml": SERVICE_TASK_BPMN, "name": "test" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let def_key = body["definition_key"].as_str().unwrap().to_string();
+    client
+        .post(format!("{base}/api/start"))
+        .json(&serde_json::json!({ "definition_key": def_key }))
+        .send()
+        .await
+        .unwrap();
+
+    let res = fetch_and_lock(
+        &base,
+        serde_json::json!({
+            "workerId": "w1",
+            "maxTasks": 5,
+            "topics": [
+                { "topicName": "other_topic", "lockDuration": 5_000 },
+                { "topicName": "test_topic", "lockDuration": 60_000 }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    let tasks: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0]["topic"], "test_topic");
+
+    let expiration: chrono::DateTime<chrono::Utc> = tasks[0]["lock_expiration"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let remaining = (expiration - chrono::Utc::now()).num_seconds();
+    assert!(
+        (55..=60).contains(&remaining),
+        "expected ~60s lock from topic duration, got {remaining}s"
+    );
+}
+
+#[tokio::test]
+async fn instance_incidents_can_be_listed_and_resolved() {
+    let (base, client, instance_id, task_id) =
+        setup_locked_task("test_topic", SERVICE_TASK_BPMN).await;
+
+    let res = client
+        .post(format!("{}/api/service-task/{}/failure", base, task_id))
+        .json(&serde_json::json!({
+            "workerId": "worker1",
+            "retries": 0,
+            "errorMessage": "boom",
+            "errorDetails": "stack trace"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    let res = client
+        .get(format!("{}/api/instances/{}/incidents", base, instance_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let incidents: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0]["kind"], "service_task");
+    assert_eq!(incidents[0]["message"], "boom");
+    assert_eq!(incidents[0]["details"], "stack trace");
+    assert!(incidents[0]["resolved_at"].is_null());
+    let incident_id = incidents[0]["id"].as_str().unwrap().to_string();
+
+    let resolve_url = format!(
+        "{}/api/instances/{}/incidents/{}/resolve",
+        base, instance_id, incident_id
+    );
+    let res = client
+        .post(&resolve_url)
+        .json(&serde_json::json!({ "resolvedBy": "admin" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let resolved: Value = res.json().await.unwrap();
+    assert_eq!(resolved["resolved_by"], "admin");
+    assert!(!resolved["resolved_at"].is_null());
+
+    // Ein bereits aufgelöster Incident ist ein Konflikt.
+    let res = client
+        .post(&resolve_url)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 409);
+
+    // Unbekannter Incident liefert 404.
+    let res = client
+        .post(format!(
+            "{}/api/instances/{}/incidents/00000000-0000-0000-0000-000000000001/resolve",
+            base, instance_id
+        ))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+
+    let res = client
+        .get(format!("{}/api/instances/{}/incidents", base, instance_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let incidents: Vec<Value> = res.json().await.unwrap();
+    assert!(!incidents[0]["resolved_at"].is_null());
+}

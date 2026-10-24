@@ -271,9 +271,19 @@ impl WorkflowEngine {
                 self.handle_send_task(instance_id, token, &def_clone, &current_id, message_name)
                     .await
             }
-            BpmnElement::ServiceTask { topic, .. } => {
-                self.handle_service_task(instance_id, token, &def_clone, &current_id, topic)
-                    .await
+            BpmnElement::ServiceTask {
+                topic,
+                multi_instance,
+            } => {
+                self.handle_service_task(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    topic,
+                    multi_instance.as_ref(),
+                )
+                .await
             }
             BpmnElement::ParallelGateway => {
                 self.handle_parallel_gateway(instance_id, token, &def_clone, &current_id)

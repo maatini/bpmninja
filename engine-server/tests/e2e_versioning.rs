@@ -161,10 +161,14 @@ async fn start_latest_uses_newest_version() {
         .unwrap()
         .to_string();
 
-    // Start via /api/start/latest
+    // Start via /api/start/latest with the documented field names.
+    // The legacy `bpmn_id` alias is covered by e2e_start_errors.
     let res = client
         .post(format!("{}/api/start/latest", base))
-        .json(&serde_json::json!({ "bpmn_id": "OrderProcess" }))
+        .json(&serde_json::json!({
+            "bpmn_process_id": "OrderProcess",
+            "business_key": "order-42"
+        }))
         .send()
         .await
         .unwrap();
@@ -172,4 +176,14 @@ async fn start_latest_uses_newest_version() {
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["definition_key"].as_str().unwrap(), key_v2);
     assert_eq!(body["version"], 2);
+
+    let instance_id = body["instance_id"].as_str().unwrap();
+    let res = client
+        .get(format!("{}/api/instances/{}", base, instance_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let instance: Value = res.json().await.unwrap();
+    assert_eq!(instance["business_key"], "order-42");
 }

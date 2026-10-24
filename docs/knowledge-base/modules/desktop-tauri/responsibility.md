@@ -36,4 +36,4 @@
 | `PendingTasksPage.tsx` | ~290 | User & service task lists with completion dialogs |
 | `IncidentsPage.tsx` | ~165 | Incident cards with quick retry, auto-refresh |
 | `SettingsPage.tsx` | ~165 | API URL config + connection verify |
-| `lib/tauri.ts` | ~170 | Typed Tauri command wrappers (API client layer) |
+| `src/shared/lib/tauri.ts` | ~170 | Typed Tauri command wrappers (API client layer) |

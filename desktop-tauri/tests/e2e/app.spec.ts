@@ -42,7 +42,6 @@ interface MockState {
   pendingServiceTasks: any[];
   pendingTimers: any[];
   pendingMessageCatches: any[];
-  completedTasks: string[];
   processInstances: Array<{
     id: string;
     definition_key: string;
@@ -90,7 +89,6 @@ const DEFAULT_MOCK_STATE: MockState = {
   pendingServiceTasks: [],
   pendingTimers: [],
   pendingMessageCatches: [],
-  completedTasks: [],
   processInstances: [],
   completedInstances: [],
   definitions: [],
@@ -135,12 +133,6 @@ async function injectTauriMock(
                 });
               }
               resolve(defId);
-              break;
-            }
-
-            case 'deploy_simple_process': {
-              mockState.deployedDefs.push('simple');
-              resolve("Deployed 'simple' process");
               break;
             }
 
@@ -198,7 +190,6 @@ async function injectTauriMock(
 
             case 'complete_task': {
               const taskId = args.taskId as string;
-              mockState.completedTasks.push(taskId);
               // Remove from pending
               mockState.pendingTasks = mockState.pendingTasks.filter(
                 (t: any) => t.task_id !== taskId,
@@ -306,14 +297,6 @@ async function injectTauriMock(
               break;
             }
 
-            case 'get_completed_instance': {
-              const instId = args.instanceId as string;
-              const found = mockState.completedInstances.find((i: any) => i.id === instId);
-              if (found) resolve(found);
-              else reject('No such completed instance: ' + instId);
-              break;
-            }
-
             case 'get_pending_timers': {
               resolve(mockState.pendingTimers);
               break;
@@ -404,11 +387,6 @@ async function injectTauriMock(
             case 'download_instance_file': {
               resolve(null);
               break;
-            }
-
-            case 'delete_instance_file': {
-               resolve(null);
-               break;
             }
 
             case 'suspend_instance': {

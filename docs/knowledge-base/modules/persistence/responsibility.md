@@ -10,7 +10,7 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 **Source:** 5 files: `lib.rs`, `client.rs`, `trait_impl.rs`, `models.rs`, `tests.rs` (~1,150 LoC)
 
 **Owns:**
-1. NATS JetStream connection lifecycle (`NatsPersistence::connect(url, stream_name)`)
+1. NATS JetStream connection lifecycle (`NatsPersistence::connect(url, stream_name)`) including a **fail-closed bootstrap** of streams, KV buckets and object stores
 2. 9 KV buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `message_catches`, `tokens`, `bpmn_xml`, `history`
 3. Object Store: `instance_files` for binary file variables
 4. JetStream: `WORKFLOW_EVENTS` consumer for history event streaming
@@ -22,6 +22,8 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 - File object keys: `file:{instance_id}-{var_name}-{filename}`
 - All values are JSON-serialized (except file data, which is raw bytes)
 - Failed operations return `EngineError::PersistenceError(msg)`
+- Bootstrap failures (connect, stream/KV/object-store creation, retention update) propagate; only "already exists" is tolerated (see [gotchas.md](gotchas.md))
+- `WORKFLOW_EVENTS`/`WORKFLOW_HISTORY` always carry bounded `max_age`, `max_bytes` and `num_replicas`; existing streams are reconciled without touching subjects/storage/discard
 
 ## persistence-memory (Testing/Development)
 

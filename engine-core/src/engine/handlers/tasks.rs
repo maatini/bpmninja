@@ -1,12 +1,66 @@
 use crate::domain::{EngineError, EngineResult};
-use crate::domain::{ProcessDefinition, Token};
+use crate::domain::{MultiInstanceDef, ProcessDefinition, Token};
 use crate::engine::WorkflowEngine;
 use crate::engine::boundary::setup_boundary_events;
 use crate::engine::executor::resolve_next_target;
-use crate::runtime::{NextAction, PendingServiceTask, PendingUserTask};
+use crate::runtime::{MultiInstanceProgress, NextAction, PendingServiceTask, PendingUserTask};
 use chrono::Utc;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Liefert die Items für ein paralleles Multi-Instance-Service-Task.
+///
+/// `collection` wird als Array aus den Token-Variablen gelesen. Bei
+/// `loop_cardinality` bleibt der Item-Wert leer (`None`); die Anzahl wird
+/// stattdessen über `loopCounter` abgebildet.
+fn resolve_multi_instance_items(
+    def: &MultiInstanceDef,
+    variables: &HashMap<String, Value>,
+    element_id: &str,
+) -> EngineResult<Vec<Option<Value>>> {
+    if let Some(collection) = &def.collection {
+        return match variables.get(collection) {
+            None => Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance collection variable '{collection}' not found for service task '{element_id}'"
+            ))),
+            Some(Value::Array(items)) => Ok(items.iter().cloned().map(Some).collect()),
+            Some(other) => Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance collection variable '{collection}' of service task '{element_id}' must be an array, got {}",
+                json_type_name(other)
+            ))),
+        };
+    }
+
+    let Some(cardinality) = &def.loop_cardinality else {
+        return Err(EngineError::InvalidDefinition(format!(
+            "Multi-instance service task '{element_id}' has neither collection nor loopCardinality"
+        )));
+    };
+    let total: usize = cardinality.trim().parse().map_err(|_| {
+        EngineError::InvalidDefinition(format!(
+            "Multi-instance loopCardinality of service task '{element_id}' must be a positive integer, got '{cardinality}'"
+        ))
+    })?;
+    if total == 0 {
+        return Err(EngineError::InvalidDefinition(format!(
+            "Multi-instance loopCardinality of service task '{element_id}' must be a positive integer, got '{cardinality}'"
+        )));
+    }
+    Ok(vec![None; total])
+}
+
+fn json_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
 
 impl WorkflowEngine {
     pub(crate) async fn handle_user_task(
@@ -137,7 +191,40 @@ impl WorkflowEngine {
         def_clone: &Arc<ProcessDefinition>,
         current_id: &str,
         topic: &str,
+        multi_instance: Option<&MultiInstanceDef>,
     ) -> EngineResult<NextAction> {
+        let mi_items = match multi_instance {
+            Some(mi) => Some(resolve_multi_instance_items(
+                mi,
+                &token.variables,
+                current_id,
+            )?),
+            None => None,
+        };
+
+        // Leere Item-Liste: Aktivität überspringen, bevor Boundary-Events
+        // eingerichtet werden.
+        if let Some(items) = &mi_items
+            && items.is_empty()
+        {
+            let next = resolve_next_target(def_clone, current_id, &token.variables)?;
+            token.current_node = next.clone();
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let mut inst = inst_arc.write().await;
+            inst.current_node = next;
+            inst.push_audit_log(format!(
+                "⏭ Multi-instance service task '{current_id}' skipped (empty collection)"
+            ));
+            tracing::info!(
+                "Instance {instance_id}: multi-instance service task '{current_id}' skipped (empty collection)"
+            );
+            return Ok(NextAction::Continue(token.clone()));
+        }
+
         let (pending_timers, pending_msgs) =
             setup_boundary_events(def_clone, current_id, instance_id, token);
         for t in pending_timers {
@@ -149,6 +236,82 @@ impl WorkflowEngine {
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
+        }
+
+        if let (Some(mi), Some(items)) = (multi_instance, mi_items) {
+            let total = items.len();
+            let inst_arc = self
+                .instances
+                .get(&instance_id)
+                .await
+                .ok_or(EngineError::NoSuchInstance(instance_id))?;
+            let pending_tasks = {
+                let mut inst = inst_arc.write().await;
+                let mut tasks = Vec::with_capacity(total);
+                for (idx, item) in items.into_iter().enumerate() {
+                    let mut variables_snapshot = token.variables.clone();
+                    variables_snapshot
+                        .insert("loopCounter".to_string(), Value::from((idx + 1) as u64));
+                    if let (Some(element_variable), Some(value)) =
+                        (mi.element_variable.as_ref(), item)
+                    {
+                        variables_snapshot.insert(element_variable.clone(), value);
+                    }
+                    tasks.push(PendingServiceTask {
+                        id: Uuid::new_v4(),
+                        instance_id,
+                        definition_key: def_clone.key,
+                        node_id: current_id.to_string(),
+                        topic: topic.to_string(),
+                        token_id: token.id,
+                        variables_snapshot,
+                        created_at: Utc::now(),
+                        worker_id: None,
+                        lock_expiration: None,
+                        retries: 3,
+                        error_message: None,
+                        error_details: None,
+                        business_key: if inst.business_key.is_empty() {
+                            None
+                        } else {
+                            Some(inst.business_key.clone())
+                        },
+                    });
+                }
+
+                inst.current_node = current_id.to_string();
+                inst.tokens.insert(token.id, token.clone());
+                inst.multi_instance_state.insert(
+                    current_id.to_string(),
+                    MultiInstanceProgress {
+                        node_id: current_id.to_string(),
+                        total,
+                        completed: 0,
+                        sequential_token: None,
+                    },
+                );
+                inst.push_audit_log(format!(
+                    "🔗 Multi-instance service task '{current_id}' created {total} tasks for topic '{topic}'"
+                ));
+                tasks
+            };
+
+            tracing::info!(
+                "Instance {instance_id}: multi-instance service task '{current_id}' pending with {total} tasks for topic '{topic}'"
+            );
+
+            // Der erste Task geht über den Executor in die Pending-Map, die
+            // übrigen werden hier direkt eingefügt und persistiert.
+            let Some((first, rest)) = pending_tasks.split_first() else {
+                return Ok(NextAction::Continue(token.clone()));
+            };
+            let first = first.clone();
+            for task in rest {
+                let id = task.id;
+                self.insert_pending_service_task(task.clone());
+                self.persist_service_task(id).await;
+            }
+            return Ok(NextAction::WaitForServiceTask(first));
         }
 
         let inst_arc = self

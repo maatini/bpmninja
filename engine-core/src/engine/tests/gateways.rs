@@ -1,14 +1,6 @@
-//! Split from `unit_tests.rs` (M5).
-
 use super::super::*;
 use super::helpers::*;
 use crate::domain::ProcessDefinitionBuilder;
-
-// -----------------------------------------------------------------------
-// Condition evaluator tests
-// -----------------------------------------------------------------------
-
-// Condition unit tests removed — covered by condition.rs::tests.
 
 // -----------------------------------------------------------------------
 // ExclusiveGateway (XOR) tests
@@ -371,9 +363,6 @@ async fn xor_gateway_negative_x_routes_to_user_task_2() {
         InstanceState::Completed
     );
 }
-
-// xor_gateway_zero_x_routes_to_user_task_2 entfernt — redundant mit
-// xor_gateway_negative_x_routes_to_user_task_2 (gleicher Default-Pfad).
 
 #[tokio::test]
 async fn xor_gateway_user_task_merges_variables() {

@@ -1,5 +1,3 @@
-//! Split from `unit_tests.rs` (M5).
-
 use super::super::*;
 use super::helpers::*;
 use crate::domain::ProcessDefinitionBuilder;

@@ -81,7 +81,7 @@ engine-core/src/
 3. **Concurrency**: `instance_store.rs` uses `DashMap` for lock-free concurrent access. Never introduce global `Mutex`/`RwLock` on the instance store.
 4. **Token Semantics**: Every BPMN element consumes input tokens and produces output tokens. Gateway routing is deterministic for the same input state.
 5. **Error Handling**: Use `WorkflowError` from `domain/error.rs`. Never unwrap in production code – use `?` or explicit error mapping.
-6. **Cross-Crate**: Follow `CROSS_CRATE_WORKFLOW.md` – engine-core changes come FIRST, then parser, persistence, server, desktop.
+6. **Cross-Crate**: Follow the implementation order in `.agent/rules/01_GLOBAL_DIRECTIVES.md` – engine-core changes come FIRST, then parser, persistence, server, desktop.
 
 ## Co-Evolutionary Verification (EvoSkills, arXiv 2604.01687)
 

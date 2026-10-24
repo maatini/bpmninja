@@ -25,8 +25,6 @@ graphify-out/
 
 # Agent / AI files
 .agent/
-.gemini/
-AGENT_GUIDELINES.md
 
 # IDE & OS artifacts
 .vscode/
@@ -50,9 +48,6 @@ docker-compose.override.yml
 readme-assets/
 *.md
 !README.md
-
-# Example files
-example.bpmn
 
 # Rust backup files
 **/*.rs.bk

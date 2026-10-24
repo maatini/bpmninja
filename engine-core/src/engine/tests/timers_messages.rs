@@ -1,5 +1,3 @@
-//! Split from `unit_tests.rs` (M5).
-
 use super::super::*;
 use super::helpers::*;
 use crate::domain::ProcessDefinitionBuilder;
@@ -1131,4 +1129,201 @@ async fn test_correlate_message_starts_new_instance() {
         inst.variables.get("orderId"),
         Some(&serde_json::Value::from(42))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Error isolation in the timer round
+// ---------------------------------------------------------------------------
+
+/// A single broken timer (missing instance) must not abort the round: the other
+/// due timer is still processed, the broken one is kept and re-scheduled.
+#[tokio::test]
+async fn timer_error_is_isolated_and_timer_rescheduled() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("timer_error_isolated")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "timer",
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
+                std::time::Duration::from_secs(3600),
+            )),
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "timer")
+        .flow("timer", "end")
+        .build()
+        .unwrap();
+
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    let real_tid = engine
+        .pending_timers
+        .iter()
+        .map(|r| r.id)
+        .next()
+        .expect("timer must be pending");
+    engine.set_timer_expiry(real_tid, chrono::Utc::now() - chrono::Duration::seconds(1));
+
+    let bogus_tid = uuid::Uuid::new_v4();
+    engine.restore_timer(crate::runtime::PendingTimer {
+        id: bogus_tid,
+        instance_id: uuid::Uuid::new_v4(),
+        node_id: "missing_timer".into(),
+        expires_at: chrono::Utc::now() - chrono::Duration::seconds(1),
+        token_id: uuid::Uuid::new_v4(),
+        timer_def: None,
+        remaining_repetitions: None,
+    });
+
+    let processed = engine
+        .process_timers()
+        .await
+        .expect("a single broken timer must not fail the round");
+    assert_eq!(processed, 2);
+
+    // The healthy timer fired and completed the instance.
+    assert_eq!(
+        engine.get_instance_state(inst_id).await.unwrap(),
+        InstanceState::Completed
+    );
+    assert!(!engine.pending_timers.contains_key(&real_tid));
+
+    // The broken timer survived and was pushed into the future (no hot loop).
+    let new_expiry = {
+        let kept = engine
+            .pending_timers
+            .get(&bogus_tid)
+            .expect("failed timer must be kept");
+        assert!(
+            kept.expires_at > chrono::Utc::now(),
+            "failed timer must be re-scheduled into the future"
+        );
+        kept.expires_at
+    };
+    assert!(engine.timer_due_index.contains(bogus_tid, new_expiry));
+
+    assert_eq!(
+        engine
+            .timer_processing_errors
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+}
+
+/// A timer that fails after it was taken from the pending map must stay
+/// persisted; `remove_persisted_timer` only runs after successful processing.
+#[tokio::test]
+async fn failed_timer_stays_persisted() {
+    let engine = WorkflowEngine::with_in_memory_persistence();
+    let def = ProcessDefinitionBuilder::new("timer_error_persisted")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "timer",
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
+                std::time::Duration::from_secs(3600),
+            )),
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "timer")
+        .flow("timer", "end")
+        .build()
+        .unwrap();
+
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+
+    let tid = engine
+        .pending_timers
+        .iter()
+        .map(|r| r.id)
+        .next()
+        .expect("timer must be pending");
+
+    // Break the instance so the timer cannot be processed.
+    {
+        let inst_arc = engine
+            .instances
+            .get(&inst_id)
+            .await
+            .expect("instance must exist");
+        inst_arc.write().await.tokens.clear();
+    }
+    engine.set_timer_expiry(tid, chrono::Utc::now() - chrono::Duration::seconds(1));
+
+    let processed = engine.process_timers().await.unwrap();
+    assert_eq!(processed, 1);
+    assert!(engine.pending_timers.contains_key(&tid));
+    assert_eq!(
+        engine
+            .timer_processing_errors
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+
+    let persistence = engine.persistence.clone().expect("persistence attached");
+    let timers = persistence.list_timers().await.unwrap();
+    let persisted = timers
+        .iter()
+        .find(|t| t.id == tid)
+        .expect("failed timer must stay persisted");
+    assert!(
+        persisted.expires_at > chrono::Utc::now(),
+        "persisted timer must carry the new expiry"
+    );
+}
+
+/// Ein fehlschlagender Timer erzeugt einen Incident; der 2-s-Retry erhöht
+/// `occurrences` statt neue Einträge anzulegen.
+#[tokio::test]
+async fn failed_timer_records_deduplicated_incident() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("timer_incident")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "timer",
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
+                std::time::Duration::from_secs(3600),
+            )),
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "timer")
+        .flow("timer", "end")
+        .build()
+        .unwrap();
+
+    let (key, _) = engine.deploy_definition(def).await;
+    let inst_id = engine.start_instance(key).await.unwrap();
+    let tid = engine
+        .pending_timers
+        .iter()
+        .map(|r| r.id)
+        .next()
+        .expect("timer must be pending");
+
+    // Token entfernen, damit die Timer-Auswertung fehlschlägt.
+    {
+        let inst_arc = engine
+            .instances
+            .get(&inst_id)
+            .await
+            .expect("instance must exist");
+        inst_arc.write().await.tokens.clear();
+    }
+    engine.set_timer_expiry(tid, chrono::Utc::now() - chrono::Duration::seconds(1));
+
+    engine.process_timers().await.unwrap();
+    let incidents = engine.get_instance_incidents(inst_id).await.unwrap();
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].kind, crate::domain::IncidentKind::Timer);
+    assert_eq!(incidents[0].node_id.as_deref(), Some("timer"));
+    assert_eq!(incidents[0].occurrences, 1);
+
+    // Zweite Runde: derselbe Timer schlägt erneut fehl.
+    engine.set_timer_expiry(tid, chrono::Utc::now() - chrono::Duration::seconds(1));
+    engine.process_timers().await.unwrap();
+
+    let incidents = engine.get_instance_incidents(inst_id).await.unwrap();
+    assert_eq!(incidents.len(), 1, "retry must not duplicate the incident");
+    assert_eq!(incidents[0].occurrences, 2);
 }

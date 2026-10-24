@@ -1,0 +1,10 @@
+# Laufzeit
+crewai>=1.0,<2
+crewai-tools>=1.0,<2
+python-dotenv>=1.0
+PyYAML>=6.0
+requests>=2.32
+beautifulsoup4>=4.12
+
+# Entwicklung und Tests
+pytest>=8.0

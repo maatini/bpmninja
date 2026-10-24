@@ -27,22 +27,32 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-pub use state::{MAX_XML_BYTES, default_cors_origins, require_nats_from_env};
+pub use state::{
+    MAX_XML_BYTES, StorageState, StorageStatus, default_cors_origins, require_nats_from_env,
+};
 
 /// Optional overrides for app construction (primarily for tests).
 ///
 /// When a field is `None`, the value is taken from the environment.
 /// Explicit values avoid process-wide env races in parallel integration tests.
 ///
-/// `api_key`: `None` = from `BPMNINJA_API_KEY`, `Some(None)` = auth off,
-/// `Some(Some(k))` = auth on with that key.
+/// `api_key`: `None` = from `BPMNINJA_API_KEY`, `Some(None)` = auth explicitly
+/// off, `Some(Some(k))` = auth on with that key.
+/// `worker_api_key`: same scheme for `BPMNINJA_WORKER_API_KEY`.
+/// `bind_addr`: host only (`BIND_ADDR`/`BIND_ADDRESS`); drives the fail-closed
+/// decision when no key is configured.
 #[derive(Debug, Clone, Default)]
 pub struct AppBuildConfig {
     pub require_nats: Option<bool>,
     pub max_upload_bytes: Option<usize>,
     pub max_xml_bytes: Option<usize>,
     pub api_key: Option<Option<String>>,
+    pub worker_api_key: Option<Option<String>>,
+    pub bind_addr: Option<String>,
+    pub allow_unauthenticated: Option<bool>,
     pub cors_origins: Option<Vec<String>>,
+    /// Ergebnis des NATS-Bootstraps; `None` leitet den Status aus `persistence` ab.
+    pub storage_status: Option<StorageStatus>,
 }
 
 /// Builds the Axum router with all routes and middleware.
@@ -63,7 +73,11 @@ pub fn build_app() -> Router {
             max_upload_bytes: None,
             max_xml_bytes: Some(MAX_XML_BYTES),
             api_key: Some(None),
+            worker_api_key: Some(None),
+            bind_addr: Some(state::DEFAULT_BIND_ADDR.to_string()),
+            allow_unauthenticated: None,
             cors_origins: Some(default_cors_origins()),
+            storage_status: None,
         },
     )
 }
@@ -108,10 +122,26 @@ pub fn build_app_with_config(
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
+    // `Some(None)` is the explicit "auth off" switch (tests / dev helpers).
+    let explicit_auth_off = matches!(config.api_key, Some(None));
     let api_key = match config.api_key {
         Some(explicit) => explicit.and_then(|k| state::parse_api_key(Some(&k))),
         None => state::api_key_from_env(),
     };
+    let worker_api_key = match config.worker_api_key {
+        Some(explicit) => explicit.and_then(|k| state::parse_api_key(Some(&k))),
+        None => state::worker_api_key_from_env(),
+    };
+    let bind_addr = config.bind_addr.unwrap_or_else(state::bind_addr_from_env);
+    let allow_unauthenticated = config
+        .allow_unauthenticated
+        .unwrap_or_else(state::allow_unauthenticated_from_env);
+    let auth_required = state::resolve_auth_required(
+        api_key.is_some() || worker_api_key.is_some(),
+        explicit_auth_off,
+        allow_unauthenticated,
+        &bind_addr,
+    );
     let cors_origins = match config.cors_origins {
         Some(origins) if !origins.is_empty() => origins,
         Some(_) => state::default_cors_origins(),
@@ -121,12 +151,17 @@ pub fn build_app_with_config(
         .max_xml_bytes
         .unwrap_or_else(state::max_xml_bytes_from_env);
 
+    let storage_status = config
+        .storage_status
+        .unwrap_or_else(|| StorageStatus::inferred(persistence.is_some()));
+
     let state = Arc::new(AppState {
         engine,
         persistence,
         deployed_xml: Arc::new(RwLock::new(xml_cache)),
         nats_url,
         log_buffer,
+        storage_status,
         require_nats: config
             .require_nats
             .unwrap_or_else(state::require_nats_from_env),
@@ -135,15 +170,28 @@ pub fn build_app_with_config(
             .unwrap_or_else(state::max_upload_bytes_from_env),
         max_xml_bytes,
         api_key,
+        worker_api_key,
+        auth_required,
         cors_origins: cors_origins.clone(),
     });
 
     tracing::info!(
-        auth_enabled = state.api_key.is_some(),
+        auth_required = state.auth_required,
+        admin_key = state.api_key.is_some(),
+        worker_key = state.worker_api_key.is_some(),
+        bind_addr = %bind_addr,
+        allow_unauthenticated,
         cors_origins = ?state.cors_origins,
         max_xml_bytes,
         "HTTP security config"
     );
+
+    if !state.auth_required && !state::is_loopback_bind(&bind_addr) {
+        tracing::warn!(
+            bind_addr = %bind_addr,
+            "API authentication is disabled on a non-loopback bind (explicit opt-out)"
+        );
+    }
 
     let cors = build_cors_layer(&cors_origins);
 
@@ -199,6 +247,14 @@ pub fn build_app_with_config(
         .route(
             "/api/instances/{id}/history/{event_id}",
             get(history::get_instance_history_entry),
+        )
+        .route(
+            "/api/instances/{id}/incidents",
+            get(instances::get_instance_incidents),
+        )
+        .route(
+            "/api/instances/{id}/incidents/{incident_id}/resolve",
+            post(instances::resolve_instance_incident),
         )
         .route("/api/info", get(monitoring::get_backend_info))
         .route("/api/monitoring", get(monitoring::get_monitoring_data))

@@ -37,6 +37,7 @@ fn dummy_instance(
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
         started_at,
         completed_at: None,
     }

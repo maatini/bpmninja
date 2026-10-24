@@ -30,12 +30,18 @@ async fn start_server_with_nats() -> Option<String> {
 
     let engine = engine_core::engine::WorkflowEngine::new().with_persistence(persistence.clone());
 
-    let app = engine_server::build_app_with_engine(
+    let app = engine_server::build_app_with_config(
         Arc::new(engine),
         Some(persistence),
         std::collections::HashMap::new(),
         None,
         Arc::new(engine_server::LogBuffer::new()),
+        engine_server::AppBuildConfig {
+            // Auth off explicitly: the API-key gate is fail-closed otherwise.
+            api_key: Some(None),
+            worker_api_key: Some(None),
+            ..Default::default()
+        },
     );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

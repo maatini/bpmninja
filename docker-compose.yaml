@@ -15,16 +15,22 @@ services:
     #   context: .
     #   dockerfile: engine-server/Dockerfile
     ports:
-      - "8081:8081" # LAN-API
+      - "8081:8081" # LAN-API (nur mit API-Key erreichbar, siehe unten)
     environment:
       - PORT=8081
+      # Für Docker ist 0.0.0.0 nötig. Lokal ohne Key: BIND_ADDR=127.0.0.1 setzen —
+      # nur dann bleibt die Auth aus (fail-closed bei Nicht-Loopback-Bind).
       - BIND_ADDR=0.0.0.0
+      # Pflicht: ohne Key startet der Container nicht (Compose bricht ab).
+      - BPMNINJA_API_KEY=${BPMNINJA_API_KEY:?BPMNINJA_API_KEY muss gesetzt sein (API-Auth ist fail-closed)}
+      # Optional: Worker-Key, erlaubt nur Service-Task-Endpunkte
+      # (fetchAndLock, complete, failure, extendLock, bpmnError). Alles andere → 403.
+      - BPMNINJA_WORKER_API_KEY=${BPMNINJA_WORKER_API_KEY:-}
       - NATS_URL=nats://bpmninja:bpmninja@nats:4222
       # Host-side `cargo run -p engine-server`: NATS_URL=nats://bpmninja:bpmninja@localhost:4222
       # Fail-fast: do not silently fall back to in-memory (data loss after restart)
       - REQUIRE_NATS=true
       # Optional LAN-Härtung (engine-server Env-Namen; Werte bei Bedarf setzen):
-      # - BPMNINJA_API_KEY=
       # - CORS_ORIGINS=
     depends_on:
       - nats

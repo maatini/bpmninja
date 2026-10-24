@@ -7,5 +7,3 @@ pub struct MultiInstanceDef {
     pub collection: Option<String>,
     pub element_variable: Option<String>,
 }
-
-// ---------------------------------------------------------------------------

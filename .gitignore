@@ -17,6 +17,8 @@ out/
 # pnpm-lock.yaml
 # yarn.lock
 # package-lock.json
+/package-lock.json
+.venv/
 
 # ========================
 # Logs & Debug
@@ -46,6 +48,8 @@ engine_logs.jsonl
 # Local scratch notes
 # ========================
 kladde.md
+HANDOFF.md
+/reports/crewai/
 
 # ========================
 # Editoren & OS

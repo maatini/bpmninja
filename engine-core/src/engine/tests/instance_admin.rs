@@ -1,5 +1,3 @@
-//! Split from `unit_tests.rs` (M5).
-
 use super::super::*;
 use super::helpers::*;
 use crate::domain::ProcessDefinitionBuilder;
@@ -104,6 +102,7 @@ async fn restore_instance_loads_from_persistence() {
         multi_instance_state: std::collections::HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
         started_at: None,
         completed_at: None,
     };
@@ -1034,6 +1033,7 @@ async fn test_instance_store_is_empty_and_clear() {
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
         started_at: None,
         completed_at: None,
     };
@@ -1212,6 +1212,7 @@ async fn test_restore_instance_makes_it_accessible() {
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
         started_at: None,
         completed_at: None,
     };

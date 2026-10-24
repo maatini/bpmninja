@@ -1,5 +1,3 @@
-//! Split from `unit_tests.rs` (M5).
-
 use super::super::*;
 use super::helpers::*;
 use crate::domain::ProcessDefinitionBuilder;
@@ -175,6 +173,32 @@ async fn top_level_error_end_event_results_in_completed_with_error() {
         log.iter()
             .any(|l| l.contains("CRITICAL_FAIL") && l.contains("Error End"))
     );
+}
+
+#[tokio::test]
+async fn uncaught_top_level_error_end_creates_bpmn_error_incident() {
+    let engine = WorkflowEngine::new();
+    let def = ProcessDefinitionBuilder::new("top_err_incident")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "err_end",
+            BpmnElement::ErrorEndEvent {
+                error_code: "CRITICAL_FAIL".into(),
+            },
+        )
+        .flow("start", "err_end")
+        .build()
+        .unwrap();
+
+    let (key, _) = engine.deploy_definition(def).await;
+    let instance_id = engine.start_instance(key).await.unwrap();
+
+    let incidents = engine.get_instance_incidents(instance_id).await.unwrap();
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].kind, crate::domain::IncidentKind::BpmnError);
+    assert_eq!(incidents[0].node_id.as_deref(), Some("err_end"));
+    assert_eq!(incidents[0].message, "Unhandled BPMN error 'CRITICAL_FAIL'");
+    assert_eq!(incidents[0].occurrences, 1);
 }
 
 #[tokio::test]

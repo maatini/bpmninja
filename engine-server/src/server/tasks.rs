@@ -1,4 +1,4 @@
-use crate::server::state::{AppError, AppState, lock_duration_ms_to_secs, parse_uuid};
+use crate::server::state::{ApiJson, AppError, AppState, lock_duration_ms_to_secs, parse_uuid};
 use axum::{
     Json,
     extract::{Path, State},
@@ -33,7 +33,7 @@ pub(crate) async fn get_service_tasks(
 pub(crate) async fn complete_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<CompleteRequest>,
+    ApiJson(payload): ApiJson<CompleteRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -60,22 +60,67 @@ pub(crate) struct FetchAndLockRequest {
     pub async_response_timeout: Option<u64>,
 }
 
-pub(crate) async fn fetch_and_lock_service_tasks(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<FetchAndLockRequest>,
-) -> Json<Vec<PendingServiceTask>> {
-    let topics: Vec<String> = payload
+/// Accepted bounds for `lockDuration` in the HTTP contract (milliseconds).
+const MIN_LOCK_DURATION_MS: i64 = 1_000;
+const MAX_LOCK_DURATION_MS: i64 = 3_600_000;
+/// Accepted bounds for `maxTasks` and `topics` in a fetch-and-lock request.
+const MAX_FETCH_TASKS: usize = 100;
+const MAX_FETCH_TOPICS: usize = 32;
+
+/// Validates a fetch-and-lock request and returns `(topic, lock seconds)` pairs.
+///
+/// Out-of-range values would otherwise reach `engine-core` (or `chrono`) and
+/// either lock tasks for months or panic on extreme `TimeDelta`s.
+fn validated_topics(payload: &FetchAndLockRequest) -> Result<Vec<(String, i64)>, AppError> {
+    if payload.topics.is_empty() {
+        return Err(AppError::BadRequest(
+            "topics must contain at least one topic".to_string(),
+        ));
+    }
+    if payload.topics.len() > MAX_FETCH_TOPICS {
+        return Err(AppError::BadRequest(format!(
+            "topics must contain at most {MAX_FETCH_TOPICS} entries, got {}",
+            payload.topics.len()
+        )));
+    }
+    if !(1..=MAX_FETCH_TASKS).contains(&payload.max_tasks) {
+        return Err(AppError::BadRequest(format!(
+            "maxTasks must be between 1 and {MAX_FETCH_TASKS}, got {}",
+            payload.max_tasks
+        )));
+    }
+
+    payload
         .topics
         .iter()
-        .map(|t| t.topic_name.clone())
-        .collect();
-    // HTTP contract is milliseconds (Camunda/OpenAPI); engine-core uses seconds.
-    let lock_duration_ms = payload
-        .topics
-        .first()
-        .map(|t| t.lock_duration)
-        .unwrap_or(30_000);
-    let lock_duration = lock_duration_ms_to_secs(lock_duration_ms);
+        .enumerate()
+        .map(|(index, topic)| {
+            let name = topic.topic_name.trim();
+            if name.is_empty() {
+                return Err(AppError::BadRequest(format!(
+                    "topics[{index}].topicName must not be empty"
+                )));
+            }
+            if !(MIN_LOCK_DURATION_MS..=MAX_LOCK_DURATION_MS).contains(&topic.lock_duration) {
+                return Err(AppError::BadRequest(format!(
+                    "topics[{index}].lockDuration must be between \
+                     {MIN_LOCK_DURATION_MS} and {MAX_LOCK_DURATION_MS} ms, got {}",
+                    topic.lock_duration
+                )));
+            }
+            Ok((
+                name.to_string(),
+                lock_duration_ms_to_secs(topic.lock_duration),
+            ))
+        })
+        .collect()
+}
+
+pub(crate) async fn fetch_and_lock_service_tasks(
+    State(state): State<Arc<AppState>>,
+    ApiJson(payload): ApiJson<FetchAndLockRequest>,
+) -> Result<Json<Vec<PendingServiceTask>>, AppError> {
+    let topics = validated_topics(&payload)?;
     let timeout_ms = payload.async_response_timeout.unwrap_or(0);
 
     let poll_interval = tokio::time::Duration::from_millis(500);
@@ -86,21 +131,20 @@ pub(crate) async fn fetch_and_lock_service_tasks(
         let tasks = {
             let engine = &state.engine;
             engine
-                .fetch_and_lock_service_tasks(
+                .fetch_and_lock_service_tasks_with_durations(
                     &payload.worker_id,
                     payload.max_tasks,
                     &topics,
-                    lock_duration,
                 )
                 .await
         };
 
         if !tasks.is_empty() || timeout_ms == 0 {
-            return Json(tasks);
+            return Ok(Json(tasks));
         }
 
         if start.elapsed() >= max_timeout {
-            return Json(vec![]);
+            return Ok(Json(vec![]));
         }
 
         tokio::time::sleep(poll_interval).await;
@@ -117,7 +161,7 @@ pub(crate) struct CompleteServiceTaskRequest {
 pub(crate) async fn complete_service_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<CompleteServiceTaskRequest>,
+    ApiJson(payload): ApiJson<CompleteServiceTaskRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -142,7 +186,7 @@ pub(crate) struct FailServiceTaskRequest {
 pub(crate) async fn fail_service_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<FailServiceTaskRequest>,
+    ApiJson(payload): ApiJson<FailServiceTaskRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -169,7 +213,7 @@ pub(crate) struct RetryIncidentRequest {
 pub(crate) async fn retry_incident(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<RetryIncidentRequest>,
+    ApiJson(payload): ApiJson<RetryIncidentRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -187,7 +231,7 @@ pub(crate) struct ResolveIncidentRequest {
 pub(crate) async fn resolve_incident(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<ResolveIncidentRequest>,
+    ApiJson(payload): ApiJson<ResolveIncidentRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -208,7 +252,7 @@ pub(crate) struct ExtendLockRequest {
 pub(crate) async fn extend_lock(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<ExtendLockRequest>,
+    ApiJson(payload): ApiJson<ExtendLockRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;
@@ -234,7 +278,7 @@ pub(crate) struct BpmnErrorRequest {
 pub(crate) async fn bpmn_error(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<BpmnErrorRequest>,
+    ApiJson(payload): ApiJson<BpmnErrorRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let task_id = parse_uuid(&id)?;

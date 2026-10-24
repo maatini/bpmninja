@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)] // presence-only: parser rejects MI without reading fields
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct BpmnMultiInstanceLoopCharacteristics {
     #[serde(rename = "@isSequential", default)]
@@ -13,7 +12,6 @@ pub(crate) struct BpmnMultiInstanceLoopCharacteristics {
     pub element_variable: Option<String>,
 }
 
-#[allow(dead_code)] // deserialized with MI XML; fields unused after MI reject
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct BpmnLoopCardinality {
     #[serde(rename = "$value", default)]

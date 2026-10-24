@@ -1,0 +1,761 @@
+# Aufgaben der Documentation Crew.
+#
+# `context` bildet die fachlichen Abhängigkeiten ab. Die Reihenfolge entspricht
+# dem Hauptpfad; der hierarchische Manager darf Aufgaben delegieren, aber nicht
+# die Abhängigkeiten umgehen.
+#
+# Alle Dateipfade sind relativ zu output_path. Die Schreibwerkzeuge verhindern
+# Pfadausbrüche und akzeptieren nur Markdown beziehungsweise Mermaid-Dateien.
+
+domain_research_task:
+  agent: domain_researcher
+  description: >
+    Recherchiere die Domäne des Projekts "{project_name}" gründlich, bevor
+    irgendein Dokument geschrieben oder umgebaut wird.
+
+    Projektbeschreibung:
+    {project_description}
+
+    Domänenthema:
+    {domain_topic}
+
+    Zielgruppe:
+    {target_audience}
+
+    Bestehende Quellen (Manifest):
+    {source_manifest}
+
+    Repository-Pfad für Codeabgleich (kann leer sein):
+    {repository_path}
+
+    Gehe in vier Schritten vor:
+
+    1. Domänenkarte: zentrale Konzepte, Akteure, Datenflüsse, Lebenszyklen,
+       typische Architekturentscheidungen und die Begriffe, die in dieser
+       Domäne regelmäßig verwechselt werden.
+    2. Standards und Best Practices: relevante Normen und Leitfäden, mindestens
+       Diátaxis, Google Developer Documentation Style Guide, Microsoft Writing
+       Style Guide sowie passende IEEE-/ISO-Dokumentationsnormen. Ergänze
+       domänenspezifische Standards, Sicherheitsanforderungen und
+       Barrierefreiheitsanforderungen.
+    3. Vergleichsprojekte: mindestens drei vergleichbare Open-Source- oder
+       Enterprise-Projekte. Analysiere, wie sie Einstieg, Referenz, Fehlerfälle
+       und Betrieb dokumentieren, und was daraus übertragbar ist.
+    4. Nutzerprobleme: typische Suchintentionen, Support-Fragen, falsche
+       Annahmen und Reibungspunkte der Zielgruppe. Leite daraus konkrete
+       Dokumentationsaufgaben ab.
+
+    Nutze web_search und fetch_url intensiv. Prüfe Primärquellen, nicht nur
+    Suchsnippets. Lies die wichtigsten vorhandenen Dokumente mit source_read.
+    Jede übernommene Aussage braucht eine Quellenangabe mit Titel, URL und
+    Zugriffsdatum. Widersprüche zwischen Quellen werden ausdrücklich benannt.
+
+    Schreibe das Ergebnis mit doc_write nach
+    "_research/domain-research.md". Die Datei enthält:
+    - Management Summary mit den fünf wichtigsten Erkenntnissen
+    - Domänenkarte und Begriffsfeld
+    - Standards und Best Practices mit Quellen
+    - Vergleichsprojekte in einer Tabelle
+    - Nutzerprobleme und Suchintentionen
+    - Empfehlungen für Terminologie, IA und Inhalte
+    - Quellenverzeichnis
+    - offene Fragen und Recherchelücken
+
+    Schreibe zusätzlich eine kompakte Quellenliste nach
+    "_research/sources.md". Erfinde keine Quellen. Wenn eine Suche fehlschlägt,
+    dokumentiere den Fehlversuch und arbeite mit der nächsten belastbaren
+    Quelle weiter.
+  expected_output: >
+    Zwei Markdown-Dateien: ein tiefer, belegter Forschungsbericht und eine
+    Quellenliste. Jede Empfehlung ist auf eine Nutzeraufgabe oder einen
+    Standard zurückführbar; offene Lücken sind markiert.
+  markdown: true
+
+documentation_audit_task:
+  agent: documentation_auditor
+  description: >
+    Auditiere die bestehende Dokumentation von "{project_name}" systematisch.
+
+    Zielgruppe:
+    {target_audience}
+
+    Quellenmanifest:
+    {source_manifest}
+
+    Repository-Pfad für Codeabgleich (kann leer sein):
+    {repository_path}
+
+    Erstelle zuerst mit source_inventory ein vollständiges Inventar. Lies
+    anschließend jede relevant echte Dokumentationsdatei mit source_read.
+    Überspringe generierte Dateien, Caches und Binärdateien. Nutze
+    source_search, um widersprüchliche Begriffe, Versionsangaben und
+    wiederkehrende Aussagen zu finden. Wenn ein Repository-Pfad angegeben ist,
+    prüfe auffällige technische Aussagen stichprobenartig mit code_search und
+    code_read.
+
+    Bewerte jede Datei und den Bestand als Ganzes mit dieser Rubrik
+    (jeweils 0 bis 100):
+    - Vollständigkeit: fehlen Voraussetzungen, Ergebnisse, Fehlerfälle,
+      Betrieb, Sicherheit oder Migration?
+    - Technische Korrektheit: stimmen APIs, Statuscodes, Befehle,
+      Standardwerte und Grenzen?
+    - Klarheit: sind Aufgaben, Zielgruppe und nächster Schritt erkennbar?
+    - Konsistenz: Terminologie, Struktur, Formatierung, Versionsstand?
+    - Aktualität: veraltete Screenshots, Befehle, Links oder Aussagen?
+    - Auffindbarkeit: Navigation, Titel, Querverweise, Suchbegriffe?
+    - Barrierefreiheit: Linktexte, Alt-Texte, Überschriften, Tabellen?
+    - Diátaxis-Konformität: vermischte Content-Typen, falsche Ordnerlogik?
+
+    Jeder Befund braucht: ID, Datei, Abschnitt, Zitat oder präzise Stelle,
+    Schweregrad (Blocker, hoch, mittel, niedrig), Nutzerimpact und konkrete
+    Korrektur. Priorisiere nach Risiko und Aufwand. Erfinde keine Probleme,
+    um die Liste zu füllen; belege auch Stärken, die erhalten bleiben sollen.
+
+    Schreibe mit doc_write:
+    - "_audit/audit-report.md" mit Management Summary, Rubrik-Scores,
+      priorisierten Befunden, Stärken, offenen Fragen und einer
+      Top-10-Korrekturliste.
+    - "_audit/inventory.md" mit Dateiliste, Zweck, Zielgruppe,
+      Diátaxis-Typ, Wortzahl und Status.
+    - "_audit/gap-matrix.md" mit Aufgabe der Zielgruppe, vorhandener
+      Abdeckung, Lücke und empfohlenem Content-Typ.
+
+    Der Audit-Score ist eine Baseline, keine Freigabe. Weise ausdrücklich
+    darauf hin, welche Dateien nicht geprüft werden konnten.
+  expected_output: >
+    Drei belegte Markdown-Dateien: Audit-Report mit priorisierten Befunden,
+    Inventar und Gap-Matrix. Jeder Befund ist reproduzierbar und einer
+    Nutzeraufgabe zugeordnet.
+  markdown: true
+  context:
+    - domain_research_task
+
+information_architecture_task:
+  agent: information_architect
+  description: >
+    Entwirf die Informationsarchitektur für "{project_name}" auf Basis von
+    Forschung und Audit.
+
+    Domänenthema: {domain_topic}
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+    Ausgabewurzel: {output_path}
+
+    Lies "_research/domain-research.md" und "_audit/audit-report.md" vollständig.
+    Lies zusätzlich die wichtigsten Originaldokumente mit source_read, damit du
+    nicht nur über Zusammenfassungen entscheidest.
+
+    Liefere:
+    1. Nutzergruppen und ihre Aufgaben: Anfänger, fortgeschrittene Nutzer,
+       Entwickler, Integratoren und Stakeholder. Jeweils Einstieg, typische
+       Frage, Erfolgskriterium und bevorzugter Content-Typ.
+    2. Diátaxis-Zuordnung: Welche Inhalte gehören in tutorials/, how-to/,
+       reference/ und explanation/? Benenne Mischformen und wie sie getrennt
+       werden.
+    3. Dateiplan: konkrete Pfade, Titel, Zweck, Zielgruppe, Abhängigkeiten und
+       Priorität. Plane mindestens ein Tutorial, zwei How-to Guides, eine
+       Referenzlandingpage mit mindestens drei Detailseiten und zwei
+       Explanation-Seiten.
+    4. Navigationskonzept: Landingpage, Tabellen der Inhalte, Querverweise,
+       Breadcrumbs, "Was möchten Sie tun?"-Einstiege und Suchbegriffe.
+    5. Front-Matter-Standard: title, description, audience, prerequisites,
+       content_type, status, last_reviewed, owner, related.
+    6. Migrationsplan: bestehende Dateien, Zielpfad, Aktion (übernehmen,
+       aufteilen, zusammenführen, archivieren), Weiterleitungsbedarf.
+    7. Qualitätskriterien und Verantwortlichkeiten für die Pflege.
+
+    Schreibe mit doc_write:
+    - "_architecture/information-architecture.md"
+    - "_architecture/content-plan.md"
+    - "_architecture/migration-map.md"
+    - "README.md" als Dokumentationslandingpage mit Navigation, Zielgruppen
+      und den wichtigsten Einstiegen. Die Landingpage verlinkt ausschließlich
+      auf geplante oder bereits vorhandene Dateien.
+
+    Keine vagen Empfehlungen. Jede Strukturentscheidung nennt die
+    Nutzeraufgabe, die sie löst.
+  expected_output: >
+    Ein konkreter, umsetzbarer IA-Entwurf mit Dateiplan, Nutzerreisen,
+    Front-Matter-Standard, Migrationsmatrix und einer funktionierenden
+    Landingpage.
+  markdown: true
+  context:
+    - domain_research_task
+    - documentation_audit_task
+
+tutorial_creation_task:
+  agent: senior_technical_writer
+  description: >
+    Schreibe das Einstiegs-Tutorial für "{project_name}".
+
+    Zielgruppe: {target_audience}
+    Domänenthema: {domain_topic}
+    Dokumentationssprache: {documentation_language}
+
+    Grundlage: "_research/domain-research.md",
+    "_audit/audit-report.md" und "_architecture/information-architecture.md".
+    Lies höchstens drei davon und beginne danach sofort mit dem Schreiben.
+    Lies keine Rohquellen, wenn Research und Audit die Fakten bereits belegen.
+
+    Liefere ein vollständiges Tutorial unter "tutorials/erster-prozess.md":
+    - Voraussetzungen, geschätzte Dauer und Lernziele
+    - nummerierte Schritte mit lauffähigen Befehlen oder Codebeispielen
+    - erwartetes Ergebnis nach jedem größeren Schritt
+    - Fehlerbehebung für die zwei häufigsten Fehler
+    - nächster sinnvoller Schritt mit Link
+
+    Ausgabeformat (verbindlich): Gib die Datei als eigenen Abschnitt aus:
+    ## Datei: `tutorials/erster-prozess.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Datei zusätzlich mit doc_write. Beginne mit dem Schreiben,
+    sobald die drei Grundlagen gelesen sind.
+
+    Jede Seite beginnt mit Front Matter (title, description, audience,
+    prerequisites, content_type, status, last_reviewed, owner, related).
+    Keine erfundenen APIs, Befehle oder Quellen. Offene Punkte als "Offen"
+    kennzeichnen.
+  expected_output: >
+    Ein vollständiges, ausführbares Tutorial mit Voraussetzungen, Schritten,
+    erwarteten Ergebnissen, Fehlerbehebung und nächstem Schritt.
+  markdown: true
+  context:
+    - domain_research_task
+    - information_architecture_task
+
+howto_creation_task:
+  agent: senior_technical_writer
+  description: >
+    Schreibe mindestens zwei aufgabenorientierte How-to Guides für
+    "{project_name}" entlang des Dateiplans aus
+    "_architecture/information-architecture.md".
+
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+
+    Grundlage: "_research/domain-research.md",
+    "_audit/gap-matrix.md" und "_architecture/content-plan.md". Lies
+    höchstens drei davon und beginne danach mit dem Schreiben.
+
+    Wenn der Dateiplan keine Pfade nennt, verwende:
+    - "how-to/external-task-worker-schreiben.md"
+    - "how-to/konfiguration-anpassen.md"
+
+    Jeder Guide beginnt mit der Aufgabe, den Voraussetzungen und dem
+    erwarteten Ergebnis. Danach folgen nummerierte Schritte, ein
+    Überprüfungsschritt und typische Fehler. Keine Tutorial-Prosa, keine
+    vollständige API-Referenz.
+
+    Ausgabeformat (verbindlich): Für jede Datei ein Abschnitt:
+    ## Datei: `how-to/<name>.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Dateien zusätzlich mit doc_write.
+  expected_output: >
+    Mindestens zwei How-to Guides, die eine konkrete Aufgabe lösen und
+    Voraussetzungen, Schritte, Überprüfung und Fehlerfälle abdecken.
+  markdown: true
+  context:
+    - documentation_audit_task
+    - information_architecture_task
+
+reference_creation_task:
+  agent: senior_technical_writer
+  description: >
+    Schreibe die Referenz für "{project_name}".
+
+    Domänenthema: {domain_topic}
+    Dokumentationssprache: {documentation_language}
+    Repository-Pfad (kann leer sein): {repository_path}
+
+    Grundlage: "_research/domain-research.md",
+    "_audit/audit-report.md" und "_architecture/content-plan.md". Prüfe
+    API-Signaturen und Standardwerte bei Bedarf gezielt mit code_search und
+    code_read. Verbringe höchstens ein Drittel deiner Schritte mit Prüfen.
+
+    Liefere:
+    - "reference/README.md" als Referenzlandingpage mit Tabellen der Inhalte
+    - "reference/rest-api.md" mit Endpunkten, Methoden, Statuscodes,
+      Beispielen und Fehlerantworten
+    - "reference/konfiguration.md" mit allen Umgebungsvariablen,
+      Standardwerten und Gültigkeitsbereichen
+    - "reference/cli.md" mit Befehlen, Argumenten und Beispielen
+
+    Ausgabeformat (verbindlich): Für jede Datei ein Abschnitt:
+    ## Datei: `reference/<name>.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Dateien zusätzlich mit doc_write. Jede Aussage ist präzise,
+    versioniert und mit Beispiel belegt; nicht verifizierbare Angaben werden
+    als "Offen" markiert.
+  expected_output: >
+    Eine Referenzlandingpage und mindestens drei Detailseiten mit präzisen,
+    belegten APIs, Konfigurationen und CLI-Befehlen.
+  markdown: true
+  context:
+    - documentation_audit_task
+    - information_architecture_task
+
+explanation_creation_task:
+  agent: senior_technical_writer
+  description: >
+    Schreibe zwei Explanation-Seiten für "{project_name}", die verstehen
+    helfen, statt Aufgaben abzuarbeiten.
+
+    Domänenthema: {domain_topic}
+    Dokumentationssprache: {documentation_language}
+
+    Grundlage: "_research/domain-research.md",
+    "_audit/audit-report.md" und "_architecture/information-architecture.md".
+
+    Liefere:
+    - "explanation/architektur.md": Komponenten, Datenflüsse, Persistenz,
+      Skalierung und bewusste Grenzen
+    - "explanation/konzepte.md": zentrale Konzepte, Trade-offs und
+      Abweichungen von vergleichbaren Systemen
+
+    Ausgabeformat (verbindlich): Für jede Datei ein Abschnitt:
+    ## Datei: `explanation/<name>.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Dateien zusätzlich mit doc_write. Erkläre Entscheidungen und
+    Konsequenzen; verzichte auf Schritt-für-Schritt-Anleitungen und
+    vollständige Parameterlisten.
+  expected_output: >
+    Zwei Explanation-Seiten zu Architektur, Konzepten, Trade-offs und
+    Betriebsgrenzen.
+  markdown: true
+  context:
+    - domain_research_task
+    - information_architecture_task
+
+landing_page_task:
+  agent: senior_technical_writer
+  description: >
+    Aktualisiere die Dokumentationslandingpage "README.md" für
+    "{project_name}".
+
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+
+    Grundlage: "_architecture/information-architecture.md" sowie die zuvor
+    geschriebenen Tutorials, How-to Guides, Referenz- und Explanation-Seiten.
+    Verschaffe dir mit doc_list einen Überblick.
+
+    Die Landingpage enthält:
+    - ein bis zwei Sätze, was das Projekt ist und welches Problem es löst
+    - eine Zielgruppen-Tabelle mit Einstiegen
+    - die vier Diátaxis-Bereiche mit je zwei bis vier Links
+    - Voraussetzungen für den Schnellstart
+    - einen Link auf das Einstiegs-Tutorial
+
+    Verlinke ausschließlich Dateien, die tatsächlich existieren. Keine
+    Marketingfloskeln, keine erfundenen Badges.
+
+    Ausgabeformat (verbindlich):
+    ## Datei: `README.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Datei zusätzlich mit doc_write.
+  expected_output: >
+    Eine aktuelle Landingpage mit Zielgruppen, Diátaxis-Navigation und
+    funktionierenden Links.
+  markdown: true
+  context:
+    - tutorial_creation_task
+    - howto_creation_task
+    - reference_creation_task
+    - explanation_creation_task
+
+content_manifest_task:
+  agent: senior_technical_writer
+  description: >
+    Erstelle das Content-Manifest für die Dokumentation von "{project_name}".
+
+    Ermittle mit doc_list alle vorhandenen Markdown-Dateien unter
+    {output_path}. Rufe doc_list genau einmal auf und lies keine Datei mit
+    doc_read; die Datei, die du gerade erzeugst, existiert noch nicht. Schreibe
+    "_qa/content-manifest.md" mit einer Tabelle:
+    Datei, Titel, Content-Typ, Zielgruppe, Wortzahl, Quellen, Status und
+    offene Punkte.
+
+    Nenne außerdem:
+    - die Anzahl der Dateien je Diátaxis-Bereich
+    - Dateien ohne Front Matter oder mit fehlenden Pflichtfeldern
+    - Seiten, die auf nicht existierende Dateien verweisen
+    - die drei größten verbleibenden Lücken
+
+    Ausgabeformat (verbindlich):
+    ## Datei: `_qa/content-manifest.md`
+    <vollständiger Dateiinhalt>
+    Kein umschließender Code-Fence: Der Dateiinhalt folgt direkt auf die
+    Pfadzeile und endet beim nächsten '## Datei:'-Abschnitt.
+
+    Schreibe die Datei zusätzlich mit doc_write.
+  expected_output: >
+    Ein vollständiges Content-Manifest mit Dateiliste, Content-Typen,
+    Wortzahlen, Quellen und offenen Lücken.
+  markdown: true
+  context:
+    - tutorial_creation_task
+    - howto_creation_task
+    - reference_creation_task
+    - explanation_creation_task
+    - landing_page_task
+
+technical_review_task:
+  agent: technical_accuracy_reviewer
+  description: >
+    Prüfe alle Dokumente aus dem Content-Durchlauf technisch auf Korrektheit.
+
+    Projekt: {project_name}
+    Domänenthema: {domain_topic}
+    Repository-Pfad (kann leer sein): {repository_path}
+
+    Lies "_qa/content-manifest.md" und jede dort gelistete Datei. Ziehe
+    Forschung, Audit und IA hinzu. Wenn ein Repository-Pfad angegeben ist,
+    prüfe API-Signaturen, Statuscodes, Konfigurationswerte, Standardwerte,
+    Fehlermeldungen und Sicherheitsaussagen gegen den Code mit code_search und
+    code_read. Wenn kein Code verfügbar ist, prüfe gegen die bestehenden
+    Dokumente und markiere nicht verifizierbare Aussagen ausdrücklich.
+
+    Suche insbesondere nach:
+    - falschen oder veralteten Befehlen, Parametern und Statuscodes
+    - fehlenden Voraussetzungen und stillschweigenden Annahmen
+    - widersprüchlichen Aussagen zwischen Seiten
+    - Aussagen, die nur für eine Version oder Umgebung gelten
+    - fehlenden Fehlerfällen, Grenzwerten und Betriebsrisiken
+    - Sicherheitsaussagen ohne Beleg
+    - Beispielen, die nicht ausführbar oder nicht vollständig sind
+
+    Jeder Befund erhält: ID, Datei, Stelle, Schweregrad, Problem, Beleg,
+    korrigierte Fassung und Status. Korrigiere eindeutige Fehler direkt mit
+    doc_write; bei Unsicherheit dokumentiere die offene Frage statt zu raten.
+    Schreibe den Review nach "_review/technical-review.md" und aktualisiere
+    das Content-Manifest um korrigierte Dateien.
+
+    Am Ende: eine knappe Freigabeempfehlung mit den verbleibenden Blockern.
+    Keine pauschale Freigabe, solange ein Blocker offen ist.
+  expected_output: >
+    Ein belegter technischer Review mit korrigierten Stellen, offenen Fragen
+    und einer klaren Freigabeempfehlung.
+  markdown: true
+  context:
+    - content_manifest_task
+    - documentation_audit_task
+    - domain_research_task
+
+style_consistency_task:
+  agent: style_terminology_editor
+  description: >
+    Vereinheitliche Stil, Terminologie und Formatierung in der Dokumentation
+    von "{project_name}".
+
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+
+    Lies alle Dateien aus "_qa/content-manifest.md" sowie den technischen
+    Review. Erstelle zuerst ein Glossar der domänenkritischen Begriffe mit
+    Definition, Synonymen, abzugrenzenden Begriffen und Beispiel. Prüfe dann
+    systematisch:
+
+    - Terminologie: ein Begriff pro Konzept, keine stillen Synonyme
+    - Stimme und Ton: sachlich, direkt, respektvoll, keine Marketingfloskeln
+    - Überschriften: konsistente Hierarchie, keine Springe, aussagekräftig
+    - Formatierung: Code-Fences mit Sprache, Tabellen, Listen, Hervorhebungen
+    - Front Matter: gleiche Felder, Datums- und Versionsformate
+    - Links: beschreibende Linktexte, keine "hier klicken"
+    - Barrierefreiheit: Alt-Texte, keine Farbe als einzige Bedeutung
+    - Sprachqualität: Rechtschreibung, Grammatik, Satzlänge, Anglizismen
+    - Konsistenz zwischen README, Tutorials, How-to, Referenz und Explanation
+
+    Korrigiere Abweichungen direkt mit doc_write. Ändere Produktbegriffe nur,
+    wenn du die Änderung begründest und alle Vorkommen konsistent anpasst.
+    Schreibe:
+    - "_review/style-guide.md" mit anwendbaren Regeln und Beispielen
+    - "_review/glossary.md" mit dem Glossar
+    - "_review/style-report.md" mit Befunden, Korrekturen und Restrisiken
+
+    Der Style Guide muss kurz genug sein, dass ihn ein Team tatsächlich
+    benutzt. Keine Regeln ohne Beispiel.
+  expected_output: >
+    Ein konsistenter Bestand, ein anwendbarer Style Guide, ein gepflegtes
+    Glossar und ein belegter Abschlussreport.
+  markdown: true
+  context:
+    - technical_review_task
+    - content_manifest_task
+
+ux_optimization_task:
+  agent: audience_ux_specialist
+  description: >
+    Optimiere die Dokumentation für die Zielgruppen von "{project_name}".
+
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+
+    Lies Landingpage, IA, Content-Manifest und alle Hauptseiten. Prüfe aus
+    Sicht von vier Rollen: Einsteiger, fortgeschrittener Nutzer, Entwickler
+    und Stakeholder. Für jede Rolle beantworte:
+    - Wo startet sie?
+    - Welche Aufgabe will sie in den ersten fünf Minuten erledigen?
+    - Findet sie den nächsten Schritt ohne Suche?
+    - Welche Begriffe versteht sie nicht?
+    - Woran erkennt sie, dass sie fertig ist?
+
+    Verbessere konkret:
+    - README als Einstieg: "Was möchten Sie tun?", Zielgruppen, Voraussetzungen,
+      Installationspfad, erste erfolgreiche Aktion, Hilfe bei Problemen
+    - Navigation und Querverweise zwischen Tutorial, How-to, Referenz und
+      Explanation
+    - Onboarding-Reihenfolge und Lesepfade
+    - Tabellen der Inhalte und Seitentitel
+    - Fehlerseiten, Suche, Glossarverweise
+    - Barrierefreiheit und mobile Lesbarkeit
+    - Metriken: Time to First Success, Absprungstellen, Support-Fragen
+
+    Setze Änderungen direkt mit doc_write um. Schreibe
+    "_review/ux-review.md" mit Nutzerreisen, Befunden, Änderungen, offenen
+    Risiken und einem messbaren Verbesserungsplan. Erfinde keine
+    Nutzertestdaten; kennzeichne Annahmen als Annahmen.
+  expected_output: >
+    Ein nutzerzentrierter Einstieg, konsistente Lesepfade und ein belegter
+    UX-Review mit konkreten, umgesetzten Verbesserungen.
+  markdown: true
+  context:
+    - style_consistency_task
+    - content_manifest_task
+
+diagram_integration_task:
+  agent: visual_diagram_specialist
+  description: >
+    Ergänze die Dokumentation von "{project_name}" um präzise
+    Mermaid-Diagramme.
+
+    Domänenthema: {domain_topic}
+    Zielgruppe: {target_audience}
+
+    Lies IA, Content-Manifest, Architektur- und Fließtextseiten. Identifiziere
+    höchstens sechs Stellen, an denen ein Diagramm eine echte Verständnislücke
+    schließt. Bevorzuge:
+    - Architektur oder Komponenten als flowchart
+    - zeitliche Abläufe und Integrationen als sequenceDiagram
+    - Zustände und Lebenszyklen als stateDiagram-v2
+    - Datenmodelle als erDiagram oder classDiagram
+    - Entscheidungswege als flowchart
+
+    Für jedes Diagramm gilt:
+    - Es beantwortet genau eine Frage.
+    - Knoten und Kanten sind konsistent benannt.
+    - Die Leserichtung ist sinnvoll.
+    - Farbe ist nicht der einzige Bedeutungsträger.
+    - Ein Alternativtext und ein erklärender Satz stehen direkt beim Diagramm.
+    - Die dargestellten Fakten sind durch Text, Quelle oder Code gedeckt.
+
+    Integriere die Diagramme mit doc_write direkt in die passenden Seiten.
+    Schreibe zusätzlich "_architecture/diagram-plan.md" mit Zweck, Quelle,
+    Zielseite und Alternativtext je Diagramm. Prüfe alle Blöcke mit
+    verify_mermaid und korrigiere Syntaxfehler. Entferne Diagramme, die nur
+    dekorativ sind.
+  expected_output: >
+    Wenige, gut platzierte und syntaktisch geprüfte Mermaid-Diagramme mit
+    Alternativtexten, erklärendem Kontext und einem nachvollziehbaren
+    Diagrammplan.
+  markdown: true
+  context:
+    - ux_optimization_task
+    - information_architecture_task
+
+quality_assurance_task:
+  agent: quality_assurance_reviewer
+  description: >
+    Führe die ganzheitliche Qualitätsprüfung für "{project_name}" durch.
+    Dies ist Iteration {iteration}; der Schwellenwert liegt bei
+    {qa_threshold} von 100.
+
+    Zielgruppe: {target_audience}
+    Dokumentationssprache: {documentation_language}
+
+    Prüfe den vollständigen Bestand, nicht nur Stichproben der letzten
+    Änderung. Lies Landingpage, IA, Content-Manifest, technischen Review,
+    Style-Report, UX-Review und Diagrammplan. Lies jede veröffentlichte Seite
+    mit doc_read.
+
+    Prüfe:
+    - Vollständigkeit: alle geplanten Seiten vorhanden, Voraussetzungen,
+      Ergebnisse, Fehlerfälle, Betrieb, Sicherheit, Migration
+    - Technische Korrektheit: Aussagen gegen Quellen und, falls angegeben,
+      Code geprüft
+    - Klarheit: Aufgabe, Zielgruppe und nächster Schritt erkennbar
+    - Konsistenz: Terminologie, Front Matter, Formatierung, Versionen
+    - Diátaxis: saubere Trennung der vier Content-Typen, keine Mischformen
+    - Nutzbarkeit: Einstieg, Navigation, Lesepfade, Suche, Glossar
+    - Barrierefreiheit: Linktexte, Überschriften, Alternativtexte, Tabellen
+    - Wartbarkeit: Quellen, Owner, Reviewdatum, offene Punkte
+
+    Nutze check_links und verify_mermaid. Belege jeden Blocker mit Datei und
+    Stelle. Bewerte die sechs Dimensionen unabhängig mit 0 bis 100:
+    completeness, accuracy, clarity, consistency, diataxis, usability.
+
+    Rufe das Werkzeug record_quality_score genau einmal auf. Übergib die sechs
+    Dimensionen, die Blocker als Liste, eine Entscheidung (approved oder
+    changes_requested), eine kurze Begründung und iteration={iteration}. Das
+    Werkzeug berechnet den gewichteten Gesamtscore und erzwingt
+    changes_requested, wenn Blocker offen sind oder der Score unter dem
+    Schwellenwert liegt. Übergebe keinen eigenen Gesamtscore.
+
+    Schreibe zusätzlich "_qa/qa-report.md" mit Management Summary,
+    Dimensionsscores, Blockern, Nicht-Blockern, geprüften und nicht prüfbaren
+    Bereichen sowie einer klaren Freigabeempfehlung. Wenn du eine Prüfung
+    mangels Quelle nicht durchführen konntest, senke die betroffene Dimension
+    und dokumentiere die Einschränkung.
+  expected_output: >
+    Ein vollständiger QA-Report, ein maschinenlesbarer Score-Datensatz mit
+    sechs Dimensionen und eine belastbare Freigabeempfehlung. Offene Blocker
+    verhindern eine Freigabe.
+  markdown: true
+  context:
+    - diagram_integration_task
+    - technical_review_task
+    - style_consistency_task
+
+revision_task:
+  agent: senior_technical_writer
+  description: >
+    Überarbeite die Dokumentation von "{project_name}" anhand des QA-Feedbacks.
+    Dies ist Nachbesserungsrunde {iteration}; Schwellenwert {qa_threshold}.
+
+    QA-Feedback:
+    {qa_feedback}
+
+    Arbeite alle Blocker zuerst ab, danach die hochpriorisierten
+    Nicht-Blocker. Lies jede betroffene Datei höchstens einmal. Behebe
+    Ursachen, nicht Symptome: Wenn eine Anleitung falsch ist, korrigiere alle
+    abhängigen Schritte und Verweise. Entferne keine belegten Inhalte, nur um
+    einen Score zu erhöhen. Erfinde keine APIs oder Quellen.
+
+    Für jede Datei, die einen Blocker hat, gilt: Schreibe die vollständige
+    Datei neu, nicht nur die geänderte Stelle. Nutze dafür exakt dieses
+    Format, ohne umschließenden Code-Fence:
+
+    ## Datei: `pfad/zur/datei.md`
+    <vollständiger Dateiinhalt mit Front Matter>
+
+    Eine Datei gilt erst als behoben, wenn ihr vollständiger Inhalt erneut
+    ausgegeben wurde. Beginne mit dem Schreiben, sobald du den Blocker
+    verstanden hast, und prüfe danach Links und Manifest.
+
+    Prüfe nach jeder Änderung:
+    - alle internen Links mit check_links
+    - die betroffenen Aussagen gegen Quellen oder Code
+    - Front Matter, Terminologie und Diátaxis-Zuordnung
+    - das Content-Manifest; ergänze neue oder geänderte Dateien
+
+    Schreibe "_qa/revision-round-{iteration}.md" mit:
+    - jedem Blocker, seiner Ursache und der Korrektur
+    - nicht behobenen Punkten und dem Grund
+    - geänderten Dateien
+    - verbleibenden Risiken
+  expected_output: >
+    Ein nachvollziehbarer Revisionsbericht und korrigierte Dokumente, die alle
+    Blocker adressieren oder offen begründen.
+  markdown: true
+
+revision_technical_task:
+  agent: technical_accuracy_reviewer
+  description: >
+    Prüfe die Nachbesserungen aus Runde {iteration} technisch nach.
+
+    Lies "_qa/revision-round-{iteration}.md" und alle darin geänderten
+    Dateien. Prüfe die korrigierten Aussagen erneut gegen Quellen und, falls
+    angegeben, gegen den Code unter {repository_path}. Suche nach
+    Folgefehlern: geänderte Befehle, verschobene Verweise, inkonsistente
+    Statuscodes, neue Annahmen.
+
+    Schreibe "_review/technical-review-round-{iteration}.md" mit offenen und
+    behobenen Befunden. Korrigiere eindeutige Fehler direkt mit doc_write.
+    Keine Freigabe, solange ein technischer Blocker offen ist.
+  expected_output: >
+    Ein technischer Nachreview mit behobenen und verbleibenden Befunden.
+  markdown: true
+  context:
+    - revision_task
+
+revision_qa_task:
+  agent: quality_assurance_reviewer
+  description: >
+    Bewerte den Bestand nach der Nachbesserungsrunde {iteration} erneut.
+    Schwellenwert: {qa_threshold}.
+
+    Prüfe mindestens alle zuvor gemeldeten Blocker, die geänderten Dateien
+    und die kritischen Nutzerpfade. Führe zusätzlich eine Stichprobe über den
+    Gesamtbestand durch, damit die Nachbesserung keine Regression eingeführt
+    hat. Nutze check_links und verify_mermaid.
+
+    Bewerte erneut die sechs Dimensionen: completeness, accuracy, clarity,
+    consistency, diataxis, usability. Rufe record_quality_score genau einmal
+    mit diesen Dimensionen, den verbleibenden Blockern, einer Entscheidung
+    (approved oder changes_requested), einer Begründung und
+    iteration={iteration} auf. Übergebe keinen eigenen Gesamtscore.
+
+    Schreibe "_qa/qa-report.md" mit dem aktuellen Stand und einem kurzen
+    Vergleich zur vorherigen Runde. Wenn ein zuvor gemeldeter Blocker behoben
+    ist, belege die Behebung. Wenn nicht, bleibt er Blocker.
+  expected_output: >
+    Ein aktueller QA-Report mit reproduzierbarem Score, Blockerstatus und
+    Freigabeempfehlung.
+  markdown: true
+  context:
+    - revision_technical_task
+    - revision_task
+
+executive_summary_task:
+  agent: documentation_lead
+  description: >
+    Erstelle den Abschlussbericht für "{project_name}".
+
+    Aktueller QA-Stand:
+    {qa_summary}
+
+    Score-Historie:
+    {quality_history}
+
+    Schwellenwert: {qa_threshold}
+
+    Lies den QA-Report, das Content-Manifest, die Landingpage und die
+    zentralen Dokumente. Prüfe stichprobenartig, ob die im QA-Report
+    behaupteten Korrekturen tatsächlich vorhanden sind. Du gibst die Freigabe
+    persönlich und nachvollziehbar.
+
+    Schreibe mit doc_write:
+    1. "EXECUTIVE-SUMMARY.md" mit:
+       - Auftrag und scope
+       - Zielgruppen und Diátaxis-Abdeckung
+       - wichtigsten Verbesserungen gegenüber dem Ausgangsbestand
+       - Qualitätsergebnissen je Dimension und Iteration
+       - offenen Blockern und Restrisiken
+       - Freigabeentscheidung: FREIGEGEBEN oder NICHT FREIGEGEBEN
+       - Übernahme-Checkliste für das Repository
+       - nächsten 30 Tagen und Verantwortlichkeiten
+    2. "_qa/final-approval.md" mit einer kurzen, formellen
+       Freigabeempfehlung, den Abnahmekriterien und der Unterschrift
+       "Documentation Lead".
+
+    Wenn der Score unter dem Schwellenwert liegt oder Blocker offen sind,
+    lautet die Entscheidung NICHT FREIGEGEBEN. Nenne dann die exakten
+    restlichen Schritte. Übertreibe den erreichten Stand nicht und erfinde
+    keine Metriken.
+  expected_output: >
+    Ein ehrlicher, belegter Abschlussbericht mit Freigabeentscheidung,
+    Restrisiken, Übernahme-Checkliste und nächsten Schritten.
+  markdown: true

@@ -344,9 +344,12 @@ export class ExternalTaskClient {
     // Optional: automatic lock extension timer
     let lockExtensionTimer: ReturnType<typeof setInterval> | null = null;
     if (this.config.autoExtendLock) {
+      // Extend with the duration this task was locked with (topic option),
+      // falling back to the global config value.
+      const extendDuration = sub.options.lockDuration ?? this.config.lockDuration;
       lockExtensionTimer = setInterval(async () => {
         try {
-          await taskService.extendLock(this.config.lockDuration);
+          await taskService.extendLock(extendDuration);
         } catch (err) {
           this.config.logger.warn(
             `Failed to extend lock for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,

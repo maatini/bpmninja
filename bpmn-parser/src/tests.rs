@@ -1246,9 +1246,174 @@ fn reject_multi_instance_loop_characteristics() {
     let err = parse_bpmn_xml(xml).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Multi-instance is not supported") && msg.contains("ut1"),
+        msg.contains("Multi-instance is only supported for parallel service tasks")
+            && msg.contains("userTask 'ut1'"),
         "unexpected error: {msg}"
     );
+}
+
+#[test]
+fn accept_parallel_multi_instance_loop_cardinality() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1" data-topic="notify">
+                    <multiInstanceLoopCharacteristics isSequential="false">
+                        <loopCardinality>3</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("svc1").unwrap() {
+        BpmnElement::ServiceTask {
+            topic,
+            multi_instance: Some(mi),
+        } => {
+            assert_eq!(topic, "notify");
+            assert!(!mi.is_sequential);
+            assert_eq!(mi.loop_cardinality.as_deref(), Some("3"));
+            assert_eq!(mi.collection, None);
+            assert_eq!(mi.element_variable, None);
+        }
+        other => panic!("Expected ServiceTask with multi-instance, got {other:?}"),
+    }
+}
+
+#[test]
+fn accept_parallel_multi_instance_collection() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1" data-topic="notify">
+                    <multiInstanceLoopCharacteristics isSequential="false"
+                        collection="orders" elementVariable="order" />
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("svc1").unwrap() {
+        BpmnElement::ServiceTask {
+            multi_instance: Some(mi),
+            ..
+        } => {
+            assert!(!mi.is_sequential);
+            assert_eq!(mi.collection.as_deref(), Some("orders"));
+            assert_eq!(mi.element_variable.as_deref(), Some("order"));
+            assert_eq!(mi.loop_cardinality, None);
+        }
+        other => panic!("Expected ServiceTask with multi-instance, got {other:?}"),
+    }
+}
+
+#[test]
+fn reject_sequential_multi_instance() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1">
+                    <multiInstanceLoopCharacteristics isSequential="true">
+                        <loopCardinality>2</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("Sequential multi-instance is not supported yet") && msg.contains("svc1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_multi_instance_without_source() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1">
+                    <multiInstanceLoopCharacteristics isSequential="false" />
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("requires either collection or loopCardinality") && msg.contains("svc1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_multi_instance_with_both_sources() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1">
+                    <multiInstanceLoopCharacteristics isSequential="false"
+                        collection="orders">
+                        <loopCardinality>2</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("either collection or loopCardinality, not both") && msg.contains("svc1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_multi_instance_invalid_cardinality() {
+    let invalid_values = ["abc", "0", "-1"];
+    for value in invalid_values {
+        let xml = format!(
+            r#"
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="proc1" isExecutable="true">
+                    <startEvent id="s1" />
+                    <serviceTask id="svc1">
+                        <multiInstanceLoopCharacteristics isSequential="false">
+                            <loopCardinality>{value}</loopCardinality>
+                        </multiInstanceLoopCharacteristics>
+                    </serviceTask>
+                    <endEvent id="e1" />
+                    <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                    <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+                </process>
+            </definitions>
+        "#
+        );
+        let msg = parse_bpmn_xml(&xml).unwrap_err().to_string();
+        assert!(
+            msg.contains("must be a positive integer") && msg.contains("svc1"),
+            "unexpected error for '{value}': {msg}"
+        );
+    }
 }
 
 #[test]

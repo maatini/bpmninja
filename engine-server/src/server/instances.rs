@@ -1,11 +1,11 @@
-use crate::server::state::{AppError, AppState, parse_uuid};
+use crate::server::state::{ApiJson, AppError, AppState, parse_uuid};
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::IntoResponse,
 };
-use engine_core::ProcessInstance;
+use engine_core::{Incident, ProcessInstance};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -14,8 +14,23 @@ use std::sync::Arc;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StartRequest {
     pub definition_key: String,
+    /// Optional business key; also accepted inside `variables` (legacy clients).
+    #[serde(default)]
+    pub business_key: Option<String>,
     #[serde(default)]
     pub variables: Option<HashMap<String, Value>>,
+}
+
+/// The engine reads the business key from the variables map and removes it
+/// before seeding instance variables. A top-level `business_key` wins.
+fn with_business_key(
+    mut variables: HashMap<String, Value>,
+    business_key: Option<String>,
+) -> HashMap<String, Value> {
+    if let Some(key) = business_key.filter(|key| !key.trim().is_empty()) {
+        variables.insert("business_key".to_string(), Value::String(key));
+    }
+    variables
 }
 
 #[derive(Serialize)]
@@ -25,14 +40,12 @@ pub(crate) struct StartResponse {
 
 pub(crate) async fn start_instance(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<StartRequest>,
+    ApiJson(payload): ApiJson<StartRequest>,
 ) -> Result<Json<StartResponse>, AppError> {
     let engine = &state.engine;
     let def_key = parse_uuid(&payload.definition_key)?;
-    let id = match payload.variables {
-        Some(vars) if !vars.is_empty() => engine.start_instance_with_variables(def_key, vars).await,
-        _ => engine.start_instance(def_key).await,
-    }?;
+    let vars = with_business_key(payload.variables.unwrap_or_default(), payload.business_key);
+    let id = engine.start_instance_with_variables(def_key, vars).await?;
 
     Ok(Json(StartResponse {
         instance_id: id.to_string(),
@@ -41,7 +54,11 @@ pub(crate) async fn start_instance(
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StartLatestRequest {
-    pub bpmn_id: String,
+    /// BPMN process id. `bpmn_id` is still accepted for older clients.
+    #[serde(alias = "bpmn_id")]
+    pub bpmn_process_id: String,
+    #[serde(default)]
+    pub business_key: Option<String>,
     #[serde(default)]
     pub variables: Option<HashMap<String, Value>>,
 }
@@ -55,11 +72,13 @@ pub(crate) struct StartLatestResponse {
 
 pub(crate) async fn start_instance_latest(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<StartLatestRequest>,
+    ApiJson(payload): ApiJson<StartLatestRequest>,
 ) -> Result<Json<StartLatestResponse>, AppError> {
     let engine = &state.engine;
-    let vars = payload.variables.unwrap_or_default();
-    let (inst_id, def_key) = engine.start_instance_latest(&payload.bpmn_id, vars).await?;
+    let vars = with_business_key(payload.variables.unwrap_or_default(), payload.business_key);
+    let (inst_id, def_key) = engine
+        .start_instance_latest(&payload.bpmn_process_id, vars)
+        .await?;
 
     let def = engine
         .get_definition(&def_key)
@@ -76,11 +95,11 @@ pub(crate) async fn start_instance_latest(
 
 pub(crate) async fn start_timer_instance(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<StartRequest>,
+    ApiJson(payload): ApiJson<StartRequest>,
 ) -> Result<Json<StartResponse>, AppError> {
     let engine = Arc::clone(&state.engine);
     let def_key = parse_uuid(&payload.definition_key)?;
-    let vars = payload.variables.unwrap_or_default();
+    let vars = with_business_key(payload.variables.unwrap_or_default(), payload.business_key);
     let id = engine.start_timer_instance(def_key, vars).await?;
 
     Ok(Json(StartResponse {
@@ -136,10 +155,44 @@ pub(crate) struct UpdateVariablesRequest {
     pub variables: HashMap<String, Value>,
 }
 
+/// Liefert alle Incidents einer Instanz (offen und aufgelöst).
+pub(crate) async fn get_instance_incidents(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<Incident>>, AppError> {
+    let instance_id = parse_uuid(&id)?;
+    let incidents = state.engine.get_instance_incidents(instance_id).await?;
+    Ok(Json(incidents))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResolveInstanceIncidentRequest {
+    pub resolved_by: Option<String>,
+}
+
+/// Löst einen Incident manuell auf (Admin-Rolle).
+pub(crate) async fn resolve_instance_incident(
+    State(state): State<Arc<AppState>>,
+    Path((id, incident_id)): Path<(String, String)>,
+    payload: Option<ApiJson<ResolveInstanceIncidentRequest>>,
+) -> Result<Json<Incident>, AppError> {
+    let instance_id = parse_uuid(&id)?;
+    let incident_id = parse_uuid(&incident_id)?;
+    let resolved_by = payload.and_then(|ApiJson(payload)| payload.resolved_by);
+
+    let incident = state
+        .engine
+        .resolve_instance_incident(instance_id, incident_id, resolved_by)
+        .await?;
+
+    Ok(Json(incident))
+}
+
 pub(crate) async fn update_instance_variables(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<UpdateVariablesRequest>,
+    ApiJson(payload): ApiJson<UpdateVariablesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
@@ -187,7 +240,7 @@ fn default_true() -> bool {
 pub(crate) async fn move_token(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<MoveTokenRequest>,
+    ApiJson(payload): ApiJson<MoveTokenRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;
@@ -214,7 +267,7 @@ pub(crate) struct MigrateInstanceRequest {
 pub(crate) async fn migrate_instance(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(payload): Json<MigrateInstanceRequest>,
+    ApiJson(payload): ApiJson<MigrateInstanceRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let engine = &state.engine;
     let instance_id = parse_uuid(&id)?;

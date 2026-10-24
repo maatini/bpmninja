@@ -85,7 +85,7 @@ Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
 ```
 .agent/
 ├── manifest.json              # 7 Agents (engine, parser, persistence, server, ui, orchestrator, quality)
-├── rules/                     # 14 Regeldateien, teils mit file_match-Triggern
+├── rules/                     # 15 Regeldateien, teils mit file_match-Triggern
 │   ├── 01_GLOBAL_DIRECTIVES.md    # Workflow, Prioritäten, Sprache
 │   ├── 02_GRAPH_FIRST_NAVIGATION.md  # Graph-First-Protokoll (vor jedem Code-Lesen!)
 │   ├── 03_GRAPH_MAINTENANCE.md    # Wann graphify ausführen, Metriken prüfen
@@ -95,7 +95,7 @@ Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
 │   ├── BPMN_WORKFLOW_ENGINE.md    # Vollständige BPMN-Element-Spezifikation
 │   ├── DEPENDENCY_MANAGEMENT.md   # Workspace-Dependency-Regeln
 │   └── ...                        # Weitere Crate-spezifische Agenten
-├── skills/                    # 6 Skills mit oracle.sh-Prüfungen
+├── skills/                    # 6 Skills, 5 davon mit oracle.sh-Prüfungen
 └── workflows/                 # 9 Workflows (build, lint, test, verify, etc.)
 ```
 

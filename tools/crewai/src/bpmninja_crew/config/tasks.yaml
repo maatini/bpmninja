@@ -1,0 +1,220 @@
+repo_analysis_task:
+  description: |
+    Analysiere das BPMNinja-Repository im Fokusbereich "{focus}".
+    Relevante Pfade für diesen Fokus: {focus_paths}
+
+    Vorgehen:
+    1. Verschaffe dir mit repo_stats, cargo_metadata und git_log einen Überblick.
+    2. Lies README.md, CLAUDE.md, HANDOFF.md (falls vorhanden),
+       improvements.md und docs/knowledge-base/index.md, damit du bereits
+       erledigte Arbeiten nicht erneut vorschlägst.
+    3. Untersuche den Fokusbereich gezielt: Architektur, Fehlerbehandlung,
+       tote oder doppelte Pfade, Nebenläufigkeit, Persistenz, Testlücken,
+       Performance-Hotspots und Konsistenz der öffentlichen APIs.
+    4. Belege jeden Fund mit Dateipfad und Zeile oder Symbol. Keine
+       Vermutungen ohne Code-Evidenz.
+
+    Rahmen:
+    - Höchstens 8 Funde, jeder mit Schweregrad (hoch/mittel/niedrig),
+      Evidenz, Wirkung, möglicher Änderung und grobem Aufwand (S/M/L/XL).
+    - Keine Vorschläge für bereits umgesetzte Wellen, Releases oder
+      Abhängigkeits-Updates, die laut HANDOFF bereits erledigt sind.
+    - Keine Dateiänderungen. Nur lesen und berichten.
+    - Antworte auf Deutsch, maximal 1200 Wörter, als Markdown.
+  expected_output: |
+    Ein Markdown-Bericht mit Projektzustand, höchstens 8 belegten Funden
+    (Schweregrad, path:line, Wirkung, Änderungsidee, Aufwand) und einer
+    kurzen Liste der geprüften, aber verworfenen Punkte.
+
+domain_research_task:
+  description: |
+    Recherchiere im Internet den Stand von BPMN-2.0-Workflow-Engines und
+    angrenzenden Standards für den Fokus "{focus}".
+
+    Themen, die du prüfen sollst:
+    - BPMN-2.0-Abdeckung und Camunda-Kompatibilität (External Tasks,
+      Incidents, Boundary Events, Compensation, Multi-Instance, DMN).
+    - Betriebsmerkmale: Persistenz, Skalierung, Observability, Multi-Tenancy,
+      Prozessmigration, Audit und Security.
+    - Developer Experience: Modellierung, Deployment, API-Verträge, Clients.
+    - Vergleich mit Camunda 7/8, Zeebe, Flowable, Temporal, Orkes und bpmn-js.
+
+    Regeln:
+    - Nutze web_search und fetch_url. Prüfe mindestens 6 Primär- oder
+      belastbare Sekundärquellen und nenne URL plus Abrufdatum.
+    - Lies vor der Bewertung den BPMNinja-Code oder die Doku, damit du nur
+      echte Lücken meldest. Bereits vorhandene Funktionen sind keine Lücke.
+    - Unterscheide klar zwischen Marktstandard, sinnvoller Differenzierung
+      und bewusst nicht verfolgtem Umfang.
+    - Keine unbelegten Behauptungen. Unsicherheit ausdrücklich markieren.
+    - Antworte auf Deutsch, maximal 1000 Wörter.
+
+    Liefere eine Vergleichstabelle (Fähigkeit, Wettbewerber, BPMNinja-Status,
+    Lücke/Relevanz, Quelle) und danach höchstens 6 daraus abgeleitete
+    Verbesserungsideen.
+  expected_output: |
+    Ein Markdown-Bericht mit Quellenliste (URL + Datum), Vergleichstabelle und
+    höchstens 6 belegten, BPMNinja-spezifischen Verbesserungsideen.
+
+product_review_task:
+  description: |
+    Prüfe Produktoberflächen und Developer Experience von BPMNinja im Fokus
+    "{focus}".
+
+    Untersuchung:
+    - REST-Routen, Statuscodes, Fehlerobjekte, Pagination, Filter und
+      Idempotenz in engine-server.
+    - OpenAPI/TypeSpec-Spezifikation gegen die tatsächlichen Handler prüfen.
+    - TypeScript-External-Task-Client: API-Form, Fehlerbehandlung, Defaults,
+      Typen und Einstiegshürden.
+    - Desktop-UI: zentrale Flows (Deployment, Instanzstart, Live-Tracking,
+      Incident-Behandlung), leere Zustände, Fehlermeldungen und
+      Zustandskonsistenz.
+    - Dokumentation und Onboarding: README, docs/, Knowledge Base.
+
+    Regeln:
+    - Belege jeden Fund mit Route, Datei oder Komponente.
+    - Höchstens 8 Funde, priorisiert nach Nutzerwirkung.
+    - Keine reinen Geschmacksfragen und keine groß angelegten Redesigns ohne
+      inkrementellen Pfad.
+    - Keine Dateiänderungen. Antworte auf Deutsch, maximal 1100 Wörter.
+  expected_output: |
+    Ein Markdown-Bericht mit höchstens 8 belegten DX-/Produkt-Funden,
+    jeweils mit betroffener Oberfläche, Evidenz, Wirkung und konkretem
+    Verbesserungsvorschlag.
+
+quality_audit_task:
+  description: |
+    Prüfe BPMNinja auf Betriebs-, Security- und Qualitätsrisiken im Fokus
+    "{focus}".
+
+    Suche gezielt nach:
+    - unwrap, expect, panic!, unreachable!, unsafe und unterdrückten Warnungen.
+    - fehlenden Timeouts, Retries, Limits und sauberer Fehlerpropagation.
+    - AuthZ/AuthN, CORS, Body-Limits, Pfadvalidierung, Secret-Handling.
+    - Testblindstellen in kritischen Pfaden (Gateways, Timer, Persistenz,
+      Incident-Recovery, Multi-Instance).
+    - CI-Abdeckung, Fuzzing, Mutation-Tests und Dependency-Risiken.
+
+    Regeln:
+    - Jeder Fund braucht path:line oder eine belastbare Quelle.
+    - Prüfe Sicherheitsbehauptungen gegen RustSec/OSV oder Herstellerdoku.
+    - Keine pauschalen Härtungslisten; nur konkrete, projektbezogene Lücken.
+    - Höchstens 8 Funde, priorisiert nach Risiko.
+    - Keine Dateiänderungen. Antworte auf Deutsch, maximal 1100 Wörter.
+  expected_output: |
+    Ein Markdown-Bericht mit höchstens 8 belegten Risiken, jeweils mit
+    Schweregrad, Evidenz, Angriffs-/Ausfallszenario und Gegenmaßnahme.
+
+synthesis_task:
+  description: |
+    Verdichte die vier Fachberichte zu einem Maßnahmenkatalog für BPMNinja.
+    Fokus: {focus}. Zielgröße: 6 bis {max_recommendations} Empfehlungen.
+
+    Bewertungsraster (Summe = Rating 1–100):
+    - impact: 0–30 Punkte. Wirkung auf Nutzer, Betrieb oder Produktreife.
+    - domain_gap: 0–20 Punkte. Relevanz im BPMN-/Workflow-Markt, belegt durch
+      die Domänenrecherche.
+    - risk_reduction: 0–20 Punkte. Gewinn bei Stabilität, Security oder
+      Wartbarkeit.
+    - effort: 0–15 Punkte. 15 = kleiner, klar abgegrenzter Aufwand;
+      0 = sehr großer Umbau.
+    - evidence: 0–15 Punkte. Stärke der Code- und Quellenbelege.
+    Die Summe der fünf Werte ist der score. Kein Score außerhalb 1–100.
+
+    Regeln:
+    - Dedupliziere Funde aus den Fachberichten und merge überlappende Punkte.
+    - Verwirf generische Ratschläge, bereits erledigte Arbeiten und Ideen ohne
+      Evidenz. Liste sie in discarded mit kurzer Begründung.
+    - Jede Empfehlung braucht: Titel, Kategorie, prägnante Zusammenfassung,
+      konkreten Änderungsvorschlag mit Dateien/Modulen, testbare
+      Abnahmekriterien, Risiken, Aufwand S/M/L/XL, Evidenz (path + Zeilen +
+      Notiz) und Quellen-URLs.
+    - Empfiehl nur Schritte, die inkrementell umsetzbar sind. Große Umbauten
+      müssen in einen ersten kleinen Schritt zerlegt werden.
+    - Sortiere absteigend nach Score. IDs vergibst du als R1, R2, …
+
+    Ausgabeformat:
+    - Antworte ausschließlich mit einem einzigen JSON-Objekt. Kein Markdown,
+      keine Code-Fences, kein erklärender Text davor oder danach.
+    - Das Objekt muss exakt diesem JSON-Schema entsprechen:
+    {report_schema}
+    - Die Felder generated_at, focus, project_state, methodology,
+      recommendations und discarded müssen gefüllt sein. Verwende deutsche
+      Texte, auch wenn die Schema-Beschreibungen englisch sind.
+
+    Wichtig: Der Bericht ist eine Entscheidungsvorlage. Es wird nichts
+    umgesetzt, bevor der Nutzer konkrete IDs bestätigt.
+  expected_output: |
+    Ein einzelnes valides JSON-Objekt (RecommendationReport) mit
+    project_state, methodology, 6 bis {max_recommendations} absteigend
+    sortierten Empfehlungen (Rating 1–100, Score-Aufschlüsselung, Evidenz,
+    Abnahmekriterien, Quellen) und einer Liste verworfener Ideen.
+
+implement_task:
+  description: |
+    Setze ausschließlich die folgenden bestätigten Empfehlungen um:
+    {recommendation_brief}
+
+    Regeln:
+    - Arbeite chirurgisch. Ändere nur Dateien, die für diese Empfehlungen
+      nötig sind, und lasse vorhandene Arbeitsbaum-Änderungen unangetastet.
+    - Lies vor jeder Änderung die betroffene Datei und die umliegenden Muster.
+    - Nutze repo_replace für bestehende Dateien, repo_write nur für neue.
+    - Keine Commits, kein Push, keine neuen Abhängigkeiten ohne zwingenden
+      Grund, kein Löschen von Nutzer-Notizen (HANDOFF.md, plan.md,
+      improve1026.md).
+    - Projektregeln: kein unwrap in Produktionscode, kein println/eprintln,
+      kein #[allow(...)] als Abkürzung, tracing statt Logging, Tests für
+      Verhaltensänderungen.
+    - Führe nach der Änderung mindestens cargo fmt und die engste sinnvolle
+      Prüfung aus (cargo check oder cargo test für die betroffene Crate).
+    - Wenn eine Empfehlung unklar, widersprüchlich oder zu riskant ist:
+      keine halbe Änderung, sondern Status BLOCKED mit Begründung.
+    - Antworte auf Deutsch mit STATUS, GEÄNDERTE DATEIEN, KOMMANDOS,
+      ERGEBNIS und OFFENE PUNKTE.
+  expected_output: |
+    Ein Umsetzungsbericht mit Status (done/blocked/failed), geänderten Dateien,
+    ausgeführten Kommandos, Testergebnissen und offenen Punkten.
+
+verify_task:
+  description: |
+    Verifiziere die Umsetzung aus dem vorherigen Schritt. Du änderst keinen
+    Produktcode.
+
+    Vorgehen:
+    1. Prüfe mit repo_diff, welche Dateien geändert wurden.
+    2. Wähle die betroffenen Crates und führe aus: cargo fmt --all --check,
+       cargo check -p <crate>, cargo test -p <crate> und bei Rust-Änderungen
+       cargo clippy -p <crate> --all-targets -- -D warnings.
+    3. Bei Desktop-Änderungen: npm run build und npm run lint in desktop-tauri,
+       sofern node_modules vorhanden ist.
+    4. Berichte exakte Kommandos, Exit-Codes und die entscheidenden
+       Fehlerzeilen. Trenne neue Fehler von bereits vorher bestehenden.
+    5. Wenn eine Prüfung fehlschlägt, empfiehl die kleinste Korrektur, aber
+       ändere nichts selbst.
+  expected_output: |
+    Ein Verifikationsbericht mit Dateiliste, exakten Kommandos, Exit-Codes,
+    Testergebnissen und klarer Aussage, ob die Änderung abgenommen werden kann.
+
+review_task:
+  description: |
+    Reviewe den Diff gegen die bestätigten Empfehlungen und die Projektregeln.
+    Du änderst keinen Code.
+
+    Prüfpunkte:
+    - Deckt der Diff die Abnahmekriterien ab?
+    - Gibt es Scope Creep, unrelated Formatierungen oder gelöschten fremden
+      Code?
+    - Neue panic-Pfade, unwrap, println, #[allow], unnötige Clones oder
+      blockierende Aufrufe?
+    - Fehlen Tests für geändertes Verhalten?
+    - Wurden öffentliche Verträge, Persistenzformate oder Fehlercodes
+      unbeabsichtigt gebrochen?
+    - Ist die Verifikation ausreichend und reproduzierbar?
+
+    Antworte mit APPROVED oder CHANGES REQUESTED, jeweils mit Datei, Zeile
+    und konkreter Begründung. Maximal 600 Wörter.
+  expected_output: |
+    Ein Review mit eindeutigem Votum (APPROVED oder CHANGES REQUESTED),
+    begründeten Funden nach Datei/Zeile und Restrisiko.

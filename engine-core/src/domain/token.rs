@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Token {
-    #[allow(dead_code)]
     pub id: Uuid,
     pub current_node: String,
     pub variables: HashMap<String, Value>,
@@ -25,7 +24,6 @@ impl Token {
     }
 
     /// Creates a new token with pre-populated variables.
-    #[allow(dead_code)]
     pub fn with_variables(start_node: &str, variables: HashMap<String, Value>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -35,7 +33,3 @@ impl Token {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// File Reference
-// ---------------------------------------------------------------------------

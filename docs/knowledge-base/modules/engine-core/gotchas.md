@@ -61,6 +61,15 @@ Snapshots are taken every 8 audit entries. The `calculate_diff` function compare
 - NATS fail + `REQUIRE_NATS=false` → in-memory with error log (explicit local opt-in)
 - NATS fail + `REQUIRE_NATS=true` (default) → **process exits**
 
+### ⚠️ Incidents sind Teil der Instanz, nicht der Pending-Tasks
+
+`ProcessInstance.incidents` ist die einzige Quelle für offene/aufgelöste Incidents. Es gibt **keine** zusätzliche `WorkflowPersistence`-Methode: die Liste wird mit der Instanz gespeichert (`#[serde(default)]` hält alte NATS-Dokumente ladbar). Ein Service-Task kann zusätzlich `retries <= 0` tragen; das ist nur noch der Fetch-and-Lock-Schutz, nicht die Incident-Wahrheit.
+
+- Dedup-Key ist `(kind, node_id, task_id)` bei offenen Einträgen. Timer-Fehler am selben Node erhöhen daher `occurrences`, obwohl `process_timers` alle 2 s erneut versucht.
+- Maximal `MAX_INCIDENTS_PER_INSTANCE = 100`. Beim Trimmen werden zuerst aufgelöste, dann die ältesten offenen Einträge verworfen.
+- Persistenz-Incidents entstehen erst nach `MAX_RETRIES` (50) des Retry-Workers. `Delete*`-Jobs können nach dem Entfernen aus der Pending-Map nicht mehr zugeordnet werden und werden ohne Incident übersprungen; fehlt die Instanz, passiert ebenfalls nichts.
+- `resolve_instance_incident` arbeitet nur auf aktiven Instanzen (`InstanceStore`) und persistiert anschließend. Ein zweiter Resolve-Versuch liefert `IncidentAlreadyResolved`.
+
 ### ⚠️ Retry queue is bounded
 
 Failed persistence ops are enqueued on a bounded channel (default capacity 10 000, `PERSISTENCE_RETRY_QUEUE_CAPACITY`). When full, jobs are **dropped** and counted (`bpmn_persistence_retry_dropped_total`) instead of growing memory unboundedly. Call `engine.shutdown()` before dropping the engine so the worker can flush remaining jobs.
