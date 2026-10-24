@@ -1,0 +1,35 @@
+{
+  "score": 75,
+  "threshold": 90,
+  "dimensions": {
+    "completeness": 62,
+    "accuracy": 70,
+    "clarity": 86,
+    "consistency": 78,
+    "diataxis": 84,
+    "usability": 80
+  },
+  "blockers": [
+    "B-01 reference/konfiguration.md: gesamter Inhalt 4 Wörter (nur title), 8 Pflichtfelder und Body fehlen; sechs Seiten verweisen für Default-Werte auf diese Seite",
+    "B-03 reference/service-task-api.md, Abschnitt '### bpmnError': curl-Beispiel bricht mitten im Pfad ab (vollständig: /api/service-task/{id}/bpmnError)",
+    "B-04 reference/rest-api.md, Abschnitt '## Offen': letzter Absatz endet mitten im Satz (SSE-Ereignisformat zu GET /api/events)",
+    "B-05 reference/bpmn-elemente.md und reference/kompatibilitaet.md fehlen vollständig, obwohl als P0 geführt und in explanation/architektur.md §2.3/§7 sowie explanation/konzepte.md 'Offen' referenziert",
+    "B-06 tutorials/erster-prozess.md, how-to/external-task-worker-schreiben.md, how-to/konfiguration-anpassen.md, reference/rest-api.md, reference/service-task-api.md: kein Beispiel gegen laufende Engine oder docs/openapi.yaml verifiziert",
+    "B-07 how-to/external-task-worker-schreiben.md, Schritt 4 (worker/worker.mjs): Handler-Signatur ({task, service}) statt (task, service), task.variables statt task.variables_snapshot, complete({variables:{...}}) statt complete({...})",
+    "B-08 how-to/external-task-worker-schreiben.md, Schritt 1: errorRef=\"INVALID_ADDRESS\" als direkter String verwendet; ob errorRef auf ein <bpmn:error>-Element verweisen muss, ist nicht belegt",
+    "B-09 _architecture/diagram-plan.md: Diagramme D1-D5 nur gegen Mermaid-Grammatik geprüft, Rendering im Zielsystem nicht nachgewiesen"
+  ],
+  "decision": "changes_requested",
+  "passed": false,
+  "summary": "Struktur, Ton, Diátaxis-Schnitt und Belegdichte sind freigabereif; Vollständigkeit und Nachweis der Beispiele sind es nicht. Acht Blocker: reference/konfiguration.md ist ein 4-Wort-Fragment (B-01), reference/service-task-api.md bricht im bpmnError-Beispiel ab (B-03), reference/rest-api.md endet mitten im Satz (B-04), die P0-Seiten reference/bpmn-elemente.md und reference/kompatibilitaet.md fehlen (B-05), kein Beispiel ist gegen eine laufende Engine oder docs/openapi.yaml verifiziert (B-06), das Worker-Beispiel nutzt die falsche Client-API (B-07), die errorRef-Semantik ist unbelegt (B-08), und die fünf Mermaid-Diagramme sind nur syntaktisch, nicht im Rendering geprüft (B-09). Linkprüfung: 4 defekte von 170, davon keiner in einer veröffentlichten Seite. Nicht prüfbar und deshalb score-mindernd dokumentiert: Live-Ausführung, OpenAPI-Abgleich, Mermaid-Rendering, Ankerauflösung, Nutzertests.",
+  "iteration": 1,
+  "created_at": "2026-10-24T11:11:44.255119+00:00",
+  "weights": {
+    "completeness": 0.2,
+    "accuracy": 0.25,
+    "clarity": 0.15,
+    "consistency": 0.15,
+    "diataxis": 0.15,
+    "usability": 0.1
+  }
+}
