@@ -31,6 +31,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          # Tag statt Workflow-Ref auschecken, damit auch ein manuell gestarteter
+          # Lauf den Stand des Tags baut und nicht den aktuellen Branch.
+          ref: ${{ env.TAG }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -103,6 +106,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          ref: ${{ env.TAG }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -136,7 +140,9 @@ jobs:
           projectPath: desktop-tauri
           tagName: ${{ env.TAG }}
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          releaseDraft: false
+          # Draft bleibt bestehen, bis alle Targets gebaut und Prüfsummen
+          # hochgeladen sind; der publish-Job veröffentlicht am Ende.
+          releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
 
