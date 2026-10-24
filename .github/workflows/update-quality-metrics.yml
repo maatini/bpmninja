@@ -1,49 +1,71 @@
 name: Update Quality Metrics
 
 on:
-  workflow_run:
-    workflows:
-      - Fuzz Testing
-      - Core Mutation Tests
-    types:
-      - completed
+  # Wöchentlich montags um 04:00 UTC
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: write
   actions: read
 
-# Serialize metrics updates so two workflow_run jobs do not
-# commit against the same stale main and reject each other.
+# Metriken laufen gesammelt und schreiben nur auf den metrics-Branch.
 concurrency:
   group: update-quality-metrics
   cancel-in-progress: false
 
 jobs:
   update-metrics:
-    name: Merge quality metrics and update README
-    # Mutation workflow uses continue-on-error; also merge when the run failed
-    # but still produced metrics artifacts (partial success).
-    if: >
-      github.event.workflow_run.conclusion == 'success' ||
-      github.event.workflow_run.conclusion == 'failure'
+    name: Qualitätsmetriken zusammenführen
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout main
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
 
-      - name: Download metrics artifacts from triggering run
-        uses: actions/download-artifact@v8
-        with:
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          pattern: "*-metrics"
-          path: incoming-metrics
-          merge-multiple: true
+      - name: Mutation-Metriken herunterladen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p incoming-metrics/mutation
+          if ! run_id="$(gh run list --workflow "Core Mutation Tests" --status completed --limit 1 --json databaseId --jq '.[0].databaseId')"; then
+            echo "::warning::Lauf-Liste für 'Core Mutation Tests' konnte nicht abgerufen werden."
+            exit 0
+          fi
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "::warning::Kein abgeschlossener Lauf für 'Core Mutation Tests' gefunden."
+            exit 0
+          fi
+          echo "Lade Mutation-Metriken aus Run ${run_id}."
+          if ! gh run download "$run_id" --pattern "*-metrics" --dir incoming-metrics/mutation; then
+            echo "::warning::Artefakte für 'Core Mutation Tests' (Run ${run_id}) konnten nicht geladen werden."
+          fi
 
-      - name: Merge metrics and update README block
+      - name: Fuzz-Metriken herunterladen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p incoming-metrics/fuzz
+          if ! run_id="$(gh run list --workflow "Fuzz Testing" --status completed --limit 1 --json databaseId --jq '.[0].databaseId')"; then
+            echo "::warning::Lauf-Liste für 'Fuzz Testing' konnte nicht abgerufen werden."
+            exit 0
+          fi
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "::warning::Kein abgeschlossener Lauf für 'Fuzz Testing' gefunden."
+            exit 0
+          fi
+          echo "Lade Fuzz-Metriken aus Run ${run_id}."
+          if ! gh run download "$run_id" --pattern "*-metrics" --dir incoming-metrics/fuzz; then
+            echo "::warning::Artefakte für 'Fuzz Testing' (Run ${run_id}) konnten nicht geladen werden."
+          fi
+
+      - name: Metriken zusammenführen und README-Block aktualisieren
         run: python3 .github/scripts/merge_quality_metrics.py
 
-      - name: Commit and push if changed
+      - name: Auf metrics-Branch committen und pushen
         run: bash .github/scripts/commit-and-push-quality-metrics.sh
