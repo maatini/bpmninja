@@ -1,4 +1,4 @@
-//! Paralleles Multi-Instance für Service Tasks (R8).
+//! Paralleles und sequentielles Multi-Instance für Service Tasks (R8).
 
 use super::super::*;
 use crate::domain::{MultiInstanceDef, ProcessDefinitionBuilder};
@@ -15,6 +15,17 @@ fn parallel_mi(
         loop_cardinality: loop_cardinality.map(str::to_string),
         collection: collection.map(str::to_string),
         element_variable: element_variable.map(str::to_string),
+    }
+}
+
+fn sequential_mi(
+    loop_cardinality: Option<&str>,
+    collection: Option<&str>,
+    element_variable: Option<&str>,
+) -> MultiInstanceDef {
+    MultiInstanceDef {
+        is_sequential: true,
+        ..parallel_mi(loop_cardinality, collection, element_variable)
     }
 }
 
@@ -218,4 +229,216 @@ async fn collection_with_wrong_type_yields_clear_error() {
         msg.contains("orders") && msg.contains("must be an array") && msg.contains("string"),
         "unexpected error: {msg}"
     );
+}
+
+async fn lock_single_task(engine: &WorkflowEngine) -> PendingServiceTask {
+    let mut locked = engine
+        .fetch_and_lock_service_tasks("worker", 10, &["work".to_string()], 600)
+        .await;
+    assert_eq!(locked.len(), 1, "exactly one sequential task must be open");
+    locked.remove(0)
+}
+
+#[tokio::test]
+async fn sequential_loop_cardinality_runs_one_task_at_a_time() {
+    let (engine, def_key) = deploy_mi_engine(sequential_mi(Some("3"), None, None)).await;
+    let instance_id = engine.start_instance(def_key).await.unwrap();
+
+    let tasks = pending_tasks(&engine, instance_id);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(loop_counter(&tasks[0]), Some(1));
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert!(matches!(
+        inst.state,
+        InstanceState::WaitingOnServiceTask { .. }
+    ));
+    assert_eq!(inst.tokens.len(), 1);
+    let progress = inst
+        .multi_instance_state
+        .get("svc")
+        .expect("MI progress entry");
+    assert_eq!(progress.total, 3);
+    assert_eq!(progress.completed, 0);
+    assert_eq!(progress.items.len(), 3);
+    assert!(progress.sequential_token.is_some());
+
+    let mut previous_task_id = tasks[0].id;
+    for counter in 1..=2u64 {
+        let task = lock_single_task(&engine).await;
+        assert_eq!(task.id, previous_task_id);
+        assert_eq!(loop_counter(&task), Some(counter));
+
+        engine
+            .complete_service_task(task.id, "worker", HashMap::new())
+            .await
+            .unwrap();
+
+        let tasks = pending_tasks(&engine, instance_id);
+        assert_eq!(
+            tasks.len(),
+            1,
+            "a new task must appear after item {counter}"
+        );
+        assert_ne!(tasks[0].id, previous_task_id, "next task must be new");
+        assert_eq!(loop_counter(&tasks[0]), Some(counter + 1));
+        previous_task_id = tasks[0].id;
+
+        let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+        assert!(
+            matches!(inst.state, InstanceState::WaitingOnServiceTask { task_id } if task_id == previous_task_id),
+            "instance must wait for the next item after {counter}"
+        );
+        assert_eq!(inst.tokens.len(), 1, "token must survive until last item");
+        let progress = inst
+            .multi_instance_state
+            .get("svc")
+            .expect("MI progress entry");
+        assert_eq!(progress.completed, counter as usize);
+        assert_eq!(progress.total, 3);
+    }
+
+    let last_task = lock_single_task(&engine).await;
+    assert_eq!(last_task.id, previous_task_id);
+    assert_eq!(loop_counter(&last_task), Some(3));
+    engine
+        .complete_service_task(last_task.id, "worker", HashMap::new())
+        .await
+        .unwrap();
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert!(inst.multi_instance_state.is_empty());
+    assert!(inst.tokens.is_empty());
+    assert!(pending_tasks(&engine, instance_id).is_empty());
+    let end_entries = inst
+        .audit_log
+        .iter()
+        .filter(|line| line.contains("Process completed at end event"))
+        .count();
+    assert_eq!(end_entries, 1, "instance must advance exactly once");
+}
+
+#[tokio::test]
+async fn sequential_collection_preserves_item_order_and_element_variable() {
+    let (engine, def_key) =
+        deploy_mi_engine(sequential_mi(None, Some("orders"), Some("order"))).await;
+
+    let mut vars = HashMap::new();
+    vars.insert("orders".to_string(), json!(["a", "b", "c"]));
+    let instance_id = engine
+        .start_instance_with_variables(def_key, vars)
+        .await
+        .unwrap();
+
+    for (idx, expected) in ["a", "b", "c"].iter().enumerate() {
+        let tasks = pending_tasks(&engine, instance_id);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(loop_counter(&tasks[0]), Some(idx as u64 + 1));
+        assert_eq!(
+            tasks[0].variables_snapshot.get("order"),
+            Some(&json!(expected))
+        );
+
+        let task = lock_single_task(&engine).await;
+        assert_eq!(task.id, tasks[0].id);
+        engine
+            .complete_service_task(task.id, "worker", HashMap::new())
+            .await
+            .unwrap();
+    }
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert!(inst.multi_instance_state.is_empty());
+    assert!(pending_tasks(&engine, instance_id).is_empty());
+    assert_eq!(inst.variables.get("order"), Some(&json!("c")));
+    assert_eq!(inst.variables.get("loopCounter"), Some(&json!(3)));
+}
+
+#[tokio::test]
+async fn sequential_empty_collection_skips_task_and_continues() {
+    let (engine, def_key) =
+        deploy_mi_engine(sequential_mi(None, Some("orders"), Some("order"))).await;
+
+    let mut vars = HashMap::new();
+    vars.insert("orders".to_string(), json!([]));
+    let instance_id = engine
+        .start_instance_with_variables(def_key, vars)
+        .await
+        .unwrap();
+
+    assert!(pending_tasks(&engine, instance_id).is_empty());
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert!(inst.multi_instance_state.is_empty());
+}
+
+#[tokio::test]
+async fn sequential_failure_keeps_progress_and_single_open_task() {
+    let (engine, def_key) = deploy_mi_engine(sequential_mi(Some("2"), None, None)).await;
+    let instance_id = engine.start_instance(def_key).await.unwrap();
+
+    let first = lock_single_task(&engine).await;
+    assert_eq!(loop_counter(&first), Some(1));
+    engine
+        .fail_service_task(
+            first.id,
+            "worker",
+            Some(1),
+            Some("transient error".into()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert_eq!(inst.tokens.len(), 1);
+    let progress = inst
+        .multi_instance_state
+        .get("svc")
+        .expect("MI progress entry");
+    assert_eq!(progress.completed, 0, "failed item must not count as done");
+    assert_eq!(pending_tasks(&engine, instance_id).len(), 1);
+
+    let retried = lock_single_task(&engine).await;
+    assert_eq!(retried.id, first.id);
+    engine
+        .complete_service_task(retried.id, "worker", HashMap::new())
+        .await
+        .unwrap();
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    let progress = inst
+        .multi_instance_state
+        .get("svc")
+        .expect("MI progress entry");
+    assert_eq!(progress.completed, 1);
+    let second = lock_single_task(&engine).await;
+    assert_eq!(loop_counter(&second), Some(2));
+
+    engine
+        .fail_service_task(second.id, "worker", Some(0), Some("boom".into()), None)
+        .await
+        .unwrap();
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    let progress = inst
+        .multi_instance_state
+        .get("svc")
+        .expect("MI progress entry");
+    assert_eq!(progress.completed, 1, "incident must not lose progress");
+    assert_eq!(pending_tasks(&engine, instance_id).len(), 1);
+
+    engine.retry_incident(second.id, Some(1)).await.unwrap();
+    let retried = lock_single_task(&engine).await;
+    assert_eq!(retried.id, second.id);
+    engine
+        .complete_service_task(retried.id, "worker", HashMap::new())
+        .await
+        .unwrap();
+
+    let inst = engine.get_instance_or_archived(instance_id).await.unwrap();
+    assert_eq!(inst.state, InstanceState::Completed);
+    assert!(inst.multi_instance_state.is_empty());
+    assert!(pending_tasks(&engine, instance_id).is_empty());
 }

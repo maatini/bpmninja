@@ -40,15 +40,14 @@ Assignee and topic are read from desktop `data-*` attributes first, then Camunda
 
 The desktop modeler writes both `data-assignee`/`data-topic` and `camunda:assignee`/`camunda:topic`. XML exported from Camunda Modeler deploys with the Camunda attributes. `quick-xml` strips the `camunda:` prefix on attributes, so the parser binds `camunda:assignee` as `@assignee` (with alias `@camunda:assignee`).
 
-### ⚠️ Multi-instance: parallel service tasks only
+### ⚠️ Multi-instance: parallel and sequential service tasks only
 
-`multiInstanceLoopCharacteristics` is supported **only** on `serviceTask` and only in **parallel** form, with either `collection` + `elementVariable` or `loopCardinality` (positive integer). The runtime emits `MultiInstanceFork`/`MultiInstanceNext`, tracks `MultiInstanceProgress` and advances the token once after the last item completes.
+`multiInstanceLoopCharacteristics` is supported **only** on `serviceTask`, in both **parallel** and **sequential** (`isSequential="true"`) form, with either `collection` + `elementVariable` or `loopCardinality` (positive integer). The runtime tracks `MultiInstanceProgress` and advances the token once after the last item completes. Parallel MI creates all pending tasks up front; sequential MI keeps exactly one task open, stores the remaining items in `MultiInstanceProgress.items` and reuses the token for the next iteration. Collection order and the `elementVariable` value per iteration are preserved; `loopCounter` starts at 1.
 
 Everything else is rejected at parse time with `EngineError::InvalidDefinition`:
 
-- `isSequential="true"` (`Sequential multi-instance is not supported yet`)
 - `multiInstanceLoopCharacteristics` on `userTask`, `scriptTask`, `sendTask`, `receiveTask`, `manualTask`, or `businessRuleTask`
-  (`Multi-instance is only supported for parallel service tasks; <kind> '<id>' is not supported`)
+  (`Multi-instance is only supported for service tasks; <kind> '<id>' is not supported`)
 - missing both `collection` and `loopCardinality`, or defining both
 - non-positive/non-integer `loopCardinality`
 

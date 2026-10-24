@@ -1246,7 +1246,32 @@ fn reject_multi_instance_loop_characteristics() {
     let err = parse_bpmn_xml(xml).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Multi-instance is only supported for parallel service tasks")
+        msg.contains("Multi-instance is only supported for service tasks")
+            && msg.contains("userTask 'ut1'"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_sequential_multi_instance_on_user_task() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <userTask id="ut1">
+                    <multiInstanceLoopCharacteristics isSequential="true">
+                        <loopCardinality>3</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                </userTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ut1" />
+                <sequenceFlow id="f2" sourceRef="ut1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("Multi-instance is only supported for service tasks")
             && msg.contains("userTask 'ut1'"),
         "unexpected error: {msg}"
     );
@@ -1317,12 +1342,12 @@ fn accept_parallel_multi_instance_collection() {
 }
 
 #[test]
-fn reject_sequential_multi_instance() {
+fn accept_sequential_multi_instance() {
     let xml = r#"
         <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <process id="proc1" isExecutable="true">
                 <startEvent id="s1" />
-                <serviceTask id="svc1">
+                <serviceTask id="svc1" data-topic="notify">
                     <multiInstanceLoopCharacteristics isSequential="true">
                         <loopCardinality>2</loopCardinality>
                     </multiInstanceLoopCharacteristics>
@@ -1333,11 +1358,50 @@ fn reject_sequential_multi_instance() {
             </process>
         </definitions>
     "#;
-    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
-    assert!(
-        msg.contains("Sequential multi-instance is not supported yet") && msg.contains("svc1"),
-        "unexpected error: {msg}"
-    );
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("svc1").unwrap() {
+        BpmnElement::ServiceTask {
+            topic,
+            multi_instance: Some(mi),
+        } => {
+            assert_eq!(topic, "notify");
+            assert!(mi.is_sequential);
+            assert_eq!(mi.loop_cardinality.as_deref(), Some("2"));
+            assert_eq!(mi.collection, None);
+        }
+        other => panic!("Expected ServiceTask with sequential multi-instance, got {other:?}"),
+    }
+}
+
+#[test]
+fn accept_sequential_multi_instance_collection() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1" data-topic="notify">
+                    <multiInstanceLoopCharacteristics isSequential="true"
+                        collection="orders" elementVariable="order" />
+                </serviceTask>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("svc1").unwrap() {
+        BpmnElement::ServiceTask {
+            multi_instance: Some(mi),
+            ..
+        } => {
+            assert!(mi.is_sequential);
+            assert_eq!(mi.collection.as_deref(), Some("orders"));
+            assert_eq!(mi.element_variable.as_deref(), Some("order"));
+            assert_eq!(mi.loop_cardinality, None);
+        }
+        other => panic!("Expected ServiceTask with sequential multi-instance, got {other:?}"),
+    }
 }
 
 #[test]

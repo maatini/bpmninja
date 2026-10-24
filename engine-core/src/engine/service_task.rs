@@ -245,13 +245,18 @@ impl WorkflowEngine {
         let is_last_item = mi_progress
             .as_ref()
             .is_some_and(|p| p.completed.saturating_add(1) >= p.total);
-        let mi_element_variable = match def.get_node(&task.node_id) {
+        let mi_definition = match def.get_node(&task.node_id) {
             Some(BpmnElement::ServiceTask {
                 multi_instance: Some(mi),
                 ..
-            }) => mi.element_variable.clone(),
+            }) => Some(mi.clone()),
             _ => None,
         };
+        let is_sequential =
+            is_multi_instance && mi_definition.as_ref().is_some_and(|mi| mi.is_sequential);
+        let mi_element_variable = mi_definition
+            .as_ref()
+            .and_then(|mi| mi.element_variable.clone());
 
         // Retrieve token from central store and merge variables. Bei MI bleibt
         // der Token bis zum letzten Item in der Instanz.
@@ -296,7 +301,96 @@ impl WorkflowEngine {
             token.variables.insert(k, v);
         }
 
-        // Vor dem letzten Item: nur Fortschritt fortschreiben, Token behalten.
+        // Sequentielles MI: nach jedem Item genau einen Nachfolge-Task
+        // anlegen; der Token bleibt bis zum letzten Item in der Instanz.
+        if is_sequential && !is_last_item {
+            let (completed, total, items) = mi_progress
+                .as_ref()
+                .map(|p| (p.completed.saturating_add(1), p.total, p.items.clone()))
+                .unwrap_or_else(|| (0, 0, Vec::new()));
+            let next_item = items.get(completed).cloned().flatten();
+            let mut variables_snapshot = token.variables.clone();
+            variables_snapshot.insert(
+                "loopCounter".to_string(),
+                Value::from(completed.saturating_add(1) as u64),
+            );
+            if let (Some(element_variable), Some(value)) = (&mi_element_variable, next_item) {
+                variables_snapshot.insert(element_variable.clone(), value);
+            }
+            let business_key = old_state.as_ref().and_then(|inst| {
+                (!inst.business_key.is_empty()).then(|| inst.business_key.clone())
+            });
+            let next_task = PendingServiceTask {
+                id: Uuid::new_v4(),
+                instance_id,
+                definition_key: def.key,
+                node_id: task.node_id.clone(),
+                topic: task.topic.clone(),
+                token_id: token.id,
+                variables_snapshot,
+                created_at: Utc::now(),
+                worker_id: None,
+                lock_expiration: None,
+                retries: 3,
+                error_message: None,
+                error_details: None,
+                business_key,
+            };
+
+            {
+                let inst_arc = self
+                    .instances
+                    .get(&instance_id)
+                    .await
+                    .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                let mut inst = inst_arc.write().await;
+                inst.variables = token.variables.clone();
+                inst.tokens.insert(token.id, token);
+                if let Some(progress) = inst.multi_instance_state.get_mut(&task.node_id) {
+                    progress.completed = progress.completed.saturating_add(1);
+                }
+                inst.state = InstanceState::WaitingOnServiceTask {
+                    task_id: next_task.id,
+                };
+                inst.push_audit_log(format!(
+                    "✅ Sequential multi-instance service task '{}' item {completed}/{total} completed by worker '{}'",
+                    task.node_id, worker_id
+                ));
+            }
+
+            self.insert_pending_service_task(next_task.clone());
+            self.persist_service_task(next_task.id).await;
+
+            tracing::info!(
+                "Instance {}: completed sequential multi-instance service task '{}' item {completed}/{total}; next task {} (loopCounter {})",
+                instance_id,
+                task.node_id,
+                next_task.id,
+                completed.saturating_add(1)
+            );
+
+            self.remove_persisted_service_task(task_id).await;
+            metrics::counter!("bpmn_tasks_completed_total", "type" => "service").increment(1);
+
+            self.record_history_event(
+                instance_id,
+                crate::history::HistoryEventType::TaskCompleted,
+                &format!(
+                    "Sequential multi-instance service task '{}' item {completed}/{total} completed",
+                    task.node_id
+                ),
+                crate::history::ActorType::ServiceWorker,
+                Some(worker_id.to_string()),
+                old_state.as_ref(),
+            )
+            .await;
+
+            self.persist_instance(instance_id).await;
+            return Ok(());
+        }
+
+        // Paralleles MI vor dem letzten Item: nur Fortschritt fortschreiben,
+        // Token behalten.
         if is_multi_instance && !is_last_item {
             let (completed, total) = mi_progress
                 .as_ref()

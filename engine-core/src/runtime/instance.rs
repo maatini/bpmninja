@@ -56,6 +56,10 @@ pub struct MultiInstanceProgress {
     pub completed: usize,
     /// For sequential MI: the token that will re-execute the task
     pub sequential_token: Option<Token>,
+    /// Items of a sequential MI activity (parallel MI leaves this empty).
+    /// Older snapshots without this field deserialize to an empty vector.
+    #[serde(default)]
+    pub items: Vec<Option<Value>>,
 }
 
 /// The state of a process instance.

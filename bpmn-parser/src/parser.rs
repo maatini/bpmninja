@@ -276,7 +276,7 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
 
 /// Baut eine Multi-Instance-Definition für Service Tasks.
 ///
-/// Unterstützt wird nur paralleles MI mit genau einer Quelle:
+/// Unterstützt werden paralleles und sequentielles MI mit genau einer Quelle:
 /// `collection` (Variablenreferenz auf ein Array) oder `loopCardinality`.
 fn parse_multi_instance(
     mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
@@ -286,11 +286,7 @@ fn parse_multi_instance(
         return Ok(None);
     };
 
-    if mi.is_sequential.unwrap_or(false) {
-        return Err(EngineError::InvalidDefinition(format!(
-            "Sequential multi-instance is not supported yet (element '{element_id}')"
-        )));
-    }
+    let is_sequential = mi.is_sequential.unwrap_or(false);
 
     let collection = mi
         .collection
@@ -334,7 +330,7 @@ fn parse_multi_instance(
     };
 
     Ok(Some(engine_core::model::MultiInstanceDef {
-        is_sequential: false,
+        is_sequential,
         loop_cardinality,
         collection,
         element_variable,
@@ -342,7 +338,7 @@ fn parse_multi_instance(
 }
 
 /// Lehnt `multiInstanceLoopCharacteristics` für Elemente ab, die kein
-/// paralleler Service Task sind.
+/// Service Task sind.
 fn reject_multi_instance(
     mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
     element_id: &str,
@@ -350,7 +346,7 @@ fn reject_multi_instance(
 ) -> EngineResult<()> {
     if mi.is_some() {
         return Err(EngineError::InvalidDefinition(format!(
-            "Multi-instance is only supported for parallel service tasks; {element_kind} '{element_id}' is not supported"
+            "Multi-instance is only supported for service tasks; {element_kind} '{element_id}' is not supported"
         )));
     }
     Ok(())
