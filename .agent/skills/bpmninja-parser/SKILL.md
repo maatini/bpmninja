@@ -1,8 +1,8 @@
 ---
 name: bpmninja-parser
-description: Skill for the bpmn-parser crate covering BPMN 2.0 XML parsing, model generation, validation, and error recovery. Implements EvoSkills co-evolutionary verification (arXiv 2604.01687).
+description: Skill for the bpmn-parser crate covering BPMN 2.0 XML parsing, model generation, validation, and error recovery.
 version: 2.0.0
-tags: [rust, bpmn-parser, xml, quick-xml, parsing, validation, evoskills]
+tags: [rust, bpmn-parser, xml, quick-xml, parsing, validation]
 requires: [cargo]
 ---
 
@@ -27,13 +27,12 @@ bpmn-parser/src/
 ```
 
 ### Key Types
-- `ProcessDefinition` – Top-level parsed BPMN process
-- `BpmnElement` – Enum of all supported BPMN elements
+- `ProcessDefinition` – Top-level parsed BPMN process (aus `engine-core`)
 - `SequenceFlow` – Flow connections between elements
-- `BpmnParser::parse(xml: &str) -> Result<ProcessDefinition>` – Main entry point
+- `parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition>` – einziger öffentlicher Einstieg
 
 ### Relationship to engine-core
-The parser produces `ProcessDefinition` which engine-core's `domain/definition.rs` consumes. The parser's model types MUST be compatible with engine-core's domain types. When adding new elements to the parser, engine-core's domain model usually needs a corresponding update first (see `.agent/rules/01_GLOBAL_DIRECTIVES.md`).
+The parser produces `ProcessDefinition` which engine-core's `domain/definition.rs` consumes. The parser's model types MUST be compatible with engine-core's domain types. When adding new elements to the parser, engine-core's domain model usually needs a corresponding update first (see `CLAUDE.md`).
 
 ## Domain Rules & Patterns
 
@@ -43,36 +42,12 @@ The parser produces `ProcessDefinition` which engine-core's `domain/definition.r
 4. **No External I/O**: The parser is a pure function `&str → Result<ProcessDefinition>`. No file system or network access.
 5. **Performance**: Parser must handle BPMN files up to 10MB without excessive memory allocation. Prefer streaming/SAX-style parsing over DOM.
 
-## Co-Evolutionary Verification (EvoSkills, arXiv 2604.01687)
+## Verifikation
 
-Every change MUST go through this loop before commit:
-
-### Step 1 – Generate
-Use the Graphify MCP Tools first to analyze the relevant Graph Communities (e.g. 8, 10). Only after understanding the graph boundaries, read specific parser files like `parser.rs`. Produce concrete, diff-ready Rust code changes.
-
-### Step 2 – Surrogate Verification (Self-Critique)
-Evaluate changes against these criteria (score 0–10 each, **all must be ≥ 7**):
-
-| # | Criterion | Question |
-|---|---|---|
-| 1 | Parsing Safety | Does the change handle malformed XML gracefully? No panics on invalid input? |
-| 2 | BPMN 2.0 Spec Compliance | Do parsed elements match the official BPMN 2.0 XML schema semantics? |
-| 3 | Model Compatibility | Are parser model types still compatible with engine-core's domain types? |
-| 4 | Error Recovery | Are unknown/unsupported elements skipped gracefully instead of causing failures? |
-| 5 | Test Coverage | Are new parsing paths covered by tests with representative XML snippets? |
-| 6 | Performance | Does the change avoid unnecessary allocations or O(n²) patterns on large inputs? |
-
-If ANY criterion scores < 7 → return to Step 1 with actionable diagnostic.
-
-### Step 3 – External Oracle
-Run `scripts/oracle.sh`. Returns only **PASS** or **FAIL + exit code**.
-
-### Step 4 – Evolution Decision
-- **Surrogate FAIL** → Fix and retry (max 15 retries)
-- **Surrogate PASS, Oracle FAIL** → Escalate surrogate criteria, retry
-- **Oracle PASS** → Commit. Update Evolution Log.
-
-Max rounds: 5 oracle, 15 surrogate.
+```bash
+cargo clippy -p bpmn-parser --all-targets -- -D warnings
+cargo test -p bpmn-parser
+```
 
 ## Common Pitfalls
 - Adding parser support without updating engine-core's domain model first
@@ -81,6 +56,3 @@ Max rounds: 5 oracle, 15 surrogate.
 - Tests with inline XML that doesn't match real BPMN modeler output
 - Forgetting namespace handling in XML elements
 
-## Evolution Log
-| Date | Change | Surrogate Rounds | Oracle Result | Notes |
-|---|---|---|---|---|

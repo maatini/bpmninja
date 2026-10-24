@@ -3,23 +3,33 @@ trigger: file_match
 file_patterns: ["bpmn-parser/**"]
 ---
 
-# Parser Agent
+# Parser-Regeln
+
 - **Domain:** `bpmn-parser/`
-- **Role:** Takes raw BPMN 2.0 XML string/bytes and returns `engine_core::ProcessDefinition`.
-- **Parser:** `quick-xml` with `serde` deserialization.
+- **Rolle:** BPMN-2.0-XML → `engine_core::ProcessDefinition`.
+- **Technik:** `quick-xml` mit `serde`-Deserialisierung; Einstieg `parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition>`.
 
-## Parsing Rules
-- Validate BPMN structural integrity before returning `Ok()` (e.g., every flow target must exist, start events must be present).
-- Use `ProcessDefinitionBuilder` from `engine-core` to construct the output — never build `ProcessDefinition` directly.
-- Parse all 21 `BpmnElement` variants documented in `BPMN_WORKFLOW_ENGINE.md`.
-- Gracefully handle unknown elements: log via `tracing::warn!` and skip — do not error on vendor extensions.
+## Parsing
+- Struktur vor `Ok()` validieren: jede Flow-Ziel-ID existiert, Start-Event vorhanden, Pflichtattribute gesetzt.
+- Ausgabe ausschließlich über `ProcessDefinitionBuilder` bauen.
+- Alle 29 `BpmnElement`-Varianten aus `RUST_ENGINE_AGENT.md` abdecken.
+- Unbekannte Elemente mit `tracing::warn!` überspringen; Vendor-Extensions sind kein Fehler.
+- Embedded Sub-Prozesse beim Parsen flatten; Send-, Inclusive-, EventBased- und Intermediate-Events dabei erhalten.
+- Multi-Instance wird abgelehnt (`InvalidDefinition`), nicht still ignoriert.
 
-## Error Handling
-- Return `anyhow::Result<ProcessDefinition>` with descriptive error context.
-- Include XML element name and line context in error messages where possible.
-- Never panic on malformed XML — always return an error.
+## Attribute und Namespaces
+- `quick-xml` entfernt das `camunda:`-Präfix; Attribute kommen als `@assignee`/`@topic` an.
+  `serde` nutzt `rename = "@topic"` plus `alias = "@camunda:topic"` (analog `assignee`).
+- Topic-Priorität: `data-topic` → `data-handler` → `camunda:topic` → Node-ID.
+- Assignee-Priorität: `data-assignee` → `camunda:assignee` → unassigned.
 
-## Testing
-- Test each BPMN element type with minimal XML snippets.
-- Test error cases: malformed XML, missing required attributes, unknown elements.
-- Round-trip tests: parse → serialize → parse should produce identical `ProcessDefinition`.
+## Fehler
+- Fehler als `EngineError::InvalidDefinition` mit Elementname und Kontext zurückgeben.
+- Bei kaputtem XML nie panicken.
+- `receiveTask` mit `messageRef` wird MessageCatchEvent, `manualTask` wird UserTask,
+  `businessRuleTask` nur mit explizitem Topic gültig; leere Timer-/Event-Definitionen sind ungültig.
+
+## Tests
+- Jede Elementart mit minimalem XML-Snippet testen.
+- Fehlerfälle: kaputtes XML, fehlende Pflichtattribute, unbekannte Elemente.
+- Roundtrip: parse → serialize → parse ergibt dieselbe `ProcessDefinition`.

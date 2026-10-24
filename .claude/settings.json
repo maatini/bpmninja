@@ -31,28 +31,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Prüfe ob .agent/manifest.json und graphify-out/GRAPH_REPORT.md existieren. Wenn ja, erinnere an den Graph-First-Workflow: 1) GRAPH_REPORT.md lesen, 2) Relevante Communities identifizieren, 3) Graph MCP Tools zur Navigation nutzen, 4) Erst dann Code lesen. Bei regelwidrigen God Nodes oder isolierten Nodes: Issue vorschlagen."
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "prompt",
-            "if": "Bash(git commit*)",
-            "prompt": "Prüfe den letzten Bash-Befehl. Wenn es ein git commit war: Erinnere daran, dass laut .agent/rules/03_GRAPH_MAINTENANCE.md nach jedem Commit 'devbox run graphify' laufen muss. Frag den User, ob du das jetzt anstoßen sollst."
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Prüfe den Dateipfad der letzten Schreiboperation. Wenn die Datei in engine-core/ liegt, lies .agent/rules/RUST_ENGINE_AGENT.md. Wenn in bpmn-parser/: .agent/rules/BPMN_PARSER_AGENT.md. Wenn in engine-server/: .agent/rules/ENGINE_SERVER_AGENT.md. Wenn in desktop-tauri/: .agent/rules/TAURI_REACT_UI_AGENT.md. Wenn in persistence-nats/: .agent/rules/NATS_MESSAGE_BROKER.md. Bei Rust-Dateien workspace-weit: .agent/rules/RUST_AGENT_RULES.md. Gib die relevanten Regeln als additionalContext zurück."
+            "prompt": "Lies CLAUDE.md. Bei Bedarf HANDOFF.md und die passende Pro-Crate-Regel aus .agent/rules/ lesen. Kein Graph- oder Task-Memory-Zwang."
           }
         ]
       }

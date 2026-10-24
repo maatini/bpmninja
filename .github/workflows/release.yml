@@ -146,7 +146,7 @@ jobs:
       - name: Prüfsummen hochladen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" "bpmninja-${{ matrix.name }}.sha256" --clobber
+        run: gh release upload "${{ env.TAG }}" "bpmninja-${{ matrix.name }}.sha256" --clobber
 
   publish:
     name: Release veröffentlichen

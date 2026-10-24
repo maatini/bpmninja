@@ -6,7 +6,7 @@
       "path": "engine-core",
       "rules": [
         "rules/RUST_ENGINE_AGENT.md",
-        "rules/BPMN_WORKFLOW_ENGINE.md"
+        "rules/RUST_AGENT_RULES.md"
       ],
       "skills": [
         "skills/bpmninja-engine/SKILL.md"
@@ -15,7 +15,8 @@
     "parser": {
       "path": "bpmn-parser",
       "rules": [
-        "rules/BPMN_PARSER_AGENT.md"
+        "rules/BPMN_PARSER_AGENT.md",
+        "rules/RUST_AGENT_RULES.md"
       ],
       "skills": [
         "skills/bpmninja-parser/SKILL.md"
@@ -24,7 +25,8 @@
     "persistence": {
       "path": "persistence-nats",
       "rules": [
-        "rules/NATS_MESSAGE_BROKER.md"
+        "rules/NATS_MESSAGE_BROKER.md",
+        "rules/RUST_AGENT_RULES.md"
       ],
       "skills": [
         "skills/bpmninja-engine/SKILL.md"
@@ -33,7 +35,8 @@
     "server": {
       "path": "engine-server",
       "rules": [
-        "rules/ENGINE_SERVER_AGENT.md"
+        "rules/ENGINE_SERVER_AGENT.md",
+        "rules/RUST_AGENT_RULES.md"
       ],
       "skills": [
         "skills/bpmninja-server/SKILL.md"
@@ -42,8 +45,7 @@
     "ui": {
       "path": "desktop-tauri",
       "rules": [
-        "rules/TAURI_REACT_UI_AGENT.md",
-        "rules/TAURI_BACKEND_AGENT.md"
+        "rules/TAURI_AGENT.md"
       ],
       "skills": [
         "skills/bpmninja-desktop/SKILL.md"
@@ -52,15 +54,27 @@
     "orchestrator": {
       "path": "agent-orchestrator",
       "rules": [
-        "rules/ORCHESTRATOR_AGENT.md"
+        "rules/ENGINE_SERVER_AGENT.md",
+        "rules/NATS_MESSAGE_BROKER.md"
       ],
       "skills": [
         "skills/bpmninja-server/SKILL.md"
       ]
     },
+    "client": {
+      "path": "bpmn-ninja-external-task-client",
+      "rules": [
+        "rules/ENGINE_SERVER_AGENT.md"
+      ],
+      "skills": [
+        "skills/bpmninja-external-task-client/SKILL.md"
+      ]
+    },
     "quality": {
       "path": ".",
-      "rules": [],
+      "rules": [
+        "rules/RUST_AGENT_RULES.md"
+      ],
       "skills": [
         "skills/bpmninja-quality/SKILL.md"
       ]

@@ -1,5 +1,7 @@
 # Restplan — nach Welle 1–5 (`improve1026.md`)
 
+> **Historisch (2026-10-10).** Ersetzt durch `HANDOFF.md`; offene Punkte stehen dort. Nicht ausführen.
+
 Stand: 2026-10-10 (Handoff-Refresh). Quelle: `improve1026.md`. **Welle 1–5 sind lokal fertig, nicht committed.** Lokal 1 hinter origin/main (`069af0b` quality-metrics).
 
 Nächste Session: `HANDOFF.md` → `CLAUDE.md` → dieses File. Commit-Schnitt crate-basiert in `HANDOFF.md` (Wellen in engine-core/parser/server vermischt).
