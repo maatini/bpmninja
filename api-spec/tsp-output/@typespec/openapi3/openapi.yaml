@@ -534,6 +534,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/incidents:
+    get:
+      operationId: Api_getInstanceIncidents
+      description: List incidents of an instance, including already resolved ones.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Incident'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/incidents/{incident_id}/resolve:
+    post:
+      operationId: Api_resolveInstanceIncident
+      description: Resolve an instance incident manually. Returns the updated incident.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveInstanceIncidentRequest'
   /api/instances/{id}/migrate:
     post:
       operationId: Api_migrateInstance
@@ -946,6 +1005,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveIncidentRequest'
   /api/service-task/{id}/retry:
     post:
       operationId: Api_retryIncident
@@ -964,6 +1029,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetryIncidentRequest'
   /api/service-tasks:
     get:
       operationId: Api_getServiceTasks
@@ -1017,7 +1088,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StartResponse'
+                $ref: '#/components/schemas/StartLatestResponse'
         default:
           description: An unexpected error response.
           content:
@@ -1127,6 +1198,14 @@ security:
   - {}
 components:
   schemas:
+    ActorType:
+      type: string
+      enum:
+        - Engine
+        - User
+        - ServiceWorker
+        - Timer
+        - Listener
     AppError:
       type: object
       required:
@@ -1139,6 +1218,7 @@ components:
       required:
         - backend_type
         - connected
+        - storage_status
       properties:
         backend_type:
           type: string
@@ -1146,6 +1226,8 @@ components:
           type: string
         connected:
           type: boolean
+        storage_status:
+          $ref: '#/components/schemas/StorageStatus'
     BpmnErrorRequest:
       type: object
       required:
@@ -1166,20 +1248,40 @@ components:
         size_bytes:
           type: integer
           format: int64
-        revision:
-          type: integer
-          format: int64
-        updated_at:
+        created_at:
           type: string
     BucketEntryDetail:
       type: object
       required:
         - key
-        - value
+        - data
+        - encoding
       properties:
         key:
           type: string
-        value: {}
+        data:
+          type: string
+        encoding:
+          type: string
+          description: '`utf8` for text/JSON/XML, `base64` for binary payloads.'
+    BucketInfo:
+      type: object
+      required:
+        - name
+        - bucket_type
+        - entries
+        - size_bytes
+      properties:
+        name:
+          type: string
+        bucket_type:
+          type: string
+        entries:
+          type: integer
+          format: int64
+        size_bytes:
+          type: integer
+          format: int64
     CompleteRequest:
       type: object
       properties:
@@ -1224,6 +1326,7 @@ components:
         - bpmn_id
         - version
         - node_count
+        - is_latest
       properties:
         key:
           type: string
@@ -1235,6 +1338,8 @@ components:
         node_count:
           type: integer
           format: int32
+        is_latest:
+          type: boolean
     DeployRequest:
       type: object
       required:
@@ -1250,9 +1355,13 @@ components:
       type: object
       required:
         - definition_key
+        - version
       properties:
         definition_key:
           type: string
+        version:
+          type: integer
+          format: int32
     ExtendLockRequest:
       type: object
       required:
@@ -1298,29 +1407,141 @@ components:
         asyncResponseTimeout:
           type: integer
           format: int64
+    HistoryDiff:
+      type: object
+      properties:
+        variables:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/VariableDiff'
+          nullable: true
+        status:
+          type: array
+          items: {}
+          nullable: true
+          description: '[old_status, new_status]'
+        current_node:
+          type: array
+          items: {}
+          nullable: true
+          description: '[old_node, new_node]'
+        human_readable:
+          type: string
+          nullable: true
     HistoryEntry:
       type: object
       required:
         - id
         - instance_id
-        - event_type
-        - actor_type
         - timestamp
-        - details
+        - event_type
+        - description
+        - actor_type
+        - context
+        - is_snapshot
       properties:
         id:
           type: string
         instance_id:
           type: string
-        node_id:
-          type: string
-        event_type:
-          type: string
-        actor_type:
-          type: string
         timestamp:
           type: string
-        details: {}
+        event_type:
+          $ref: '#/components/schemas/HistoryEventType'
+        node_id:
+          type: string
+          nullable: true
+        description:
+          type: string
+        actor_type:
+          $ref: '#/components/schemas/ActorType'
+        actor_id:
+          type: string
+          nullable: true
+        diff:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/HistoryDiff'
+          nullable: true
+        context:
+          type: object
+          additionalProperties: {}
+        metadata: {}
+        definition_version:
+          type: integer
+          format: int32
+          nullable: true
+        is_snapshot:
+          type: boolean
+        full_state_snapshot: {}
+    HistoryEventType:
+      type: string
+      enum:
+        - InstanceStarted
+        - InstanceCompleted
+        - InstanceDeleted
+        - TaskCompleted
+        - VariableUpdated
+        - GatewayTaken
+        - ListenerExecuted
+        - TokenAdvanced
+        - TokenForked
+        - TokenJoined
+        - BranchCompleted
+        - Error
+        - CallActivityStarted
+        - CallActivityCompleted
+        - InstanceSuspended
+        - InstanceResumed
+        - TokenMoved
+        - EscalationThrown
+        - CompensationTriggered
+        - InstanceMigrated
+    Incident:
+      type: object
+      required:
+        - id
+        - kind
+        - message
+        - created_at
+        - last_seen_at
+        - occurrences
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/IncidentKind'
+        node_id:
+          type: string
+          nullable: true
+        task_id:
+          type: string
+          nullable: true
+        message:
+          type: string
+        details:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        last_seen_at:
+          type: string
+        occurrences:
+          type: integer
+          format: int32
+        resolved_at:
+          type: string
+          nullable: true
+        resolved_by:
+          type: string
+          nullable: true
+    IncidentKind:
+      type: string
+      enum:
+        - service_task
+        - timer
+        - persistence
+        - bpmn_error
     LogEntry:
       type: object
       required:
@@ -1359,6 +1580,10 @@ components:
         - instances_completed
         - pending_user_tasks
         - pending_service_tasks
+        - pending_timers
+        - pending_message_catches
+        - persistence_errors
+        - storage_status
       properties:
         definitions_count:
           type: integer
@@ -1378,8 +1603,19 @@ components:
         pending_service_tasks:
           type: integer
           format: int32
+        pending_timers:
+          type: integer
+          format: int32
+        pending_message_catches:
+          type: integer
+          format: int32
+        persistence_errors:
+          type: integer
+          format: int64
         storage_info:
           $ref: '#/components/schemas/StorageInfo'
+        storage_status:
+          $ref: '#/components/schemas/StorageStatus'
     MoveTokenRequest:
       type: object
       required:
@@ -1387,28 +1623,43 @@ components:
       properties:
         target_node_id:
           type: string
+        variables:
+          type: object
+          additionalProperties: {}
+        cancel_current:
+          type: boolean
+          description: 'Cancel the token currently at the source node (default: true).'
     PendingMessage:
       type: object
       required:
+        - id
         - instance_id
         - node_id
         - message_name
+        - token_id
       properties:
+        id:
+          type: string
         instance_id:
           type: string
         node_id:
           type: string
         message_name:
           type: string
+        token_id:
+          type: string
     PendingServiceTask:
       type: object
       required:
         - id
         - instance_id
+        - definition_key
         - node_id
         - topic
-        - state
-        - variables
+        - token_id
+        - variables_snapshot
+        - created_at
+        - retries
       properties:
         id:
           type: string
@@ -1420,42 +1671,34 @@ components:
           type: string
         topic:
           type: string
-        state:
+        token_id:
           type: string
-        locked_by:
+        business_key:
           type: string
-        lock_expires_at:
-          type: string
-        variables:
+        variables_snapshot:
           type: object
-          additionalProperties:
-            $ref: '#/components/schemas/VariableValue'
+          additionalProperties: {}
+        created_at:
+          type: string
+        worker_id:
+          type: string
+        lock_expiration:
+          type: string
         retries:
           type: integer
           format: int32
         error_message:
           type: string
+        error_details:
+          type: string
     PendingTimer:
-      type: object
-      required:
-        - instance_id
-        - node_id
-        - fire_at
-      properties:
-        instance_id:
-          type: string
-        node_id:
-          type: string
-        fire_at:
-          type: string
-    PendingUserTask:
       type: object
       required:
         - id
         - instance_id
         - node_id
-        - state
-        - created_at
+        - expires_at
+        - token_id
       properties:
         id:
           type: string
@@ -1463,12 +1706,36 @@ components:
           type: string
         node_id:
           type: string
-        state:
+        expires_at:
           type: string
-          enum:
-            - Pending
-            - Completed
+        token_id:
+          type: string
+        remaining_repetitions:
+          type: integer
+          format: int32
+    PendingUserTask:
+      type: object
+      required:
+        - task_id
+        - instance_id
+        - node_id
+        - assignee
+        - token_id
+        - created_at
+      properties:
+        task_id:
+          type: string
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        assignee:
+          type: string
+        token_id:
+          type: string
         created_at:
+          type: string
+        business_key:
           type: string
     ProcessInstance:
       type: object
@@ -1476,7 +1743,9 @@ components:
         - id
         - definition_key
         - state
+        - audit_log
         - variables
+        - incidents
       properties:
         id:
           type: string
@@ -1489,14 +1758,21 @@ components:
         state: {}
         current_node:
           type: string
+        audit_log:
+          type: array
+          items:
+            type: string
         variables:
           type: object
-          additionalProperties:
-            $ref: '#/components/schemas/VariableValue'
+          additionalProperties: {}
         started_at:
           type: string
         completed_at:
           type: string
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
       description: Lifecycle state. Terminal states are `Completed`, `CompletedWithError`, and `Terminated`. Waiting variants carry additional payloads in the JSON object form.
     ProcessTimersResponse:
       type: object
@@ -1504,6 +1780,23 @@ components:
         - triggered
       properties:
         triggered:
+          type: integer
+          format: int32
+    ResolveIncidentRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: {}
+    ResolveInstanceIncidentRequest:
+      type: object
+      properties:
+        resolvedBy:
+          type: string
+    RetryIncidentRequest:
+      type: object
+      properties:
+        retries:
           type: integer
           format: int32
     StartLatestRequest:
@@ -1519,6 +1812,20 @@ components:
         variables:
           type: object
           additionalProperties: {}
+    StartLatestResponse:
+      type: object
+      required:
+        - instance_id
+        - definition_key
+        - version
+      properties:
+        instance_id:
+          type: string
+        definition_key:
+          type: string
+        version:
+          type: integer
+          format: int32
     StartRequest:
       type: object
       required:
@@ -1541,22 +1848,55 @@ components:
     StorageInfo:
       type: object
       required:
+        - backend_name
+        - version
         - host
         - port
-        - messages
-        - bytes
+        - memory_bytes
+        - storage_bytes
+        - streams
+        - consumers
+        - buckets
       properties:
+        backend_name:
+          type: string
+        version:
+          type: string
         host:
           type: string
         port:
           type: integer
           format: int32
-        messages:
-          type: integer
-          format: int32
-        bytes:
+        memory_bytes:
           type: integer
           format: int64
+        storage_bytes:
+          type: integer
+          format: int64
+        streams:
+          type: integer
+          format: int32
+        consumers:
+          type: integer
+          format: int32
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BucketInfo'
+    StorageStatus:
+      type: object
+      required:
+        - state
+        - detail
+      properties:
+        state:
+          type: string
+          enum:
+            - ready
+            - failed
+            - in-memory
+        detail:
+          type: string
     TopicRequest:
       type: object
       required:
@@ -1585,6 +1925,23 @@ components:
           format: binary
       required:
         - file
+    VariableDiff:
+      type: object
+      required:
+        - added
+        - removed
+        - changed
+      properties:
+        added:
+          type: object
+          additionalProperties: {}
+        removed:
+          type: array
+          items:
+            type: string
+        changed:
+          type: object
+          additionalProperties: {}
     VariableValue:
       type: object
       required:
