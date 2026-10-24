@@ -24,6 +24,7 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": ["default", "rustSources"],
       "options": {
         "command": "npm test",
         "cwd": "{projectRoot}"

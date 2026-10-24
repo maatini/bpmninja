@@ -254,13 +254,13 @@ devbox shell
 
 ### Nx (Task-Orchestrierung)
 
-Nx orchestriert die Cargo-, npm- und API-Spec-Targets; Cargo bleibt die Build-Engine. Das Rust-Projekt `rust` hat `cache: false`, seine Targets werden also nicht gecacht. Verfügbare Projekte zeigt `npx nx show projects`.
+Nx 24.0.1 orchestriert lokal die Projekte `rust`, `desktop`, `client` und `api-spec`; Cargo bleibt die Build-Engine. In der CI plant Nx nur: `nrwl/nx-set-shas` plus `nx show projects --affected` im Job `plan` ermitteln die betroffenen Projekte, die Build-Jobs rufen anschließend cargo und npm direkt auf. Nx-Cache und Targets sind lokal, in der CI gibt es keinen Nx-Cache. Die Rust-Inputs umfassen zusätzlich `deny.toml`, `.github/workflows/**`, `package.json`, `package-lock.json` und `nx.json`, damit Infrastrukturänderungen die Rust-Jobs auslösen. Das `test`-Target von `client` nutzt `rustSources` als Input, weil sein Integrationstest das `engine-server`-Binary startet. Das Rust-Projekt `rust` hat `cache: false`, seine Targets werden also nicht gecacht. Aufruf über `npm exec -- nx …` (alternativ `./node_modules/.bin/nx`); der Aufruf über `npx` scheitert in der Devbox mit `Missing script: nx`. Verfügbare Projekte zeigt `npm exec -- nx show projects`.
 
 ```bash
-npx nx run-many -t lint test build   # alle Projekte, parallel
-npx nx affected -t lint test build   # nur betroffene Projekte (Basis: main)
-npx nx run rust:test                 # einzelnes Target
-npx nx graph                         # Projekt-/Task-Graph im Browser
+npm exec -- nx run-many -t lint test build   # alle Projekte, parallel
+npm exec -- nx affected -t lint test build   # nur betroffene Projekte (Basis: main)
+npm exec -- nx run rust:test                 # einzelnes Target (cargo nextest run --workspace)
+npm exec -- nx graph                         # Projekt-/Task-Graph im Browser
 ```
 
 ### Starting the Engine Server

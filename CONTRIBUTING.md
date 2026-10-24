@@ -37,16 +37,18 @@ cd desktop-tauri && npm ci && npm run lint && npm run build && npm run test:e2e
 cd bpmn-ninja-external-task-client && npm ci && npm test
 ```
 
-Prüf-Targets laufen zusätzlich über Nx (Cargo bleibt Build-Engine für Rust):
+Prüf-Targets laufen zusätzlich über Nx (Cargo bleibt Build-Engine für Rust). Aufruf über
+`npm exec -- nx …`; der Aufruf über `npx` scheitert in der Devbox mit `Missing script: nx`.
 
 ```bash
-npx nx run-many -t fmt clippy test deny   # Rust-Targets (test braucht cargo-nextest)
-npx nx affected -t lint test build        # Rust, Desktop, Client und API-Spec
-npx nx affected -t fmt clippy test deny   # nur Rust
+npm exec -- nx run-many -t fmt clippy test deny   # Rust-Targets (test braucht cargo-nextest)
+npm exec -- nx affected -t lint test build        # Rust, Desktop, Client und API-Spec
+npm exec -- nx affected -t fmt clippy test deny   # nur Rust
 ```
 
-`cargo-nextest` wird in der CI über `taiki-e/install-action` bereitgestellt;
-lokal installierst du es mit `cargo install cargo-nextest --locked`.
+`cargo-nextest` ist in der Devbox enthalten und nach `devbox shell` verfügbar; die CI
+installiert es über `taiki-e/install-action`. Außerhalb der Devbox installierst du es mit
+`cargo install cargo-nextest --locked`.
 
 ## Testpflichten pro Änderungsbereich
 
