@@ -2,7 +2,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::domain::{BpmnElement, ProcessDefinition, Token};
-use crate::runtime::{PendingMessageCatch, PendingSignalCatch, PendingTimer};
+use crate::runtime::{
+    PendingConditionalCatch, PendingMessageCatch, PendingSignalCatch, PendingTimer,
+};
 
 /// Wait-States, die beim Betreten einer Aktivität für ihre Boundary-Events
 /// eingerichtet werden.
@@ -10,6 +12,7 @@ pub(crate) struct BoundaryEvents {
     pub(crate) timers: Vec<PendingTimer>,
     pub(crate) messages: Vec<PendingMessageCatch>,
     pub(crate) signals: Vec<PendingSignalCatch>,
+    pub(crate) conditionals: Vec<PendingConditionalCatch>,
 }
 
 /// Scans the process definition for boundary events attached to the given `node_id`
@@ -23,10 +26,12 @@ pub(crate) fn setup_boundary_events(
     let mut pending_timers = Vec::new();
     let mut pending_msgs = Vec::new();
     let mut pending_signals = Vec::new();
+    let mut pending_conditionals = Vec::new();
 
     let mut bounds_timers = Vec::new();
     let mut bounds_msgs = Vec::new();
     let mut bounds_signals = Vec::new();
+    let mut bounds_conditionals = Vec::new();
 
     for (node_id, node) in &def.nodes {
         match node {
@@ -48,6 +53,13 @@ pub(crate) fn setup_boundary_events(
                 ..
             } if attached_to == attached_node_id => {
                 bounds_signals.push((node_id.clone(), signal_name.clone()));
+            }
+            BpmnElement::BoundaryConditionalEvent {
+                attached_to,
+                condition,
+                ..
+            } if attached_to == attached_node_id => {
+                bounds_conditionals.push((node_id.clone(), condition.clone()));
             }
             _ => {}
         }
@@ -90,10 +102,22 @@ pub(crate) fn setup_boundary_events(
         pending_signals.push(pending);
     }
 
+    for (node_id, condition) in bounds_conditionals {
+        pending_conditionals.push(PendingConditionalCatch {
+            id: Uuid::new_v4(),
+            instance_id,
+            node_id,
+            condition,
+            token_id: token.id,
+            last_result: false,
+        });
+    }
+
     BoundaryEvents {
         timers: pending_timers,
         messages: pending_msgs,
         signals: pending_signals,
+        conditionals: pending_conditionals,
     }
 }
 

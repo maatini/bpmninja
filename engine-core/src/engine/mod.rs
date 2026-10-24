@@ -21,6 +21,7 @@ use std::time::Duration;
 use crate::persistence::WorkflowPersistence;
 
 pub(crate) mod boundary;
+mod conditional_events;
 mod definition_ops;
 pub(crate) mod events;
 pub(crate) mod executor;
@@ -58,6 +59,9 @@ pub struct WorkflowEngine {
     /// Wartende Signal-Catches. Signale sind Broadcast: alle Einträge mit
     /// passendem Namen werden von `correlate_signal` bedient.
     pub(crate) pending_signal_catches: Arc<DashMap<Uuid, PendingSignalCatch>>,
+    /// Wartende Conditional-Catches. Die Auswertung erfolgt zentral am Ende
+    /// eines Ausführungs-Batches gegen die aktuellen Instanzvariablen.
+    pub(crate) pending_conditional_catches: Arc<DashMap<Uuid, PendingConditionalCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
     /// Number of timer processing failures since engine start.
@@ -93,6 +97,7 @@ impl WorkflowEngine {
             timer_due_index: timer_index::TimerDueIndex::new(),
             pending_message_catches: Arc::new(DashMap::new()),
             pending_signal_catches: Arc::new(DashMap::new()),
+            pending_conditional_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             timer_processing_errors: std::sync::atomic::AtomicU64::new(0),
@@ -134,6 +139,7 @@ impl WorkflowEngine {
             Arc::clone(&self.pending_timers),
             Arc::clone(&self.pending_message_catches),
             Arc::clone(&self.pending_signal_catches),
+            Arc::clone(&self.pending_conditional_catches),
             Arc::clone(&self.persistence_error_count),
         );
 
@@ -225,6 +231,17 @@ impl WorkflowEngine {
         self.pending_signal_catches.insert(catch.id, catch);
     }
 
+    /// Restores a pending conditional catch from persistence (e.g. on server startup).
+    pub fn restore_conditional_catch(&self, catch: PendingConditionalCatch) {
+        tracing::info!(
+            "Restored conditional catch {} (instance: {}, condition: {})",
+            catch.id,
+            catch.instance_id,
+            catch.condition
+        );
+        self.pending_conditional_catches.insert(catch.id, catch);
+    }
+
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
     pub(crate) async fn cancel_boundary_timers(&self, instance_id: Uuid, task_node_id: &str) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -288,6 +305,7 @@ impl WorkflowEngine {
 
         let mut bound_messages: Vec<String> = Vec::new();
         let mut bound_signals: Vec<String> = Vec::new();
+        let mut bound_conditionals: Vec<String> = Vec::new();
         if let Some(def) = self.definitions.get(&def_key) {
             for (id, node) in &def.nodes {
                 match node {
@@ -300,6 +318,11 @@ impl WorkflowEngine {
                         if attached_to == task_node_id =>
                     {
                         bound_signals.push(id.clone());
+                    }
+                    crate::domain::BpmnElement::BoundaryConditionalEvent {
+                        attached_to, ..
+                    } if attached_to == task_node_id => {
+                        bound_conditionals.push(id.clone());
                     }
                     _ => {}
                 }
@@ -319,11 +342,20 @@ impl WorkflowEngine {
             .filter(|r| r.instance_id == instance_id && bound_signals.contains(&r.node_id))
             .map(|r| r.id)
             .collect();
+        let conditional_ids_to_delete: std::collections::HashSet<Uuid> = self
+            .pending_conditional_catches
+            .iter()
+            .filter(|r| r.instance_id == instance_id && bound_conditionals.contains(&r.node_id))
+            .map(|r| r.id)
+            .collect();
 
         self.pending_message_catches
             .retain(|_, m| !(m.instance_id == instance_id && bound_messages.contains(&m.node_id)));
         self.pending_signal_catches
             .retain(|_, s| !(s.instance_id == instance_id && bound_signals.contains(&s.node_id)));
+        self.pending_conditional_catches.retain(|_, c| {
+            !(c.instance_id == instance_id && bound_conditionals.contains(&c.node_id))
+        });
 
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -339,6 +371,14 @@ impl WorkflowEngine {
                 if let Err(e) = persistence.delete_signal_catch(signal_id).await {
                     self.log_persistence_error(
                         &format!("delete_boundary_signal_catch({})", signal_id),
+                        e,
+                    );
+                }
+            }
+            for conditional_id in conditional_ids_to_delete {
+                if let Err(e) = persistence.delete_conditional_catch(conditional_id).await {
+                    self.log_persistence_error(
+                        &format!("delete_boundary_conditional_catch({})", conditional_id),
                         e,
                     );
                 }
@@ -373,10 +413,19 @@ impl WorkflowEngine {
             .map(|r| r.id)
             .collect();
 
+        // Collect conditional catch IDs to delete
+        let conditionals_to_delete: Vec<Uuid> = self
+            .pending_conditional_catches
+            .iter()
+            .filter(|r| r.instance_id == instance_id && &r.token_id == token_id)
+            .map(|r| r.id)
+            .collect();
+
         // Log to instance audit log
         if !timers_to_delete.is_empty()
             || !messages_to_delete.is_empty()
             || !signals_to_delete.is_empty()
+            || !conditionals_to_delete.is_empty()
         {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
@@ -396,6 +445,12 @@ impl WorkflowEngine {
                     inst.audit_log.push(format!(
                         "⭮ Event-based gateway: {} alternative signal catch(es) cancelled",
                         signals_to_delete.len()
+                    ));
+                }
+                if !conditionals_to_delete.is_empty() {
+                    inst.audit_log.push(format!(
+                        "⭮ Event-based gateway: {} alternative conditional catch(es) cancelled",
+                        conditionals_to_delete.len()
                     ));
                 }
             }
@@ -419,6 +474,8 @@ impl WorkflowEngine {
             .retain(|_, m| !(m.instance_id == instance_id && &m.token_id == token_id));
         self.pending_signal_catches
             .retain(|_, s| !(s.instance_id == instance_id && &s.token_id == token_id));
+        self.pending_conditional_catches
+            .retain(|_, c| !(c.instance_id == instance_id && &c.token_id == token_id));
 
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -435,6 +492,14 @@ impl WorkflowEngine {
             for signal_id in signals_to_delete {
                 if let Err(e) = persistence.delete_signal_catch(signal_id).await {
                     self.log_persistence_error(&format!("delete_signal_catch({})", signal_id), e);
+                }
+            }
+            for conditional_id in conditionals_to_delete {
+                if let Err(e) = persistence.delete_conditional_catch(conditional_id).await {
+                    self.log_persistence_error(
+                        &format!("delete_conditional_catch({})", conditional_id),
+                        e,
+                    );
                 }
             }
         }

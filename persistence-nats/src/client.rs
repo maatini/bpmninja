@@ -29,6 +29,10 @@ const KV_BUCKETS: &[(&str, &str)] = &[
         "PendingSignalCatch objects (JSON)",
     ),
     (
+        "pending_conditional_catches",
+        "PendingConditionalCatch objects (JSON)",
+    ),
+    (
         "history_instances",
         "Archived completed ProcessInstance objects (JSON)",
     ),

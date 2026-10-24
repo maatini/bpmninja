@@ -407,6 +407,32 @@ impl WorkflowEngine {
         }
     }
 
+    /// Persists a pending conditional catch to the KV store.
+    pub(crate) async fn persist_conditional_catch(&self, catch_id: Uuid) {
+        if let Some(p) = &self.persistence
+            && let Some(catch_ref) = self.pending_conditional_catches.get(&catch_id)
+        {
+            inline_retry!(
+                self,
+                p.save_conditional_catch(&catch_ref),
+                format!("save_conditional_catch({})", catch_id),
+                PersistJob::SaveConditionalCatch(catch_id)
+            );
+        }
+    }
+
+    /// Deletes a completed or cancelled pending conditional catch from the KV store.
+    pub(crate) async fn remove_persisted_conditional_catch(&self, catch_id: Uuid) {
+        if let Some(p) = &self.persistence {
+            inline_retry!(
+                self,
+                p.delete_conditional_catch(catch_id),
+                format!("delete_conditional_catch({})", catch_id),
+                PersistJob::DeleteConditionalCatch(catch_id)
+            );
+        }
+    }
+
     /// Archives a completed instance to the history store (for history queries/filtering),
     /// but intentionally keeps the instance in the active DashMap and active persistence bucket.
     ///

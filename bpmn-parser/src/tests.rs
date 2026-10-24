@@ -2545,3 +2545,235 @@ fn event_based_gateway_accepts_signal_catch_targets() {
         Some(BpmnElement::SignalCatchEvent { .. })
     ));
 }
+
+#[test]
+fn parse_conditional_intermediate_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait_cond">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">${amount &gt; 100}</conditionExpression>
+                    </conditionalEventDefinition>
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait_cond" />
+                <sequenceFlow id="f2" sourceRef="wait_cond" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("wait_cond").unwrap() {
+        BpmnElement::ConditionalCatchEvent { condition } => {
+            assert_eq!(condition, "${amount > 100}");
+        }
+        other => panic!("Expected ConditionalCatchEvent, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_boundary_conditional_interrupting_and_non_interrupting() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <userTask id="ut1" />
+                <boundaryEvent id="bound_int" attachedToRef="ut1">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">x &gt; 10</conditionExpression>
+                    </conditionalEventDefinition>
+                </boundaryEvent>
+                <boundaryEvent id="bound_nonint" attachedToRef="ut1" cancelActivity="false">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">x &gt; 20</conditionExpression>
+                    </conditionalEventDefinition>
+                </boundaryEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <endEvent id="e3" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="ut1" />
+                <sequenceFlow id="f2" sourceRef="ut1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="bound_int" targetRef="e2" />
+                <sequenceFlow id="f4" sourceRef="bound_nonint" targetRef="e3" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("bound_int").unwrap() {
+        BpmnElement::BoundaryConditionalEvent {
+            attached_to,
+            condition,
+            cancel_activity,
+        } => {
+            assert_eq!(attached_to, "ut1");
+            assert_eq!(condition, "x > 10");
+            assert!(*cancel_activity);
+        }
+        other => panic!("Expected BoundaryConditionalEvent, got {other:?}"),
+    }
+    match def.nodes.get("bound_nonint").unwrap() {
+        BpmnElement::BoundaryConditionalEvent {
+            condition,
+            cancel_activity,
+            ..
+        } => {
+            assert_eq!(condition, "x > 20");
+            assert!(!*cancel_activity);
+        }
+        other => panic!("Expected BoundaryConditionalEvent, got {other:?}"),
+    }
+}
+
+#[test]
+fn reject_conditional_catch_without_condition() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait_cond">
+                    <conditionalEventDefinition />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait_cond" />
+                <sequenceFlow id="f2" sourceRef="wait_cond" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("conditionExpression") && msg.contains("wait_cond"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_invalid_conditional_condition() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait_cond">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">${x &amp;&amp;}</conditionExpression>
+                    </conditionalEventDefinition>
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait_cond" />
+                <sequenceFlow id="f2" sourceRef="wait_cond" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid condition") && msg.contains("wait_cond"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_conditional_start_event() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">x &gt; 0</conditionExpression>
+                    </conditionalEventDefinition>
+                </startEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("conditional start events are not supported")
+            && msg.contains("no global variable scope")
+            && msg.contains("s1"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn reject_event_based_gateway_with_conditional_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <eventBasedGateway id="gw" />
+                <intermediateCatchEvent id="wait_cond">
+                    <conditionalEventDefinition>
+                        <conditionExpression xsi:type="tFormalExpression">x &gt; 0</conditionExpression>
+                    </conditionalEventDefinition>
+                </intermediateCatchEvent>
+                <intermediateCatchEvent id="wait_timer">
+                    <timerEventDefinition>
+                        <timeDuration>PT10S</timeDuration>
+                    </timerEventDefinition>
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="gw" />
+                <sequenceFlow id="f2" sourceRef="gw" targetRef="wait_cond" />
+                <sequenceFlow id="f3" sourceRef="gw" targetRef="wait_timer" />
+                <sequenceFlow id="f4" sourceRef="wait_cond" targetRef="e1" />
+                <sequenceFlow id="f5" sourceRef="wait_timer" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("EventBasedGateway") && msg.contains("conditional catch"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn parse_conditional_catch_in_subprocess() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <intermediateCatchEvent id="sub_cond">
+                        <conditionalEventDefinition>
+                            <conditionExpression xsi:type="tFormalExpression">x &gt; 0</conditionExpression>
+                        </conditionalEventDefinition>
+                    </intermediateCatchEvent>
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_cond" />
+                    <sequenceFlow id="sf2" sourceRef="sub_cond" targetRef="sub_e1" />
+                </subProcess>
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("sub_cond").unwrap() {
+        BpmnElement::ConditionalCatchEvent { condition } => {
+            assert_eq!(condition, "x > 0");
+        }
+        other => panic!("Expected ConditionalCatchEvent, got {other:?}"),
+    }
+}

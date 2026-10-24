@@ -5,6 +5,7 @@ use quick_xml::de::from_str;
 
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessDefinitionBuilder};
+use engine_core::validate_condition;
 
 use crate::models::{BpmnDefinitions, BpmnExtensionElements};
 
@@ -203,6 +204,30 @@ fn resolve_signal_ref(
             "signalEventDefinition on {element_kind} '{element_id}' references unknown signal '{signal_ref}'"
         ))
     })
+}
+
+/// Liest die Bedingung eines `<conditionalEventDefinition>` und validiert sie.
+fn parse_conditional_condition(
+    definition: &crate::models::BpmnConditionalEventDefinition,
+    element_kind: &str,
+    element_id: &str,
+) -> EngineResult<String> {
+    let condition = definition
+        .condition
+        .as_ref()
+        .map(|c| c.value.trim())
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| {
+            EngineError::InvalidDefinition(format!(
+                "conditionalEventDefinition on {element_kind} '{element_id}' has no conditionExpression"
+            ))
+        })?;
+    validate_condition(condition).map_err(|error| {
+        EngineError::InvalidDefinition(format!(
+            "invalid condition on conditional event '{element_id}': {error}"
+        ))
+    })?;
+    Ok(condition.to_string())
 }
 
 fn send_task_message_name(
@@ -559,6 +584,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 1. Process Start Events
     for start in process.start_events {
         let node_id = start.id.clone();
+        if start.conditional_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "conditional start events are not supported; no global variable scope (start event '{node_id}')"
+            )));
+        }
         if let Some(timer) = start.timer_event_definition {
             let timer_def = parse_timer_definition(&start.id, &timer)?;
             builder = builder.node(start.id, BpmnElement::TimerStartEvent(timer_def));
@@ -842,9 +872,16 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 &catch_evt.id,
             )?;
             builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
+        } else if let Some(cond) = catch_evt.conditional_event_definition {
+            let condition =
+                parse_conditional_condition(&cond, "intermediateCatchEvent", &catch_evt.id)?;
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent { condition },
+            );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, or signalEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, signalEventDefinition, or conditionalEventDefinition",
                 node_id
             )));
         }
@@ -964,6 +1001,16 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     cancel_activity,
                 },
             );
+        } else if let Some(cond) = bd.conditional_event_definition {
+            let condition = parse_conditional_condition(&cond, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
+                    cancel_activity,
+                },
+            );
         } else if let Some(err) = bd.error_event_definition {
             let error_code = err
                 .error_ref
@@ -994,7 +1041,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, conditional, error, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -1081,6 +1128,11 @@ fn flatten_subprocess(
         )));
     }
     let start_event_id = start_event.id.clone();
+    if start_event.conditional_event_definition.is_some() {
+        return Err(EngineError::InvalidDefinition(format!(
+            "conditional start events are not supported; no global variable scope (start event '{start_event_id}' in subProcess '{sub_process_id}')"
+        )));
+    }
     let mut start_targets: Vec<String> = sp
         .sequence_flows
         .iter()
@@ -1301,9 +1353,16 @@ fn flatten_subprocess(
                 &catch_evt.id,
             )?;
             builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
+        } else if let Some(cond) = catch_evt.conditional_event_definition {
+            let condition =
+                parse_conditional_condition(&cond, "intermediateCatchEvent", &catch_evt.id)?;
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent { condition },
+            );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, or signalEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, signalEventDefinition, or conditionalEventDefinition",
                 catch_evt.id
             )));
         }
@@ -1413,6 +1472,16 @@ fn flatten_subprocess(
                     cancel_activity,
                 },
             );
+        } else if let Some(cond) = bd.conditional_event_definition {
+            let condition = parse_conditional_condition(&cond, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
+                    cancel_activity,
+                },
+            );
         } else if let Some(err) = bd.error_event_definition {
             let error_code = err
                 .error_ref
@@ -1443,7 +1512,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, conditional, error, escalation, or compensate definition",
                 bd.id
             )));
         }

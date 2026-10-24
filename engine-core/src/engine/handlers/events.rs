@@ -3,7 +3,9 @@ use crate::domain::{ProcessDefinition, Token};
 use crate::engine::WorkflowEngine;
 use crate::engine::executor::resolve_next_target;
 use crate::runtime::CompensationRecord;
-use crate::runtime::{NextAction, PendingMessageCatch, PendingSignalCatch, PendingTimer};
+use crate::runtime::{
+    NextAction, PendingConditionalCatch, PendingMessageCatch, PendingSignalCatch, PendingTimer,
+};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -185,6 +187,39 @@ impl WorkflowEngine {
             "📡 Signal catch event '{current_id}' waiting for '{signal_name}'"
         ));
         Ok(NextAction::WaitForSignal(pending))
+    }
+
+    /// Registriert einen wartenden Conditional-Catch.
+    ///
+    /// Die Auswertung erfolgt zentral am Ende des Ausführungs-Batches; ist die
+    /// Bedingung dann bereits wahr, läuft der Token ohne Halt weiter.
+    pub(crate) async fn handle_conditional_catch_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        current_id: &str,
+        condition: &str,
+    ) -> EngineResult<NextAction> {
+        let pending = PendingConditionalCatch {
+            id: Uuid::new_v4(),
+            instance_id,
+            node_id: current_id.to_string(),
+            condition: condition.to_string(),
+            token_id: token.id,
+            last_result: false,
+        };
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = current_id.to_string();
+        inst.tokens.insert(token.id, token.clone());
+        inst.push_audit_log(format!(
+            "⏳ Conditional catch event '{current_id}' waiting for '{condition}'"
+        ));
+        Ok(NextAction::WaitForCondition(pending))
     }
 
     /// Broadcastet ein Signal und setzt den Token hinter dem Throw-Event fort.

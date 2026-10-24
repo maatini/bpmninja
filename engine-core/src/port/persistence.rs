@@ -153,6 +153,18 @@ pub trait WorkflowPersistence: Send + Sync {
     /// Load all persisted pending signal catches.
     async fn list_signal_catches(&self) -> EngineResult<Vec<crate::runtime::PendingSignalCatch>>;
 
+    /// Persist a pending conditional catch.
+    async fn save_conditional_catch(
+        &self,
+        catch: &crate::runtime::PendingConditionalCatch,
+    ) -> EngineResult<()>;
+    /// Delete a pending conditional catch.
+    async fn delete_conditional_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()>;
+    /// Load all persisted pending conditional catches.
+    async fn list_conditional_catches(
+        &self,
+    ) -> EngineResult<Vec<crate::runtime::PendingConditionalCatch>>;
+
     /// Store a file in the instance_files Object Store.
     async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()>;
     /// Load a file from the instance_files Object Store.

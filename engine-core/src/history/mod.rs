@@ -37,6 +37,7 @@ pub enum HistoryEventType {
     CompensationTriggered,
     SignalCaught,
     SignalThrown,
+    ConditionalCaught,
     InstanceMigrated,
 }
 
@@ -65,6 +66,7 @@ impl HistoryEventType {
             Self::CompensationTriggered => "Compensation was triggered".into(),
             Self::SignalCaught => "A signal was caught".into(),
             Self::SignalThrown => "A signal was thrown".into(),
+            Self::ConditionalCaught => "A conditional event was caught".into(),
             Self::InstanceMigrated => "Process instance was migrated to a new definition".into(),
         }
     }

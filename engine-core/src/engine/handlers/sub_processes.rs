@@ -32,6 +32,11 @@ impl WorkflowEngine {
             self.pending_signal_catches.insert(id, s);
             self.persist_signal_catch(id).await;
         }
+        for c in boundary.conditionals {
+            let id = c.id;
+            self.pending_conditional_catches.insert(id, c);
+            self.persist_conditional_catch(id).await;
+        }
 
         let inst_arc = self
             .instances

@@ -111,6 +111,7 @@ impl ProcessDefinition {
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
             | BpmnElement::BoundarySignalEvent { attached_to, .. }
+            | BpmnElement::BoundaryConditionalEvent { attached_to, .. }
             | BpmnElement::BoundaryCompensationEvent { attached_to, .. } = element
                 && !nodes.contains_key(attached_to)
             {
@@ -186,7 +187,7 @@ impl ProcessDefinition {
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
-                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
+                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets; conditional catch events are not supported here. Node '{}' is invalid.",
                             sf.target
                         )));
                     }
@@ -314,6 +315,19 @@ fn validate_condition_expressions(
             validate_condition(condition).map_err(|error| {
                 EngineError::InvalidDefinition(format!(
                     "Invalid join condition on complex gateway '{node_id}': {error}"
+                ))
+            })?;
+        }
+
+        let event_condition = match element {
+            BpmnElement::ConditionalCatchEvent { condition }
+            | BpmnElement::BoundaryConditionalEvent { condition, .. } => Some(condition),
+            _ => None,
+        };
+        if let Some(condition) = event_condition {
+            validate_condition(condition).map_err(|error| {
+                EngineError::InvalidDefinition(format!(
+                    "Invalid condition on conditional event '{node_id}': {error}"
                 ))
             })?;
         }

@@ -8,8 +8,8 @@ use crate::persistence::CompletedInstanceQuery;
 
 use super::WorkflowEngine;
 use crate::runtime::{
-    EngineStats, InstancePage, InstanceState, PendingMessageCatch, PendingServiceTask,
-    PendingSignalCatch, PendingTimer, PendingUserTask, ProcessInstance,
+    EngineStats, InstancePage, InstanceState, PendingConditionalCatch, PendingMessageCatch,
+    PendingServiceTask, PendingSignalCatch, PendingTimer, PendingUserTask, ProcessInstance,
 };
 
 impl WorkflowEngine {
@@ -42,6 +42,7 @@ impl WorkflowEngine {
             pending_timers: self.pending_timers.len(),
             pending_message_catches: self.pending_message_catches.len(),
             pending_signal_catches: self.pending_signal_catches.len(),
+            pending_conditional_catches: self.pending_conditional_catches.len(),
             persistence_errors: self
                 .persistence_error_count
                 .load(std::sync::atomic::Ordering::Relaxed),
@@ -141,6 +142,14 @@ impl WorkflowEngine {
     /// Returns all currently pending signal catch events.
     pub fn get_pending_signal_catches(&self) -> Vec<PendingSignalCatch> {
         self.pending_signal_catches
+            .iter()
+            .map(|it| it.value().clone())
+            .collect()
+    }
+
+    /// Returns all currently pending conditional catches.
+    pub fn get_pending_conditional_catches(&self) -> Vec<PendingConditionalCatch> {
+        self.pending_conditional_catches
             .iter()
             .map(|it| it.value().clone())
             .collect()
@@ -312,6 +321,13 @@ impl WorkflowEngine {
         .await;
 
         self.persist_instance(instance_id).await;
+
+        // Direkte Variablenänderungen können Conditional-Catches auslösen.
+        let fired = self.fire_conditional_catches(instance_id).await?;
+        if !fired.is_empty() {
+            self.run_instance_batch_with_tokens(instance_id, fired)
+                .await?;
+        }
 
         Ok(())
     }
@@ -548,6 +564,20 @@ impl WorkflowEngine {
                 self.pending_signal_catches.remove(tid);
                 if let Some(p) = &self.persistence {
                     let _ = p.delete_signal_catch(*tid).await;
+                }
+            }
+
+            // Remove pending conditional catches
+            let conditional_ids: Vec<Uuid> = self
+                .pending_conditional_catches
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.id)
+                .collect();
+            for tid in &conditional_ids {
+                self.pending_conditional_catches.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_conditional_catch(*tid).await;
                 }
             }
         }
@@ -810,6 +840,13 @@ impl WorkflowEngine {
                 entry.node_id = new_node.clone();
             }
         }
+        for mut entry in self.pending_conditional_catches.iter_mut() {
+            if entry.instance_id == instance_id
+                && let Some(new_node) = node_mapping.get(&entry.node_id)
+            {
+                entry.node_id = new_node.clone();
+            }
+        }
 
         // --- 7. Record history ---
         self.record_history_event(
@@ -889,6 +926,14 @@ impl WorkflowEngine {
             {
                 let _ = persistence.delete_signal_catch(catch.id).await;
             }
+            // Delete associated conditional catches from persistence
+            for catch in self
+                .pending_conditional_catches
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+            {
+                let _ = persistence.delete_conditional_catch(catch.id).await;
+            }
             // Delete instance from persistence
             persistence
                 .delete_instance(&instance_id.to_string())
@@ -911,6 +956,10 @@ impl WorkflowEngine {
 
         // Clean up pending signal catches in memory
         self.pending_signal_catches
+            .retain(|_, t| t.instance_id != instance_id);
+
+        // Clean up pending conditional catches in memory
+        self.pending_conditional_catches
             .retain(|_, t| t.instance_id != instance_id);
 
         Ok(())

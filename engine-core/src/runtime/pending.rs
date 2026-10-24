@@ -96,3 +96,22 @@ pub struct PendingSignalCatch {
     /// Reference to the token stored in ProcessInstance.tokens
     pub token_id: Uuid,
 }
+
+/// Ein wartender Conditional-Catch.
+///
+/// Die Bedingung wird am Ende eines jeden Ausführungs-Batches gegen die
+/// Instanzvariablen geprüft. `last_result` verhindert, dass ein bereits
+/// gefeuerter nicht-unterbrechender Boundary-Catch bei unveränderter
+/// Bedingung erneut feuert.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingConditionalCatch {
+    pub id: Uuid,
+    pub instance_id: Uuid,
+    pub node_id: String,
+    pub condition: String,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
+    /// Ergebnis der letzten Auswertung; nur ein Übergang `false -> true` feuert.
+    #[serde(default)]
+    pub last_result: bool,
+}

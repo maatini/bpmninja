@@ -244,6 +244,8 @@ pub(crate) struct BpmnStartEvent {
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "signalEventDefinition")]
     pub signal_event_definition: Option<BpmnSignalEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +268,12 @@ pub(crate) struct BpmnMessageEventDefinition {
 pub(crate) struct BpmnSignalEventDefinition {
     #[serde(rename = "@signalRef")]
     pub signal_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalEventDefinition {
+    #[serde(rename = "conditionExpression")]
+    pub condition: Option<BpmnConditionExpression>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -502,6 +510,8 @@ pub(crate) struct BpmnIntermediateCatchEvent {
     pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "linkEventDefinition")]
     pub link_event_definition: Option<BpmnLinkEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -526,6 +536,8 @@ pub(crate) struct BpmnBoundaryEvent {
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
     #[serde(rename = "cancelEventDefinition")]
     pub cancel_event_definition: Option<BpmnCancelEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[allow(dead_code)]

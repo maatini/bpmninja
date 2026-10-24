@@ -77,6 +77,14 @@ pub enum BpmnElement {
         signal_name: String,
         cancel_activity: bool,
     },
+    /// An intermediate catch event that waits until the condition becomes true.
+    ConditionalCatchEvent { condition: String },
+    /// A boundary conditional event attached to an activity.
+    BoundaryConditionalEvent {
+        attached_to: String,
+        condition: String,
+        cancel_activity: bool,
+    },
     /// A boundary error event attached to an activity.
     BoundaryErrorEvent {
         attached_to: String,

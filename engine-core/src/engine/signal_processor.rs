@@ -221,7 +221,7 @@ impl WorkflowEngine {
 
     /// Entfernt offene User-/Service-Tasks eines durch ein Boundary-Signal
     /// abgebrochenen Tokens.
-    async fn cancel_pending_activity(&self, instance_id: Uuid, token_id: &Uuid) {
+    pub(crate) async fn cancel_pending_activity(&self, instance_id: Uuid, token_id: &Uuid) {
         let user_task_ids: Vec<Uuid> = self
             .pending_user_tasks
             .iter()

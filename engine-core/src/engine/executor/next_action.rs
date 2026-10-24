@@ -138,6 +138,18 @@ impl WorkflowEngine {
                 self.persist_signal_catch(catch_id).await;
                 self.persist_instance(instance_id).await;
             }
+            NextAction::WaitForCondition(pending) => {
+                let catch_id = pending.id;
+                if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                    let mut inst = inst_arc.write().await;
+                    if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                        inst.state = InstanceState::WaitingOnCondition { catch_id };
+                    }
+                }
+                self.pending_conditional_catches.insert(catch_id, pending);
+                self.persist_conditional_catch(catch_id).await;
+                self.persist_instance(instance_id).await;
+            }
             NextAction::WaitForEventGroup(actions) => {
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
@@ -329,6 +341,8 @@ impl WorkflowEngine {
                 self.pending_message_catches
                     .retain(|_, t| t.instance_id != instance_id);
                 self.pending_signal_catches
+                    .retain(|_, t| t.instance_id != instance_id);
+                self.pending_conditional_catches
                     .retain(|_, t| t.instance_id != instance_id);
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {

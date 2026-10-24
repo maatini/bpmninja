@@ -15,6 +15,7 @@ pub struct RestoreStats {
     pub timers: usize,
     pub message_catches: usize,
     pub signal_catches: usize,
+    pub conditional_catches: usize,
 }
 
 pub struct StartupCoordinator {
@@ -38,6 +39,7 @@ impl StartupCoordinator {
         let timers = self.restore_timers(engine).await;
         let message_catches = self.restore_message_catches(engine).await;
         let signal_catches = self.restore_signal_catches(engine).await;
+        let conditional_catches = self.restore_conditional_catches(engine).await;
 
         RestoreStats {
             definitions,
@@ -47,6 +49,7 @@ impl StartupCoordinator {
             timers,
             message_catches,
             signal_catches,
+            conditional_catches,
         }
     }
 
@@ -237,6 +240,23 @@ impl StartupCoordinator {
             }
             Err(e) => {
                 tracing::error!("Signal-Catches aus NATS laden fehlgeschlagen: {:?}", e);
+                0
+            }
+        }
+    }
+
+    async fn restore_conditional_catches(&self, engine: &mut WorkflowEngine) -> usize {
+        match self.nats.list_conditional_catches().await {
+            Ok(catches) => {
+                let num = catches.len();
+                for catch in catches {
+                    engine.restore_conditional_catch(catch);
+                }
+                tracing::info!("{num} Conditional-Catch(es) wiederhergestellt.");
+                num
+            }
+            Err(e) => {
+                tracing::error!("Conditional-Catches aus NATS laden fehlgeschlagen: {:?}", e);
                 0
             }
         }

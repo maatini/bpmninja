@@ -397,3 +397,82 @@ fn test_get_file_reference_returns_none_for_non_file() {
     let just_a_str = serde_json::json!("file");
     assert!(FileReference::from_variable_value(&just_a_str).is_none());
 }
+
+#[test]
+fn event_based_gateway_rejects_conditional_catch() {
+    let def = ProcessDefinitionBuilder::new("bad_cond_gw")
+        .node("start", BpmnElement::StartEvent)
+        .node("gw", BpmnElement::EventBasedGateway)
+        .node(
+            "catch_cond",
+            BpmnElement::ConditionalCatchEvent {
+                condition: "x > 0".into(),
+            },
+        )
+        .node(
+            "catch_timer",
+            BpmnElement::TimerCatchEvent(crate::domain::TimerDefinition::Duration(
+                std::time::Duration::from_secs(5),
+            )),
+        )
+        .node("end1", BpmnElement::EndEvent)
+        .node("end2", BpmnElement::EndEvent)
+        .flow("start", "gw")
+        .flow("gw", "catch_cond")
+        .flow("gw", "catch_timer")
+        .flow("catch_cond", "end1")
+        .flow("catch_timer", "end2")
+        .build();
+
+    assert!(matches!(
+        def,
+        Err(EngineError::InvalidDefinition(msg)) if msg.contains("EventBasedGateway") && msg.contains("conditional catch")
+    ));
+}
+
+#[test]
+fn boundary_conditional_requires_existing_attached_node() {
+    let def = ProcessDefinitionBuilder::new("bad_bound_cond")
+        .node("start", BpmnElement::StartEvent)
+        .node("task", BpmnElement::UserTask("alice".into()))
+        .node(
+            "bound_cond",
+            BpmnElement::BoundaryConditionalEvent {
+                attached_to: "missing".into(),
+                condition: "x > 0".into(),
+                cancel_activity: true,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .node("boundary_end", BpmnElement::EndEvent)
+        .flow("start", "task")
+        .flow("task", "end")
+        .flow("bound_cond", "boundary_end")
+        .build();
+
+    assert!(matches!(
+        def,
+        Err(EngineError::InvalidDefinition(msg)) if msg.contains("bound_cond") && msg.contains("missing")
+    ));
+}
+
+#[test]
+fn deploy_rejects_invalid_conditional_event_condition() {
+    let def = ProcessDefinitionBuilder::new("bad_cond_expr")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "catch",
+            BpmnElement::ConditionalCatchEvent {
+                condition: "x &&".into(),
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "catch")
+        .flow("catch", "end")
+        .build();
+
+    assert!(matches!(
+        def,
+        Err(EngineError::InvalidDefinition(msg)) if msg.contains("Invalid condition on conditional event") && msg.contains("catch")
+    ));
+}

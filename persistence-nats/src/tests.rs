@@ -332,3 +332,41 @@ async fn test_signal_catch_save_list_and_delete() {
     let after = persistence.list_signal_catches().await.unwrap();
     assert!(after.iter().all(|c| c.id != catch.id));
 }
+
+/// Conditional-Catches inklusive `last_result` überleben den Reload aus dem KV-Bucket.
+#[tokio::test]
+async fn test_conditional_catch_save_list_and_delete() {
+    let persistence = match setup_nats_test().await {
+        Some(p) => p,
+        None => return,
+    };
+
+    let catch = engine_core::PendingConditionalCatch {
+        id: Uuid::new_v4(),
+        instance_id: Uuid::new_v4(),
+        node_id: "wait_condition".into(),
+        condition: "amount > 100".into(),
+        token_id: Uuid::new_v4(),
+        last_result: true,
+    };
+
+    persistence.save_conditional_catch(&catch).await.unwrap();
+
+    let listed = persistence.list_conditional_catches().await.unwrap();
+    let found = listed
+        .iter()
+        .find(|c| c.id == catch.id)
+        .expect("conditional catch must be listed after reload");
+    assert_eq!(found.instance_id, catch.instance_id);
+    assert_eq!(found.node_id, "wait_condition");
+    assert_eq!(found.condition, "amount > 100");
+    assert_eq!(found.token_id, catch.token_id);
+    assert!(found.last_result);
+
+    persistence
+        .delete_conditional_catch(catch.id)
+        .await
+        .unwrap();
+    let after = persistence.list_conditional_catches().await.unwrap();
+    assert!(after.iter().all(|c| c.id != catch.id));
+}
