@@ -15,30 +15,16 @@
 #   - fuzz_history_diff:     History snapshots -> diff/reconciliation
 #   - fuzz_server_payloads:  API payloads -> validation and decode paths
 #
-# Each target runs for a CI-friendly duration (5 min on PR, 8 min nightly).
+# Each target runs for a CI-friendly duration (8 min). Fuzzing is not started
+# automatically; trigger it manually via workflow_dispatch.
 # Any crash, ASan/MSan/UBSan finding, or assertion failure fails the pipeline.
 # On failure, crash artifacts + minimized corpus are uploaded for analysis.
 # =============================================================================
 
 name: Fuzz Testing
 
+# Manual only: fuzzing is expensive and must not run on every push or PR.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'engine-core/**'
-      - 'bpmn-parser/**'
-      - 'fuzz/**'
-      - '.github/workflows/fuzzing.yml'
-  pull_request:
-    paths:
-      - 'engine-core/**'
-      - 'bpmn-parser/**'
-      - 'fuzz/**'
-      - '.github/workflows/fuzzing.yml'
-  schedule:
-    # Nightly at 03:00 UTC (after mutation tests at 02:00)
-    - cron: '0 3 * * *'
   workflow_dispatch:
 
 # Only one fuzz run per branch at a time — cancel superseded runs
@@ -52,8 +38,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Nightly runs get longer fuzzing time (480s = 8 min), PRs get 300s = 5 min
-  FUZZ_DURATION: ${{ github.event_name == 'schedule' && '480' || '300' }}
+  # Manual runs get the longer fuzzing time (480s = 8 min)
+  FUZZ_DURATION: '480'
 
 jobs:
   fuzz:
