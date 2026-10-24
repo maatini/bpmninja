@@ -1,7 +1,7 @@
 //! Background SSE consumer — verbindet sich mit `/api/events` der Engine und emittiert
 //! Tauri-Events, damit die UI push-basiert aktualisiert werden kann.
 //!
-//! Das Tauri-Event `engine-event` wird mit einer `{type: string}` Payload gefeuert.
+//! Das Tauri-Event `engine-event` übernimmt IDs und Deltas aus dem SSE-Payload.
 //! Reconnect-Schleife mit exponentiellem Backoff (max 30s).
 //! Die Base-URL wird bei jedem Connect/Reconnect aus `AppState` gelesen; ein Wechsel
 //! bricht die aktuelle Verbindung ab und setzt den Backoff zurück.
@@ -15,6 +15,42 @@ use tokio_util::io::StreamReader;
 use crate::state::{get_base_url, AppState};
 
 const URL_POLL_SECS: u64 = 1;
+
+#[derive(Default)]
+struct SseMessage {
+    event_type: String,
+    data: Vec<String>,
+}
+
+impl SseMessage {
+    fn push_line(&mut self, line: &str) -> Option<serde_json::Value> {
+        if line.is_empty() {
+            let event_type = std::mem::take(&mut self.event_type);
+            let data = std::mem::take(&mut self.data).join("\n");
+            if event_type.is_empty() {
+                return None;
+            }
+            // Alte Server senden leere Daten; deren Invalidierung bleibt gültig.
+            if data.is_empty() {
+                return Some(serde_json::json!({ "type": event_type }));
+            }
+            return Some(match serde_json::from_str::<serde_json::Value>(&data) {
+                Ok(serde_json::Value::Object(mut payload)) => {
+                    payload.insert("type".into(), event_type.into());
+                    serde_json::Value::Object(payload)
+                }
+                _ => serde_json::json!({ "type": "resync_required" }),
+            });
+        }
+        if let Some(event_type) = line.strip_prefix("event:") {
+            self.event_type = event_type.trim().to_string();
+        } else if let Some(data) = line.strip_prefix("data:") {
+            self.data
+                .push(data.strip_prefix(' ').unwrap_or(data).to_string());
+        }
+        None
+    }
+}
 
 /// Spawnt den SSE-Consumer-Task. Gibt sofort zurück; Arbeit läuft im Hintergrund.
 pub fn spawn(app_handle: AppHandle, client: Client) {
@@ -118,11 +154,17 @@ async fn connect_and_consume(
         return Err(format!("HTTP {}", response.status()));
     }
 
+    // Kein Replay-Protokoll: jede neue Verbindung invalidiert den lokalen Cache.
+    let _ = app_handle.emit(
+        "engine-event",
+        serde_json::json!({ "type": "resync_required" }),
+    );
+
     let byte_stream = response.bytes_stream().map_err(std::io::Error::other);
     let stream_reader = StreamReader::new(byte_stream);
     let mut lines = BufReader::new(stream_reader).lines();
 
-    let mut current_event_type = String::new();
+    let mut message = SseMessage::default();
 
     loop {
         match tokio::time::timeout(
@@ -132,20 +174,8 @@ async fn connect_and_consume(
         .await
         {
             Ok(Ok(Some(line))) => {
-                let line: String = line;
-                if let Some(event_type) = line.strip_prefix("event:") {
-                    current_event_type = event_type.trim().to_string();
-                } else if line.starts_with("data:") {
-                    // Dispatch the event — type carries the semantic
-                    if !current_event_type.is_empty() {
-                        let _ = app_handle.emit(
-                            "engine-event",
-                            serde_json::json!({ "type": current_event_type }),
-                        );
-                    }
-                } else if line.is_empty() {
-                    // Blank line = end of SSE message block, reset type
-                    current_event_type.clear();
+                if let Some(payload) = message.push_line(&line) {
+                    let _ = app_handle.emit("engine-event", payload);
                 }
             }
             Ok(Ok(None)) | Ok(Err(_)) => return Ok(ConsumeOutcome::StreamEnded),
@@ -163,4 +193,37 @@ async fn connect_and_consume(
 /// Minimal fallback logging without requiring a tracing dependency in the Tauri crate.
 fn tracing_or_eprintln(msg: String) {
     eprintln!("[bpmninja-sse] {msg}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SseMessage;
+
+    #[test]
+    fn forwards_multiline_payload_only_at_message_boundary() {
+        let mut message = SseMessage::default();
+        assert!(message.push_line("event: instance_changed").is_none());
+        assert!(message
+            .push_line("data: {\"instance_id\":\"id\",")
+            .is_none());
+        assert!(message
+            .push_line("data: \"delta\":{\"current_node\":\"end\"}}")
+            .is_none());
+        let payload = message.push_line("").unwrap();
+        assert_eq!(payload["type"], "instance_changed");
+        assert_eq!(payload["instance_id"], "id");
+        assert_eq!(payload["delta"]["current_node"], "end");
+        assert!(message.push_line("").is_none());
+    }
+
+    #[test]
+    fn supports_legacy_empty_data_and_recovers_from_bad_json() {
+        let mut message = SseMessage::default();
+        message.push_line("event: task_changed");
+        message.push_line("data:");
+        assert_eq!(message.push_line("").unwrap()["type"], "task_changed");
+        message.push_line("event: instance_changed");
+        message.push_line("data: broken");
+        assert_eq!(message.push_line("").unwrap()["type"], "resync_required");
+    }
 }

@@ -18,7 +18,7 @@ The client uses `globalThis.fetch()`. This requires Node ≥ 18. No axios, got, 
 
 ### ⚠️ Tests use fake timers, not real timeouts
 
-All 68 tests use `vi.useFakeTimers()` and mock `fetch`. No real HTTP requests or timers run during tests. This means timing-sensitive bugs may only appear in integration, not unit tests.
+All 76 tests use `vi.useFakeTimers()` and mock `fetch`. No real HTTP requests or timers run during tests. This means timing-sensitive bugs may only appear in integration, not unit tests.
 
 ### ⚠️ Lock extension is automatic but optional
 

@@ -207,7 +207,7 @@ fn event_based_gateway_rejects_non_catch_targets() {
 
     assert!(matches!(
         def,
-        Err(EngineError::InvalidDefinition(msg)) if msg.contains("EventBasedGateway") && msg.contains("can only connect to MessageCatchEvent or TimerCatchEvent")
+        Err(EngineError::InvalidDefinition(msg)) if msg.contains("EventBasedGateway") && msg.contains("can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent")
     ));
 }
 

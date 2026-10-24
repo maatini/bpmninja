@@ -1,64 +1,13 @@
-name: Build macOS Binary
+name: Build macOS Packages
 
 on:
-  # Allows manual triggering of the workflow from the GitHub UI
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-tauri:
-    strategy:
-      matrix:
-        include:
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            name: intel
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            name: arm
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: ${{ matrix.target }}
-
-      - name: Install UI Dependencies
-        working-directory: desktop-tauri
-        run: npm install
-
-      - name: Build Tauri App (macOS)
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: desktop-tauri
-          # Automatically creates a draft release containing the .dmg / .app
-          tagName: app-v__VERSION__ 
-          releaseName: 'macOS ${{ matrix.name }} Build v__VERSION__'
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.target }}
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: macos-binary-${{ matrix.name }}
-          path: |
-            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
-            desktop-tauri/src-tauri/target/release/bundle/dmg/*.dmg
-            desktop-tauri/src-tauri/target/release/bundle/macos/*.app
+  packages:
+    uses: ./.github/workflows/desktop-packages.yml
+    with:
+      platform: macos

@@ -137,6 +137,7 @@ impl WorkflowEngine {
         token: &mut Token,
         current_id: &str,
         message_name: &str,
+        kind: crate::runtime::CatchKind,
     ) -> EngineResult<NextAction> {
         let pending = PendingMessageCatch {
             id: Uuid::new_v4(),
@@ -144,6 +145,7 @@ impl WorkflowEngine {
             node_id: current_id.to_string(),
             message_name: message_name.to_string(),
             token_id: token.id,
+            kind,
         };
         let inst_arc = self
             .instances
@@ -151,10 +153,15 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        Self::track_boundary_task(
+            &mut inst,
+            token,
+            crate::runtime::BoundaryTask::Message(pending.id),
+        );
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
         inst.push_audit_log(format!(
-            "✉️ Message catch event '{current_id}' waiting for '{message_name}'"
+            "✉️ {kind:?} catch event '{current_id}' waiting for '{message_name}'"
         ));
         Ok(NextAction::WaitForMessage(pending))
     }
@@ -286,6 +293,26 @@ impl WorkflowEngine {
                 })
             }
         } else {
+            if let Some(handler) = self
+                .prepare_event_code(instance_id, escalation_code, true, token)
+                .await?
+            {
+                let interrupting = handler.event_context.as_ref().is_some_and(|c| {
+                    token
+                        .event_context
+                        .as_ref()
+                        .is_some_and(|source| source.generation != c.generation)
+                });
+                if interrupting {
+                    return Ok(NextAction::Continue(handler));
+                }
+                let next = resolve_next_target(def_clone, current_id, &token.variables)?;
+                token.current_node = next;
+                return Ok(NextAction::SpawnAndContinue {
+                    main: token.clone(),
+                    spawned: vec![handler],
+                });
+            }
             // No handler found — escalation is ignored (non-fatal), token continues
             let next = resolve_next_target(def_clone, current_id, &token.variables)?;
             token.current_node = next.clone();

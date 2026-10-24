@@ -36,6 +36,10 @@ pub enum HistoryEventType {
     EscalationThrown,
     CompensationTriggered,
     InstanceMigrated,
+    EventSubprocessActivated,
+    EventSubprocessInterrupted,
+    EventSubprocessScopeInterrupted,
+    EventSubprocessCompleted,
 }
 
 impl HistoryEventType {
@@ -62,6 +66,12 @@ impl HistoryEventType {
             Self::EscalationThrown => "An escalation was thrown".into(),
             Self::CompensationTriggered => "Compensation was triggered".into(),
             Self::InstanceMigrated => "Process instance was migrated to a new definition".into(),
+            Self::EventSubprocessActivated => "Event subprocess activated".into(),
+            Self::EventSubprocessInterrupted => "Event subprocess execution interrupted".into(),
+            Self::EventSubprocessScopeInterrupted => {
+                "Event subprocess interrupted its containing scope".into()
+            }
+            Self::EventSubprocessCompleted => "Event subprocess completed".into(),
         }
     }
 }
@@ -344,6 +354,7 @@ mod tests {
     #[test]
     fn test_calculate_diff() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -358,6 +369,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };
@@ -393,6 +405,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_file_upload_human_text() {
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -407,6 +420,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };
@@ -502,6 +516,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_empty() {
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -516,6 +531,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };
@@ -727,6 +743,7 @@ mod tests {
     fn test_calculate_diff_only_variables_changed() {
         // Catches: replace || with && in calculate_diff_from_snapshot (line 318)
         let old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK".into(),
@@ -745,6 +762,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };
@@ -763,6 +781,7 @@ mod tests {
     #[test]
     fn test_calculate_diff_only_removed() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK".into(),
@@ -777,6 +796,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };
@@ -796,6 +816,7 @@ mod tests {
     #[test]
     fn test_diff_snapshot_produces_same_result_as_full_clone() {
         let mut old = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "BK-1".into(),
@@ -810,6 +831,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };

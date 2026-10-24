@@ -38,8 +38,14 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Test HTTP benchmark tooling
+        run: python3 -B -m unittest discover -s engine-server/benchmarks -p test_http_load.py -v
+
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
+
+      - name: Check opt-in server allocator and benchmarks
+        run: cargo check --locked -p engine-server --features allocator-mimalloc --all-targets
 
       - name: Start NATS JetStream
         run: |
@@ -170,6 +176,10 @@ jobs:
       - name: Run lint
         working-directory: desktop-tauri
         run: npm run lint
+
+      - name: Test event filtering and deltas
+        working-directory: desktop-tauri
+        run: npm run test:events
 
       - name: Build frontend bundle
         working-directory: desktop-tauri

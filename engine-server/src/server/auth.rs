@@ -3,7 +3,7 @@ use axum::{
     extract::{Request, State},
     http::{Method, header},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use std::sync::Arc;
 
@@ -34,6 +34,7 @@ pub async fn auth_middleware(
 
     match extract_api_key(request.headers()) {
         Some(provided) if api_keys_equal(provided, expected) => Ok(next.run(request).await),
+        _ if path.starts_with("/engine-rest/") => Ok((axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"type":"AuthorizationException","message":"Unauthorized","code":0}))).into_response()),
         _ => Err(AppError::Unauthorized),
     }
 }

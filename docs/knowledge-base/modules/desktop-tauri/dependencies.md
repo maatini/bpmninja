@@ -23,7 +23,7 @@
 | Caller | How | For |
 |--------|-----|-----|
 | End users | Desktop app window | BPMN modeling, instance tracking, monitoring |
-| CI (GitHub Actions) | Playwright tests | 48 E2E tests |
+| CI (GitHub Actions) | Playwright tests | 52 E2E tests |
 
 ## Architecture Diagram
 

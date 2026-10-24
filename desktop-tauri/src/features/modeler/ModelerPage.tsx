@@ -23,14 +23,19 @@ import { CustomPropertiesProvider } from './properties/ConditionPropertiesProvid
 import { ScriptPropertiesProvider } from './properties/ScriptPropertiesProvider';
 import { TopicPropertiesProvider } from './properties/TopicPropertiesProvider';
 import { AssigneePropertiesProvider } from './properties/AssigneePropertiesProvider';
+import dataDefaultsModdle from './properties/dataDefaultsModdle.json';
+import { DataMappingsPropertiesProvider } from './properties/DataMappingsPropertiesProvider';
 import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
+import { EventSubprocessPropertiesProvider } from './properties/EventSubprocessPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider', 'dataMappingsPropertiesProvider', 'eventSubprocessPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
   topicPropertiesProvider: ['type', TopicPropertiesProvider],
   assigneePropertiesProvider: ['type', AssigneePropertiesProvider],
+  dataMappingsPropertiesProvider: ['type', DataMappingsPropertiesProvider],
+  eventSubprocessPropertiesProvider: ['type', EventSubprocessPropertiesProvider],
   calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
 };
 
@@ -92,7 +97,8 @@ export const ModelerPage = memo(function ModelerPage({ onDeploy, onStart, onNewD
           customProviderModule
         ],
         moddleExtensions: {
-          camunda: camundaModdleDescriptor
+          camunda: camundaModdleDescriptor,
+          bpmninja: dataDefaultsModdle
         }
       });
       

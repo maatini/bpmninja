@@ -1,10 +1,10 @@
 # Graph Maintenance & Metriken
 
-Der Knowledge-Graph veraltet sofort bei jeder Code-Änderung. Es ist deine Aufgabe, ihn aktuell zu halten.
+Der Knowledge-Graph kann nach Code-Änderungen veralten. Halte ihn mit inkrementellen Updates aktuell; der installierte Git-Hook aktualisiert ihn zusätzlich nach Commits und Branch-Wechseln.
 
 ### Wann `graphify update .` ausgeführt werden MUSS:
 - Nach jedem abgeschlossenen Task-Intervall (≥3 betroffene Dateien).
-- Nach jedem Git Commit.
+- Falls der Git-Hook nicht verfügbar war oder fehlschlug.
 - Vor einem `/compact` Kontext-Reset.
 - Bei der Anlage von neuen Funktionen/Architekturelementen.
 *(Dies führt nur ein AST-Update durch und generiert keine API-Kosten.)*
@@ -16,4 +16,4 @@ Der Knowledge-Graph veraltet sofort bei jeder Code-Änderung. Es ist deine Aufga
 3. **Community-Kohäsion (< 0.05):** Hat sich die Modulgrenze verschlechtert? -> Modulschnitt überdenken.
 
 ### Manueller Full Re-Build
-Führe `graphify build .` (voller LLM-Rebuild inklusive Semantik/Inferenz) **niemals** eigenmächtig aus, da dies API-Kosten verursacht. Nur nach explizitem Nutzerbefehl auslösen.
+Führe `graphify .` (voller Rebuild inklusive Semantik/Inferenz) **niemals** eigenmächtig aus, da dies API-Kosten verursachen kann. Nur nach explizitem Nutzerbefehl auslösen. Für normale Codefragen immer eine gezielte `graphify query`-Abfrage statt eines Rebuilds verwenden.

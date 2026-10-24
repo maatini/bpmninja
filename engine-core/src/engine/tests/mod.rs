@@ -1,18 +1,33 @@
 pub mod boundary_restore;
 pub mod call_activity_parallel;
 pub mod call_errors;
+pub mod camunda_compat;
+mod data_mappings;
+mod event_subprocess;
+pub mod events;
 pub mod gateways;
 pub mod helpers;
+pub mod history_batch;
 pub mod inclusive_join;
 pub mod instance_admin;
 pub mod instance_pagination;
+pub mod loops;
 pub mod migration;
+pub mod persist_lock;
 pub mod recurring_and_event_timer;
 pub mod scripting;
 pub mod service_incidents;
+pub mod signals;
 pub mod start_tasks;
 pub mod stress_tests;
+pub mod task_handler;
 pub mod timer_due_index;
 pub mod timers_messages;
 pub mod topic_index;
 pub mod xor_merge;
+
+mod conditional_catches;
+
+mod conditional_boundaries;
+
+mod conditional_starts;

@@ -1,3 +1,5 @@
+mod allocator;
+
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -89,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_persistence(p_arc.clone() as Arc<dyn WorkflowPersistence>);
             StartupCoordinator::new(p_arc.clone())
                 .restore(&mut engine, &mut xml_cache)
-                .await;
+                .await?;
 
             // Log-Persistenz in NATS einrichten
             let log_sink = NatsLogSink::new(p_arc.jetstream()).await;
@@ -128,7 +130,8 @@ async fn main() -> anyhow::Result<()> {
         log_buffer,
     );
 
-    // Background timer scheduler — processes expired timers automatically
+    // Background timer scheduler — sleeps until the next timer is due (or a new
+    // timer is added); TIMER_INTERVAL_MS is the maximum idle wait.
     let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -136,14 +139,14 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let timer_engine = engine_arc.clone();
     let timer_task = tokio::spawn(async move {
-        let interval = tokio::time::Duration::from_millis(timer_interval_ms);
+        let max_idle = tokio::time::Duration::from_millis(timer_interval_ms);
         tracing::info!(
-            "Timer scheduler started (interval: {}ms)",
+            "Timer scheduler started (max idle: {}ms)",
             timer_interval_ms
         );
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(interval) => {
+                _ = timer_engine.wait_for_timer_work(max_idle) => {
                     let engine = &timer_engine;
                     match engine.process_timers().await {
                         Ok(0) => {} // No expired timers — silent

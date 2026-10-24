@@ -32,6 +32,55 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CompleteRequest'
+  /api/conditional-catches:
+    get:
+      operationId: Api_getPendingConditionalCatches
+      description: Live conditional catch occurrences, without process variables.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingConditionalCatch'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/conditional-starts/evaluate:
+    post:
+      operationId: Api_evaluateConditionalStart
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalStartResult'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConditionalStartRequest'
   /api/definitions:
     get:
       operationId: Api_listDefinitions
@@ -148,7 +197,7 @@ paths:
   /api/events:
     get:
       operationId: Api_engineEvents
-      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.
+      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`, `conditional_start_changed`). Broadcast capacity is 256; slow clients may miss events.
       parameters: []
       responses:
         '200':
@@ -981,6 +1030,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /api/signal:
+    post:
+      operationId: Api_broadcastSignal
+      description: Broadcast a signal to all waiting signal catch/boundary events and start processes with a matching signal start event.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcastSignalResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastSignalRequest'
   /api/start:
     post:
       operationId: Api_start
@@ -1107,6 +1180,247 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppError'
+  /engine-rest/external-task/fetchAndLock:
+    post:
+      operationId: CamundaExternalTasks_fetchAndLock
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CamundaExternalTasks.FetchedTask'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.FetchRequest'
+  /engine-rest/external-task/{id}/bpmnError:
+    post:
+      operationId: CamundaExternalTasks_bpmnError
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.BpmnErrorRequest'
+  /engine-rest/external-task/{id}/complete:
+    post:
+      operationId: CamundaExternalTasks_complete
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.CompleteRequest'
+  /engine-rest/external-task/{id}/extendLock:
+    post:
+      operationId: CamundaExternalTasks_extendLock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.ExtendRequest'
+  /engine-rest/external-task/{id}/failure:
+    post:
+      operationId: CamundaExternalTasks_failure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.FailureRequest'
   /metrics:
     get:
       operationId: metrics
@@ -1154,6 +1468,26 @@ components:
           type: string
         errorCode:
           type: string
+    BroadcastSignalRequest:
+      type: object
+      required:
+        - signalName
+      properties:
+        signalName:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    BroadcastSignalResponse:
+      type: object
+      required:
+        - affectedInstances
+      properties:
+        affectedInstances:
+          type: array
+          items:
+            type: string
+          description: Instances resumed by the signal plus instances started by signal start events.
     BucketEntry:
       type: object
       required:
@@ -1178,6 +1512,233 @@ components:
         key:
           type: string
         value: {}
+    CamundaExternalTasks.BpmnErrorRequest:
+      type: object
+      required:
+        - workerId
+        - errorCode
+      properties:
+        workerId:
+          type: string
+        errorCode:
+          type: string
+        errorMessage:
+          type: string
+          nullable: true
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+    CamundaExternalTasks.CompleteRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+        localVariables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+          description: Only null or an empty object is supported; there are no local scopes.
+    CamundaExternalTasks.ErrorBody:
+      type: object
+      required:
+        - type
+        - message
+        - code
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+          format: int32
+    CamundaExternalTasks.ExtendRequest:
+      type: object
+      required:
+        - workerId
+        - newDuration
+      properties:
+        workerId:
+          type: string
+        newDuration:
+          type: integer
+          format: int64
+          minimum: 1
+    CamundaExternalTasks.FailureRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        retries:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        retryTimeout:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        errorMessage:
+          type: string
+          nullable: true
+        errorDetails:
+          type: string
+          nullable: true
+    CamundaExternalTasks.FetchRequest:
+      type: object
+      required:
+        - workerId
+        - maxTasks
+      properties:
+        workerId:
+          type: string
+        maxTasks:
+          type: integer
+          format: int32
+          minimum: 1
+        topics:
+          type: array
+          items:
+            $ref: '#/components/schemas/CamundaExternalTasks.Topic'
+        asyncResponseTimeout:
+          type: integer
+          format: uint64
+          nullable: true
+          maximum: 1800000
+        usePriority:
+          type: boolean
+          description: Accepted; all service-task priorities are zero.
+    CamundaExternalTasks.FetchedTask:
+      type: object
+      required:
+        - id
+        - activityId
+        - activityInstanceId
+        - processInstanceId
+        - processDefinitionId
+        - processDefinitionKey
+        - processDefinitionVersionTag
+        - topicName
+        - workerId
+        - lockExpirationTime
+        - retries
+        - errorMessage
+        - errorDetails
+        - businessKey
+        - tenantId
+        - priority
+        - suspended
+        - variables
+      properties:
+        id:
+          type: string
+        activityId:
+          type: string
+        activityInstanceId:
+          type: string
+        processInstanceId:
+          type: string
+        processDefinitionId:
+          type: string
+        processDefinitionKey:
+          type: string
+          nullable: true
+        processDefinitionVersionTag:
+          nullable: true
+        topicName:
+          type: string
+        workerId:
+          type: string
+        lockExpirationTime:
+          type: string
+        retries:
+          type: integer
+          format: int32
+        errorMessage:
+          type: string
+          nullable: true
+        errorDetails:
+          type: string
+          nullable: true
+        businessKey:
+          type: string
+        tenantId:
+          nullable: true
+        priority:
+          type: number
+          enum:
+            - 0
+        suspended:
+          type: boolean
+          enum:
+            - false
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+    CamundaExternalTasks.Topic:
+      type: object
+      required:
+        - topicName
+        - lockDuration
+      properties:
+        topicName:
+          type: string
+        lockDuration:
+          type: integer
+          format: int64
+          minimum: 1
+        variables:
+          type: array
+          items:
+            type: string
+          nullable: true
+        deserializeValues:
+          type: boolean
+        includeExtensionProperties:
+          type: boolean
+          enum:
+            - false
+        localVariables:
+          type: boolean
+          enum:
+            - false
+        withoutTenantId:
+          type: boolean
+    CamundaExternalTasks.TypedVariable:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - 'Null'
+            - Boolean
+            - Short
+            - Integer
+            - Long
+            - Double
+            - String
+            - Date
+            - Json
+        value: {}
+        valueInfo:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          description: Null/empty metadata, transient=false, and Json serializationDataFormat=application/json are supported.
     CompleteRequest:
       type: object
       properties:
@@ -1194,6 +1755,45 @@ components:
         variables:
           type: object
           additionalProperties: {}
+    ConditionalStartRequest:
+      type: object
+      required:
+        - request_id
+        - variables
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        process_id:
+          type: string
+        business_key:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+      description: Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.
+    ConditionalStartResult:
+      type: object
+      required:
+        - request_id
+        - definition_key
+        - matched
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        matched:
+          type: boolean
+        instance_id:
+          type: string
+          format: uuid
+          description: Present only when matched is true.
     CorrelateMessageRequest:
       type: object
       required:
@@ -1248,9 +1848,15 @@ components:
       type: object
       required:
         - definition_key
+        - version
       properties:
         definition_key:
           type: string
+        version:
+          type: integer
+          format: int32
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
     ExtendLockRequest:
       type: object
       required:
@@ -1348,6 +1954,40 @@ components:
           additionalProperties:
             type: string
           description: Optional mapping of old BPMN node IDs to new BPMN node IDs. Required for nodes that were renamed between versions.
+    ModelCheckReport:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - passed
+            - violations
+            - skipped
+            - inconclusive
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelCheckViolation'
+        reason:
+          type: string
+    ModelCheckViolation:
+      type: object
+      required:
+        - property
+      properties:
+        property:
+          type: string
+          enum:
+            - safeness
+            - option_to_complete
+            - proper_completion
+            - no_dead_activities
+        elements:
+          type: array
+          items:
+            type: string
     MonitoringData:
       type: object
       required:
@@ -1385,6 +2025,40 @@ components:
       properties:
         target_node_id:
           type: string
+    PendingConditionalCatch:
+      type: object
+      required:
+        - id
+        - instance_id
+        - node_id
+        - token_id
+        - generation
+        - claimed
+      properties:
+        kind:
+          type: string
+          enum:
+            - intermediate
+            - boundary
+        activity_activation_id:
+          type: string
+        attached_to:
+          type: string
+        interrupting:
+          type: boolean
+        id:
+          type: string
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        token_id:
+          type: string
+        generation:
+          type: integer
+          format: uint64
+        claimed:
+          type: boolean
     PendingMessage:
       type: object
       required:
@@ -1398,6 +2072,12 @@ components:
           type: string
         message_name:
           type: string
+          description: Message or signal name, depending on `kind`.
+        kind:
+          type: string
+          enum:
+            - Message
+            - Signal
     PendingServiceTask:
       type: object
       required:
@@ -1489,8 +2169,12 @@ components:
           type: string
         variables:
           type: object
+          additionalProperties: {}
+        variable_types:
+          type: object
           additionalProperties:
-            $ref: '#/components/schemas/VariableValue'
+            type: string
+          description: Optional transport type hints; absent from legacy/native-only snapshots.
         started_at:
           type: string
         completed_at:

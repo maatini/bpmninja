@@ -43,7 +43,9 @@ model ProcessInstance {
   parent_instance_id?: string;
   state: unknown;
   current_node?: string;
-  variables: Record<VariableValue>;
+  variables: Record<unknown>;
+  @doc("Optional transport type hints; absent from legacy/native-only snapshots.")
+  variable_types?: Record<string>;
   started_at?: string;
   completed_at?: string;
 }
@@ -54,8 +56,37 @@ model DeployRequest {
   name: string;
 }
 
+model ModelCheckViolation {
+  property: "safeness" | "option_to_complete" | "proper_completion" | "no_dead_activities";
+  elements?: string[];
+}
+
+model ModelCheckReport {
+  status: "passed" | "violations" | "skipped" | "inconclusive";
+  violations?: ModelCheckViolation[];
+  reason?: string;
+}
+
 model DeployResponse {
   definition_key: string;
+  version: int32;
+  model_check?: ModelCheckReport;
+}
+
+@doc("Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.")
+model ConditionalStartRequest {
+  @format("uuid") request_id: string;
+  @format("uuid") definition_key?: string;
+  process_id?: string;
+  business_key?: string;
+  variables: Record<unknown>;
+}
+model ConditionalStartResult {
+  @format("uuid") request_id: string;
+  @format("uuid") definition_key: string;
+  matched: boolean;
+  @doc("Present only when matched is true.")
+  @format("uuid") instance_id?: string;
 }
 
 model StartRequest {
@@ -164,6 +195,16 @@ model CorrelateMessageResponse {
   affectedInstances: string[];
 }
 
+model BroadcastSignalRequest {
+  signalName: string;
+  variables?: Record<unknown>;
+}
+
+model BroadcastSignalResponse {
+  @doc("Instances resumed by the signal plus instances started by signal start events.")
+  affectedInstances: string[];
+}
+
 model ProcessTimersResponse {
   triggered: int32;
 }
@@ -177,7 +218,22 @@ model PendingTimer {
 model PendingMessage {
   instance_id: string;
   node_id: string;
+  @doc("Message or signal name, depending on `kind`.")
   message_name: string;
+  kind?: "Message" | "Signal";
+}
+
+model PendingConditionalCatch {
+  kind?: "intermediate" | "boundary";
+  activity_activation_id?: string;
+  attached_to?: string;
+  interrupting?: boolean;
+  id: string;
+  instance_id: string;
+  node_id: string;
+  token_id: string;
+  generation: uint64;
+  claimed: boolean;
 }
 
 model BackendInfo {
@@ -251,6 +307,9 @@ namespace Api {
 
   @post @route("/deploy")
   op deploy(@body request: DeployRequest): DeployResponse | AppError;
+
+  @post @route("/conditional-starts/evaluate")
+  op evaluateConditionalStart(@body request: ConditionalStartRequest): ConditionalStartResult | { @statusCode statusCode: 409; @body body: AppError } | AppError;
 
   @post @route("/start")
   op start(@body request: StartRequest): StartResponse | AppError;
@@ -377,6 +436,10 @@ namespace Api {
   @post @route("/message")
   op correlateMessage(@body request: CorrelateMessageRequest): CorrelateMessageResponse | AppError;
 
+  @post @route("/signal")
+  @doc("Broadcast a signal to all waiting signal catch/boundary events and start processes with a matching signal start event.")
+  op broadcastSignal(@body request: BroadcastSignalRequest): BroadcastSignalResponse | AppError;
+
   @get @route("/timers")
   op getPendingTimers(): PendingTimer[] | AppError;
 
@@ -385,6 +448,10 @@ namespace Api {
 
   @get @route("/messages")
   op getPendingMessages(): PendingMessage[] | AppError;
+
+  @doc("Live conditional catch occurrences, without process variables.")
+  @get @route("/conditional-catches")
+  op getPendingConditionalCatches(): PendingConditionalCatch[] | AppError;
 
   // ---- Service tasks (External-Task-Worker-kompatibel) ----
 
@@ -443,7 +510,7 @@ namespace Api {
   ): LogEntry[] | AppError;
 
   @get @route("/events")
-  @doc("SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`). Broadcast capacity is 256; slow clients may miss events.")
+  @doc("SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`, `conditional_start_changed`). Broadcast capacity is 256; slow clients may miss events.")
   op engineEvents(): {
     @header contentType: "text/event-stream";
     @body body: string;
@@ -457,3 +524,86 @@ op metrics(): {
   @header contentType: "text/plain";
   @body body: string;
 };
+
+@route("/engine-rest/external-task")
+@doc("Camunda 7 worker facade. Primitive/Date/Json variables only; Java objects, local scopes, tenant/definition filters and extension properties are rejected.")
+namespace CamundaExternalTasks {
+  model TypedVariable {
+    type?: "Null" | "Boolean" | "Short" | "Integer" | "Long" | "Double" | "String" | "Date" | "Json";
+    value?: unknown;
+    @doc("Null/empty metadata, transient=false, and Json serializationDataFormat=application/json are supported.")
+    valueInfo?: Record<unknown> | null;
+  }
+  model Topic {
+    topicName: string;
+    @minValue(1) lockDuration: int64;
+    variables?: string[] | null;
+    deserializeValues?: boolean;
+    includeExtensionProperties?: false;
+    localVariables?: false;
+    withoutTenantId?: boolean;
+  }
+  model FetchRequest {
+    workerId: string;
+    @minValue(1) maxTasks: int32;
+    topics?: Topic[];
+    @maxValue(1800000) asyncResponseTimeout?: uint64 | null;
+    @doc("Accepted; all service-task priorities are zero.")
+    usePriority?: boolean;
+  }
+  model FetchedTask {
+    id: string;
+    activityId: string;
+    activityInstanceId: string;
+    processInstanceId: string;
+    processDefinitionId: string;
+    processDefinitionKey: string | null;
+    processDefinitionVersionTag: null;
+    topicName: string;
+    workerId: string;
+    lockExpirationTime: string;
+    retries: int32;
+    errorMessage: string | null;
+    errorDetails: string | null;
+    businessKey: string;
+    tenantId: null;
+    priority: 0;
+    suspended: false;
+    variables: Record<TypedVariable>;
+  }
+  model CompleteRequest {
+    workerId: string;
+    variables?: Record<TypedVariable> | null;
+    @doc("Only null or an empty object is supported; there are no local scopes.")
+    localVariables?: Record<TypedVariable> | null;
+  }
+  model FailureRequest {
+    workerId: string;
+    @minValue(0) retries?: int32 | null;
+    @minValue(0) retryTimeout?: int64 | null;
+    errorMessage?: string | null;
+    errorDetails?: string | null;
+  }
+  model ExtendRequest { workerId: string; @minValue(1) newDuration: int64; }
+  model BpmnErrorRequest {
+    workerId: string;
+    errorCode: string;
+    errorMessage?: string | null;
+    variables?: Record<TypedVariable> | null;
+  }
+  model ErrorBody { type: string; message: string; code: int32; }
+  @error model ErrorResponse {
+    @statusCode statusCode: 400 | 401 | 404 | 413 | 500;
+    @body body: ErrorBody;
+  }
+  @post @route("/fetchAndLock")
+  op fetchAndLock(@body request: FetchRequest): FetchedTask[] | ErrorResponse;
+  @post @route("/{id}/complete")
+  op complete(@path id: string, @body request: CompleteRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/failure")
+  op failure(@path id: string, @body request: FailureRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/extendLock")
+  op extendLock(@path id: string, @body request: ExtendRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+  @post @route("/{id}/bpmnError")
+  op bpmnError(@path id: string, @body request: BpmnErrorRequest): { @statusCode statusCode: 204 } | ErrorResponse;
+}

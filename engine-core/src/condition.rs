@@ -8,6 +8,66 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+/// Strict grammar for conditional events; gateway parsing remains compatible.
+pub fn validate_event_condition(expression: &str) -> crate::domain::EngineResult<()> {
+    compile_event_condition(expression).map(|_| ())
+}
+
+pub(crate) fn compile_event_condition(
+    expression: &str,
+) -> crate::domain::EngineResult<CompiledCondition> {
+    let invalid = || {
+        crate::domain::EngineError::InvalidDefinition(
+            "Conditional event requires a variable or a single comparison with a JSON literal"
+                .into(),
+        )
+    };
+    let expression = expression.trim();
+    if expression.is_empty() || expression.len() > 4096 {
+        return Err(invalid());
+    }
+    let name_end = expression
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(expression.len());
+    let variable = &expression[..name_end];
+    if !variable.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        return Err(invalid());
+    }
+    let tail = expression[name_end..].trim();
+    if tail.is_empty() {
+        return Ok(CompiledCondition::Truthy(variable.into()));
+    }
+    for (text, operator) in [
+        ("==", Operator::Eq),
+        ("!=", Operator::Ne),
+        (">=", Operator::Ge),
+        ("<=", Operator::Le),
+        (">", Operator::Gt),
+        ("<", Operator::Lt),
+    ] {
+        if let Some(right) = tail.strip_prefix(text) {
+            let right = right.trim();
+            let rhs = serde_json::from_str::<Value>(right)
+                .ok()
+                .or_else(|| {
+                    (right.len() >= 2
+                        && right.starts_with('\'')
+                        && right.ends_with('\'')
+                        && !right[1..right.len() - 1].contains(['\'', '\\', '\n', '\r']))
+                    .then(|| Value::String(right[1..right.len() - 1].into()))
+                })
+                .filter(|value| !value.is_array() && !value.is_object())
+                .ok_or_else(invalid)?;
+            return Ok(CompiledCondition::Comparison {
+                variable: variable.into(),
+                operator,
+                rhs,
+            });
+        }
+    }
+    Err(invalid())
+}
+
 /// Evaluates a simple condition expression against token variables.
 ///
 /// Supported forms:
@@ -17,45 +77,87 @@ use serde_json::Value;
 ///
 /// Returns `false` if the variable is missing or the expression is malformed.
 pub fn evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool {
-    let expr = expr.trim();
-    if expr.is_empty() {
-        return false;
-    }
+    CompiledCondition::parse(expr).evaluate(variables)
+}
 
-    // Try comparison operators (longest first to avoid prefix conflicts)
-    for op in ["==", "!=", ">=", "<=", ">", "<"] {
-        if let Some(idx) = expr.find(op) {
-            let var_name = expr[..idx].trim();
-            let rhs_str = expr[idx + op.len()..].trim();
+/// Parsed condition kept with a deployed definition, never serialized.
+#[derive(Debug, Clone)]
+pub(crate) enum CompiledCondition {
+    Empty,
+    Truthy(String),
+    Comparison {
+        variable: String,
+        operator: Operator,
+        rhs: Value,
+    },
+}
 
-            let lhs = match variables.get(var_name) {
-                Some(v) => v,
-                None => return false,
-            };
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Operator {
+    Eq,
+    Ne,
+    Ge,
+    Le,
+    Gt,
+    Lt,
+}
 
-            // Parse RHS as a JSON value for comparison
-            let rhs = parse_rhs(rhs_str);
-
-            return match op {
-                "==" => values_eq(lhs, &rhs),
-                "!=" => !values_eq(lhs, &rhs),
-                ">" => values_cmp(lhs, &rhs) == Some(Ordering::Greater),
-                "<" => values_cmp(lhs, &rhs) == Some(Ordering::Less),
-                ">=" => values_cmp(lhs, &rhs).is_some_and(|o| o != Ordering::Less),
-                "<=" => values_cmp(lhs, &rhs).is_some_and(|o| o != Ordering::Greater),
-                _ => false,
-            };
+impl CompiledCondition {
+    pub(crate) fn parse(expr: &str) -> Self {
+        let expr = expr.trim();
+        if expr.is_empty() {
+            return Self::Empty;
         }
+        for (op, operator) in [
+            ("==", Operator::Eq),
+            ("!=", Operator::Ne),
+            (">=", Operator::Ge),
+            ("<=", Operator::Le),
+            (">", Operator::Gt),
+            ("<", Operator::Lt),
+        ] {
+            if let Some(idx) = expr.find(op) {
+                return Self::Comparison {
+                    variable: expr[..idx].trim().to_string(),
+                    operator,
+                    rhs: parse_rhs(expr[idx + op.len()..].trim()),
+                };
+            }
+        }
+        Self::Truthy(expr.to_string())
     }
 
-    // Fallback: truthy check on a single variable name
-    match variables.get(expr) {
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Null) | None => false,
-        // Arrays and objects are truthy
-        Some(_) => true,
+    pub(crate) fn evaluate(&self, variables: &HashMap<String, Value>) -> bool {
+        match self {
+            Self::Empty => false,
+            Self::Truthy(expr) => {
+                match variables.get(expr) {
+                    Some(Value::Bool(b)) => *b,
+                    Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+                    Some(Value::String(s)) => !s.is_empty(),
+                    Some(Value::Null) | None => false,
+                    // Arrays and objects are truthy
+                    Some(_) => true,
+                }
+            }
+            Self::Comparison {
+                variable,
+                operator,
+                rhs,
+            } => {
+                let Some(lhs) = variables.get(variable) else {
+                    return false;
+                };
+                match operator {
+                    Operator::Eq => values_eq(lhs, rhs),
+                    Operator::Ne => !values_eq(lhs, rhs),
+                    Operator::Gt => values_cmp(lhs, rhs) == Some(Ordering::Greater),
+                    Operator::Lt => values_cmp(lhs, rhs) == Some(Ordering::Less),
+                    Operator::Ge => values_cmp(lhs, rhs).is_some_and(|o| o != Ordering::Less),
+                    Operator::Le => values_cmp(lhs, rhs).is_some_and(|o| o != Ordering::Greater),
+                }
+            }
+        }
     }
 }
 
@@ -228,5 +330,50 @@ mod tests {
         assert!(evaluate_condition("num", &vars));
         assert!(!evaluate_condition("zero", &vars));
         assert!(!evaluate_condition("missing_var", &vars));
+    }
+}
+
+#[cfg(test)]
+mod event_condition_tests {
+    use super::*;
+    #[test]
+    fn strict_conditions_handle_json_strings_and_reject_unsupported_expressions() {
+        let vars = HashMap::from([("status".into(), Value::String("x == y\nnext".into()))]);
+        assert!(
+            compile_event_condition(r#"status == "x == y\nnext""#)
+                .unwrap()
+                .evaluate(&vars)
+        );
+        assert!(
+            compile_event_condition("status != 'other > value'")
+                .unwrap()
+                .evaluate(&vars)
+        );
+        for expression in [
+            "",
+            "a && b",
+            "a >",
+            "a === 1",
+            "a == unquoted",
+            "a > []",
+            "1name",
+            "f()",
+            "a.b",
+            "a == 1 == 1",
+        ] {
+            assert!(
+                validate_event_condition(expression).is_err(),
+                "{expression}"
+            );
+        }
+        for expression in [
+            "flag",
+            "amount >= 1.5",
+            "status == 'approved'",
+            "flag == true",
+            "value == null",
+        ] {
+            assert!(validate_event_condition(expression).is_ok(), "{expression}");
+        }
     }
 }

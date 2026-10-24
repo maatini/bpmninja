@@ -17,21 +17,34 @@ pub enum NextAction {
     /// The engine must pause — an external task is pending.
     WaitForServiceTask(PendingServiceTask),
     /// Token arrived at a join gateway but must wait for sibling tokens.
-    WaitForJoin { gateway_id: String, token: Token },
+    WaitForJoin {
+        gateway_id: String,
+        token: Token,
+    },
     /// The engine must pause — a timer is pending.
     WaitForTimer(PendingTimer),
     /// The engine must pause — a message catch is pending.
     WaitForMessage(PendingMessageCatch),
     /// The engine must pause at an event-based gateway, registering multiple event listeners.
     WaitForEventGroup(Vec<NextAction>),
+    WaitForConditional {
+        node_id: String,
+    },
     /// The process reached an end event.
     Complete,
     /// Ends the current process instance with an error code (for error propagation).
-    ErrorEnd { error_code: String },
+    ErrorEnd {
+        error_code: String,
+    },
     /// Ends the current path with an escalation code (non-fatal, propagates to parent).
-    EscalationEnd { escalation_code: String },
+    EscalationEnd {
+        escalation_code: String,
+    },
     /// Spawns extra tokens (e.g. non-interrupting escalation handler) while the main token continues.
-    SpawnAndContinue { main: Token, spawned: Vec<Token> },
+    SpawnAndContinue {
+        main: Token,
+        spawned: Vec<Token>,
+    },
     /// Terminate End Event: kill all active tokens and complete the instance immediately.
     Terminate,
     /// The engine must pause — a call activity (sub-process) is pending.
@@ -40,9 +53,15 @@ pub enum NextAction {
         token: Token,
     },
     /// Multi-instance parallel: spawn N tokens that each execute the same task.
-    MultiInstanceFork { node_id: String, tokens: Vec<Token> },
+    MultiInstanceFork {
+        node_id: String,
+        tokens: Vec<Token>,
+    },
     /// Multi-instance sequential: re-execute the same task node.
-    MultiInstanceNext { node_id: String, token: Token },
+    MultiInstanceNext {
+        node_id: String,
+        token: Token,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -52,10 +71,24 @@ pub enum NextAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MultiInstanceProgress {
     pub node_id: String,
+    /// Planned instances (multi-instance) or iterations so far (standard loop).
     pub total: usize,
     pub completed: usize,
-    /// For sequential MI: the token that will re-execute the task
-    pub sequential_token: Option<Token>,
+    /// Parallel children still running.
+    #[serde(default)]
+    pub active_tokens: Vec<uuid::Uuid>,
+    /// Collection elements for sequential instances not yet started.
+    #[serde(default)]
+    pub elements: Vec<serde_json::Value>,
+    /// `output_element` per instance index.
+    #[serde(default)]
+    pub outputs: Vec<serde_json::Value>,
+    /// Variables of finished parallel children, merged at the end.
+    #[serde(default)]
+    pub merged_variables: HashMap<String, serde_json::Value>,
+    /// Values of the local loop variables before the activity started.
+    #[serde(default)]
+    pub shadowed: HashMap<String, Option<serde_json::Value>>,
 }
 
 /// The state of a process instance.
@@ -75,6 +108,9 @@ pub enum InstanceState {
         message_id: Uuid,
     },
     WaitingOnEventBasedGateway,
+    WaitingOnConditional {
+        node_id: String,
+    },
     /// Multiple tokens are active; some may be waiting, some running.
     ParallelExecution {
         active_token_count: usize,
@@ -154,6 +190,9 @@ pub struct ProcessInstance {
     pub audit_log: Vec<String>,
     /// Current process variables (synced from the executing token).
     pub variables: HashMap<String, Value>,
+    /// Optional transport type hints (e.g. Integer versus Long); values remain JSON-native.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub variable_types: HashMap<String, String>,
     /// Central token store — the single source of truth for all active tokens.
     /// PendingTasks reference tokens by UUID instead of owning copies.
     #[serde(default)]
@@ -174,12 +213,88 @@ pub struct ProcessInstance {
     /// Independent of `InstanceState` so parallel calls can resume individually.
     #[serde(default)]
     pub outstanding_calls: HashMap<Uuid, OutstandingCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_state: Option<Box<EventSubProcessState>>,
     /// Timestamp when this instance was started.
     #[serde(default)]
     pub started_at: Option<DateTime<Utc>>,
     /// Timestamp when this instance reached a terminal state.
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EventSubProcessState {
+    #[serde(default)]
+    pub boundary_activations: HashMap<Uuid, BoundaryActivation>,
+    #[serde(default)]
+    pub boundary_cleanup: Vec<Uuid>,
+    #[serde(default)]
+    pub boundary_task_cleanup: Vec<BoundaryTask>,
+    #[serde(default)]
+    pub conditional_waits: HashMap<Uuid, ConditionalWait>,
+    #[serde(default)]
+    pub gateway_waits: HashMap<Uuid, EventWaitGroup>,
+
+    #[serde(default)]
+    pub conditional_variables: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    pub variable_revision: u64,
+    #[serde(default)]
+    pub conditional_values: HashMap<Uuid, bool>,
+    #[serde(default)]
+    pub ready_conditional_tokens: Vec<Uuid>,
+    #[serde(default)]
+    pub conditional_cancel_children: Vec<Uuid>,
+    #[serde(default)]
+    pub conditional_cleanup: bool,
+
+    pub generation: u64,
+    pub main_completed: bool,
+    pub subscriptions: HashMap<Uuid, EventSubscription>,
+    pub activations: HashMap<Uuid, String>,
+    /// Successful container-start effects and this marker share one snapshot.
+    #[serde(default, skip_serializing_if = "std::collections::HashSet::is_empty")]
+    pub started_activations: std::collections::HashSet<Uuid>,
+    /// Stable history IDs survive a crash between snapshot and history writes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lifecycle_outbox: Vec<crate::history::HistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConditionalWait {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_activation: Option<Uuid>,
+    #[serde(default)]
+    pub registered_revision: u64,
+    #[serde(default)]
+    pub claimed_revision: Option<u64>,
+    pub id: Uuid,
+    pub token_id: Uuid,
+    pub node_id: String,
+    pub generation: u64,
+    pub claimed: bool,
+    pub group: Option<Uuid>,
+    pub order: usize,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventWaitGroup {
+    #[serde(default)]
+    pub timers: Vec<PendingTimer>,
+    #[serde(default)]
+    pub messages: Vec<PendingMessageCatch>,
+    pub id: Uuid,
+    pub gateway: String,
+    pub jobs: HashMap<Uuid, String>,
+    pub winner: Option<String>,
+    pub cleaned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventSubscription {
+    pub subprocess_id: String,
+    pub next_due: Option<DateTime<Utc>>,
+    pub remaining: Option<u32>,
 }
 
 impl ProcessInstance {
@@ -227,6 +342,7 @@ mod tests {
 
     fn make_instance() -> ProcessInstance {
         ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: Uuid::new_v4(),
             definition_key: Uuid::new_v4(),
             business_key: "test".into(),
@@ -241,6 +357,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         }
@@ -383,4 +500,32 @@ mod tests {
         inst.variables.insert("x".into(), json!(42));
         assert!(inst.file_variable_names().is_empty());
     }
+}
+
+/// Conditional boundaries belong to an activity visit, not just a BPMN node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundaryActivation {
+    #[serde(default)]
+    pub tasks: Vec<BoundaryTask>,
+    #[serde(default)]
+    pub timers: Vec<PendingTimer>,
+    #[serde(default)]
+    pub messages: Vec<PendingMessageCatch>,
+    #[serde(default)]
+    pub jobs: std::collections::HashSet<Uuid>,
+    #[serde(default)]
+    pub subscriptions: HashMap<String, Uuid>,
+    #[serde(default)]
+    pub registered_revision: u64,
+    pub id: Uuid,
+    pub node_id: String,
+    pub token: Token,
+    pub latches: HashMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BoundaryTask {
+    User(Uuid),
+    Service(Uuid),
+    Message(Uuid),
 }

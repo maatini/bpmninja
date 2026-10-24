@@ -19,6 +19,7 @@ use crate::runtime::{
 
 #[derive(Default, Clone)]
 pub struct InMemoryPersistence {
+    conditional_starts: Arc<RwLock<HashMap<uuid::Uuid, crate::ConditionalStartReceipt>>>,
     tokens: Arc<RwLock<HashMap<String, Vec<Token>>>>,
     instances: Arc<RwLock<HashMap<uuid::Uuid, ProcessInstance>>>,
     definitions: Arc<RwLock<HashMap<uuid::Uuid, ProcessDefinition>>>,
@@ -40,6 +41,55 @@ impl InMemoryPersistence {
 
 #[async_trait]
 impl WorkflowPersistence for InMemoryPersistence {
+    async fn reserve_conditional_start(
+        &self,
+        receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<crate::ConditionalStartReceipt> {
+        let mut receipts = self.conditional_starts.write().await;
+        let saved = receipts
+            .entry(receipt.request.request_id)
+            .or_insert_with(|| receipt.clone());
+        if saved.request != receipt.request {
+            return Err(crate::EngineError::ConditionalStartConflict(
+                receipt.request.request_id,
+            ));
+        }
+        Ok(saved.clone())
+    }
+    async fn get_conditional_start(
+        &self,
+        id: uuid::Uuid,
+    ) -> EngineResult<Option<crate::ConditionalStartReceipt>> {
+        Ok(self.conditional_starts.read().await.get(&id).cloned())
+    }
+    async fn list_conditional_starts(&self) -> EngineResult<Vec<crate::ConditionalStartReceipt>> {
+        Ok(self
+            .conditional_starts
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect())
+    }
+    async fn complete_conditional_start(
+        &self,
+        receipt: &crate::ConditionalStartReceipt,
+    ) -> EngineResult<()> {
+        let mut receipts = self.conditional_starts.write().await;
+        let stored = receipts
+            .get_mut(&receipt.request.request_id)
+            .ok_or_else(|| {
+                crate::EngineError::PersistenceError("Missing conditional-start receipt".into())
+            })?;
+        if stored.request != receipt.request || stored.result != receipt.result {
+            return Err(crate::EngineError::ConditionalStartConflict(
+                receipt.request.request_id,
+            ));
+        }
+        stored.dispatched = true;
+        Ok(())
+    }
+
     async fn save_token(&self, instance_id: uuid::Uuid, token: &Token) -> EngineResult<()> {
         let mut t = self.tokens.write().await;
         let key = format!("token-{instance_id}-{}", token.id);
@@ -71,6 +121,10 @@ impl WorkflowPersistence for InMemoryPersistence {
         let mut i = self.instances.write().await;
         i.insert(instance.id, instance.clone());
         Ok(())
+    }
+
+    async fn get_active_instance(&self, id: uuid::Uuid) -> EngineResult<Option<ProcessInstance>> {
+        Ok(self.instances.read().await.get(&id).cloned())
     }
 
     async fn list_instances(&self) -> EngineResult<Vec<ProcessInstance>> {
@@ -295,9 +349,10 @@ impl WorkflowPersistence for InMemoryPersistence {
 
     async fn append_history_entry(&self, entry: &HistoryEntry) -> EngineResult<()> {
         let mut h = self.history.write().await;
-        h.entry(entry.instance_id)
-            .or_insert_with(Vec::new)
-            .push(entry.clone());
+        let entries = h.entry(entry.instance_id).or_insert_with(Vec::new);
+        if !entries.iter().any(|existing| existing.id == entry.id) {
+            entries.push(entry.clone());
+        }
         Ok(())
     }
 
@@ -523,6 +578,7 @@ mod tests {
         p.save_file("file2", &[0u8; 200]).await.unwrap();
 
         let inst = ProcessInstance {
+            variable_types: std::collections::HashMap::new(),
             id: uuid::Uuid::new_v4(),
             definition_key: uuid::Uuid::new_v4(),
             business_key: String::new(),
@@ -537,6 +593,7 @@ mod tests {
             multi_instance_state: HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            event_state: None,
             started_at: None,
             completed_at: None,
         };

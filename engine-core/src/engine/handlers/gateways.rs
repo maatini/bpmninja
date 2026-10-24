@@ -142,6 +142,11 @@ impl WorkflowEngine {
             let target_node = sf.target.clone();
             if let Some(target_element) = def_clone.get_node(&target_node) {
                 match target_element {
+                    BpmnElement::ConditionalCatchEvent { .. } => {
+                        actions.push(NextAction::WaitForConditional {
+                            node_id: target_node.clone(),
+                        })
+                    }
                     BpmnElement::TimerCatchEvent(timer_def) => {
                         let now = Utc::now();
                         let expires_at = timer_def.next_expiry(now).unwrap_or(now);
@@ -163,6 +168,18 @@ impl WorkflowEngine {
                             node_id: target_node.clone(),
                             message_name: message_name.clone(),
                             token_id: token.id,
+                            kind: crate::runtime::CatchKind::Message,
+                        };
+                        actions.push(NextAction::WaitForMessage(pending));
+                    }
+                    BpmnElement::SignalCatchEvent { signal_name } => {
+                        let pending = PendingMessageCatch {
+                            id: Uuid::new_v4(),
+                            instance_id,
+                            node_id: target_node.clone(),
+                            message_name: signal_name.clone(),
+                            token_id: token.id,
+                            kind: crate::runtime::CatchKind::Signal,
                         };
                         actions.push(NextAction::WaitForMessage(pending));
                     }
@@ -181,8 +198,64 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if inst.event_state.is_none() {
+            inst.event_state = Some(Default::default());
+        }
+        if token.event_context.is_none() {
+            token.event_context = Some(Box::new(crate::domain::token::EventContext {
+                generation: inst.event_state.as_ref().unwrap().generation,
+                activation: None,
+                started_node: None,
+                baseline: inst.variables.clone(),
+            }));
+        }
+        let group_id = Uuid::new_v4();
+        let jobs = actions
+            .iter()
+            .filter_map(|action| match action {
+                NextAction::WaitForTimer(job) => Some((job.id, job.node_id.clone())),
+                NextAction::WaitForMessage(job) => Some((job.id, job.node_id.clone())),
+                _ => None,
+            })
+            .collect();
+        inst.event_state.as_mut().unwrap().gateway_waits.insert(
+            token.id,
+            crate::runtime::EventWaitGroup {
+                timers: actions
+                    .iter()
+                    .filter_map(|action| {
+                        if let NextAction::WaitForTimer(job) = action {
+                            Some(job.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                messages: actions
+                    .iter()
+                    .filter_map(|action| {
+                        if let NextAction::WaitForMessage(job) = action {
+                            Some(job.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                id: group_id,
+                gateway: current_id.into(),
+                jobs,
+                winner: None,
+                cleaned: false,
+            },
+        );
+        for (order, action) in actions.iter().enumerate() {
+            if let NextAction::WaitForConditional { node_id } = action {
+                Self::register_conditional_wait(&mut inst, token, node_id, Some(group_id), order);
+            }
+        }
         inst.current_node = current_id.to_string();
         inst.tokens.insert(token.id, token.clone());
+        Self::evaluate_conditionals(&mut inst, def_clone)?;
         inst.push_audit_log(format!(
             "⭮ Event-based gateway '{current_id}' waiting for {} alternative events",
             actions.len()

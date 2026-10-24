@@ -1,5 +1,7 @@
 use crate::parser::parse_bpmn_xml;
-use engine_core::model::{BpmnElement, ListenerEvent};
+use engine_core::model::{
+    BpmnElement, ListenerEvent, LoopCharacteristics, MultiInstanceDef, StandardLoopDef,
+};
 
 #[test]
 fn parse_simple_bpmn() {
@@ -578,7 +580,7 @@ fn parse_event_based_gateway() {
 }
 
 #[test]
-fn parse_event_subprocess_accepted() {
+fn parse_interrupting_error_event_subprocess() {
     let xml = r#"
         <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <error id="err1" errorCode="VALIDATION_FAILED" />
@@ -597,13 +599,10 @@ fn parse_event_subprocess_accepted() {
         </definitions>
     "#;
 
-    // Event sub-processes (triggeredByEvent="true") must NOT cause a parse error
-    let result = parse_bpmn_xml(xml);
-    assert!(
-        result.is_ok(),
-        "Event sub-process should be accepted: {:?}",
-        result.err()
-    );
+    let definition = parse_bpmn_xml(xml).unwrap();
+    assert_eq!(definition.event_subprocesses.len(), 1);
+    assert_eq!(definition.start_event().unwrap().0, "s1");
+    assert!(definition.event_subprocesses[0].is_interrupting);
 }
 
 #[test]
@@ -1227,7 +1226,7 @@ fn parse_manual_task_as_user_task() {
 }
 
 #[test]
-fn reject_multi_instance_loop_characteristics() {
+fn parse_multi_instance_loop_characteristics() {
     let xml = r#"
         <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <process id="proc1" isExecutable="true">
@@ -1243,11 +1242,18 @@ fn reject_multi_instance_loop_characteristics() {
             </process>
         </definitions>
     "#;
-    let err = parse_bpmn_xml(xml).unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("Multi-instance is not supported") && msg.contains("ut1"),
-        "unexpected error: {msg}"
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert_eq!(
+        def.loops.get("ut1"),
+        Some(&LoopCharacteristics::MultiInstance(MultiInstanceDef {
+            is_sequential: false,
+            loop_cardinality: Some("3".into()),
+            collection: None,
+            element_variable: None,
+            completion_condition: None,
+            output_collection: None,
+            output_element: None,
+        }))
     );
 }
 
@@ -1410,4 +1416,648 @@ fn flatten_subprocess_keeps_send_inclusive_event_and_catch() {
         def.nodes.get("sub_wait").unwrap(),
         BpmnElement::MessageCatchEvent { .. }
     ));
+}
+
+// --- X0: unsupported elements are rejected, visual elements accepted ---------
+
+fn process_xml(body: &str) -> String {
+    format!(
+        r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+             <signal id="sig" name="go" />
+             <message id="msg" name="m" />
+             <process id="p" isExecutable="true">{body}</process>
+           </definitions>"#
+    )
+}
+
+fn rejection(body: &str) -> String {
+    parse_bpmn_xml(&process_xml(body))
+        .expect_err("must be rejected")
+        .to_string()
+}
+
+#[test]
+fn x2c_rejects_conditional_start_without_inline_condition() {
+    let err = rejection(
+        r#"<startEvent id="s"><conditionalEventDefinition/></startEvent>
+           <endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("conditional start requires one inline condition"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x0_rejects_message_end_event_instead_of_plain_end() {
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"><messageEventDefinition messageRef="msg"/></endEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("messageEventDefinition on endEvent 'e'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x0_rejects_multiple_event_definitions() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateCatchEvent id="c">
+             <messageEventDefinition messageRef="msg"/>
+             <timerEventDefinition><timeDuration>PT1M</timeDuration></timerEventDefinition>
+           </intermediateCatchEvent>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="c"/><sequenceFlow id="f2" sourceRef="c" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("multiple event definitions on intermediateCatchEvent 'c'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x0_rejects_transaction_and_sub_process_loops() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp"><standardLoopCharacteristics/>
+             <startEvent id="ss"/><endEvent id="se"/><sequenceFlow id="sf" sourceRef="ss" targetRef="se"/>
+           </subProcess>
+           <transaction id="tx"><startEvent id="ts"/><endEvent id="te"/>
+             <sequenceFlow id="tf" sourceRef="ts" targetRef="te"/></transaction>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="tx"/>
+           <sequenceFlow id="f3" sourceRef="tx" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("standardLoopCharacteristics on sub-process 'sp'"),
+        "{err}"
+    );
+    assert!(err.contains("transaction 'tx'"), "{err}");
+}
+
+#[test]
+fn x0_accepts_visual_and_data_elements() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+             <collaboration id="c"><participant id="pool" processRef="p"/></collaboration>
+             <process id="p" isExecutable="true">
+               <laneSet id="ls"><lane id="lane1"><flowNodeRef>s</flowNodeRef></lane></laneSet>
+               <startEvent id="s"/><endEvent id="e"/>
+               <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+               <dataObject id="do1"/><dataObjectReference id="dor1" dataObjectRef="do1"/>
+               <textAnnotation id="ta"><text>note</text></textAnnotation>
+               <association id="as" sourceRef="s" targetRef="ta"/>
+               <group id="g"/>
+             </process>
+           </definitions>"#
+        .to_string();
+    parse_bpmn_xml(&xml).expect("visual/data elements must be accepted");
+}
+
+#[test]
+fn x0_ignores_elements_of_processes_that_are_not_deployed() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+        <process id="p" isExecutable="true">
+          <startEvent id="s"/><endEvent id="e"/><sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+        </process>
+        <process id="other" isExecutable="false">
+          <startEvent id="os"><signalEventDefinition/></startEvent>
+        </process>
+      </definitions>"#;
+    parse_bpmn_xml(xml).expect("only the deployed process is checked");
+}
+
+#[test]
+fn embedded_subprocess_enters_at_start_successor_without_noop_task() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/><userTask id="inner"/><endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="inner"/>
+             <sequenceFlow id="b" sourceRef="inner" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("sp"),
+        Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "inner"
+    ));
+    assert!(
+        def.get_node("sp_s").is_none(),
+        "internal start must not be a node"
+    );
+}
+
+// --- X3: link events are resolved into direct sequence flows -----------------
+
+fn targets(def: &engine_core::model::ProcessDefinition, from: &str) -> Vec<String> {
+    def.next_nodes(from)
+        .iter()
+        .map(|f| f.target.clone())
+        .collect()
+}
+
+#[test]
+fn x3_link_throw_jumps_to_successor_of_matching_catch() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="a"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="next"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc"><linkEventDefinition name="next"/></intermediateCatchEvent>
+           <userTask id="b"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="a"/>
+           <sequenceFlow id="f2" sourceRef="a" targetRef="lt"/>
+           <sequenceFlow id="f3" sourceRef="lc" targetRef="b"/>
+           <sequenceFlow id="f4" sourceRef="b" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert_eq!(targets(&def, "a"), ["b"]);
+    assert!(def.get_node("lt").is_none() && def.get_node("lc").is_none());
+}
+
+#[test]
+fn x3_keeps_conditions_and_gateway_defaults_through_links() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><exclusiveGateway id="gw" default="f_def"/>
+           <intermediateThrowEvent id="lt1"><linkEventDefinition name="L1"/></intermediateThrowEvent>
+           <intermediateThrowEvent id="lt2"><linkEventDefinition name="L2"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc1"><linkEventDefinition name="L1"/></intermediateCatchEvent>
+           <intermediateCatchEvent id="lc2"><linkEventDefinition name="L2"/></intermediateCatchEvent>
+           <endEvent id="big"/><endEvent id="small"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="gw"/>
+           <sequenceFlow id="f_big" sourceRef="gw" targetRef="lt1"><conditionExpression>amount &gt; 100</conditionExpression></sequenceFlow>
+           <sequenceFlow id="f_def" sourceRef="gw" targetRef="lt2"/>
+           <sequenceFlow id="f2" sourceRef="lc1" targetRef="big"/>
+           <sequenceFlow id="f3" sourceRef="lc2" targetRef="small"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    let flows = def.next_nodes("gw");
+    assert!(
+        flows
+            .iter()
+            .any(|f| f.target == "big" && f.condition.as_deref() == Some("amount > 100"))
+    );
+    assert!(matches!(
+        def.get_node("gw"),
+        Some(BpmnElement::ExclusiveGateway { default: Some(d) }) if d == "small"
+    ));
+}
+
+#[test]
+fn x3_resolves_links_inside_sub_process_scope() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/>
+             <intermediateThrowEvent id="lt"><linkEventDefinition name="x"/></intermediateThrowEvent>
+             <intermediateCatchEvent id="lc"><linkEventDefinition name="x"/></intermediateCatchEvent>
+             <userTask id="inner"/><endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="lt"/>
+             <sequenceFlow id="b" sourceRef="lc" targetRef="inner"/>
+             <sequenceFlow id="c" sourceRef="inner" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("sp"),
+        Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "inner"
+    ));
+}
+
+#[test]
+fn x3_rejects_link_throw_without_matching_catch() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="nowhere"/></intermediateThrowEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("no link catch event named 'nowhere'"), "{err}");
+}
+
+#[test]
+fn x3_rejects_duplicate_catch_names_and_missing_names() {
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"/>
+           <intermediateCatchEvent id="c1"><linkEventDefinition name="dup"/></intermediateCatchEvent>
+           <intermediateCatchEvent id="c2"><linkEventDefinition name="dup"/></intermediateCatchEvent>
+           <sequenceFlow id="f0" sourceRef="s" targetRef="e"/>
+           <sequenceFlow id="f1" sourceRef="c1" targetRef="e"/>
+           <sequenceFlow id="f2" sourceRef="c2" targetRef="e"/>"#,
+    );
+    assert!(err.contains("share the name 'dup'"), "{err}");
+
+    let err = rejection(
+        r#"<startEvent id="s"/><endEvent id="e"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition/></intermediateThrowEvent>
+           <sequenceFlow id="f" sourceRef="s" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("link event 'lt' has no name"), "{err}");
+}
+
+#[test]
+fn x3_rejects_link_cycle_without_activities() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateThrowEvent id="lt"><linkEventDefinition name="loop"/></intermediateThrowEvent>
+           <intermediateCatchEvent id="lc"><linkEventDefinition name="loop"/></intermediateCatchEvent>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="lt"/>
+           <sequenceFlow id="f2" sourceRef="lc" targetRef="lt"/>"#,
+    );
+    assert!(err.contains("form a cycle"), "{err}");
+}
+
+// --- X13: instantiating receive task = message start -------------------------
+
+#[test]
+fn x13_instantiating_receive_task_becomes_message_start() {
+    let xml = process_xml(
+        r#"<receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+           <userTask id="work"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="rcv" targetRef="work"/>
+           <sequenceFlow id="f2" sourceRef="work" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.start_event(),
+        Some(("rcv", BpmnElement::MessageStartEvent { message_name })) if message_name == "m"
+    ));
+}
+
+#[test]
+fn x13_non_instantiating_receive_task_stays_message_catch() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><receiveTask id="rcv" messageRef="msg"/><endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="rcv"/>
+           <sequenceFlow id="f2" sourceRef="rcv" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("rcv"),
+        Some(BpmnElement::MessageCatchEvent { message_name }) if message_name == "m"
+    ));
+}
+
+#[test]
+fn x13_rejects_instantiating_receive_task_with_incoming_flow() {
+    let err = rejection(
+        r#"<startEvent id="s"/><receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="rcv"/>
+           <sequenceFlow id="f2" sourceRef="rcv" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("must not have incoming sequence flows"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x13_rejects_instantiating_receive_task_inside_sub_process() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/><receiveTask id="rcv" messageRef="msg" instantiate="true"/>
+             <endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="sp_e"/>
+             <sequenceFlow id="b" sourceRef="rcv" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("instantiating receiveTask 'rcv' inside a sub-process"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x13_still_rejects_instantiating_and_parallel_event_gateways() {
+    let err = rejection(
+        r#"<eventBasedGateway id="gw" instantiate="true"/>
+           <intermediateCatchEvent id="c"><messageEventDefinition messageRef="msg"/></intermediateCatchEvent>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="gw" targetRef="c"/><sequenceFlow id="f2" sourceRef="c" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("instantiating or parallel eventBasedGateway 'gw'"),
+        "{err}"
+    );
+}
+
+// --- X1: signal events ------------------------------------------------------
+
+#[test]
+fn x1_maps_all_signal_event_kinds_to_signal_names() {
+    let xml = process_xml(
+        r#"<startEvent id="s"><signalEventDefinition signalRef="sig"/></startEvent>
+           <userTask id="t"/>
+           <boundaryEvent id="b" attachedToRef="t" cancelActivity="false"><signalEventDefinition signalRef="sig"/></boundaryEvent>
+           <intermediateCatchEvent id="c"><signalEventDefinition signalRef="sig"/></intermediateCatchEvent>
+           <intermediateThrowEvent id="th"><signalEventDefinition signalRef="sig"/></intermediateThrowEvent>
+           <endEvent id="e"><signalEventDefinition signalRef="sig"/></endEvent>
+           <endEvent id="e2"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="t"/>
+           <sequenceFlow id="f2" sourceRef="t" targetRef="c"/>
+           <sequenceFlow id="f3" sourceRef="c" targetRef="th"/>
+           <sequenceFlow id="f4" sourceRef="th" targetRef="e"/>
+           <sequenceFlow id="f5" sourceRef="b" targetRef="e2"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    let go = || "go".to_string();
+    assert_eq!(
+        def.get_node("s"),
+        Some(&BpmnElement::SignalStartEvent { signal_name: go() })
+    );
+    assert_eq!(
+        def.get_node("b"),
+        Some(&BpmnElement::BoundarySignalEvent {
+            attached_to: "t".into(),
+            signal_name: go(),
+            cancel_activity: false,
+        })
+    );
+    assert_eq!(
+        def.get_node("c"),
+        Some(&BpmnElement::SignalCatchEvent { signal_name: go() })
+    );
+    assert_eq!(
+        def.get_node("th"),
+        Some(&BpmnElement::SignalThrowEvent { signal_name: go() })
+    );
+    assert_eq!(
+        def.get_node("e"),
+        Some(&BpmnElement::SignalEndEvent { signal_name: go() })
+    );
+}
+
+#[test]
+fn x1_signal_events_inside_sub_process() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/>
+             <intermediateCatchEvent id="c"><signalEventDefinition signalRef="sig"/></intermediateCatchEvent>
+             <endEvent id="sp_e"/>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="c"/>
+             <sequenceFlow id="b" sourceRef="c" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(matches!(
+        def.get_node("c"),
+        Some(BpmnElement::SignalCatchEvent { signal_name }) if signal_name == "go"
+    ));
+
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <subProcess id="sp">
+             <startEvent id="sp_s"/>
+             <endEvent id="sp_e"><signalEventDefinition signalRef="sig"/></endEvent>
+             <sequenceFlow id="a" sourceRef="sp_s" targetRef="sp_e"/>
+           </subProcess>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="sp"/><sequenceFlow id="f2" sourceRef="sp" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("signal endEvent 'sp_e' inside a sub-process"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x1_rejects_signal_definition_without_ref() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <intermediateThrowEvent id="th"><signalEventDefinition/></intermediateThrowEvent>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="th"/><sequenceFlow id="f2" sourceRef="th" targetRef="e"/>"#,
+    );
+    assert!(
+        err.contains("signalEventDefinition on 'th' has no signalRef"),
+        "{err}"
+    );
+}
+
+// --- X4 / X5: multi-instance and standard loop ------------------------------
+
+#[test]
+fn x4_parses_camunda_collection_completion_and_output() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <serviceTask id="charge" data-topic="charge">
+             <multiInstanceLoopCharacteristics isSequential="true" collection="${orders}" elementVariable="order" outputCollection="receipts" outputElement="receipt">
+               <completionCondition>${nrOfCompletedInstances &gt;= 2}</completionCondition>
+             </multiInstanceLoopCharacteristics>
+           </serviceTask>
+           <callActivity id="call" calledElement="child">
+             <multiInstanceLoopCharacteristics><loopCardinality>${n}</loopCardinality></multiInstanceLoopCharacteristics>
+           </callActivity>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="charge"/>
+           <sequenceFlow id="f2" sourceRef="charge" targetRef="call"/>
+           <sequenceFlow id="f3" sourceRef="call" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert_eq!(
+        def.loops.get("charge"),
+        Some(&LoopCharacteristics::MultiInstance(MultiInstanceDef {
+            is_sequential: true,
+            loop_cardinality: None,
+            collection: Some("${orders}".into()),
+            element_variable: Some("order".into()),
+            completion_condition: Some("${nrOfCompletedInstances >= 2}".into()),
+            output_collection: Some("receipts".into()),
+            output_element: Some("receipt".into()),
+        }))
+    );
+    assert!(matches!(
+        def.loops.get("call"),
+        Some(LoopCharacteristics::MultiInstance(mi)) if mi.loop_cardinality.as_deref() == Some("${n}")
+    ));
+}
+
+#[test]
+fn x5_parses_standard_loop() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/>
+           <scriptTask id="retry" scriptFormat="rhai">
+             <standardLoopCharacteristics testBefore="true" loopMaximum="5">
+               <loopCondition>attempts &lt; 3</loopCondition>
+             </standardLoopCharacteristics>
+             <script>attempts = attempts + 1;</script>
+           </scriptTask>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="retry"/><sequenceFlow id="f2" sourceRef="retry" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert_eq!(
+        def.loops.get("retry"),
+        Some(&LoopCharacteristics::Standard(StandardLoopDef {
+            loop_condition: Some("attempts < 3".into()),
+            test_before: true,
+            loop_maximum: Some(5),
+        }))
+    );
+}
+
+#[test]
+fn x4_rejects_multi_instance_without_cardinality_or_collection() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <userTask id="t"><multiInstanceLoopCharacteristics/></userTask>
+           <endEvent id="e"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="t"/><sequenceFlow id="f2" sourceRef="t" targetRef="e"/>"#,
+    );
+    assert!(err.contains("needs loopCardinality or collection"), "{err}");
+}
+
+#[test]
+fn x4_rejects_non_interrupting_boundary_on_loop_activity() {
+    let err = rejection(
+        r#"<startEvent id="s"/>
+           <userTask id="t"><multiInstanceLoopCharacteristics><loopCardinality>2</loopCardinality></multiInstanceLoopCharacteristics></userTask>
+           <boundaryEvent id="remind" attachedToRef="t" cancelActivity="false">
+             <timerEventDefinition><timeDuration>PT1H</timeDuration></timerEventDefinition>
+           </boundaryEvent>
+           <endEvent id="e"/><endEvent id="e2"/>
+           <sequenceFlow id="f1" sourceRef="s" targetRef="t"/><sequenceFlow id="f2" sourceRef="t" targetRef="e"/>
+           <sequenceFlow id="f3" sourceRef="remind" targetRef="e2"/>"#,
+    );
+    assert!(
+        err.contains("Non-interrupting boundary event 'remind' on loop activity 't'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn x2a_intermediate_conditional_catches_validate_and_preserve_gateway_ownership() {
+    let xml = r#"<definitions><process id="p" isExecutable="true"><startEvent id="s"/><intermediateCatchEvent id="wait"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></intermediateCatchEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="wait"/><sequenceFlow id="b" sourceRef="wait" targetRef="e"/></process></definitions>"#;
+    let foreign = xml.replace("</definitions>", "<process id=\"ignored\"><intermediateCatchEvent id=\"foreign_wait\"><conditionalEventDefinition><condition/></conditionalEventDefinition></intermediateCatchEvent></process></definitions>");
+    assert!(
+        parse_bpmn_xml(&foreign).is_ok(),
+        "Conditions in an undeployed pool must not be validated"
+    );
+    let definition = parse_bpmn_xml(xml).unwrap();
+    assert!(
+        matches!(&definition.nodes["wait"], engine_core::domain::BpmnElement::ConditionalCatchEvent { condition } if condition == "amount > 100")
+    );
+    for replacement in [
+        "<condition>flag &amp;&amp; ready</condition>",
+        "<condition language=\"feel\">flag</condition>",
+        "<condition camunda:resource=\"test\">flag</condition>",
+        "<condition/>",
+    ] {
+        assert!(
+            parse_bpmn_xml(&xml.replace("<condition>amount &gt; 100</condition>", replacement))
+                .is_err()
+        );
+    }
+    assert!(
+        parse_bpmn_xml(&xml.replace(
+            "<conditionalEventDefinition>",
+            "<conditionalEventDefinition camunda:variableName=\"flag\">"
+        ))
+        .is_err()
+    );
+    let nested = xml.replace("<intermediateCatchEvent", "<subProcess id=\"embedded\"><startEvent id=\"inner\"/><sequenceFlow id=\"in\" sourceRef=\"inner\" targetRef=\"wait\"/><intermediateCatchEvent").replace("</intermediateCatchEvent>", "</intermediateCatchEvent><endEvent id=\"out\"/><sequenceFlow id=\"outflow\" sourceRef=\"wait\" targetRef=\"out\"/></subProcess>").replace("targetRef=\"wait\"/><sequenceFlow id=\"b\" sourceRef=\"wait\"", "targetRef=\"embedded\"/><sequenceFlow id=\"b\" sourceRef=\"embedded\"");
+    assert!(parse_bpmn_xml(&nested).is_ok());
+}
+
+#[test]
+fn x2b_boundary_conditions_validate_attachments_and_expressions() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="t"/><boundaryEvent id="b" attachedToRef="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></boundaryEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="c" sourceRef="t" targetRef="e"/><sequenceFlow id="d" sourceRef="b" targetRef="e"/>"#,
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+    assert!(
+        matches!(&def.nodes["b"], engine_core::domain::BpmnElement::BoundaryConditionalEvent { cancel_activity: true, condition, .. } if condition == "flag")
+    );
+    assert!(matches!(
+        &parse_bpmn_xml(&xml.replace(
+            "attachedToRef=\"t\"",
+            "attachedToRef=\"t\" cancelActivity=\"false\""
+        ))
+        .unwrap()
+        .nodes["b"],
+        engine_core::domain::BpmnElement::BoundaryConditionalEvent {
+            cancel_activity: false,
+            ..
+        }
+    ));
+    for condition in [
+        "<condition/>",
+        "<condition language=\"feel\">flag</condition>",
+        "<condition>flag &amp;&amp; other</condition>",
+    ] {
+        assert!(parse_bpmn_xml(&xml.replace("<condition>flag</condition>", condition)).is_err());
+    }
+    assert!(parse_bpmn_xml(&xml.replace("attachedToRef=\"t\"", "attachedToRef=\"s\"")).is_err());
+    assert!(parse_bpmn_xml(&xml.replace("<userTask id=\"t\"/>", "<userTask id=\"t\"><standardLoopCharacteristics><loopCondition>flag</loopCondition></standardLoopCharacteristics></userTask>")).is_err());
+}
+
+#[test]
+fn x2b_boundary_task_types_and_scope_validation() {
+    let xml = process_xml(
+        r#"<startEvent id="s"/><userTask id="t"/><boundaryEvent id="b" attachedToRef="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></boundaryEvent><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="c" sourceRef="t" targetRef="e"/><sequenceFlow id="d" sourceRef="b" targetRef="e"/>"#,
+    );
+    for task in [
+        "<manualTask id=\"t\"/>",
+        "<serviceTask id=\"t\" data-topic=\"work\"/>",
+        "<businessRuleTask id=\"t\" data-topic=\"work\"/>",
+        "<scriptTask id=\"t\" scriptFormat=\"rhai\"><script>flag = false;</script></scriptTask>",
+        "<receiveTask id=\"t\" messageRef=\"m\"/>",
+    ] {
+        let input = xml
+            .replace("<userTask id=\"t\"/>", task)
+            .replace("<process", "<message id=\"m\" name=\"received\"/><process");
+        assert!(parse_bpmn_xml(&input).is_ok(), "{input}");
+    }
+    for task in [
+        "<callActivity id=\"t\" calledElement=\"child\"/>",
+        "<intermediateCatchEvent id=\"t\"><messageEventDefinition messageRef=\"m\"/></intermediateCatchEvent>",
+    ] {
+        assert!(parse_bpmn_xml(&xml.replace("<userTask id=\"t\"/>", task)).is_err());
+    }
+    let foreign = xml.replace("</definitions>", "<process id=\"ignored\"><boundaryEvent id=\"bad\" attachedToRef=\"missing\"><conditionalEventDefinition><condition/></conditionalEventDefinition></boundaryEvent></process></definitions>");
+    assert!(parse_bpmn_xml(&foreign).is_ok());
+}
+
+#[test]
+fn x2c_top_level_conditional_start_validation_and_pool_isolation() {
+    let xml = process_xml(
+        r#"<startEvent id="s"><conditionalEventDefinition><condition>amount &gt; 100</condition></conditionalEventDefinition></startEvent><userTask id="t"/><endEvent id="e"/><sequenceFlow id="a" sourceRef="s" targetRef="t"/><sequenceFlow id="b" sourceRef="t" targetRef="e"/>"#,
+    );
+    let definition = parse_bpmn_xml(&xml).unwrap();
+    assert!(
+        matches!(&definition.nodes["s"], BpmnElement::ConditionalStartEvent { condition } if condition == "amount > 100")
+    );
+    for replacement in [
+        "<condition/>",
+        "<condition>flag &amp;&amp; ready</condition>",
+        r#"<condition language="feel">flag</condition>"#,
+        r#"<condition camunda:resource="condition.rhai">flag</condition>"#,
+    ] {
+        assert!(
+            parse_bpmn_xml(&xml.replace("<condition>amount &gt; 100</condition>", replacement))
+                .is_err(),
+            "{replacement}"
+        );
+    }
+    for invalid in [
+        xml.replace("<conditionalEventDefinition>", r#"<conditionalEventDefinition camunda:variableName="flag">"#),
+        xml.replace("<conditionalEventDefinition>", r#"<conditionalEventDefinition camunda:variableEvents="update">"#),
+        xml.replace("<userTask", r#"<startEvent id="other"/><userTask"#),
+        xml.replace(r#"targetRef="t""#, r#"targetRef="s""#),
+        xml.replace("<conditionalEventDefinition>", "<messageEventDefinition/><conditionalEventDefinition>"),
+        xml.replace(r#"<endEvent id="e"/>"#, r#"<endEvent id="e"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></endEvent>"#),
+        xml.replace(r#"<userTask id="t"/>"#, r#"<intermediateThrowEvent id="t"><conditionalEventDefinition><condition>flag</condition></conditionalEventDefinition></intermediateThrowEvent>"#),
+    ] { assert!(parse_bpmn_xml(&invalid).is_err(), "{invalid}"); }
+    let foreign = xml.replace("</definitions>", r#"<process id="ignored"><startEvent id="bad"><conditionalEventDefinition><condition/></conditionalEventDefinition></startEvent></process></definitions>"#);
+    assert!(parse_bpmn_xml(&foreign).is_ok());
 }

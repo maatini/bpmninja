@@ -26,3 +26,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Opt-in evaluation profile; production release keeps thin LTO.
+[profile.release-fat]
+inherits = "release"
+lto = "fat"

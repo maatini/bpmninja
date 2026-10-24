@@ -1862,6 +1862,281 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await page.waitForTimeout(300);
   }
 
+  const X11_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:bpmninja="https://bpmninja.dev/schema/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" targetNamespace="test">
+<bpmn:process id="Process_Data" isExecutable="true"><bpmn:property id="Customer" name="customerId" bpmninja:default="7"/>
+<bpmn:startEvent id="start"/><bpmn:serviceTask id="work" camunda:topic="mapped"><bpmn:extensionElements><camunda:inputOutput><camunda:inputParameter name="id">\${customerId}</camunda:inputParameter><camunda:outputParameter name="receipt">\${result}</camunda:outputParameter></camunda:inputOutput></bpmn:extensionElements></bpmn:serviceTask>
+<bpmn:callActivity id="call" calledElement="child"/><bpmn:endEvent id="end"/>
+<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="work"/><bpmn:sequenceFlow id="f2" sourceRef="work" targetRef="call"/><bpmn:sequenceFlow id="f3" sourceRef="call" targetRef="end"/>
+<bpmn:dataObject id="Order" name="order"/><bpmn:dataObjectReference id="OrderRef" dataObjectRef="Order"/>
+</bpmn:process><bpmndi:BPMNDiagram id="Diagram_Data"><bpmndi:BPMNPlane id="Plane_Data" bpmnElement="Process_Data">
+<bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="100" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="work_di" bpmnElement="work"><dc:Bounds x="180" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="call_di" bpmnElement="call"><dc:Bounds x="330" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="480" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+<bpmndi:BPMNShape id="order_di" bpmnElement="OrderRef"><dc:Bounds x="200" y="210" width="36" height="50"/></bpmndi:BPMNShape>
+<bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="136" y="118"/><di:waypoint x="180" y="118"/></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="280" y="118"/><di:waypoint x="330" y="118"/></bpmndi:BPMNEdge>
+<bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="430" y="118"/><di:waypoint x="480" y="118"/></bpmndi:BPMNEdge>
+</bpmndi:BPMNPlane></bpmndi:BPMNDiagram></bpmn:definitions>`;
+
+  async function exportedXml(page: Page): Promise<string> {
+    return page.evaluate(async () => (await (window as any).__bpmnModeler__.saveXML({ format: true })).xml);
+  }
+
+  function eventSubprocessXml(event: string) {
+    return X11_XML.replace('</bpmn:process>', `<bpmn:subProcess id="handler" triggeredByEvent="true"><bpmn:startEvent id="hs" isInterrupting="false">${event}</bpmn:startEvent><bpmn:userTask id="hw"/><bpmn:endEvent id="he"/><bpmn:sequenceFlow id="hf1" sourceRef="hs" targetRef="hw"/><bpmn:sequenceFlow id="hf2" sourceRef="hw" targetRef="he"/></bpmn:subProcess></bpmn:process>`)
+      .replace('</bpmndi:BPMNPlane>', `<bpmndi:BPMNShape id="handler_di" bpmnElement="handler" isExpanded="true"><dc:Bounds x="100" y="300" width="480" height="180"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="hs_di" bpmnElement="hs"><dc:Bounds x="130" y="350" width="36" height="36"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="hw_di" bpmnElement="hw"><dc:Bounds x="220" y="330" width="100" height="80"/></bpmndi:BPMNShape><bpmndi:BPMNShape id="he_di" bpmnElement="he"><dc:Bounds x="420" y="350" width="36" height="36"/></bpmndi:BPMNShape><bpmndi:BPMNEdge id="hf1_di" bpmnElement="hf1"><di:waypoint x="166" y="368"/><di:waypoint x="220" y="368"/></bpmndi:BPMNEdge><bpmndi:BPMNEdge id="hf2_di" bpmnElement="hf2"><di:waypoint x="320" y="368"/><di:waypoint x="420" y="368"/></bpmndi:BPMNEdge></bpmndi:BPMNPlane>`);
+  }
+
+  test('X9 creates message references with atomic undo and retains interruption on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:messageEventDefinition/>'), 'hs');
+    const reference = page.getByLabel('Event reference ID', { exact: true });
+    await reference.fill('AlertMessage');
+    await reference.blur();
+    await expect.poll(() => exportedXml(page)).toContain('messageRef="AlertMessage"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    expect(await exportedXml(page)).not.toContain('id="AlertMessage"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    await page.getByLabel('Event name', { exact: true }).fill('alert & review');
+    await page.getByLabel('Event name', { exact: true }).blur();
+    await page.getByLabel('Interrupting', { exact: true }).check();
+    await expect.poll(() => exportedXml(page)).toMatch(/name="alert &(?:amp;|#38;) review"/);
+    const xml = await exportedXml(page);
+    expect(xml).not.toContain('isInterrupting="false"');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('hs'));
+    }, xml);
+    await expect(reference).toHaveValue('AlertMessage');
+    await expect(page.getByLabel('Event name', { exact: true })).toHaveValue('alert & review');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toBeChecked();
+    await reference.fill('work');
+    await reference.blur();
+    await expect(page.getByText('This ID belongs to a different BPMN element.', { exact: true })).toBeVisible();
+    expect(await exportedXml(page)).toContain('messageRef="AlertMessage"');
+  });
+
+  test('X2b edits a conditional boundary condition and interrupting flag', async ({ page }) => {
+    const xml = X11_XML.replace('</bpmn:process>', '<bpmn:boundaryEvent id="boundary" attachedToRef="work" cancelActivity="false"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:boundaryEvent></bpmn:process>')
+      .replace('</bpmndi:BPMNPlane>', '<bpmndi:BPMNShape id="boundary_di" bpmnElement="boundary"><dc:Bounds x="300" y="142" width="36" height="36" /></bpmndi:BPMNShape></bpmndi:BPMNPlane>');
+    await loadXmlAndClickElement(page, xml, 'boundary');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    const interrupting = page.getByLabel('Interrupting', { exact: true });
+    await expect(interrupting).not.toBeChecked();
+    await interrupting.check();
+    const exported = await exportedXml(page);
+    expect(exported).not.toContain('cancelActivity="false"');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('boundary'));
+    }, exported);
+    await expect(condition).toHaveValue('amount > 100');
+    await expect(interrupting).toBeChecked();
+  });
+
+  test('X2c edits a top-level conditional start with undo and XML roundtrip', async ({ page }) => {
+    const xml = X11_XML.replace(/<bpmn:startEvent id="start"[^>]*\/>/, '<bpmn:startEvent id="start"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:startEvent>');
+    await loadXmlAndClickElement(page, xml, 'start');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toHaveCount(0);
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    const exported = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('start'));
+    }, exported);
+    await expect(condition).toHaveValue('amount > 100');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toHaveCount(0);
+  });
+
+  test('X2a edits an intermediate conditional catch with undo and XML roundtrip', async ({ page }) => {
+    const xml = X11_XML.replace(/<bpmn:serviceTask id="work"[\s\S]*?<\/bpmn:serviceTask>/, '<bpmn:intermediateCatchEvent id="work"><bpmn:conditionalEventDefinition><bpmn:condition>flag</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:intermediateCatchEvent>');
+    await loadXmlAndClickElement(page, xml, 'work');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    const exported = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('work'));
+    }, exported);
+    await expect(condition).toHaveValue('amount > 100');
+  });
+
+  test('X9b edits a conditional start with undo and XML roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:conditionalEventDefinition><bpmn:condition xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">flag</bpmn:condition></bpmn:conditionalEventDefinition>'), 'hs');
+    const condition = page.getByLabel('Condition', { exact: true });
+    await expect(condition).toHaveValue('flag');
+    await condition.fill('amount > 100'); await condition.blur();
+    await expect.poll(() => exportedXml(page)).toContain('amount');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').undo());
+    await expect(condition).toHaveValue('flag');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('commandStack').redo());
+    await expect(condition).toHaveValue('amount > 100');
+    await page.getByLabel('Interrupting', { exact: true }).check();
+    const xml = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('hs'));
+    }, xml);
+    await expect(condition).toHaveValue('amount > 100');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toBeChecked();
+  });
+
+  test('X9 edits timer type and expression without retaining an obsolete timer', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:timerEventDefinition><bpmn:timeDuration>PT1M</bpmn:timeDuration></bpmn:timerEventDefinition>'), 'hs');
+    await expect(page.getByLabel('Timer expression', { exact: true })).toHaveValue('PT1M');
+    await page.getByLabel('Timer type', { exact: true }).selectOption('timeCycle');
+    await page.getByLabel('Timer expression', { exact: true }).fill('R3/PT5M');
+    await page.getByLabel('Timer expression', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('R3/PT5M');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('bpmn:timeCycle');
+    expect(xml).not.toContain('bpmn:timeDuration');
+    expect(xml).toContain('isInterrupting="false"');
+  });
+
+  test('X9 edits error codes and keeps error starts interrupting', async ({ page }) => {
+    const xml = eventSubprocessXml('<bpmn:errorEventDefinition/>').replace('id="hs" isInterrupting="false"', 'id="hs"');
+    await loadXmlAndClickElement(page, xml, 'hs');
+    await expect(page.getByLabel('Interrupting', { exact: true })).toHaveCount(0);
+    await page.getByLabel('Event reference ID', { exact: true }).fill('HandlerError');
+    await page.getByLabel('Event reference ID', { exact: true }).blur();
+    await expect(page.getByLabel('Event code', { exact: true })).toBeEnabled();
+    await page.getByLabel('Event code', { exact: true }).fill('FAIL');
+    await page.getByLabel('Event code', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('errorCode="FAIL"');
+    expect(await exportedXml(page)).toContain('errorRef="HandlerError"');
+  });
+
+  test('X9 edits container start and end listeners and retains them on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, eventSubprocessXml('<bpmn:messageEventDefinition/>'), 'handler');
+    const start = page.getByLabel('Start Script (Rhai)', { exact: true });
+    const end = page.getByLabel('End Script (Rhai)', { exact: true });
+    await expect(start).toBeVisible();
+    await start.fill('starts += 1;'); await start.blur();
+    await end.fill('ends += 1;'); await end.blur();
+    await expect.poll(() => exportedXml(page)).toContain('ends += 1;');
+    const xml = await exportedXml(page);
+    const containerListeners = await page.evaluate(() => {
+      const modeler = (window as any).__bpmnModeler__;
+      return modeler.get('elementRegistry').get('handler').businessObject.extensionElements.values.map((listener: any) => [listener.event, listener.script.value]);
+    });
+    expect(containerListeners).toEqual([['start', 'starts += 1;'], ['end', 'ends += 1;']]);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('handler'));
+    }, xml);
+    await expect(start).toHaveValue('starts += 1;');
+    await expect(end).toHaveValue('ends += 1;');
+  });
+
+  for (const kind of ['signal', 'escalation']) {
+    test(`X9 edits ${kind} references and retains non-interrupting starts`, async ({ page }) => {
+      await loadXmlAndClickElement(page, eventSubprocessXml(`<bpmn:${kind}EventDefinition/>`), 'hs');
+      await page.getByLabel('Event reference ID', { exact: true }).fill('HandlerTrigger');
+      await page.getByLabel('Event reference ID', { exact: true }).blur();
+      const value = page.getByLabel(kind === 'signal' ? 'Event name' : 'Event code', { exact: true });
+      await expect(value).toBeEnabled();
+      await value.fill('ALERT');
+      await value.blur();
+      await expect.poll(() => exportedXml(page)).toContain(kind === 'signal' ? 'name="ALERT"' : 'escalationCode="ALERT"');
+      expect(await exportedXml(page)).toContain(`${kind}Ref="HandlerTrigger"`);
+      await expect(page.getByLabel('Interrupting', { exact: true })).not.toBeChecked();
+    });
+  }
+
+  test('X11 edits nested activity mappings and retains output mappings on roundtrip', async ({ page }) => {
+    await loadXmlAndClickElement(page, X11_XML, 'work');
+    const input = page.getByLabel('Activity inputs', { exact: true });
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(/customerId/);
+    await input.fill(JSON.stringify({ id: '${customerId}', options: [['a'], { label: 'a & b' }] }));
+    await input.blur();
+    await expect.poll(() => exportedXml(page)).toContain('name="options"');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('name="receipt"');
+    expect(xml).toContain('a &amp; b');
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('work'));
+    }, xml);
+    await expect(input).toHaveValue(/options/);
+    expect(JSON.parse(await input.inputValue()).options).toEqual([['a'], { label: 'a & b' }]);
+    await input.fill('{"id":"${customerId + 1}"}');
+    await input.blur();
+    await expect(page.getByText(/expression interpolation is unsupported/)).toBeVisible();
+    expect(await exportedXml(page)).toContain('name="options"');
+  });
+
+  test('X11 edits Call Activity transfers and typed process defaults', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
+    await loadXmlAndClickElement(page, X11_XML, 'call');
+    await page.getByLabel('Child inputs', { exact: true }).fill('{"childId":"${id}"}');
+    await page.getByLabel('Child inputs', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('target="childId"');
+    await page.getByLabel('Child outputs', { exact: true }).fill('{"receipt":"${answer}"}');
+    await page.getByLabel('Child outputs', { exact: true }).blur();
+    await expect.poll(() => exportedXml(page)).toContain('target="receipt"');
+    await page.evaluate(() => (window as any).__bpmnModeler__.get('selection').select([]));
+    const defaults = page.getByLabel('Process variable defaults', { exact: true });
+    await expect(defaults).toHaveValue(/customerId/);
+    await defaults.fill('{"customerId":9,"flags":{"enabled":true}}');
+    await defaults.blur();
+    await expect.poll(() => exportedXml(page)).toContain('bpmninja:default="9"');
+    const xml = await exportedXml(page);
+    expect(xml).toContain('name="flags"');
+    await page.evaluate(async (xml: string) => { await (window as any).__bpmnModeler__.importXML(xml); }, xml);
+    await expect(defaults).toHaveValue(/enabled/);
+    await defaults.fill('{}');
+    await defaults.blur();
+    await expect.poll(() => exportedXml(page)).not.toContain('bpmninja:default=');
+    expect(await exportedXml(page)).toContain('id="Customer"');
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('X11 edits data object defaults and preserves them on export', async ({ page }) => {
+    await loadXmlAndClickElement(page, X11_XML, 'OrderRef');
+    const field = page.getByLabel('Data object default (JSON)', { exact: true });
+    await field.fill('{"status":"new"}');
+    await field.blur();
+    await expect.poll(() => exportedXml(page)).toMatch(/<bpmn:dataObject[^>]*bpmninja:default=/);
+    const xml = await exportedXml(page);
+    await page.evaluate(async (xml: string) => {
+      const modeler = (window as any).__bpmnModeler__;
+      await modeler.importXML(xml);
+      modeler.get('selection').select(modeler.get('elementRegistry').get('OrderRef'));
+    }, xml);
+    await expect(field).toHaveValue('{"status":"new"}');
+    await field.fill('');
+    await field.blur();
+    await expect.poll(() => exportedXml(page)).not.toMatch(/<bpmn:dataObject[^>]*bpmninja:default=/);
+  });
+
   test('condition group visible for ExclusiveGateway outgoing flow', async ({ page }) => {
     // Camunda 7 Modeler Kompatibilität – condition shown for XOR gateway flows
     await loadXmlAndClickElement(page, FLOW_CONDITION_XML_XOR, 'Flow_Cond');

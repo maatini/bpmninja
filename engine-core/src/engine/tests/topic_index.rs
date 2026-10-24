@@ -175,3 +175,113 @@ async fn restore_service_task_updates_topic_index() {
 
     assert_eq!(topic_ids(&engine, "restore_topic"), vec![svc_id]);
 }
+
+// --- P4: long-poll wake-up ---------------------------------------------------
+
+/// Fallback far beyond the assertions: only a notification can explain a fast return.
+const NO_FALLBACK: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn deploy_single_task(engine: &WorkflowEngine, topic: &str) -> uuid::Uuid {
+    let def = ProcessDefinitionBuilder::new("long_poll")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "svc",
+            BpmnElement::ServiceTask {
+                topic: topic.into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+    engine.deploy_definition(def).await.0
+}
+
+fn spawn_long_poll(
+    engine: &Arc<WorkflowEngine>,
+    worker: &'static str,
+    topic: &'static str,
+) -> tokio::task::JoinHandle<Vec<PendingServiceTask>> {
+    let engine = engine.clone();
+    tokio::spawn(async move {
+        engine
+            .fetch_and_lock_service_tasks_long_poll(
+                worker,
+                1,
+                &[topic.to_string()],
+                30,
+                std::time::Duration::from_secs(5),
+                NO_FALLBACK,
+            )
+            .await
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn long_poll_wakes_when_task_is_created() {
+    let engine = Arc::new(WorkflowEngine::new());
+    let key = deploy_single_task(&engine, "wake_new").await;
+
+    let waiter = spawn_long_poll(&engine, "w1", "wake_new");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let created_at = std::time::Instant::now();
+    engine.start_instance(key).await.unwrap();
+    let tasks = waiter.await.unwrap();
+
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        created_at.elapsed() < std::time::Duration::from_secs(1),
+        "long poll was not woken by the new task"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn long_poll_wakes_when_failed_task_is_unlocked() {
+    let engine = Arc::new(WorkflowEngine::new());
+    let key = deploy_single_task(&engine, "wake_fail").await;
+    engine.start_instance(key).await.unwrap();
+
+    let locked = engine
+        .fetch_and_lock_service_tasks("w1", 1, &["wake_fail".to_string()], 30)
+        .await;
+    assert_eq!(locked.len(), 1);
+
+    let waiter = spawn_long_poll(&engine, "w2", "wake_fail");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let failed_at = std::time::Instant::now();
+    engine
+        .fail_service_task(locked[0].id, "w1", Some(2), Some("boom".into()), None)
+        .await
+        .unwrap();
+    let tasks = waiter.await.unwrap();
+
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].worker_id.as_deref(), Some("w2"));
+    assert!(
+        failed_at.elapsed() < std::time::Duration::from_secs(1),
+        "long poll was not woken by the unlock"
+    );
+}
+
+#[tokio::test]
+async fn long_poll_returns_empty_after_timeout() {
+    let engine = WorkflowEngine::new();
+    let started = std::time::Instant::now();
+    let tasks = engine
+        .fetch_and_lock_service_tasks_long_poll(
+            "w1",
+            1,
+            &["nothing_here".to_string()],
+            30,
+            std::time::Duration::from_millis(200),
+            NO_FALLBACK,
+        )
+        .await;
+    assert!(tasks.is_empty());
+    assert!(started.elapsed() >= std::time::Duration::from_millis(200));
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+}

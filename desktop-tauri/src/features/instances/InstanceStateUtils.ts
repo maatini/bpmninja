@@ -6,6 +6,7 @@ export function stateLabel(state: ProcessInstance['state']): string {
   if ((state as any) === 'Errored') return 'Errored';
   if ((state as any) === 'Cancelled') return 'Cancelled';
   if (typeof state === 'object') {
+    if ('WaitingOnConditional' in state) return 'Waiting for condition';
     if ('Suspended' in state) return 'Suspended';
     if ('WaitingOnUserTask' in state) return 'Wait: User Task';
     if ('WaitingOnServiceTask' in state) return 'Wait: Service Task';

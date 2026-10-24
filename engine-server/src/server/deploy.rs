@@ -1,3 +1,4 @@
+use crate::server::model_check::{ModelCheckMode, ModelCheckStatus};
 use crate::server::state::{AppError, AppState, MAX_XML_BYTES, parse_uuid};
 use axum::{
     Json,
@@ -21,6 +22,9 @@ pub(crate) struct DeployRequest {
 pub(crate) struct DeployResponse {
     pub definition_key: String,
     pub version: i32,
+    /// Deploy-time model checking result (absent when `MODEL_CHECK=off`).
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub model_check: Option<crate::server::model_check::ModelCheckReport>,
 }
 
 pub(crate) async fn deploy_definition(
@@ -38,6 +42,19 @@ pub(crate) async fn deploy_definition(
     let engine = &state.engine;
     let def = bpmn_parser::parse_bpmn_xml(&payload.xml)
         .map_err(|e| AppError::BadRequest(format!("Invalid BPMN XML: {e:?}")))?;
+
+    let model_check = state.model_checker.check(&payload.xml).await;
+    if let Some(report) = &model_check
+        && report.status == ModelCheckStatus::Violations
+    {
+        if state.model_checker.mode == ModelCheckMode::Enforce {
+            return Err(AppError::BadRequest(format!(
+                "Model check failed: {}",
+                report.summary()
+            )));
+        }
+        tracing::warn!("Model check for '{}': {}", payload.name, report.summary());
+    }
     let (key, version) = engine.deploy_definition(def).await;
     let key_str = key.to_string();
 
@@ -63,6 +80,7 @@ pub(crate) async fn deploy_definition(
     Ok(Json(DeployResponse {
         definition_key: key_str,
         version,
+        model_check,
     }))
 }
 

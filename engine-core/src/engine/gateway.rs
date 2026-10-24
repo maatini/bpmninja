@@ -1,4 +1,3 @@
-use crate::condition::evaluate_condition;
 use crate::domain::{EngineError, EngineResult};
 use crate::domain::{ProcessDefinition, Token};
 use crate::runtime::NextAction;
@@ -28,7 +27,11 @@ pub(crate) fn execute_parallel_gateway(
 
     let forked: Vec<Token> = outgoing
         .iter()
-        .map(|sf| Token::with_variables(&sf.target, token.variables.clone()))
+        .map(|sf| {
+            let mut child = Token::with_variables(&sf.target, token.variables.clone());
+            child.inherit_event_context(token);
+            child
+        })
         .collect();
 
     Ok(NextAction::ContinueMultiple(forked))
@@ -46,7 +49,7 @@ pub(crate) fn execute_exclusive_gateway(
     // Conditional flows in order; first true wins.
     for sf in outgoing {
         if let Some(ref cond) = sf.condition
-            && evaluate_condition(cond, &token.variables)
+            && def.evaluate_condition(cond, &token.variables)
         {
             chosen_target = Some(sf.target.clone());
             break;
@@ -106,7 +109,7 @@ pub(crate) fn execute_inclusive_gateway(
     // Evaluate all conditions; every match is taken
     for sf in outgoing {
         if let Some(ref cond) = sf.condition {
-            if evaluate_condition(cond, &token.variables) {
+            if def.evaluate_condition(cond, &token.variables) {
                 matched_targets.push(sf.target.clone());
             }
         } else {
@@ -127,7 +130,11 @@ pub(crate) fn execute_inclusive_gateway(
     // Fork tokens — each gets a copy of the current variables
     let forked: Vec<Token> = matched_targets
         .into_iter()
-        .map(|target| Token::with_variables(&target, token.variables.clone()))
+        .map(|target| {
+            let mut child = Token::with_variables(&target, token.variables.clone());
+            child.inherit_event_context(token);
+            child
+        })
         .collect();
 
     Ok(NextAction::ContinueMultiple(forked))
@@ -159,7 +166,7 @@ pub(crate) fn execute_complex_gateway(
     // Evaluate all conditions; every match is taken (like Inclusive)
     for sf in outgoing {
         if let Some(ref cond) = sf.condition {
-            if evaluate_condition(cond, &token.variables) {
+            if def.evaluate_condition(cond, &token.variables) {
                 matched_targets.push(sf.target.clone());
             }
         } else {
@@ -189,7 +196,11 @@ pub(crate) fn execute_complex_gateway(
     // Fork tokens
     let forked: Vec<Token> = matched_targets
         .into_iter()
-        .map(|target| Token::with_variables(&target, token.variables.clone()))
+        .map(|target| {
+            let mut child = Token::with_variables(&target, token.variables.clone());
+            child.inherit_event_context(token);
+            child
+        })
         .collect();
 
     Ok(NextAction::ContinueMultiple(forked))

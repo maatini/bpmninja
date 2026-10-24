@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Activity, CheckCircle, Clock, Trash, FileCode2, Network, ScrollText, Layers, Pause } from 'lucide-react';
 import { type ProcessInstance, type DefinitionInfo } from '../../shared/types/engine';
-import { listInstances, listDefinitions, deleteInstance } from '../../shared/lib/tauri';
+import { listInstances, listDefinitions, deleteInstance, getInstanceDetails } from '../../shared/lib/tauri';
+import { applyInstanceEvent, reconcileInstanceSnapshot, type EngineEventPayload } from '../../shared/lib/engine-events';
 import { usePolling } from '../../shared/hooks/use-polling';
 import { useEngineEvents } from '../../shared/hooks/use-engine-events';
 import { PageHeader } from '../../shared/components/PageHeader';
@@ -25,16 +26,22 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ProcessInstance | null>(null);
+  const eventVersions = useRef(new Map<string, number>());
+  const refreshGeneration = useRef(0);
+  const eventsDuringRefresh = useRef(new Map<string, EngineEventPayload>());
   
   const [instanceToDelete, setInstanceToDelete] = useState<string | null>(null);
 
   const fetchData = async () => {
+    const generation = ++refreshGeneration.current;
+    eventsDuringRefresh.current.clear();
     setLoading(true);
     setError(null);
     try {
       const [instList, defList] = await Promise.all([listInstances(), listDefinitions()]);
+      if (generation !== refreshGeneration.current) return;
       instList.sort((a: ProcessInstance, b: ProcessInstance) => a.id.localeCompare(b.id));
-      setInstances(instList);
+      setInstances(current => reconcileInstanceSnapshot(instList, current, eventsDuringRefresh.current.values()));
       setDefinitions(defList);
     } catch (e: any) {
       setError(String(e));
@@ -44,7 +51,29 @@ export function InstancesPage({ selectedInstanceId, onClearSelection }: { select
   };
 
   usePolling(fetchData, 30000, !selected);
-  useEngineEvents(fetchData, ['instance_changed', 'definition_changed'], !selected);
+  const onEngineEvent = async (event: EngineEventPayload) => {
+    if (event.type !== 'instance_changed' || !event.instance_id) {
+      await fetchData();
+      return;
+    }
+    const id = event.instance_id;
+    eventsDuringRefresh.current.set(id, event);
+    const version = (eventVersions.current.get(id) ?? 0) + 1;
+    eventVersions.current.set(id, version);
+    const updated = applyInstanceEvent(instances, event);
+    if (updated) {
+      setInstances(current => applyInstanceEvent(current, event) ?? current);
+      return;
+    }
+    const generation = refreshGeneration.current;
+    try {
+      const details = await getInstanceDetails(id);
+      if (generation !== refreshGeneration.current || eventVersions.current.get(id) !== version) return;
+      setInstances(current => [...current.filter(instance => instance.id !== id), details]
+        .sort((a, b) => a.id.localeCompare(b.id)));
+    } catch { /* Löschen/Resync kann einen gezielten Request überholen; Polling bleibt Fallback. */ }
+  };
+  useEngineEvents(onEngineEvent, ['instance_changed', 'definition_changed'], !selected, { debounceMs: 0 });
 
   // Initial selection if driven from outside (e.g. Incidents list) — must be in useEffect, not render body
   useEffect(() => {

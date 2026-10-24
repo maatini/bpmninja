@@ -5,6 +5,15 @@ use crate::engine::WorkflowEngine;
 use crate::scripting;
 
 impl WorkflowEngine {
+    pub(crate) fn scope_execution_complete(instance: &crate::runtime::ProcessInstance) -> bool {
+        instance
+            .event_state
+            .as_ref()
+            .is_none_or(|state| state.main_completed && state.activations.is_empty())
+            && instance.outstanding_calls.is_empty()
+            && instance.tokens.is_empty()
+            && instance.active_tokens.iter().all(|token| token.completed)
+    }
     pub(crate) async fn complete_branch_token(
         &self,
         instance_id: Uuid,
@@ -32,15 +41,9 @@ impl WorkflowEngine {
             .get(&instance_id)
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
-        let inst = inst_arc.read().await;
-        if !inst.tokens.is_empty() {
-            return Ok(false);
-        }
-        if inst.active_tokens.is_empty() {
-            // Linear flow
-            return Ok(true);
-        }
-        Ok(inst.active_tokens.iter().all(|t| t.completed))
+        let mut inst = inst_arc.write().await;
+        self.refresh_event_completion(&mut inst).await?;
+        Ok(Self::scope_execution_complete(&inst))
     }
 
     /// Runs End scripts, commits variables to instance state.
@@ -57,13 +60,41 @@ impl WorkflowEngine {
             .await
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
+        if !crate::engine::event_subprocess::token_valid(&inst, token) {
+            return Err(EngineError::AlreadyCompleted);
+        }
+        if token.boundary_activation.is_some() {
+            let mut candidate = token.clone();
+            let mut variables = inst.variables.clone();
+            let mut audits = Vec::new();
+            scripting::run_end_scripts(
+                &self.scripts,
+                instance_id,
+                &mut candidate,
+                def,
+                node_id,
+                &mut audits,
+                &mut variables,
+            )
+            .await?;
+            let next = super::resolve_next_target(def, node_id, &candidate.variables)?;
+            Self::close_conditional_boundaries(&mut inst, &mut candidate);
+            inst.variables = variables;
+            inst.audit_log.extend(audits);
+            let mut continuation = candidate.clone();
+            continuation.current_node = next;
+            inst.tokens.insert(continuation.id, continuation);
+            *token = candidate;
+            Self::evaluate_conditionals(&mut inst, def)?;
+            return Ok(());
+        }
         let crate::ProcessInstance {
             audit_log,
             variables,
             ..
         } = &mut *inst;
         scripting::run_end_scripts(
-            &self.script_config,
+            &self.scripts,
             instance_id,
             token,
             def,
@@ -71,6 +102,9 @@ impl WorkflowEngine {
             audit_log,
             variables,
         )
-        .await
+        .await?;
+        Self::close_conditional_boundaries(&mut inst, token);
+        Self::evaluate_conditionals(&mut inst, def)?;
+        Ok(())
     }
 }

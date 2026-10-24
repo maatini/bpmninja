@@ -11,9 +11,25 @@ pub(crate) struct BpmnMultiInstanceLoopCharacteristics {
     pub collection: Option<String>,
     #[serde(rename = "@elementVariable", default)]
     pub element_variable: Option<String>,
+    #[serde(rename = "completionCondition", default)]
+    pub completion_condition: Option<BpmnLoopCardinality>,
+    /// Extension attributes (`camunda:`/`zeebe:`-style prefix is stripped).
+    #[serde(rename = "@outputCollection", default)]
+    pub output_collection: Option<String>,
+    #[serde(rename = "@outputElement", default)]
+    pub output_element: Option<String>,
 }
 
-#[allow(dead_code)] // deserialized with MI XML; fields unused after MI reject
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct BpmnStandardLoopCharacteristics {
+    #[serde(rename = "@testBefore", default)]
+    pub test_before: Option<bool>,
+    #[serde(rename = "@loopMaximum", default)]
+    pub loop_maximum: Option<u32>,
+    #[serde(rename = "loopCondition", default)]
+    pub loop_condition: Option<BpmnLoopCardinality>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct BpmnLoopCardinality {
     #[serde(rename = "$value", default)]
@@ -78,6 +94,23 @@ pub(crate) struct BpmnDefinitions {
 
     #[serde(rename = "escalation", default)]
     pub escalations: Vec<BpmnEscalationDef>,
+
+    #[serde(rename = "signal", default)]
+    pub signals: Vec<BpmnSignalDef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalDef {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name", default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalEventDefinition {
+    #[serde(rename = "@signalRef", default)]
+    pub signal_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,6 +234,8 @@ pub(crate) struct BpmnProcess {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnStartEvent {
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "extensionElements")]
@@ -209,6 +244,8 @@ pub(crate) struct BpmnStartEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,6 +299,8 @@ pub(crate) struct BpmnEndEvent {
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
     #[serde(rename = "terminateEventDefinition")]
     pub terminate_event_definition: Option<IgnoredElement>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
 }
 
 #[allow(dead_code)]
@@ -281,6 +320,8 @@ pub(crate) struct BpmnScriptTask {
     pub script: Option<BpmnScriptContent>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,6 +344,8 @@ pub(crate) struct BpmnSendTask {
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,10 +359,15 @@ pub(crate) struct BpmnReceiveTask {
     pub name: Option<String>,
     #[serde(rename = "@messageRef", default)]
     pub message_ref: Option<String>,
+    /// X13: an instantiating receive task starts the process (message start).
+    #[serde(rename = "@instantiate", default)]
+    pub instantiate: Option<bool>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -334,6 +382,16 @@ pub(crate) struct BpmnIntermediateThrowEvent {
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnLinkEventDefinition {
+    #[serde(rename = "@name", default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -351,6 +409,8 @@ pub(crate) struct BpmnServiceTask {
     pub camunda_topic: Option<String>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -366,6 +426,8 @@ pub(crate) struct BpmnUserTask {
     pub camunda_assignee: Option<String>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,6 +459,8 @@ pub(crate) struct BpmnGenericTask {
     pub name: Option<String>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
     pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,6 +471,10 @@ pub(crate) struct BpmnCallActivity {
     pub called_element: Option<String>,
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,
+    #[serde(rename = "multiInstanceLoopCharacteristics")]
+    pub multi_instance: Option<BpmnMultiInstanceLoopCharacteristics>,
+    #[serde(rename = "standardLoopCharacteristics")]
+    pub standard_loop: Option<BpmnStandardLoopCharacteristics>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -440,19 +508,40 @@ pub(crate) struct BpmnGateway {
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalEventDefinition {
+    pub condition: Option<BpmnConditionalExpression>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalExpression {
+    #[serde(rename = "$text", default)]
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct BpmnIntermediateCatchEvent {
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "timerEventDefinition")]
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnBoundaryEvent {
+    #[serde(rename = "extensionElements")]
+    pub extension_elements: Option<BpmnExtensionElements>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "@attachedToRef")]
@@ -469,6 +558,8 @@ pub(crate) struct BpmnBoundaryEvent {
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
 }
 
 #[allow(dead_code)]

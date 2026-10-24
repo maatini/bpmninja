@@ -90,6 +90,7 @@ async fn restore_instance_loads_from_persistence() {
 
     // Create a dummy instance
     let inst = ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id: Uuid::new_v4(),
         definition_key: def_key,
         business_key: "BK1".into(),
@@ -104,6 +105,7 @@ async fn restore_instance_loads_from_persistence() {
         multi_instance_state: std::collections::HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        event_state: None,
         started_at: None,
         completed_at: None,
     };
@@ -310,6 +312,7 @@ async fn restore_timer_and_message_catch() {
         node_id: "msg_1".into(),
         message_name: "ORDER_RECEIVED".into(),
         token_id: Uuid::new_v4(),
+        kind: crate::runtime::CatchKind::Message,
     };
     engine.restore_message_catch(catch.clone());
     assert_eq!(engine.pending_message_catches.len(), 1);
@@ -1020,6 +1023,7 @@ async fn test_instance_store_is_empty_and_clear() {
 
     let id = Uuid::new_v4();
     let inst = ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id,
         definition_key: Uuid::new_v4(),
         business_key: String::new(),
@@ -1034,6 +1038,7 @@ async fn test_instance_store_is_empty_and_clear() {
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        event_state: None,
         started_at: None,
         completed_at: None,
     };
@@ -1140,6 +1145,7 @@ async fn test_restore_timer_and_message_catch() {
         node_id: "msg".into(),
         message_name: "order".into(),
         token_id: uuid::Uuid::new_v4(),
+        kind: crate::runtime::CatchKind::Message,
     };
     engine.restore_message_catch(pending_msg);
     assert_eq!(engine.pending_message_catches.len(), 1);
@@ -1198,6 +1204,7 @@ async fn test_restore_instance_makes_it_accessible() {
     let def_key = uuid::Uuid::new_v4();
 
     let instance = crate::runtime::ProcessInstance {
+        variable_types: std::collections::HashMap::new(),
         id: inst_id,
         definition_key: def_key,
         business_key: "restored".into(),
@@ -1212,6 +1219,7 @@ async fn test_restore_instance_makes_it_accessible() {
         multi_instance_state: HashMap::new(),
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
+        event_state: None,
         started_at: None,
         completed_at: None,
     };

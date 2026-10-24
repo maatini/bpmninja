@@ -1,615 +1,450 @@
-openapi: 3.0.3
+openapi: 3.0.0
 info:
-  title: bpmninja Engine API
-  description: |
-    REST API for the bpmninja BPMN 2.0 Workflow Engine.
-    
-    Built with Axum (Rust). Supports BPMN process deployment, instance management,
-    user/service task handling, message correlation, timer processing, and file attachments.
-
-    When `BPMNINJA_API_KEY` is set, all endpoints except `GET /api/health` and
-    `GET /api/ready` require `Authorization: Bearer <key>` or `X-API-Key: <key>`.
-    Unset key means no authentication. XML/JSON bodies are capped at 10 MiB
-    (`MAX_XML_BYTES`). `lockDuration` / `newDuration` are milliseconds.
-  version: 0.7.24
-  contact:
-    name: bpmninja
-  license:
-    name: MIT
-
-servers:
-  - url: http://localhost:8081
-    description: Local development server
-
-security:
-  - bearerAuth: []
-  - apiKeyHeader: []
-  - {}
-
-tags:
-  - name: Definitions
-    description: Deploy, list, and manage BPMN process definitions
-  - name: Instances
-    description: Start, query, and manage process instances
-  - name: User Tasks
-    description: List and complete pending user tasks
-  - name: Service Tasks
-    description: Camunda-compatible fetch-and-lock external task API
-  - name: Variables
-    description: Read and update process instance variables
-  - name: Files
-    description: Upload and download file attachments on process instances
-  - name: Messages & Timers
-    description: Correlate messages and process expired timers
-  - name: History
-    description: Query the event history of process instances
-  - name: Monitoring
-    description: Health checks, readiness probes, engine statistics, and Prometheus metrics
-  - name: Observability
-    description: Live log buffer and SSE engine events
-
+  title: bpmninja Engine Server API
+  description: |-
+    Optional API-key auth when env BPMNINJA_API_KEY is set.
+    Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+    GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
+  version: 0.0.0
+tags: []
 paths:
-  # ─────────────────────────────── Definitions ───────────────────────────────
-
-  /api/deploy:
+  /api/complete/{id}:
     post:
-      tags: [Definitions]
-      summary: Deploy a BPMN definition
-      description: |
-        Parses and deploys a BPMN 2.0 XML definition. If a definition with the same 
-        BPMN process ID already exists, a new version is created automatically.
-        Maximum XML size: 10 MB.
+      operationId: Api_completeTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeployRequest'
+              $ref: '#/components/schemas/CompleteRequest'
+  /api/conditional-catches:
+    get:
+      operationId: Api_getPendingConditionalCatches
+      description: Live conditional catch occurrences, without process variables.
+      parameters: []
       responses:
         '200':
-          description: Definition deployed successfully
+          description: The request has succeeded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeployResponse'
-        '400':
-          description: Invalid BPMN XML or XML too large
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingConditionalCatch'
+        default:
+          description: An unexpected error response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
+                $ref: '#/components/schemas/AppError'
+  /api/conditional-starts/evaluate:
+    post:
+      operationId: Api_evaluateConditionalStart
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalStartResult'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConditionalStartRequest'
   /api/definitions:
     get:
-      tags: [Definitions]
-      summary: List all deployed definitions
+      operationId: Api_listDefinitions
+      parameters: []
       responses:
         '200':
-          description: List of definitions
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/DefinitionInfo'
-
-  /api/definitions/{id}:
-    delete:
-      tags: [Definitions]
-      summary: Delete a process definition
-      description: |
-        Deletes a definition by its UUID key.
-        Use `?cascade=true` to also delete all associated process instances.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-        - name: cascade
-          in: query
-          schema:
-            type: boolean
-            default: false
-          description: If true, deletes all instances of this definition first
-      responses:
-        '200':
-          description: Definition deleted
-        '404':
-          description: Definition not found
-        '409':
-          description: Definition has active instances (use cascade=true)
-
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/definitions/bpmn/{bpmn_id}:
     delete:
-      tags: [Definitions]
-      summary: Delete all versions of a BPMN process
-      description: Deletes all definition versions matching the given BPMN process ID.
+      operationId: Api_deleteAllDefinitions
+      description: Delete all versions of a definition by its bpmn_id.
       parameters:
         - name: bpmn_id
           in: path
           required: true
           schema:
             type: string
-          description: The BPMN process ID (not the UUID key)
+        - name: cascade
+          in: query
+          required: false
+          schema:
+            type: boolean
+          explode: false
       responses:
-        '200':
-          description: All versions deleted
-        '404':
-          description: No definitions found with this BPMN process ID
-
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/definitions/{id}:
+    delete:
+      operationId: Api_deleteDefinition
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cascade
+          in: query
+          required: false
+          schema:
+            type: boolean
+          explode: false
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/definitions/{id}/xml:
     get:
-      tags: [Definitions]
-      summary: Get the original BPMN XML of a definition
+      operationId: Api_getDefinitionXml
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: BPMN XML content
+          description: The request has succeeded.
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: An unexpected error response.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  xml:
-                    type: string
-        '404':
-          description: Definition not found
-
-  # ─────────────────────────────── Instances ─────────────────────────────────
-
-  /api/start:
+                $ref: '#/components/schemas/AppError'
+  /api/deploy:
     post:
-      tags: [Instances]
-      summary: Start a new process instance
+      operationId: Api_deploy
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StartRequest'
-      responses:
-        '200':
-          description: Instance started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StartResponse'
-        '404':
-          description: Definition not found
-
-  /api/start/latest:
-    post:
-      tags: [Instances]
-      summary: Start an instance of the latest version
-      description: Starts a new instance using the latest version of a BPMN process definition identified by its BPMN process ID.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [bpmn_process_id]
-              properties:
-                bpmn_process_id:
-                  type: string
-                  description: The BPMN process ID (not the UUID key)
-                variables:
-                  type: object
-                  additionalProperties: true
-      responses:
-        '200':
-          description: Instance started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StartResponse'
-        '404':
-          description: No definition found with this BPMN process ID
-
-  /api/start/timer:
-    post:
-      tags: [Instances]
-      summary: Start an instance from a timer start event
-      description: Starts an instance whose start event carries a timerEventDefinition.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StartRequest'
-      responses:
-        '200':
-          description: Instance started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StartResponse'
-        '400':
-          description: Definition has no timer start event
-
-  /api/instances:
+              $ref: '#/components/schemas/DeployRequest'
+  /api/events:
     get:
-      tags: [Instances]
-      summary: List all process instances
-      description: |
-        Returns a page of process instances as a JSON array.
-        Use `limit` and `offset` to paginate. The total number of instances
-        (before pagination) is returned in the `X-Total-Count` header.
+      operationId: Api_engineEvents
+      description: SSE stream of engine state changes (`instance_changed`, `task_changed`, `definition_changed`, `conditional_start_changed`). Broadcast capacity is 256; slow clients may miss events.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /api/health:
+    get:
+      operationId: Api_health
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      security:
+        - {}
+  /api/history/instances:
+    get:
+      operationId: Api_listCompletedInstances
+      description: Query archived (completed) process instances.
       parameters:
+        - name: definition_key
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: business_key
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: state
+          in: query
+          required: false
+          description: 'Terminal-state filter: `completed` or `error`.'
+          schema:
+            type: string
+            enum:
+              - completed
+              - error
+          explode: false
         - name: limit
           in: query
-          description: Maximum number of instances to return.
+          required: false
           schema:
             type: integer
-            minimum: 1
+            format: int32
+          explode: false
         - name: offset
           in: query
-          description: Number of instances to skip.
+          required: false
           schema:
             type: integer
-            minimum: 0
+            format: int32
+          explode: false
       responses:
         '200':
-          description: List of instances (JSON array; not wrapped in an object)
-          headers:
-            X-Total-Count:
-              description: Total number of instances before pagination.
-              schema:
-                type: integer
-                minimum: 0
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProcessInstance'
-
-  /api/instances/{id}:
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/history/instances/{id}:
     get:
-      tags: [Instances]
-      summary: Get instance details
+      operationId: Api_getCompletedInstance
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: Instance details
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProcessInstance'
-        '404':
-          description: Instance not found
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/info:
+    get:
+      operationId: Api_getInfo
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackendInfo'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances:
+    get:
+      operationId: Api_listInstances
+      description: List process instances as a JSON array. Paginate with `limit`/`offset`; total count is in the `X-Total-Count` header.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            X-Total-Count:
+              required: true
+              schema:
+                type: integer
+                format: int32
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProcessInstance'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances/{id}:
+    get:
+      operationId: Api_getInstance
+      description: Returns an instance by id. Falls back to the history archive if the instance is no longer active.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessInstance'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
     delete:
-      tags: [Instances]
-      summary: Delete a process instance
-      description: Deletes the instance and all associated pending tasks, timers, and file attachments.
+      operationId: Api_deleteInstance
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      responses:
-        '200':
-          description: Instance deleted
-        '404':
-          description: Instance not found
-
-  /api/instances/{id}/suspend:
-    post:
-      tags: [Instances]
-      summary: Suspend a running instance
-      description: Pauses timers and task completion. Variables and token moves remain allowed.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '204':
-          description: Instance suspended
-        '404':
-          description: Instance not found
-        '409':
-          description: Instance already in a terminal or suspended state
-
-  /api/instances/{id}/resume:
-    post:
-      tags: [Instances]
-      summary: Resume a suspended instance
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      responses:
-        '204':
-          description: Instance resumed
-        '404':
-          description: Instance not found
-        '409':
-          description: Instance is not suspended
-
-  /api/instances/{id}/move-token:
-    post:
-      tags: [Instances]
-      summary: Move an instance token to another node
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [target_node_id]
-              properties:
-                target_node_id:
-                  type: string
-      responses:
-        '204':
-          description: Token moved
-        '404':
-          description: Instance or node not found
-        '409':
-          description: Operation blocked (e.g. suspended instance)
-
-  /api/instances/{id}/migrate:
-    post:
-      tags: [Instances]
-      summary: Migrate an instance to another definition version
-      description: Changes `definition_key` and optionally remaps BPMN node IDs. Fails with 422 if a token would become orphaned.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [target_definition_key]
-              properties:
-                target_definition_key:
-                  type: string
-                  format: uuid
-                node_mapping:
-                  type: object
-                  additionalProperties:
-                    type: string
-                  description: Optional old node ID → new node ID map
-      responses:
-        '204':
-          description: Instance migrated
-        '404':
-          description: Instance or target definition not found
-        '422':
-          description: Orphaned token (unmapped node missing in target definition)
-
-  # ─────────────────────────────── User Tasks ────────────────────────────────
-
-  /api/tasks:
-    get:
-      tags: [User Tasks]
-      summary: List all pending user tasks
-      responses:
-        '200':
-          description: List of pending user tasks
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PendingUserTask'
-
-  /api/complete/{id}:
-    post:
-      tags: [User Tasks]
-      summary: Complete a user task
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CompleteRequest'
-      responses:
-        '200':
-          description: Task completed, process continued
-        '409':
-          description: Task not pending
-
-  # ────────────────────────────── Service Tasks ──────────────────────────────
-
-  /api/service-tasks:
-    get:
-      tags: [Service Tasks]
-      summary: List all pending service tasks
-      responses:
-        '200':
-          description: List of service tasks
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PendingServiceTask'
-
-  /api/service-task/fetchAndLock:
-    post:
-      tags: [Service Tasks]
-      summary: Fetch and lock service tasks
-      description: |
-        Camunda-compatible fetch-and-lock endpoint. Workers request tasks by topic,
-        lock them for processing, and receive variable snapshots.
-        
-        Supports **long-polling** via `asyncResponseTimeout` — the server holds the 
-        connection open until tasks become available or the timeout expires.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FetchAndLockRequest'
-      responses:
-        '200':
-          description: Locked tasks (may be empty array if timeout expired)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PendingServiceTask'
-
-  /api/service-task/{id}/complete:
-    post:
-      tags: [Service Tasks]
-      summary: Complete a service task
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CompleteServiceTaskRequest'
-      responses:
-        '200':
-          description: Task completed
-        '404':
-          description: Service task not found
-        '409':
-          description: Task locked by another worker
-
-  /api/service-task/{id}/failure:
-    post:
-      tags: [Service Tasks]
-      summary: Report a task failure
-      description: Decrements the retry counter. At 0 retries, the task becomes an incident.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FailServiceTaskRequest'
-      responses:
-        '200':
-          description: Failure recorded
-
-  /api/service-task/{id}/extendLock:
-    post:
-      tags: [Service Tasks]
-      summary: Extend the lock duration
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExtendLockRequest'
-      responses:
-        '200':
-          description: Lock extended
-
-  /api/service-task/{id}/bpmnError:
-    post:
-      tags: [Service Tasks]
-      summary: Throw a BPMN error
-      description: |
-        Routes the token to the matching BoundaryErrorEvent (matched by `errorCode`).
-        If no matching boundary event exists, returns an error.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BpmnErrorRequest'
-      responses:
-        '200':
-          description: Error handled, token rerouted to boundary event
-        '400':
-          description: No matching boundary error event found
-
-  /api/service-task/{id}/retry:
-    post:
-      tags: [Service Tasks]
-      summary: Retry an incident
-      description: Retries a failed service task that has become an incident.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      responses:
-        '204':
-          description: Retry scheduled
-        '404':
-          description: Service task not found
-
-  /api/service-task/{id}/resolve:
-    post:
-      tags: [Service Tasks]
-      summary: Resolve an incident
-      description: Marks the incident resolved without completing the worker task.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      responses:
-        '204':
-          description: Incident resolved
-        '404':
-          description: Service task not found
-
-  # ────────────────────────────── Variables ───────────────────────────────────
-
-  /api/instances/{id}/variables:
-    put:
-      tags: [Variables]
-      summary: Update instance variables
-      description: |
-        Keys with non-null values are created or overwritten.
-        Keys with `null` values are removed from the instance.
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-      responses:
-        '200':
-          description: Variables updated
-        '404':
-          description: Instance not found
-
-  # ─────────────────────────────── Files ─────────────────────────────────────
-
+                $ref: '#/components/schemas/AppError'
   /api/instances/{id}/files/{var_name}:
     post:
-      tags: [Files]
-      summary: Upload a file as a process variable
-      description: |
-        Upload a binary file as an instance variable (multipart field `file`).
-        Size is limited by server config `MAX_UPLOAD_BYTES` (default 5 MiB); larger payloads return 413.
+      operationId: Api_uploadInstanceFile
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
         - name: var_name
           in: path
           required: true
           schema:
             type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '201':
-          description: File uploaded
-        '400':
-          description: No file provided or invalid request
-        '413':
-          description: Upload exceeds MAX_UPLOAD_BYTES
+              $ref: '#/components/schemas/UploadFileRequest'
     get:
-      tags: [Files]
-      summary: Download a file variable
+      operationId: Api_getInstanceFile
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
         - name: var_name
           in: path
           required: true
@@ -617,19 +452,26 @@ paths:
             type: string
       responses:
         '200':
-          description: File content
+          description: The request has succeeded.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
-        '400':
-          description: Variable is not a file
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
     delete:
-      tags: [Files]
-      summary: Delete a file variable
+      operationId: Api_deleteInstanceFile
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
         - name: var_name
           in: path
           required: true
@@ -637,336 +479,342 @@ paths:
             type: string
       responses:
         '204':
-          description: File deleted
-
-  # ──────────────────────────── Messages & Timers ────────────────────────────
-
-  /api/message:
-    post:
-      tags: [Messages & Timers]
-      summary: Correlate a message
-      description: |
-        Correlates a message by `messageName`. Resumes waiting `MessageCatchEvent`s
-        and starts new instances for matching `MessageStartEvent` definitions.
-        Optional `businessKey` for targeted correlation.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [message_name]
-              properties:
-                message_name:
-                  type: string
-                business_key:
-                  type: string
-                variables:
-                  type: object
-                  additionalProperties: true
-      responses:
-        '200':
-          description: Affected instance IDs
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  affected_instances:
-                    type: array
-                    items:
-                      type: string
-                      format: uuid
-
-  /api/timers/process:
-    post:
-      tags: [Messages & Timers]
-      summary: Process expired timers
-      description: |
-        Scans for expired timers and resumes their instances.
-        Note: The engine-server also runs an automatic background scheduler 
-        (configurable via `TIMER_INTERVAL_MS`, default 1000ms).
-      responses:
-        '200':
-          description: Number of processed timers
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  processed:
-                    type: integer
-
-  /api/timers:
-    get:
-      tags: [Messages & Timers]
-      summary: List pending timers
-      responses:
-        '200':
-          description: Pending timers
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    instance_id:
-                      type: string
-                      format: uuid
-                    node_id:
-                      type: string
-                    fire_at:
-                      type: string
-                      format: date-time
-
-  /api/messages:
-    get:
-      tags: [Messages & Timers]
-      summary: List pending message catch events
-      responses:
-        '200':
-          description: Pending message catches
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    instance_id:
-                      type: string
-                      format: uuid
-                    node_id:
-                      type: string
-                    message_name:
-                      type: string
-
-  # ─────────────────────────────── History ────────────────────────────────────
-
+                $ref: '#/components/schemas/AppError'
   /api/instances/{id}/history:
     get:
-      tags: [History]
-      summary: Query instance event history
+      operationId: Api_getInstanceHistory
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
         - name: event_types
           in: query
+          required: false
           schema:
             type: string
-          description: Comma-separated event types filter
+          explode: false
         - name: node_id
           in: query
+          required: false
           schema:
             type: string
+          explode: false
         - name: actor_type
           in: query
+          required: false
           schema:
             type: string
-            enum: [Engine, User, ServiceWorker, Timer, Listener]
+          explode: false
         - name: from
           in: query
+          required: false
           schema:
             type: string
-            format: date-time
+          explode: false
         - name: to
           in: query
+          required: false
           schema:
             type: string
-            format: date-time
+          explode: false
         - name: limit
           in: query
+          required: false
           schema:
             type: integer
+            format: int32
+          explode: false
         - name: offset
           in: query
+          required: false
           schema:
             type: integer
+            format: int32
+          explode: false
       responses:
         '200':
-          description: List of history events
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/HistoryEntry'
-
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/instances/{id}/history/{event_id}:
     get:
-      tags: [History]
-      summary: Get a single history event
+      operationId: Api_getInstanceHistoryEntry
       parameters:
-        - $ref: '#/components/parameters/ResourceId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
         - name: event_id
           in: path
           required: true
           schema:
             type: string
-            format: uuid
       responses:
         '200':
-          description: History event details
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HistoryEntry'
-        '404':
-          description: Event not found
-
-  # ──────────────────────────── Historical Instances ──────────────────────────
-
-  /api/history/instances:
-    get:
-      tags: [History]
-      summary: Query archived (completed) process instances
-      description: |
-        Returns instances that have reached a terminal state (Completed,
-        CompletedWithError, Terminated) and were moved to the history archive.
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/migrate:
+    post:
+      operationId: Api_migrateInstance
+      description: Migrate a running instance to a different process definition version.
       parameters:
-        - name: definition_key
-          in: query
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-            format: uuid
-        - name: business_key
-          in: query
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateInstanceRequest'
+  /api/instances/{id}/move-token:
+    post:
+      operationId: Api_moveToken
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-        - name: from
-          in: query
-          description: ISO-8601 lower bound (inclusive) for completed_at.
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveTokenRequest'
+  /api/instances/{id}/resume:
+    post:
+      operationId: Api_resumeInstance
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-            format: date-time
-        - name: to
-          in: query
-          description: ISO-8601 upper bound (exclusive) for completed_at.
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/suspend:
+    post:
+      operationId: Api_suspendInstance
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-            format: date-time
-        - name: state
-          in: query
-          description: Terminal-state filter.
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/instances/{id}/variables:
+    put:
+      operationId: Api_updateInstanceVariables
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-            enum: [completed, error]
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVariablesRequest'
+  /api/logs:
+    get:
+      operationId: Api_getLogs
+      description: Filtered snapshot of the in-memory log buffer (newest first, max 5000).
+      parameters:
+        - name: level
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
         - name: limit
           in: query
+          required: false
           schema:
             type: integer
-            minimum: 1
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            minimum: 0
+            format: int32
+          explode: false
       responses:
         '200':
-          description: Matching archived instances
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ProcessInstance'
-
-  /api/history/instances/{id}:
-    get:
-      tags: [History]
-      summary: Get a single archived instance by id
-      parameters:
-        - $ref: '#/components/parameters/ResourceId'
-      responses:
-        '200':
-          description: Archived instance
+                  $ref: '#/components/schemas/LogEntry'
+        default:
+          description: An unexpected error response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProcessInstance'
-        '404':
-          description: Not found
-
-  # ──────────────────────────── Monitoring & Health ───────────────────────────
-
-  /api/health:
-    get:
-      tags: [Monitoring]
-      summary: Liveness check
-      description: Always returns 200 OK if the server is running. Public even when `BPMNINJA_API_KEY` is set.
-      security: []
+                $ref: '#/components/schemas/AppError'
+  /api/message:
+    post:
+      operationId: Api_correlateMessage
+      parameters: []
       responses:
         '200':
-          description: Server is alive
-
-  /api/ready:
-    get:
-      tags: [Monitoring]
-      summary: Readiness check
-      description: Returns 200 if the server is ready. Returns 503 if NATS is disconnected. Public even when `BPMNINJA_API_KEY` is set.
-      security: []
-      responses:
-        '200':
-          description: Server is ready
-        '503':
-          description: NATS connection lost
-
-  /api/info:
-    get:
-      tags: [Monitoring]
-      summary: Backend information
-      responses:
-        '200':
-          description: Backend type, NATS URL, and connection status
+          description: The request has succeeded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BackendInfo'
-
+                $ref: '#/components/schemas/CorrelateMessageResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrelateMessageRequest'
+  /api/messages:
+    get:
+      operationId: Api_getPendingMessages
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingMessage'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/monitoring:
     get:
-      tags: [Monitoring]
-      summary: Engine statistics and storage info
+      operationId: Api_getMonitoring
+      parameters: []
       responses:
         '200':
-          description: Monitoring data
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MonitoringData'
-
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/monitoring/buckets/{bucket}/entries:
     get:
-      tags: [Monitoring]
-      summary: List KV bucket entries
-      description: Lists all entries in a NATS KV bucket for diagnostic purposes.
+      operationId: Api_getBucketEntries
       parameters:
         - name: bucket
           in: path
           required: true
           schema:
             type: string
-          description: Name of the NATS KV bucket
       responses:
         '200':
-          description: List of key-value entries
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    key:
-                      type: string
-                    value:
-                      type: object
-
+                  $ref: '#/components/schemas/BucketEntry'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
   /api/monitoring/buckets/{bucket}/entries/{key}:
     get:
-      tags: [Monitoring]
-      summary: Get a single KV bucket entry
-      description: Returns the value of a specific key in a NATS KV bucket.
+      operationId: Api_getBucketEntryDetail
       parameters:
         - name: bucket
           in: path
@@ -980,494 +828,1468 @@ paths:
             type: string
       responses:
         '200':
-          description: Entry value
+          description: The request has succeeded.
           content:
             application/json:
               schema:
-                type: object
-        '404':
-          description: Key not found
-
-  /api/logs:
+                $ref: '#/components/schemas/BucketEntryDetail'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/ready:
     get:
-      tags: [Observability]
-      summary: Query the in-memory log buffer
-      description: |
-        Returns a filtered snapshot of the rolling log buffer (newest first).
-        Default limit 500, hard cap 5000.
-      parameters:
-        - name: level
-          in: query
-          schema:
-            type: string
-            enum: [error, warn, info, debug, trace]
-        - name: search
-          in: query
-          schema:
-            type: string
-          description: Case-insensitive substring on message and target
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 500
+      operationId: Api_ready
+      parameters: []
       responses:
         '200':
-          description: Log entries
+          description: The request has succeeded.
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      security:
+        - {}
+  /api/service-task/fetchAndLock:
+    post:
+      operationId: Api_fetchAndLockServiceTasks
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/LogEntry'
-
-  /api/events:
+                  $ref: '#/components/schemas/PendingServiceTask'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FetchAndLockRequest'
+  /api/service-task/{id}/bpmnError:
+    post:
+      operationId: Api_bpmnError
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BpmnErrorRequest'
+  /api/service-task/{id}/complete:
+    post:
+      operationId: Api_completeServiceTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteServiceTaskRequest'
+  /api/service-task/{id}/extendLock:
+    post:
+      operationId: Api_extendLock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtendLockRequest'
+  /api/service-task/{id}/failure:
+    post:
+      operationId: Api_failServiceTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailServiceTaskRequest'
+  /api/service-task/{id}/resolve:
+    post:
+      operationId: Api_resolveIncident
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/service-task/{id}/retry:
+    post:
+      operationId: Api_retryIncident
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/service-tasks:
     get:
-      tags: [Observability]
-      summary: Server-Sent Events for engine state changes
-      description: |
-        Stream of `instance_changed`, `task_changed`, and `definition_changed`.
-        Broadcast capacity is 256; slow clients may miss events and should re-fetch via REST.
+      operationId: Api_getServiceTasks
+      parameters: []
       responses:
         '200':
-          description: SSE stream
+          description: The request has succeeded.
           content:
-            text/event-stream:
+            application/json:
               schema:
-                type: string
-
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingServiceTask'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/signal:
+    post:
+      operationId: Api_broadcastSignal
+      description: Broadcast a signal to all waiting signal catch/boundary events and start processes with a matching signal start event.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcastSignalResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastSignalRequest'
+  /api/start:
+    post:
+      operationId: Api_start
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRequest'
+  /api/start/latest:
+    post:
+      operationId: Api_startLatest
+      description: Start an instance of the latest deployed version of a BPMN definition (by bpmn_id).
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartLatestRequest'
+  /api/start/timer:
+    post:
+      operationId: Api_startTimer
+      description: Start an instance whose start event carries a timerEventDefinition.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRequest'
+  /api/tasks:
+    get:
+      operationId: Api_getTasks
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingUserTask'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/timers:
+    get:
+      operationId: Api_getPendingTimers
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingTimer'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /api/timers/process:
+    post:
+      operationId: Api_processTimers
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessTimersResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+  /engine-rest/external-task/fetchAndLock:
+    post:
+      operationId: CamundaExternalTasks_fetchAndLock
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CamundaExternalTasks.FetchedTask'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.FetchRequest'
+  /engine-rest/external-task/{id}/bpmnError:
+    post:
+      operationId: CamundaExternalTasks_bpmnError
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.BpmnErrorRequest'
+  /engine-rest/external-task/{id}/complete:
+    post:
+      operationId: CamundaExternalTasks_complete
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.CompleteRequest'
+  /engine-rest/external-task/{id}/extendLock:
+    post:
+      operationId: CamundaExternalTasks_extendLock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.ExtendRequest'
+  /engine-rest/external-task/{id}/failure:
+    post:
+      operationId: CamundaExternalTasks_failure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CamundaExternalTasks.ErrorBody'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CamundaExternalTasks.FailureRequest'
   /metrics:
     get:
-      tags: [Monitoring]
-      summary: Prometheus metrics
-      description: |
-        Prometheus text format. The route is only mounted when the Prometheus
-        recorder is installed at process start.
+      operationId: metrics
+      description: Prometheus text format. Mounted only when the Prometheus recorder is installed at process start.
+      parameters: []
       responses:
         '200':
-          description: Metrics scrape
+          description: The request has succeeded.
           content:
             text/plain:
               schema:
                 type: string
-
-# ═══════════════════════════════ Components ═══════════════════════════════════
-
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+  - {}
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: API Key
-      description: |
-        Shared API key via `Authorization: Bearer <key>`.
-        Required only when the server is started with `BPMNINJA_API_KEY`.
-    apiKeyHeader:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: |
-        Alternative to Bearer. Required only when `BPMNINJA_API_KEY` is set.
-  parameters:
-    ResourceId:
-      name: id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-      description: UUID of the resource
-
   schemas:
-    ErrorResponse:
+    AppError:
       type: object
+      required:
+        - error
       properties:
         error:
           type: string
-      required: [error]
-
-    DeployRequest:
-      type: object
-      required: [xml, name]
-      properties:
-        xml:
-          type: string
-          description: BPMN 2.0 XML content (max 10MB)
-        name:
-          type: string
-          description: Human-readable name for the definition
-
-    DeployResponse:
-      type: object
-      properties:
-        definition_key:
-          type: string
-          format: uuid
-        version:
-          type: integer
-
-    StartRequest:
-      type: object
-      required: [definition_key]
-      properties:
-        definition_key:
-          type: string
-          format: uuid
-        variables:
-          type: object
-          additionalProperties: true
-
-    StartResponse:
-      type: object
-      properties:
-        instance_id:
-          type: string
-          format: uuid
-
-    CompleteRequest:
-      type: object
-      properties:
-        variables:
-          type: object
-          additionalProperties: true
-
-    DefinitionInfo:
-      type: object
-      properties:
-        key:
-          type: string
-          format: uuid
-        bpmn_id:
-          type: string
-        version:
-          type: integer
-        node_count:
-          type: integer
-
-    ProcessInstance:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        definition_key:
-          type: string
-          format: uuid
-        business_key:
-          type: string
-        parent_instance_id:
-          type: string
-          format: uuid
-          nullable: true
-        state:
-          type: object
-          description: InstanceState enum (Running, WaitingOnUserTask, Completed, etc.)
-        current_node:
-          type: string
-        audit_log:
-          type: array
-          items:
-            type: string
-        variables:
-          type: object
-          additionalProperties: true
-        started_at:
-          type: string
-          format: date-time
-          nullable: true
-        completed_at:
-          type: string
-          format: date-time
-          nullable: true
-
-    PendingUserTask:
-      type: object
-      properties:
-        task_id:
-          type: string
-          format: uuid
-        instance_id:
-          type: string
-          format: uuid
-        node_id:
-          type: string
-        assignee:
-          type: string
-        token_id:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
-
-    PendingServiceTask:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        instance_id:
-          type: string
-          format: uuid
-        definition_key:
-          type: string
-          format: uuid
-        node_id:
-          type: string
-        topic:
-          type: string
-        token_id:
-          type: string
-          format: uuid
-        variables_snapshot:
-          type: object
-          additionalProperties: true
-        created_at:
-          type: string
-          format: date-time
-        worker_id:
-          type: string
-          nullable: true
-        lock_expiration:
-          type: string
-          format: date-time
-          nullable: true
-        retries:
-          type: integer
-        error_message:
-          type: string
-          nullable: true
-        error_details:
-          type: string
-          nullable: true
-
-    FetchAndLockRequest:
-      type: object
-      required: [workerId, maxTasks, topics]
-      properties:
-        workerId:
-          type: string
-        maxTasks:
-          type: integer
-        topics:
-          type: array
-          items:
-            type: object
-            required: [topicName, lockDuration]
-            properties:
-              topicName:
-                type: string
-              lockDuration:
-                type: integer
-                description: Lock duration in milliseconds
-        asyncResponseTimeout:
-          type: integer
-          description: Long-polling timeout in milliseconds
-
-    CompleteServiceTaskRequest:
-      type: object
-      required: [workerId]
-      properties:
-        workerId:
-          type: string
-        variables:
-          type: object
-          additionalProperties: true
-
-    FailServiceTaskRequest:
-      type: object
-      required: [workerId]
-      properties:
-        workerId:
-          type: string
-        retries:
-          type: integer
-        errorMessage:
-          type: string
-        errorDetails:
-          type: string
-
-    ExtendLockRequest:
-      type: object
-      required: [workerId, newDuration]
-      properties:
-        workerId:
-          type: string
-        newDuration:
-          type: integer
-          description: New lock duration in milliseconds
-
-    BpmnErrorRequest:
-      type: object
-      required: [workerId, errorCode]
-      properties:
-        workerId:
-          type: string
-        errorCode:
-          type: string
-
-    HistoryEntry:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        instance_id:
-          type: string
-          format: uuid
-        timestamp:
-          type: string
-          format: date-time
-        event_type:
-          type: string
-          enum:
-            - InstanceStarted
-            - InstanceCompleted
-            - InstanceDeleted
-            - TaskCompleted
-            - VariableUpdated
-            - GatewayTaken
-            - ListenerExecuted
-            - TokenAdvanced
-            - TokenForked
-            - TokenJoined
-            - BranchCompleted
-            - Error
-            - CallActivityStarted
-            - CallActivityCompleted
-        node_id:
-          type: string
-          nullable: true
-        description:
-          type: string
-        actor_type:
-          type: string
-          enum: [Engine, User, ServiceWorker, Timer, Listener]
-        actor_id:
-          type: string
-          nullable: true
-        diff:
-          $ref: '#/components/schemas/HistoryDiff'
-        is_snapshot:
-          type: boolean
-        full_state_snapshot:
-          type: object
-          nullable: true
-
-    HistoryDiff:
-      type: object
-      nullable: true
-      properties:
-        variables:
-          type: object
-          nullable: true
-          properties:
-            added:
-              type: object
-              additionalProperties: true
-            removed:
-              type: array
-              items:
-                type: string
-            changed:
-              type: object
-              additionalProperties: true
-        status:
-          type: array
-          items:
-            type: string
-          minItems: 2
-          maxItems: 2
-          nullable: true
-          description: "[old_status, new_status]"
-        current_node:
-          type: array
-          items:
-            type: string
-          minItems: 2
-          maxItems: 2
-          nullable: true
-          description: "[old_node, new_node]"
-        human_readable:
-          type: string
-          nullable: true
-
     BackendInfo:
       type: object
+      required:
+        - backend_type
+        - connected
       properties:
         backend_type:
           type: string
         nats_url:
           type: string
-          nullable: true
         connected:
           type: boolean
-
-    MonitoringData:
+    BpmnErrorRequest:
+      type: object
+      required:
+        - workerId
+        - errorCode
+      properties:
+        workerId:
+          type: string
+        errorCode:
+          type: string
+    BroadcastSignalRequest:
+      type: object
+      required:
+        - signalName
+      properties:
+        signalName:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    BroadcastSignalResponse:
+      type: object
+      required:
+        - affectedInstances
+      properties:
+        affectedInstances:
+          type: array
+          items:
+            type: string
+          description: Instances resumed by the signal plus instances started by signal start events.
+    BucketEntry:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        revision:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+    BucketEntryDetail:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+        value: {}
+    CamundaExternalTasks.BpmnErrorRequest:
+      type: object
+      required:
+        - workerId
+        - errorCode
+      properties:
+        workerId:
+          type: string
+        errorCode:
+          type: string
+        errorMessage:
+          type: string
+          nullable: true
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+    CamundaExternalTasks.CompleteRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+        localVariables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+          nullable: true
+          description: Only null or an empty object is supported; there are no local scopes.
+    CamundaExternalTasks.ErrorBody:
+      type: object
+      required:
+        - type
+        - message
+        - code
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+          format: int32
+    CamundaExternalTasks.ExtendRequest:
+      type: object
+      required:
+        - workerId
+        - newDuration
+      properties:
+        workerId:
+          type: string
+        newDuration:
+          type: integer
+          format: int64
+          minimum: 1
+    CamundaExternalTasks.FailureRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        retries:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        retryTimeout:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        errorMessage:
+          type: string
+          nullable: true
+        errorDetails:
+          type: string
+          nullable: true
+    CamundaExternalTasks.FetchRequest:
+      type: object
+      required:
+        - workerId
+        - maxTasks
+      properties:
+        workerId:
+          type: string
+        maxTasks:
+          type: integer
+          format: int32
+          minimum: 1
+        topics:
+          type: array
+          items:
+            $ref: '#/components/schemas/CamundaExternalTasks.Topic'
+        asyncResponseTimeout:
+          type: integer
+          format: uint64
+          nullable: true
+          maximum: 1800000
+        usePriority:
+          type: boolean
+          description: Accepted; all service-task priorities are zero.
+    CamundaExternalTasks.FetchedTask:
+      type: object
+      required:
+        - id
+        - activityId
+        - activityInstanceId
+        - processInstanceId
+        - processDefinitionId
+        - processDefinitionKey
+        - processDefinitionVersionTag
+        - topicName
+        - workerId
+        - lockExpirationTime
+        - retries
+        - errorMessage
+        - errorDetails
+        - businessKey
+        - tenantId
+        - priority
+        - suspended
+        - variables
+      properties:
+        id:
+          type: string
+        activityId:
+          type: string
+        activityInstanceId:
+          type: string
+        processInstanceId:
+          type: string
+        processDefinitionId:
+          type: string
+        processDefinitionKey:
+          type: string
+          nullable: true
+        processDefinitionVersionTag:
+          nullable: true
+        topicName:
+          type: string
+        workerId:
+          type: string
+        lockExpirationTime:
+          type: string
+        retries:
+          type: integer
+          format: int32
+        errorMessage:
+          type: string
+          nullable: true
+        errorDetails:
+          type: string
+          nullable: true
+        businessKey:
+          type: string
+        tenantId:
+          nullable: true
+        priority:
+          type: number
+          enum:
+            - 0
+        suspended:
+          type: boolean
+          enum:
+            - false
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CamundaExternalTasks.TypedVariable'
+    CamundaExternalTasks.Topic:
+      type: object
+      required:
+        - topicName
+        - lockDuration
+      properties:
+        topicName:
+          type: string
+        lockDuration:
+          type: integer
+          format: int64
+          minimum: 1
+        variables:
+          type: array
+          items:
+            type: string
+          nullable: true
+        deserializeValues:
+          type: boolean
+        includeExtensionProperties:
+          type: boolean
+          enum:
+            - false
+        localVariables:
+          type: boolean
+          enum:
+            - false
+        withoutTenantId:
+          type: boolean
+    CamundaExternalTasks.TypedVariable:
       type: object
       properties:
-        definitions_count:
-          type: integer
-        instances_total:
-          type: integer
-        instances_running:
-          type: integer
-        instances_completed:
-          type: integer
-        pending_user_tasks:
-          type: integer
-        pending_service_tasks:
-          type: integer
-        pending_timers:
-          type: integer
-        pending_message_catches:
-          type: integer
-        persistence_errors:
-          type: integer
-        storage_info:
+        type:
+          type: string
+          enum:
+            - 'Null'
+            - Boolean
+            - Short
+            - Integer
+            - Long
+            - Double
+            - String
+            - Date
+            - Json
+        value: {}
+        valueInfo:
           type: object
+          additionalProperties: {}
           nullable: true
-          properties:
-            backend_name:
-              type: string
-            version:
-              type: string
-            host:
-              type: string
-            port:
-              type: integer
-            memory_bytes:
-              type: integer
-            storage_bytes:
-              type: integer
-            streams:
-              type: integer
-            consumers:
-              type: integer
-            buckets:
-              type: array
-              items:
-                type: object
-                properties:
-                  name:
-                    type: string
-                  bucket_type:
-                    type: string
-                  entries:
-                    type: integer
-                  size_bytes:
-                    type: integer
-
+          description: Null/empty metadata, transient=false, and Json serializationDataFormat=application/json are supported.
+    CompleteRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: {}
+    CompleteServiceTaskRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    ConditionalStartRequest:
+      type: object
+      required:
+        - request_id
+        - variables
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        process_id:
+          type: string
+        business_key:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+      description: Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.
+    ConditionalStartResult:
+      type: object
+      required:
+        - request_id
+        - definition_key
+        - matched
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        matched:
+          type: boolean
+        instance_id:
+          type: string
+          format: uuid
+          description: Present only when matched is true.
+    CorrelateMessageRequest:
+      type: object
+      required:
+        - messageName
+      properties:
+        messageName:
+          type: string
+        businessKey:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    CorrelateMessageResponse:
+      type: object
+      required:
+        - affectedInstances
+      properties:
+        affectedInstances:
+          type: array
+          items:
+            type: string
+    DefinitionInfo:
+      type: object
+      required:
+        - key
+        - bpmn_id
+        - version
+        - node_count
+      properties:
+        key:
+          type: string
+        bpmn_id:
+          type: string
+        version:
+          type: integer
+          format: int32
+        node_count:
+          type: integer
+          format: int32
+    DeployRequest:
+      type: object
+      required:
+        - xml
+        - name
+      properties:
+        xml:
+          type: string
+          description: BPMN 2.0 XML
+        name:
+          type: string
+    DeployResponse:
+      type: object
+      required:
+        - definition_key
+        - version
+      properties:
+        definition_key:
+          type: string
+        version:
+          type: integer
+          format: int32
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+    ExtendLockRequest:
+      type: object
+      required:
+        - workerId
+        - newDuration
+      properties:
+        workerId:
+          type: string
+        newDuration:
+          type: integer
+          format: int64
+          description: New lock duration in milliseconds. Server converts to seconds for the engine.
+    FailServiceTaskRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+        retries:
+          type: integer
+          format: int32
+        errorMessage:
+          type: string
+        errorDetails:
+          type: string
+    FetchAndLockRequest:
+      type: object
+      required:
+        - workerId
+        - maxTasks
+        - topics
+      properties:
+        workerId:
+          type: string
+        maxTasks:
+          type: integer
+          format: int32
+        topics:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopicRequest'
+        asyncResponseTimeout:
+          type: integer
+          format: int64
+    HistoryEntry:
+      type: object
+      required:
+        - id
+        - instance_id
+        - event_type
+        - actor_type
+        - timestamp
+        - details
+      properties:
+        id:
+          type: string
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        event_type:
+          type: string
+        actor_type:
+          type: string
+        timestamp:
+          type: string
+        details: {}
     LogEntry:
       type: object
-      required: [timestamp, level, target, message]
+      required:
+        - timestamp
+        - level
+        - target
+        - message
       properties:
         timestamp:
           type: string
-          format: date-time
         level:
           type: string
         target:
           type: string
         message:
           type: string
+    MigrateInstanceRequest:
+      type: object
+      required:
+        - target_definition_key
+      properties:
+        target_definition_key:
+          type: string
+          description: UUID of the target ProcessDefinition.
+        node_mapping:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional mapping of old BPMN node IDs to new BPMN node IDs. Required for nodes that were renamed between versions.
+    ModelCheckReport:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - passed
+            - violations
+            - skipped
+            - inconclusive
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelCheckViolation'
+        reason:
+          type: string
+    ModelCheckViolation:
+      type: object
+      required:
+        - property
+      properties:
+        property:
+          type: string
+          enum:
+            - safeness
+            - option_to_complete
+            - proper_completion
+            - no_dead_activities
+        elements:
+          type: array
+          items:
+            type: string
+    MonitoringData:
+      type: object
+      required:
+        - definitions_count
+        - instances_total
+        - instances_running
+        - instances_completed
+        - pending_user_tasks
+        - pending_service_tasks
+      properties:
+        definitions_count:
+          type: integer
+          format: int32
+        instances_total:
+          type: integer
+          format: int32
+        instances_running:
+          type: integer
+          format: int32
+        instances_completed:
+          type: integer
+          format: int32
+        pending_user_tasks:
+          type: integer
+          format: int32
+        pending_service_tasks:
+          type: integer
+          format: int32
+        storage_info:
+          $ref: '#/components/schemas/StorageInfo'
+    MoveTokenRequest:
+      type: object
+      required:
+        - target_node_id
+      properties:
+        target_node_id:
+          type: string
+    PendingConditionalCatch:
+      type: object
+      required:
+        - id
+        - instance_id
+        - node_id
+        - token_id
+        - generation
+        - claimed
+      properties:
+        kind:
+          type: string
+          enum:
+            - intermediate
+            - boundary
+        activity_activation_id:
+          type: string
+        attached_to:
+          type: string
+        interrupting:
+          type: boolean
+        id:
+          type: string
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        token_id:
+          type: string
+        generation:
+          type: integer
+          format: uint64
+        claimed:
+          type: boolean
+    PendingMessage:
+      type: object
+      required:
+        - instance_id
+        - node_id
+        - message_name
+      properties:
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        message_name:
+          type: string
+          description: Message or signal name, depending on `kind`.
+        kind:
+          type: string
+          enum:
+            - Message
+            - Signal
+    PendingServiceTask:
+      type: object
+      required:
+        - id
+        - instance_id
+        - node_id
+        - topic
+        - state
+        - variables
+      properties:
+        id:
+          type: string
+        instance_id:
+          type: string
+        definition_key:
+          type: string
+        node_id:
+          type: string
+        topic:
+          type: string
+        state:
+          type: string
+        locked_by:
+          type: string
+        lock_expires_at:
+          type: string
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VariableValue'
+        retries:
+          type: integer
+          format: int32
+        error_message:
+          type: string
+    PendingTimer:
+      type: object
+      required:
+        - instance_id
+        - node_id
+        - fire_at
+      properties:
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        fire_at:
+          type: string
+    PendingUserTask:
+      type: object
+      required:
+        - id
+        - instance_id
+        - node_id
+        - state
+        - created_at
+      properties:
+        id:
+          type: string
+        instance_id:
+          type: string
+        node_id:
+          type: string
+        state:
+          type: string
+          enum:
+            - Pending
+            - Completed
+        created_at:
+          type: string
+    ProcessInstance:
+      type: object
+      required:
+        - id
+        - definition_key
+        - state
+        - variables
+      properties:
+        id:
+          type: string
+        definition_key:
+          type: string
+        business_key:
+          type: string
+        parent_instance_id:
+          type: string
+        state: {}
+        current_node:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+        variable_types:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional transport type hints; absent from legacy/native-only snapshots.
+        started_at:
+          type: string
+        completed_at:
+          type: string
+      description: Lifecycle state. Terminal states are `Completed`, `CompletedWithError`, and `Terminated`. Waiting variants carry additional payloads in the JSON object form.
+    ProcessTimersResponse:
+      type: object
+      required:
+        - triggered
+      properties:
+        triggered:
+          type: integer
+          format: int32
+    StartLatestRequest:
+      type: object
+      required:
+        - bpmn_id
+      properties:
+        bpmn_id:
+          type: string
+        business_key:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    StartRequest:
+      type: object
+      required:
+        - definition_key
+      properties:
+        definition_key:
+          type: string
+        business_key:
+          type: string
+        variables:
+          type: object
+          additionalProperties: {}
+    StartResponse:
+      type: object
+      required:
+        - instance_id
+      properties:
+        instance_id:
+          type: string
+    StorageInfo:
+      type: object
+      required:
+        - host
+        - port
+        - messages
+        - bytes
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+          format: int32
+        messages:
+          type: integer
+          format: int32
+        bytes:
+          type: integer
+          format: int64
+    TopicRequest:
+      type: object
+      required:
+        - topicName
+        - lockDuration
+      properties:
+        topicName:
+          type: string
+        lockDuration:
+          type: integer
+          format: int64
+          description: Lock duration in milliseconds (Camunda-compatible). Server converts to seconds for the engine.
+    UpdateVariablesRequest:
+      type: object
+      required:
+        - variables
+      properties:
+        variables:
+          type: object
+          additionalProperties: {}
+    UploadFileRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+        - file
+    VariableValue:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+        value: {}
+        filename:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        content_type:
+          type: string
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: Bearer
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+servers:
+  - url: http://localhost:8081
+    description: Local Engine Server
+    variables: {}

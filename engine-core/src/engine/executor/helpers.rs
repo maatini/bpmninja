@@ -1,6 +1,5 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::condition::evaluate_condition;
 use crate::domain::{BpmnElement, EngineError, EngineResult, ProcessDefinition};
 
 pub(crate) fn resolve_next_target(
@@ -13,7 +12,7 @@ pub(crate) fn resolve_next_target(
         .find(|f| {
             f.condition
                 .as_ref()
-                .map(|c| evaluate_condition(c, variables))
+                .map(|c| def.evaluate_condition(c, variables))
                 .unwrap_or(true)
         })
         .map(|f| f.target.clone())

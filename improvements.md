@@ -48,6 +48,8 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 | C8 | Unsanitized Filename in `Content-Disposition` | `files.rs` | Medium |
 | C9 | Mutation-Badge 0.0% / kaputte Metrics | `docs/quality-badges.json` | Medium (Signal) |
 
+**Status 2026-10-12:** C1 (optionaler API-Key), C2, C3, C4, C5, C7, C8 und C9 sind behoben. Offen ist nur **C6** (Multi-Node, siehe S1 / Phase 4b F4).
+
 ### Details
 
 **C1 — Keine Auth:** Wer `:8081` erreicht, kann deployen, starten/stoppen/migraten, Tasks complete, Files uploaden, Tokens bewegen, Definitionen löschen, History/Logs/Metrics lesen. OIDC steht in der README als „Planned“.
@@ -111,19 +113,19 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 4. ~~**Q5** Getrackte Logs entfernen / gitignore~~ ✅  
 5. ~~**Q6** Versions-Docs syncen~~ ✅  
 
-### Phase 1 — Production Minimum Bar (1–2 Wochen)
+### Phase 1 — Production Minimum Bar (1–2 Wochen) — ✅ erledigt
 
-1. **M1** API-Authentifizierung (API-Keys als v1 OK; OIDC danach) — offen  
-2. **Q4** CORS per Env absichern — offen  
+1. ~~**M1** API-Authentifizierung (API-Key v1: `BPMNINJA_API_KEY`, Bearer oder `X-API-Key`)~~ ✅ (OIDC → S5)  
+2. ~~**Q4** CORS per Env absichern (`CORS_ORIGINS`-Allowlist, nie stilles `Any`)~~ ✅  
 3. ~~**M3** Bounded Retry + Metrics~~ ✅  
 4. ~~**M2** NATS-Integrationstests (Restore/Retry)~~ ✅  
 5. ~~**Q7** Mutation-Metrics-Pipeline reparieren~~ ✅ (Parser fix; Badge aktualisiert sich beim nächsten Mutation-CI-Lauf)
 
 ### Phase 2 — Scale & Maintainability (2–6 Wochen)
 
-1. **M4** Indexierung Timer/Topics  
-2. **M5** Mega-Tests splitten  
-3. **M6** Supply-Chain-CI  
+1. ~~**M4** Indexierung Timer/Topics (`TopicIndex`, `TimerDueIndex`)~~ ✅  
+2. ~~**M5** Mega-Tests splitten (`engine-core/src/engine/tests/`, 19 Dateien)~~ ✅  
+3. ~~**M6** Supply-Chain-CI (`cargo deny check` in `ci.yml`)~~ ✅  
 4. Optional: OpenTelemetry-Traces  
 5. `agent-orchestrator`: ausbauen oder archivieren  
 
@@ -133,6 +135,194 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 2. **S2 / S3** Persistence-Modell, falls Multi-Node es erzwingt  
 3. **S5** RBAC  
 4. Batch-Operationen (bereits auf Roadmap)  
+
+### Phase 4 — Performance & Cloud-native (Vorschlag, 2026-10-12)
+
+> Status: **Vorschlag**, noch nicht beauftragt. Jede Teilphase braucht vor der Umsetzung einen eigenen Plan + `GO`.
+> Grundsatz: Der In-Memory-Kern ist bereits schnell — die Latenz entsteht fast vollständig durch **I/O-Roundtrips pro Schritt**. Deshalb zuerst messen (4a/P0), dann Roundtrips eliminieren, dann verteilen.
+
+#### 4a — Engine-Performance (Hot Path)
+
+Befunde aus dem Code (Stand v0.7.24):
+
+| # | Maßnahme | Impact | Effort | Risiko | Befund / Warum |
+|---|----------|--------|--------|--------|----------------|
+| P0 (✅ teilweise) | Messbasis: Criterion-Benches erweitern (Gateways, Scripts, Timer, mit NATS) + HTTP-Lasttest + Flamegraph; Regressions-Gate in CI — **erledigt:** Benches (`engine_bench.rs`, `persistence-nats/benches/nats_bench.rs`), HTTP-/NATS-Lasttest (`engine-server/benchmarks/http_load.py`) mit Ergebnis-/Persistenzprüfung, p95/p99 und RSS; Regressionstests des Messwerkzeugs in CI. **Offen:** Flamegraph und Performance-Regressions-Gate (die Werkzeugtests sind kein Performance-Gate) | High | Low | None | Ohne Baseline sind „schneller“-Ziele nicht überprüfbar. |
+| P1 ✅ | NATS-Bucket-Handles beim Connect cachen | High | Low | Low | `trait_impl.rs` rief vor **jeder** Operation `js.get_key_value(..)` / `get_object_store(..)` auf (24 Stellen + `list_kv_entries`) — ein zusätzlicher JetStream-API-Roundtrip pro Schreib-/Lesezugriff. |
+| P2 ✅ | History pro Batch statt pro Schritt schreiben (gesammelt am Ende von `run_instance_batch` bzw. asynchron über bounded Channel) | High | Medium | Medium | `run_instance_batch` klont pro Schritt alle Variablen (`DiffSnapshot::from_instance`) und wartet pro Schritt auf `append_history_entry` (JetStream-Publish inkl. Inline-Retry). |
+| P3 ✅ | `persist_instance`: Lock vor dem Netzwerk-Await freigeben (Snapshot + gestreifte `PersistLocks`); Größenlimit bei einmaliger Serialisierung. Doppelte Serialisierung im NATS-Hot-Path ebenfalls behoben (P8-Vorbereitung: `save_instance_json`) | High | Low | Low | Serialisiert zweimal (Größenprüfung + Save) und hält den Instanz-Write-Lock während `save_instance` inkl. Retry-Backoff. |
+| P4 ✅ | Long-Polling auf `tokio::sync::Notify` umstellen (umgesetzt: ein globaler Notify; pro Topic = Folgeschritt bei vielen Workern) | High | Low | Low | `fetchAndLock` pollt in einer 500-ms-Sleep-Schleife (`server/tasks.rs`) → bis zu 500 ms Latenz pro Service-Task-Übergabe. |
+| P5 ✅ | Timer-Scheduler ereignisgesteuert: bis zum nächsten Fälligkeitszeitpunkt aus `TimerDueIndex` schlafen, bei neuem Timer per `Notify` wecken | Medium | Low | Low | Fester 1-s-Takt (`TIMER_INTERVAL_MS`) → bis zu 1 s Verspätung, CPU-Wakeups im Leerlauf. |
+| P6 ✅ | Rhai: eine `Engine` wiederverwenden (Feature `sync` ist aktiv) + kompilierte Scripts cachen (umgesetzt: `ScriptRunner`, Cache nach Script-Text beim ersten Lauf statt beim Deploy) | Medium | Medium | Low | `execute_script_safe` baut pro Aufruf eine neue `rhai::Engine` und kompiliert das Script jedes Mal neu. |
+| P7 ✅ | Bedingungen beim Deploy vorparsen (Sequence Flows + Complex-Join; Cache beim Restore neu aufgebaut) | Low–Med | Low | Low | Ausdrücke werden beim Registrieren der Definition geparst; die Auswertung verwendet aktuelle Variablen. Der Cache wird nicht persistiert. |
+| P8 ✅ (opt-in) | Kompaktes Persistenzformat (z. B. `postcard`/`rmp-serde`) hinter Feature-Flag; `audit_log` aus dem Instanz-Dokument lösen; Delta- statt Voll-Dokument-Writes | Medium | High | Medium | **Erledigt:** JSON-Snapshot einmal serialisieren, Größenlimit während der Serialisierung prüfen, Payload für NATS und Inline-Retries wiederverwenden; additive Trait-Methode mit Default für bestehende Backends. **Erledigt:** opt-in `compact-instances` (versioniertes MessagePack für aktive + archivierte Instanzen), JSON/MessagePack-Mischbetrieb und Restore ohne Feature, JSON-Monitoring, Größenlimit inkl. Envelope. **Erledigt:** opt-in `separate-audit-log` mit unveränderlichen SHA-256-Audit-Snapshots, referenzierter Wiederherstellung, idempotenten Writes und Archiv-Erhalt bei aktiver Löschung. **Erledigt:** `prune_instance_audits(id, dry_run)` für nicht referenzierte Audit-Versionen, mit aktiver + archivierter Referenzprüfung, Cache-Invalidierung und prozessweitem Wartungs-Gate (2026-10-13). **Erledigt:** opt-in `delta-instances`: unveränderliche Checkpoints + Byte-Deltas, CAS-Head-Updates, maximal 8 Deltas, Restart-/Rollback-Reader und begrenzter Writer-Cache. **Nacharbeit:** Online-GC für Journal-/Audit-Versionen erst mit verteiltem Ownership/Fencing; Workload-Benchmarks vor Produktiv-Aktivierung. Jeder Save schreibt weiterhin das komplette Instanz-Dokument; JSON bleibt Default (900 KiB Limit). |
+| P9 (✅ lokale Messbasis) | Globaler Allocator `mimalloc` im Server; `lto = "fat"` + PGO für Release evaluieren | Low–Med | Low | Low | Allokationslastiger Hot Path (Clones, JSON). **Erledigt:** opt-in `allocator-mimalloc` nur im Server-Binary, Engine-Benchmark, separates `release-fat`-Profil und [PGO-/Vergleichsanleitung samt HTTP-Messungen](docs/server-performance.md). **Engine-only:** Windows x64, 100 Service-Tasks, Release/thin-LTO: System 5,83 ms → mimalloc 1,90 ms (20 Samples, −68 %). **HTTP/NATS (2026-10-13):** je zwei Läufe à 1.000 Script-/Start-/Lese-Transaktionen für System/thin, mimalloc/thin und mimalloc/fat, alle fehlerfrei; p95/p99, Server-Working-Set, Binary-Größe und Builddauer dokumentiert. Hohe Streuung, kein belastbarer Produktionsvorteil. **Offen:** längere Messungen auf Zielhardware mit Worker-/Timer-Last und PGO (lokale LLVM-Werkzeuge fehlen); keine Default-Änderung ohne Produktions-Messnachweis. |
+| P10 ✅ | Feingranulare SSE-Events (Instanz-/Task-ID + Delta) statt „alles neu laden“ | Medium | Medium | Low | **Erledigt (2026-10-13):** Entity-IDs und kompakte Status-/Listen-Deltas, ohne Variablen/Token-Payloads; Tauri leitet vollständige SSE-Daten weiter. Instanzliste übernimmt bekannte Deltas direkt und lädt neue Instanzen einzeln; Detail-/Definitionsansichten filtern nach Entity. Aggregate bündeln Events in 150-ms-Fenstern. Resync bei Reconnect/ungültigem Payload/Broadcast-Verlust, alter Rückstand wird verworfen; Legacy-Events und Polling bleiben Fallback. [Event-Vertrag](docs/sse-events.md); Core-, SSE-, Tauri- und Frontend-Regressionstests. |
+
+**Messergebnis 4a-Quick-Wins (2026-10-12, Criterion, lokal Windows + lokaler NATS, Median vorher → nachher):**
+
+| Bench | Vorher | Nachher | Änderung |
+|---|---|---|---|
+| NATS `save_instance` | 496 µs | 203 µs | −60 % (P1) |
+| NATS `save_token` | 467 µs | 192 µs | −59 % (P1) |
+| Engine mit NATS: start → 5 Script-Tasks → end | 7.78 ms | 4.95 ms | −36 % (P1 + P3) |
+| NATS `append_history_entry` | 16.6 µs | 15.7 µs | keine signifikante Änderung (Publish wartet nicht auf Ack) |
+| In-Memory-Benches (linear, Gateways, Scripts, XOR) | — | — | −2 % bis −19 %; der In-Memory-Pfad wurde kaum verändert, daher größtenteils Laufzeit-Varianz |
+
+P4/P5 verbessern **Latenz**, nicht Durchsatz: Service-Task-Übergabe vorher bis 500 ms, jetzt sofort (Notify); Timer vorher bis 1 s verspätet, jetzt zum Fälligkeitszeitpunkt (durch Tests belegt, nicht durch Benches).
+
+Nebenbefund: `append_history_entry` wartet nicht auf den JetStream-Ack — History-Einträge können bei NATS-Problemen unbemerkt verloren gehen. Gehört zu P2/F3.
+
+**Messergebnis P2 + P6 + Korrekturen (2026-10-12, Median gegen Baseline `before2`):**
+
+| Bench | Vorher | Nachher | Änderung |
+|---|---|---|---|
+| Script chain (10 Script-Tasks, in-memory) | 6,54 ms | 0,46 ms | −93 % (P6) |
+| Parallel fork/join, 16 Script-Zweige | 10,3 ms | 0,81 ms | −92 % (P6) |
+| Engine mit NATS: start → 5 Script-Tasks → end | 4,95 ms | 2,11 ms | −57 % (P2 + P6) |
+| Linear 100 Service-Tasks (in-memory) | 10,1 ms | 6,38 ms | −37 % (P2: kein Snapshot ohne Persistenz) |
+| XOR routing | 16,6 µs | 12,4 µs | −25 % |
+| NATS `append_history_entry` (einzeln) | 15,9 µs | 170 µs | **langsamer, gewollt:** wartet jetzt auf den JetStream-Ack. Im Engine-Pfad fällt das einmal pro Batch an, nicht pro Schritt |
+
+Korrekturen in diesem Schritt: History-Publish wartet auf den JetStream-Ack und setzt `Nats-Msg-Id` (Retry ohne Duplikate); `fail_service_task`/`retry_incident` halten keinen DashMap-Guard mehr über `.await`. Die Rhai-Engine wird erst beim ersten Script gebaut (sonst kostet jeder `WorkflowEngine::new()` ~0,6 ms). Die engine-core-Unit-Tests laufen dadurch in ~3 s statt ~38 s.
+
+Neu bekannt (nicht behoben): `run_end_scripts` hält den Instanz-Write-Lock während Listener-Scripts laufen.
+
+#### 4b — Fundament für Verteilung (Voraussetzung für 4c–4e)
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| F1 | `EventBus`-Port in `engine-core/src/port/` (Domain-Events publizieren, Commands konsumieren) — hexagonal wie `WorkflowPersistence` | High | Medium | Low | Heute ist NATS nur Speicher; es gibt keine Abstraktion für Messaging. Alle Broker-Integrationen hängen daran. |
+| F2 | CloudEvents 1.0 als Event-Format (JSON + Binary Mode) | Medium | Low | Low | Interop mit Knative Eventing, Dapr, Kafka-Ökosystem. |
+| F3 | Transactional Outbox: Zustandsänderung + Event atomar | High | Medium | Medium | Ohne Outbox gehen Events bei Crash zwischen Save und Publish verloren (vgl. S3). |
+| F4 | Instanz-Ownership per Lease (NATS-KV-CAS mit Revision/TTL) oder Partitionierung nach Instanz-ID | High | High | High | = S1 (Multi-Node). Ohne Ownership kein horizontales Skalieren, kein Serverless. |
+| F5 | Lazy Hydration: Instanzen bei Bedarf laden statt „Restore all“ beim Start | High | Medium | Medium | `StartupCoordinator` lädt alles in RAM → lange Kaltstarts, Speicher wächst mit Instanzzahl. |
+| F6 | OpenTelemetry-Tracing mit W3C-`traceparent`-Propagation über REST, NATS, Kafka | Medium | Medium | Low | Steht bereits in Phase 2; Pflicht für Mesh-/Microservice-Betrieb. |
+
+#### 4c — Native Messaging: NATS, Redpanda, Kafka
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| N1 | External Tasks nativ über NATS JetStream: Work-Queue-Stream pro Topic (`bpmn.tasks.{topic}`), Pull-Consumer = Worker. Mapping: `AckWait` = Lock-Dauer, `ack` = complete, `nak`/`term` = failure, `in_progress` = extendLock | High | Medium | Medium | Push-nativ, ohne HTTP-Polling; Lastverteilung und Redelivery übernimmt JetStream. REST bleibt parallel bestehen. |
+| N2 | Message-Korrelation über Subjects (`bpmn.messages.{name}`) + Request/Reply-API als NATS-Micro-Service | Medium | Medium | Low | Latenzarmer Service-zu-Service-Zugang ohne HTTP. |
+| N3 | Neues Crate `eventbus-kafka`: Kafka-API-Adapter, deckt Kafka **und** Redpanda ab (Redpanda ist Kafka-API-kompatibel). Topics: `bpmninja.events`, `bpmninja.tasks.{topic}`, `bpmninja.commands`; Partitionierung nach Instanz-ID für Reihenfolge | High | High | Medium | Bibliothekswahl entscheiden: `rdkafka` (ausgereift, C-Abhängigkeit librdkafka — Windows/`deny.toml` prüfen) vs. `rskafka` (pure Rust, weniger Features). |
+| N4 | Deklarative Bindings: Message-Start-/Catch-Events direkt aus Kafka-/NATS-Topics (BPMN-Extension-Attribut) | Medium | Medium | Low | Prozesse ohne Glue-Code an Event-Streams hängen. |
+| N5 | NATS-Transport im TypeScript-External-Task-Client | Medium | Medium | Low | Worker profitieren direkt von N1. |
+| N6 | Transport-Benchmarks (REST vs. NATS vs. Kafka) im P0-Harness | Medium | Low | None | Belegt die Geschwindigkeitsaussagen. |
+
+#### 4d — Microservices & Dapr
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| D1 | `persistence-dapr`: `WorkflowPersistence` über die Dapr State API (gRPC zum Sidecar) | High | High | Medium | Öffnet ~30 State Stores (Redis, Postgres, Cosmos DB …). Achtung: Prefix-Scans/Queries nicht in jedem Store → Index-Keys oder Dapr Query API nötig. |
+| D2 | Dapr Pub/Sub als `EventBus`-Adapter (F1) | High | Low | Low | Kafka/NATS/Redpanda/Service Bus per Component-YAML statt Code. |
+| D3 | Service-Task-Connector „Dapr Service Invocation“ (`appId`/`method` als Extension-Attribut) inkl. Dapr-Resiliency-Policies | High | Medium | Low | Direkter Aufruf von Microservices als Alternative zu Fetch-and-Lock. |
+| D4 | Dapr Bindings als Trigger für Start-Events (Cron, Kafka, HTTP …) | Medium | Medium | Low | Einheitliche Trigger-Schicht. |
+| D5 | Spike: Prozessinstanz als **Dapr Actor** (turn-based Concurrency, Placement über Nodes, Reminders für Timer) | High | High | High | Könnte F4/S1 (Ownership, Multi-Node) und P5 (Timer) gemeinsam lösen. Erst als Spike mit Benchmark bewerten. |
+| D6 | Rollen statt Zerschlagung: ein Binary, per `ROLE=api,executor,timer,history` deploybar (Modular Monolith); History/Query als CQRS-Read-Model | Medium | Medium | Medium | Echte Zerlegung in viele Services kostet Netzwerk-Hops und widerspricht dem Performance-Ziel; Rollen erlauben trotzdem getrenntes Skalieren. |
+| D7 | gRPC-API (tonic) parallel zu REST | Medium | Medium | Low | Effizienter für Service-zu-Service und Mesh-L7-Routing. |
+| D8 | Referenz-Setup: Dapr-Components, docker-compose und Kubernetes-Manifeste, Beispiel-Worker | Medium | Low | None | Developer Experience. |
+
+#### 4e — Serverless & Service Mesh
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| C1 | Kaltstart optimieren: Startzeit messen, musl-/distroless-Image, Lazy Hydration (F5) | High | Medium | Low | Voraussetzung für Scale-to-Zero. |
+| C2 | KEDA-Scaler auf JetStream-Consumer-Lag bzw. Kafka-Lag für Executor-Pods (Scale-to-Zero) | High | Low | Low | Ereignisgetriebenes Skalieren; setzt F4 + N1/N3 voraus. |
+| C3 | Knative-Serving-Deployment für die API-Rolle | Medium | Low | Medium | Setzt zustandslose API-Rolle (D6) voraus. |
+| C4 | Dauerhafte Timer außerhalb des Prozesses (dedizierte Timer-Rolle, Dapr Reminders oder NATS-Scheduling evaluieren) | High | Medium | Medium | Bei Scale-to-Zero darf kein Timer an einem laufenden Pod hängen. |
+| C5 | FaaS-Connectoren: Service Tasks rufen AWS Lambda / Cloud Run / Knative Functions / OpenFaaS per HTTP + CloudEvents auf | Medium | Medium | Low | Serverless-Worker ohne eigenen Poll-Loop. |
+| C6 | Mesh-Readiness: Helm-Chart, Graceful Drain für Sidecars, mTLS über Istio/Linkerd (optional SPIFFE), OTel (F6), HPA über Prometheus-Metriken | Medium | Medium | Low | Health/Ready existieren bereits; es fehlen Deployment-Artefakte. |
+| C7 | Research: Scripts/Connectoren als WASM-Komponenten (wasmtime); `engine-core` für Edge (Spin/wasmCloud) | Low–Med | High | High | Erst nach 4a–4c; Tokio-Abhängigkeit im Kern ist das Hauptproblem. |
+
+#### 4f — BPMN-2.0.2-Vollabdeckung (Vorschlag, 2026-10-12)
+
+> Ziel: alle Elemente der BPMN-2.0.2-Spezifikation (OMG) — Flow Objects, Connecting Objects, Swimlanes, Artifacts, Data — werden **geparst**, und alle Elemente mit Ausführungssemantik werden **ausgeführt**. Rein visuelle Elemente (Lanes, Groups, Text Annotations, Associations) werden akzeptiert, beim Re-Export erhalten und im Modeler angezeigt, ändern aber den Ablauf nicht (so verlangt es auch die Spezifikation).
+> Hinweis: Die oft zitierte Zahl „116 Elemente“ ließ sich nicht belastbar gegen die Spezifikation prüfen; maßgeblich ist die Element-Matrix unten, abgeleitet aus dem BPMN-2.0.2-Metamodell und dem aktuellen Parser (`bpmn-parser/src/models.rs`, `parser.rs`).
+
+**Ist-Stand (v0.7.24):** 29 ausführbare `BpmnElement`-Varianten (Start/End inkl. Timer, Message, Error, Escalation, Compensation, Terminate; User/Service/Script/Send-Task, Receive/Manual/BusinessRule gemappt; XOR/AND/OR/Event-based/Complex-Gateway; Timer-/Message-Catch; Boundary Timer/Message/Error/Escalation/Compensation; Call Activity; Embedded Sub-Process (geflattet); Event-Sub-Process für Timer/Message/Error). **Fehlend:** Signal-, Conditional-, Link-, Cancel-, Multiple-/Parallel-Multiple-Events; Transaction- und Ad-hoc-Sub-Process; Multi-Instance (wird abgelehnt) und Standard-Loop; Data Inputs/Outputs, Data Associations, Properties; mehrere Pools mit Message Flows; Laufzeit-Scopes für Sub-Prozesse (Boundary-Events auf Sub-Prozessen wirken wegen Flattening nicht spezifikationsgemäß).
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| X0 (✅ teilweise) | Element-Matrix + Konformitäts-Testsuite | High | Medium | None | Jede BPMN-2.0.2-Elementart mit Status (ausgeführt / akzeptiert / abgelehnt) als Tabelle in Knowledge Base + README; Parse-Tests gegen die BPMN-MIWG-Referenzmodelle (Model Interchange Working Group); fehlende Elemente müssen beim Deploy **klar abgelehnt** statt still ignoriert werden. **Erledigt:** [Element-Matrix](docs/knowledge-base/modules/bpmn-parser/element-matrix.md) und Deploy-Ablehnung (`reject_unsupported_elements`). **Offen:** MIWG-Referenzmodelle als Parse-Tests, Matrix-Verweis im README. |
+| X1 ✅ (2026-10-14) | Signal-Events: Start, Intermediate Catch/Throw, Boundary (unterbrechend/nicht), End; Broadcast an alle wartenden Instanzen; `POST /api/signal` | High | Medium | Medium | Häufig genutzt; heute nicht parsebar. **Umgesetzt:** neue `BpmnElement`-Varianten, `CatchKind` auf `PendingMessageCatch` (abwärtskompatibel), `broadcast_signal` (alle Catches/Boundaries + neueste Definition mit Signal-Start), Throw/End über `SignalOutbox` nach dem Batch, Event-Gateway mit Signal-Zielen, `POST /api/signal` + OpenAPI, Desktop-Übersicht zeigt Signal-Wartezustände. Parser-, Engine- (inkl. Restart) und REST-E2E-Tests. **Offen:** Signal-Start im Event-Sub-Prozess (X9), Signal-Start/-End innerhalb eingebetteter Sub-Prozesse (abgelehnt), Variablen-Weitergabe beim Werfen, Senden-Dialog im Modeler (X17). |
+| X2 (✅ X9b/X2a/X2b/X2c, teilweise) | Conditional Events: Start, Intermediate, Boundary, Event-Sub-Process; Neubewertung bei Variablenänderung | Medium | High | Medium | Braucht einen gemeinsamen Hook für erfolgreiche Prozessvariablen-Commits. **2026-10-15:** [Plan X9b/X2](docs/x2-conditional-events-plan.md) nach GO umgesetzt: bedingte Event-Sub-Prozess-Starts mit persistierten False→True-Latches, erfolgreichem Variablen-Commit-Hook, Unterbrechung, Wiederanlauf und Modeler-Feld. Abnahme: 358 Core-, 83 Parser-, 17 NATS-, 29 Server-, 4 REST- und 7 Browser-Tests; Build/Lint/Fmt/Clippy erfolgreich. **X2a nach GO umgesetzt:** [Intermediate Conditional Catches](docs/x2a-intermediate-conditional-plan.md) mit persistierter Occurrence-ID, atomarer Event-Gateway-Gewinnerwahl, Wiederanlauf und Modeler. Abnahme: 374 Core-, 84 Parser-, 18 NATS-, 29 Server-, 6 REST- und 8 Browser-Tests sowie 9 Frontend-Event-Tests; Build/Lint/Fmt/Clippy und TypeSpec erfolgreich. **X2b nach GO am 2026-10-16 abgeschlossen:** [Conditional-Boundary-Abnahme](docs/x2b-boundary-conditional-plan.md): 396 Core-, 86 Parser-, 19 NATS-, 29 Server-, 7 REST-, 9 Browser- und 9 Frontend-Event-Tests; Build/Lint/Fmt/Clippy/TypeSpec erfolgreich. **X2c nach Freigabe abgeschlossen (2026-10-16):** [Explizite Top-Level-Conditional-Starts](docs/x2c-top-level-conditional-starts-plan.md) mit dauerhaften Request-Quittungen, True-/False-Retries, Versionsbindung und Startup-Recovery. Abnahme: 636 Workspace-Tests einschließlich 20 realer NATS-Tests und 8 X2/X9-REST-Tests; zusätzlicher NATS-Recoverytest mit allen Persistenzfeatures, 10 Browser- und 9 Frontend-Eventtests; Build/Lint/Fmt/striktes Clippy/TypeSpec erfolgreich. Boundary an Call-/Loop-/Sub-Prozess-Aktivitäten und verschachtelte Runtime-Scopes bleiben spätere Inkremente. |
+| X3 ✅ (2026-10-13) | Link Events (Intermediate Throw/Catch, „Sprungmarke“) | Low | Low | Low | Beim Parsen in direkte Sequence Flows auflösen. **Umgesetzt:** `resolve_link_events` pro Scope (Prozess / Sub-Prozess): Flows in einen Link-Throw führen direkt zum Nachfolger des gleichnamigen Link-Catch; Bedingungen und XOR-Defaults bleiben erhalten, Ketten werden aufgelöst. Abgelehnt: fehlender/doppelter Name, Throw ohne Catch, Throw mit ausgehendem Flow, Catch ohne genau einen ausgehenden Flow, Link-Zyklus ohne Aktivität. Parser- und REST-E2E-Tests; der V1-Model-Checker versteht Links nativ. Link-Knoten erscheinen nicht im Live-Tracking (kein Laufzeitknoten). |
+| X4 ✅ (2026-10-14, ohne Sub-Prozess) | Multi-Instance parallel + sequenziell (`loopCardinality`, `collection`/`elementVariable`, `completionCondition`) für Tasks, Sub-Process, Call Activity | High | High | Medium | `NextAction::MultiInstanceFork/Next` existieren bereits, werden aber nie erzeugt; heute Deploy-Fehler. **Umgesetzt:** `ProcessDefinition.loops` + Token-Marker, Entry-/Exit-Hook in `execute_step` (`engine/loops.rs`), Fortschritt persistiert in `multi_instance_state`; parallel/sequenziell, Kardinalität oder Collection, `completionCondition` (bricht Rest ab), `outputCollection`/`outputElement`, lokale Loop-Variablen; unterbrechende Boundaries beenden alle Instanzen. Tests: Parser, Engine (User-/Service-/Script-Task, Call Activity, Boundary, Restart), REST-E2E. **Offen:** Sub-Prozesse (X6), nicht-unterbrechende Boundaries an Loop-Aktivitäten (abgelehnt), Abbruch von Call-Activity-Kindprozessen beim vorzeitigen Ende. |
+| X5 ✅ (2026-10-14) | Standard-Loop (`standardLoopCharacteristics`: `loopCondition`, `testBefore`, `loopMaximum`) | Medium | Medium | Low | Wiederholung ohne explizite Gateway-Schleife. **Umgesetzt** mit X4 (gleicher Mechanismus); Sub-Prozesse wie X4 offen. |
+| X6 | Laufzeit-Scopes für Sub-Prozesse (Anpassung ADR-003) | High | High | High | Voraussetzung für spezifikationsgemäße Boundary-Events auf Sub-Prozessen, Transaction/Cancel und Kompensation pro Scope. Flattening bleibt als Optimierung für scope-lose Sub-Prozesse. |
+| X7 | Transaction-Sub-Process + Cancel End/Boundary Event (Cancel löst Kompensation aus) | Medium | High | Medium | Setzt X6 voraus; ergänzt G1 (Saga). |
+| X8 | Ad-hoc-Sub-Process (Aktivitäten in beliebiger Reihenfolge, `completionCondition`, `ordering`) | Low–Med | Medium | Medium | Setzt X6 voraus. |
+| X9 (X9a/X9b ✅, teilweise) | Event-Sub-Process vollständig: Error/Escalation/Compensation/Signal/Conditional-Start, unterbrechend und nicht unterbrechend | Medium | Medium | Medium | **2026-10-15:** Parser/Laufzeit für Timer/Message/Signal/Error/Escalation auf Prozessebene; Modeler-Editoren, 6 Browser- und 2 REST-Tests, JetStream-Reconnect inkl. Versionsbindung. Klon-Redeploy erhält bei Key-Kollision einen neuen Key. [Plan und Abnahme](docs/x9-event-subprocess-plan.md). Handler-Lifecycle-History/SSE und JetStream-Crashpunkt-Recovery bei Unterbrechung umgesetzt. Container-Start/End-Listener inkl. atomarer Variablenänderungen, Reihenfolge und Wiederanlauf umgesetzt. **X9a/X9b abgeschlossen; X9 bleibt teilweise:** Conditional-Starts auf Prozessebene mit persistierten Latches und Modeler umgesetzt ([X9b-Abnahme](docs/x2-conditional-events-plan.md)); verschachtelte Scopes/Compensation → X9c/X6/G1. |
+| X10 | Multiple / Parallel-Multiple Events (mehrere Event-Definitionen an einem Event) | Low | Medium | Low | Selten, aber Teil der Spezifikation. |
+| X11 ✅ (Teilumfang, 2026-10-14) | Daten: `dataObject`/`property` als Prozessvariablen mit Defaults, Data Input/Output Associations, `ioSpecification`, Camunda `inputOutput`-Mappings für Tasks und Call Activities | High | Medium | Medium | **Implementiert (2026-10-14, nach GO):** explizite JSON-Defaults, lokale Inputs je Aktivierung/Loop-Token, atomare Outputs vor End-Listenern/Flow-Bedingungen, Camunda Listen/Maps und `in`/`out`, Standard-Referenzauflösung; Retry-/Restart-State im Token, fehlgeschlagene Completion bleibt retrybar; Worker-Fassade nutzt effektive Task-Variablen; Modeler-Editoren und Parser-/Core-/REST-/NATS-/Browser-Tests. [Vertrag und Grenzen](docs/data-mappings.md). **Nicht unterstützt (Deploy-Fehler):** Mapping-Scripts/komplexe Ausdrücke, Assignments/Transformationen, IO-Collections und Sub-Prozess-Deklarationen (X6). |
+| X12 | Kollaboration: mehrere Pools (jeder ausführbare Prozess wird deployt), Message Flows zwischen Pools → engine-interne Zustellung | Medium | Medium | Medium | Heute wird nur der erste Prozess deployt. |
+| X13 (✅ teilweise) | Instanziierende Receive Task, Event-based Gateway mit `instantiate` und Typ `Parallel` | Low | Low | Low | Kleine Lücken im Gateway-/Task-Mapping. **Erledigt (2026-10-13):** instanziierende Receive Task wird beim Parsen zum `MessageStartEvent` (ohne eingehende Flows, nicht im Sub-Prozess); Parser- und REST-E2E-Test. **Offen:** instanziierender exklusiver Event-Gateway braucht mehrere Message-Starts pro Definition (engine-core: Validierung, `start_event()`, Start am passenden Knoten); paralleler Event-Gateway braucht zusätzlich Korrelationsschlüssel → eigene Design-Entscheidung. Beide werden weiterhin beim Deploy abgelehnt. |
+| X14 | Business Rule Task mit DMN-Entscheidungstabellen (eigener DMN-1.x-Evaluator mit FEEL-Teilmenge) | Medium | High | Medium | Hängt mit S4 (FEEL) zusammen; heute nur als Service Task. |
+| X15 ✅ (2026-10-14) | Swimlanes & Artefakte: Pools/Lanes, Groups, Text Annotations, Associations, Data Stores werden akzeptiert, beim Export erhalten, im Modeler angezeigt; optional Lane → Kandidatengruppe für User Tasks | Low–Med | Low | Low | Nicht ausführungsrelevant, darf aber nicht verloren gehen. **Befund/Umgesetzt:** Parser akzeptiert die Elemente bereits (X0), das Deploy-XML wird unverändert gespeichert und von `GET /api/definitions/{id}/xml` byteidentisch zurückgegeben, der bpmn-js-Modeler nutzt die Standard-Palette. Neu: REST-E2E-Test mit bpmn-js-Export (Pool, Lanes, Group/Category, Annotation, Association, Data Object/Store inkl. Data Associations, DI): Deploy, Ausführung, byteidentischer Export. **Verschoben:** Lane → Kandidatengruppe nach X16 (User Tasks haben noch keine Kandidatengruppen). |
+| X16 | User-Task-Details: `candidateUsers`/`candidateGroups`, Fälligkeit, Priorität, `formKey`; Claim/Unclaim-API | Medium | Medium | Low | Camunda-Kompatibilität für Task-Listen. |
+| X17 | Modeler (desktop-tauri): Properties-Panel für alle neuen Attribute; Playwright-Tests je Element | Medium | Medium | Low | Jede Engine-Erweiterung braucht die passende UI. |
+
+**Empfohlene Reihenfolge:** X0 (+ V1-Modellprüfung) → X3, X13, X15 (klein) → X1 Signal → X4 Multi-Instance + X5 Loop → ~~X11 Daten-Mappings~~ ✅ → X9 Event-Sub-Process → X2 Conditional → X12 Kollaboration → X6 Laufzeit-Scopes (ADR) → X7 Transaction/Cancel, X8 Ad-hoc → X10 → X14 DMN, X16 → X17 laufend parallel.
+
+**Abnahmekriterium je Element:** Parser-Test, Engine-Test (inkl. Persistenz-Roundtrip und Restart), E2E-Test über REST, Modeler-Unterstützung, Eintrag in der Element-Matrix.
+
+#### Bewertung externer Architekturvorschläge (2026-10-12)
+
+Quelle: eingebrachte Recherche (Rust-BPMN-Landschaft, Kafka/Redpanda-Saga-Log, WS-BPEL, AOT-Kompilierung nach C/FFI, Zeebe). Bewertet gegen die Messwerte aus 4a.
+
+**Kernbefund aus den Messungen:** Gateway-Routing im Speicher kostet ~14 µs pro Instanz (XOR), ein NATS-Roundtrip ~200 µs, ein Script-Task ~0,6 ms. Die Engine ist durch I/O und Script-Setup begrenzt, **nicht** durch das Interpretieren des Graphen. Optimierungen am Graph-Interpreter (bis hin zu nativem Code) können deshalb nur Mikrosekunden auf einem Millisekunden-Pfad sparen.
+
+| Vorschlag | Bewertung | Entscheidung |
+|-----------|-----------|--------------|
+| Kafka/Redpanda als append-only Event-/Saga-Log (Key = Instanz-ID, idempotenter Producer, `acks=all`) + materialisierte Sicht | Passt zu F1/F3/N3; Partitionierung nach Instanz-ID garantiert Reihenfolge je Instanz | **Übernehmen** als Ausprägung von N3: History/Domain-Events → Kafka/Redpanda; operativer Zustand bleibt in NATS KV (bzw. Q1) |
+| Kafka als *alleiniges* System of Record mit Replay (volles Event Sourcing des Kerns) | Großer Umbau des Persistenzmodells (= S3) | **Später/optional** — nur wenn Audit-Replay gefordert ist |
+| Saga-Kompensation (LIFO) | BPMNinja hat Compensation-Events mit LIFO bereits (`CompensationThrow/End`, `BoundaryCompensationEvent`) | **Ergänzen** statt neu bauen → G1 |
+| Externe Read-DB (PostgreSQL / ScyllaDB) | NATS KV kann nicht abfragen; History-/Archiv-Suche filtert heute im Speicher | **Postgres-Adapter vorschlagen** (Q1); Scylla erst bei nachgewiesenem Bedarf |
+| WS-BPEL-2.0-Unterstützung | Machbar über das bestehende Flattening: `sequence` → Flows, `flow` → Parallel-Gateway, `if` → XOR, `while` → XOR-Schleife, `pick` → Event-Gateway, `invoke` → Service Task, `scope`/`compensationHandler` → Compensation | **Entscheidung offen** — nur bei konkretem Bedarf (Legacy-SOAP-Landschaft) → B1 |
+| AOT: BPMN/BPEL → C-Quelltext → `.so`/`.dll`, Ausführung per FFI mit Raw-Pointern und pthreads | Spart Mikrosekunden auf einem I/O-gebundenen Pfad. `unsafe`-Code im Prozess hebelt die Rhai-Sandbox und die Crash-Sicherheit aus; ein Plugin-Absturz reißt den Knoten mit. Braucht eine C-Toolchain zur Deploy-Zeit (serverless-feindlich, plattformabhängige Artefakte). Die Beispiele enthalten Speicherlecks (`mem::forget`) und Datenrennen (parallele Threads mutieren denselben Kontext) | **Abgelehnt.** Stattdessen: vorkompilierte Scripts/Conditions (P6/P7), kompilierter In-Memory-Ausführungsplan (E2), WASM-Komponenten für schnellen *sandboxed* Fremdcode (C7), In-Process-Task-Handler in sicherem Rust (E1) |
+| Rayon-Pool für CPU-lastige Tasks | Nur relevant, wenn Tasks im Prozess laufen | Mit E1 umsetzen |
+| Camunda-7-External-Task-Worker / Camunda-8 (Zeebe) | Eine Camunda-7-kompatible REST-Fassade lässt vorhandene Camunda-7-Worker unverändert laufen | **Übernehmen** als K1; Zeebe-Bridge (K2) nur bei Bedarf |
+| Model-Checking (Ideen aus `rust_bpmn_analyzer`: Deadlocks, Livelocks, Safeness) | Unstrukturierte Inclusive-Joins können heute zur Laufzeit hängen (siehe engine-core Gotchas) | **Übernehmen** als Deploy-Validierung V1 |
+| Deterministisches Replay (Idee aus `bpm-engine`) | Teil von F3/S3 | Mit F3 |
+
+Neue Aufgaben aus der Bewertung:
+
+| # | Maßnahme | Impact | Effort | Risiko | Beschreibung / Warum |
+|---|----------|--------|--------|--------|----------------------|
+| E1 ✅ (2026-10-13) | In-Process-Task-Handler: `register_task_handler(topic, Arc<dyn TaskHandler>)` | High | Medium | Low | Service Tasks laufen direkt im Engine-Prozess ohne Fetch-and-Lock-Roundtrip — der sichere Weg zu „nativer“ Geschwindigkeit für eingebettete Nutzung. CPU-lastige Handler auf eigenem Pool (`spawn_blocking`/Rayon). **Umgesetzt:** `TaskHandler`/`TaskOutcome` + `spawn_task_handler_dispatcher` (`engine/task_handler.rs`): Dispatcher nutzt Fetch-and-Lock intern (Notify, kein HTTP) mit reservierter Worker-ID, damit Locks, Retries, Incidents, Error-Boundaries und Restart-Recovery unverändert gelten; Panik = Failure; max. 64 parallele Handler. Topics ohne Handler bleiben für externe Worker. **Offen:** direkte Ausführung im Executor ohne Pending-Task-Persistenz nur nach Benchmark-Nachweis; kein Rayon-Pool (`spawn_blocking` dokumentiert). |
+| E2 | Kompilierter Ausführungsplan beim Deploy (Knoten/Flows als Index-Arrays statt String-HashMap-Lookups pro Schritt) | Medium | High | Medium | Erst nach P6/P2 messen, ob der Interpreter überhaupt noch relevant ist. |
+| V1 ✅ (Modellprüfung) | Deploy-Validierung: unerreichbare Knoten, fehlendes End-Event, unstrukturierte Inclusive-Joins, offensichtliche Deadlock-Muster | High | Medium | Low | Fehler beim Deploy statt hängender Instanzen in Produktion. |
+| K1 ✅ (Worker-Fassade) | Camunda-7-Worker-REST (`fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`) | High | Medium | Low | Implementiert: CamelCase-DTOs, typisierte JSON-/Primitive-/Date-Variablen, Millisekunden-Locks und persistierter Retry-Delay; Core-/REST-/Persistenztests. [Vertrag und Grenzen](docs/camunda7-workers.md): keine Java-Serialisierung, lokalen Scopes oder zusätzlichen Camunda-APIs. |
+| K2 | Zeebe-/Camunda-8-Bridge | Low | High | Medium | Nur bei konkretem Bedarf. |
+| G1 | Saga-Erweiterung: Kompensation für External Tasks (`compensationTopic`), Tests für Kompensation über Call-Activities und parallele Zweige; **zuerst:** Compensation-Handler über die BPMN-Standard-**Association** auflösen (heute nur über einen nicht-standardkonformen Sequence Flow — mit bpmn-js modellierte Kompensation läuft ins Leere) | High | Medium | Medium | Baut auf vorhandener LIFO-Kompensation auf. |
+| B1 | WS-BPEL-2.0-Frontend (Parser → `ProcessDefinition`) | offen | High | Medium | Nur bei Bedarf; Abbildung siehe Tabelle oben. |
+| Q1 | `persistence-postgres` (operativer Zustand + Abfragen/Read-Model) | Medium | High | Medium | Echte Abfragen für History/Archiv statt In-Memory-Filter. |
+| J1 | JSON-Definitionsformat: `ProcessDefinition` als JSON deployen/exportieren (neben BPMN-XML) | Low–Med | Low | Low | Code-first-Definitionen ohne Modeler; Idee aus `bpmn-engine`. |
+| SIM1 | Prozess-Simulation (Pfadwahrscheinlichkeiten, Durchlaufzeiten) | Low | High | Low | Optional, z. B. auf Basis von `ebi_bpmn`. |
+
+**Rust-BPMN-Werkzeuge** (geprüft am 2026-10-12 auf crates.io/GitHub: Existenz, Lizenz, Aktivität):
+
+| Werkzeug | Befund | Einbindung in BPMNinja |
+|----------|--------|------------------------|
+| `rust_bpmn_analyzer` (GitHub, MIT, aktiv; Library-Crate `core`, nicht auf crates.io) | Echter Model-Checker: Safeness, Option to Complete, Proper Completion, No Dead Activities; Partial Order Reduction | **Als Abhängigkeit** (gepinnte Git-Revision, `deny.toml` `allow-git`) für V1: Prüfung beim Deploy in `spawn_blocking` mit Timeout, Modus per Env `MODEL_CHECK=off|warn|enforce` (Default `warn`) |
+| `bpmncheck` (crates.io, Apache-2.0, 1 Stern) | BPMN → Petri-Netz → Model-Checking | Nicht eingebunden: überschneidet sich mit `rust_bpmn_analyzer`, zusätzlicher XML-/Petri-Stack |
+| `snurr` (crates.io, MIT) | Prozess-Runner mit Closures als Task-Handlern, Thread-Parallelität | Kein Fremd-Runtime im Kern; Idee übernommen als **E1** (In-Process-Task-Handler) |
+| `bpm-engine` (crates.io, MIT) | Deterministisches Replay, Crash-Sicherheit, Saga | Ideen übernommen in **F3** (Outbox/Replay) und **G1** (Saga) |
+| `bpmn-engine` (crates.io 0.1.0, Apache-2.0) | Repository-Link liefert 404, kaum Nutzung | Nicht eingebunden; Idee „JSON-Definitionsformat“ als **J1**: Deploy/Export von `ProcessDefinition` als JSON neben BPMN-XML |
+| `ebi_bpmn` (crates.io, MIT OR Apache-2.0, aktiv) | Parser/Writer/Executor inkl. stochastischem BPMN | Nicht im Kern; Kandidat für **SIM1** (Prozess-Simulation mit Wahrscheinlichkeiten/Durchlaufzeiten) nach Bedarf |
+
+Offene Entscheidungen (Produktinhaber): Ziel-Größenordnung (gleichzeitig aktive Instanzen, Schritte/s), Bedarf an WS-BPEL, Request/Response- vs. choreografierte Microservices, Postgres als zusätzliches Backend.
+
+#### Empfohlene Reihenfolge
+
+1. **4a**: ~~P0 → P1, P3, P4, P5 (Quick Wins)~~ ✅ → ~~P2, P6~~ ✅ 2026-10-12 → ~~P7~~ ✅ 2026-10-12 → ~~P8~~ ✅ (opt-in) → P9–P10
+2. **Aus der Bewertung** (unabhängig, hoher Nutzen): ~~V1 (Deploy-Validierung), K1 (Camunda-7-Fassade), E1 (In-Process-Handler)~~ ✅; B1/K2/Q1 nach Entscheidung
+2b. **4f BPMN-Vollabdeckung**: X0 (✅ teilweise) + V1 ✅ → ~~X3~~ ✅, X13 (✅ teilweise), ~~X15~~ ✅ → ~~X1~~ ✅ → ~~X4 + X5~~ ✅ → ~~X11~~ ✅ → X9 → X2 → X12 → X6 → X7, X8 → X10 → X14, X16 (X17 laufend)
+3. **4b**: F1 + F2 → F6 → F3 → F4 + F5 (gemeinsam mit S1)
+4. **4c**: N1 → N3 → N2, N4–N6
+5. **4d**: D2 → D3 → D1 → D5-Spike → D6–D8
+6. **4e**: C1 → C4 → C2 → C3, C5, C6 → C7
 
 ---
 
@@ -162,11 +352,11 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 
 ### Performance-Hotspots
 
-1. `fetch_and_lock_service_tasks` — Full-Scan `pending_service_tasks`
-2. `process_timers` — Full-Scan aller Timer pro Intervall (default 1s)
-3. `list_instances` / Startup-Restore — große Mengen in Memory
+1. ~~`fetch_and_lock_service_tasks` — Full-Scan `pending_service_tasks`~~ ✅ `TopicIndex` (M4)
+2. ~~`process_timers` — Full-Scan aller Timer pro Intervall (default 1s)~~ ✅ `TimerDueIndex` (M4); fester Takt bleibt → P5
+3. `list_instances` / Startup-Restore — große Mengen in Memory (→ Phase 4b F5)
 4. History-Queries — Filter/Sort in Memory
-5. Unbounded Retry-Queue
+5. ~~Unbounded Retry-Queue~~ ✅ bounded (M3)
 6. SSE Broadcast Capacity 256 — langsame Clients verlieren Events (by design)
 
 ### Was das Audit nicht vollständig bewiesen hat
@@ -204,4 +394,4 @@ BPMNinja ist eine gut architekturierte, disziplinierte schlanke BPMN-2.0-Engine:
 
 ---
 
-**Nächster sinnvoller Schritt:** Rest von Phase 1 — **M1** API-Auth und **Q4** CORS-Allowlist; danach Phase 2 (Indexierung, Test-Split, Supply-Chain-CI).
+**Nächster sinnvoller Schritt:** Phase 0–1 sind abgeschlossen, Phase 2 bis auf OpenTelemetry und `agent-orchestrator`. Als Nächstes Phase 4a (Performance-Quick-Wins, siehe unten) — sie bringt den größten Hebel bei kleinem Risiko und liefert die Messbasis für alles Weitere.

@@ -35,6 +35,27 @@ pub(crate) async fn correlate_message(
     }))
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BroadcastSignalRequest {
+    pub signal_name: String,
+    pub variables: Option<HashMap<String, Value>>,
+}
+
+/// X1: resumes all waiting signal catches and starts matching signal-start processes.
+pub(crate) async fn broadcast_signal(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<BroadcastSignalRequest>,
+) -> Result<Json<CorrelateMessageResponse>, AppError> {
+    let affected = state
+        .engine
+        .broadcast_signal(&payload.signal_name, payload.variables.unwrap_or_default())
+        .await?;
+    Ok(Json(CorrelateMessageResponse {
+        affected_instances: affected.into_iter().map(|id| id.to_string()).collect(),
+    }))
+}
+
 /// Returns all currently pending message catch events.
 pub(crate) async fn get_pending_messages(
     State(state): State<Arc<AppState>>,

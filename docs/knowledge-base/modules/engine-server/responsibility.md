@@ -5,7 +5,7 @@
 1. **@tag:rest-api** — Complete REST API surface: 46 endpoints across definitions, instances, tasks, files, events, messages, history, monitoring, and health.
 2. **@tag:http-error-mapping** — `AppError` enum maps `EngineError` variants to HTTP status codes with JSON error bodies.
 3. **@tag:sse-endpoint** — `GET /api/events` endpoint bridging `EngineEvent` broadcast channel to Server-Sent Events for push-based UI updates.
-4. **@tag:timer-scheduler** — Background Tokio task that periodically calls `engine.process_timers()` (interval configurable via `TIMER_INTERVAL_MS`, default 1000ms).
+4. **@tag:timer-scheduler** — Background Tokio task that sleeps until the next timer is due (`engine.wait_for_timer_work`) and then calls `engine.process_timers()`; `TIMER_INTERVAL_MS` (default 1000ms) caps the idle wait.
 5. **@tag:startup-restore** — `StartupCoordinator` restores all state from NATS persistence on server start: definitions, instances, user tasks, service tasks, timers, message catches.
 6. **@tag:log-buffer** — Rolling in-memory log buffer (5,000 entries) captured via custom `tracing` layer, with optional NATS JetStream persistence (`ENGINE_LOGS` stream, 50,000 entries) and file fallback (`engine_logs.jsonl`).
 7. **@tag:prometheus-metrics** — `/metrics` endpoint exposing engine counters and gauges via `metrics-exporter-prometheus`.
@@ -14,6 +14,7 @@
 10. **@tag:request-size-limit** — JSON/XML body limit via `DefaultBodyLimit` = `MAX_XML_BYTES` (10 MiB, OpenAPI). Multipart instance files remain `MAX_UPLOAD_BYTES` (5 MiB).
 11. **@tag:api-auth** — Optional shared API key (`BPMNINJA_API_KEY`): Bearer or `X-API-Key`. Public: `GET /api/health`, `GET /api/ready`.
 12. **@tag:lock-duration-ms** — HTTP `lockDuration`/`newDuration` are milliseconds; converted to seconds at the engine-server boundary.
+13. **@tag:model-check** — Deploy-time model checking with `rust_bpmn_analyzer` (`MODEL_CHECK` off/warn/enforce).
 
 ## Invariants
 
@@ -50,3 +51,4 @@
 | `server/timers.rs` | `src/server/timers.rs` | List pending timers + manual timer processing |
 | `server/monitoring.rs` | `src/server/monitoring.rs` | Health, ready, info, monitoring stats, KV bucket browser |
 | `server/logs.rs` | `src/server/logs.rs` | Query log buffer with level/text filters |
+| `server/model_check.rs` | `src/server/model_check.rs` | Deploy-time model checking (analyzer, XML normalization, single-analysis guard) |

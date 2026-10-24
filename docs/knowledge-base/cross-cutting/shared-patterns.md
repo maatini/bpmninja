@@ -32,8 +32,8 @@ Reusable patterns and conventions that span multiple modules.
 **Used by:** `InstanceStore` in engine-core
 
 **How to follow:**
-- `InstanceStore` has one `RwLock<HashMap<Uuid, Arc<RwLock<ProcessInstance>>>>`
-- The outer lock protects the map (insert/remove)
+- `InstanceStore` wraps `Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>`
+- The DashMap shards the map (insert/remove/lookup without a global lock)
 - The inner lock protects the individual instance
 - Two concurrent operations on different instances don't block each other
 
@@ -84,7 +84,7 @@ Reusable patterns and conventions that span multiple modules.
 | `REQUIRE_NATS` | `true` | Fail-fast without NATS; readiness requires persistence |
 | `MAX_UPLOAD_BYTES` | `5242880` | Multipart file upload limit (bytes) |
 | `PORT` | `8081` | HTTP listen port |
-| `TIMER_INTERVAL_MS` | `1000` | Timer check interval |
+| `TIMER_INTERVAL_MS` | `1000` | Timer scheduler max idle wait |
 | `RUST_LOG` | `info` | Log level filter |
 | `LOG_FORMAT` | `text` | `text` or `json` |
 | `LOG_FILE` | `engine_logs.jsonl` | Log file path (or `off`) |
@@ -92,6 +92,11 @@ Reusable patterns and conventions that span multiple modules.
 | `RHAI_MAX_MEMORY_BYTES` | `2097152` | Rhai memory budget (derives collection caps) |
 | `RHAI_TIMEOUT_MS` | `1000` | Rhai timeout |
 | `PERSISTENCE_RETRY_QUEUE_CAPACITY` | `10000` | Bounded background retry queue size |
+| `MODEL_CHECK` | `warn` | Deploy-time model checking: `off` / `warn` / `enforce` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | Max wait for the model check during deploy |
+
+See [model-checking.md](model-checking.md) for the implemented checks and
+background on partial order reduction and related state-space techniques.
 
 ## Thin Client Pattern (Desktop App)
 

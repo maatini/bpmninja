@@ -7,18 +7,18 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 ## persistence-nats (Production)
 
 **Crate:** `persistence-nats/`  
-**Source:** 5 files: `lib.rs`, `client.rs`, `trait_impl.rs`, `models.rs`, `tests.rs` (~1,150 LoC)
+**Source:** 5 files: `lib.rs`, `client.rs`, `trait_impl.rs`, `models.rs`, `tests.rs` (~1,440 LoC)
 
 **Owns:**
 1. NATS JetStream connection lifecycle (`NatsPersistence::connect(url, stream_name)`)
-2. 9 KV buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `message_catches`, `tokens`, `bpmn_xml`, `history`
-3. Object Store: `instance_files` for binary file variables
-4. JetStream: `WORKFLOW_EVENTS` consumer for history event streaming
-5. `ENGINE_LOGS` stream for persistent log buffer backup
-6. Full `WorkflowPersistence` trait implementation (30+ methods)
+2. 8 KV buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `messages`, `tokens`, `history_instances`
+3. Object Stores: `bpmn_xml` (BPMN source), `instance_files` (binary file variables)
+4. Streams: `WORKFLOW_HISTORY` (history entries, subject `history.instance.{id}`), `WORKFLOW_EVENTS`
+5. `ENGINE_LOGS` stream for persistent log buffer backup (created by `engine-server`)
+6. Full `WorkflowPersistence` trait implementation (35 async methods)
 
 **Invariants:**
-- KV keys use prefixes: `def-{uuid}`, `inst-{uuid}`, `ut-{uuid}`, `st-{uuid}`, `tmr-{uuid}`, `msg-{uuid}`, `tok-{uuid}`, `xml-{uuid}`, `hist-{uuid}`
+- KV keys are the bare entity UUID; only tokens use `token-{instance_id}-{token_id}`
 - File object keys: `file:{instance_id}-{var_name}-{filename}`
 - All values are JSON-serialized (except file data, which is raw bytes)
 - Failed operations return `EngineError::PersistenceError(msg)`

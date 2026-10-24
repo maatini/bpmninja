@@ -68,8 +68,9 @@ sequenceDiagram
     participant Server as engine-server
     participant Engine as WorkflowEngine
 
-    Worker->>Server: POST /api/service-task/fetchAndLock { topics, workerId, maxTasks }
-    Server->>Engine: Fetch unlocked service tasks matching topics
+    Worker->>Server: POST /api/service-task/fetchAndLock { topics, workerId, maxTasks, asyncResponseTimeout }
+    Server->>Engine: fetch_and_lock_service_tasks_long_poll(...)
+    Note over Engine: Empty → wait on Notify (new / unlocked task)<br/>or 500 ms fallback tick (lock expiry)
     Engine-->>Server: List of matching PendingServiceTasks
     Server->>Engine: Lock each task (workerId, lockExpiration)
     Server-->>Worker: [{ id, topic, variables_snapshot, ... }]
@@ -103,9 +104,10 @@ sequenceDiagram
     participant Engine as WorkflowEngine
     participant NATS as persistence-nats
 
-    loop Every TIMER_INTERVAL_MS (default 1000ms)
+    loop Until next due time, new timer (Notify) or TIMER_INTERVAL_MS max idle
+        Scheduler->>Engine: wait_for_timer_work(max_idle)
         Scheduler->>Engine: process_timers()
-        Engine-->>Engine: Scan pending_timers DashMap for expired
+        Engine-->>Engine: Walk due IDs from TimerDueIndex
         alt Found expired timers
             Engine-->>Engine: Resume instance with stored token
             Engine->>NATS: Delete timer from KV
@@ -158,6 +160,7 @@ sequenceDiagram
         SC->>SC: restore_service_tasks(engine)
         SC->>SC: restore_timers(engine)
         SC->>SC: restore_message_catches(engine)
+        SC-->>Main: RestoreStats (counts)
     else Connect fail + REQUIRE_NATS=true
         Main-->>Main: exit (fail-fast)
     else Connect fail + REQUIRE_NATS=false
@@ -184,10 +187,8 @@ sequenceDiagram
         API-->>LB: 200 Ready
     end
 ```
-    SC-->>Main: RestoreStats (counts)
-```
 
-## 7. Persistence Retry (Fault-Tolerant)
+## 8. Persistence Retry (Fault-Tolerant)
 
 ```mermaid
 sequenceDiagram

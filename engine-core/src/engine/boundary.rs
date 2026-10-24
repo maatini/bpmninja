@@ -37,8 +37,26 @@ pub(crate) fn setup_boundary_events(
         {
             // Rust clippy warning fix
             if attached_to == attached_node_id {
-                bounds_msgs.push((node_id.clone(), message_name.clone()));
+                bounds_msgs.push((
+                    node_id.clone(),
+                    message_name.clone(),
+                    crate::runtime::CatchKind::Message,
+                ));
             }
+        }
+
+        if let BpmnElement::BoundarySignalEvent {
+            attached_to,
+            signal_name,
+            ..
+        } = node
+            && attached_to == attached_node_id
+        {
+            bounds_msgs.push((
+                node_id.clone(),
+                signal_name.clone(),
+                crate::runtime::CatchKind::Signal,
+            ));
         }
     }
 
@@ -57,13 +75,14 @@ pub(crate) fn setup_boundary_events(
         pending_timers.push(pending);
     }
 
-    for (node_id, message_name) in bounds_msgs {
+    for (node_id, message_name, kind) in bounds_msgs {
         let pending = crate::runtime::PendingMessageCatch {
             id: Uuid::new_v4(),
             instance_id,
             node_id,
             message_name,
             token_id: token.id,
+            kind,
         };
         pending_msgs.push(pending);
     }

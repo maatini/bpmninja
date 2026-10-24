@@ -16,7 +16,8 @@ impl DefinitionRegistry {
         Self::default()
     }
 
-    pub fn insert(&self, key: Uuid, def: Arc<ProcessDefinition>) {
+    pub fn insert(&self, key: Uuid, mut def: Arc<ProcessDefinition>) {
+        Arc::make_mut(&mut def).compile_conditions();
         self.inner.insert(key, def);
     }
 
