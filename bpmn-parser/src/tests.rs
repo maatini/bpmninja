@@ -1576,3 +1576,134 @@ fn flatten_subprocess_keeps_send_inclusive_event_and_catch() {
         BpmnElement::MessageCatchEvent { .. }
     ));
 }
+
+#[test]
+fn flatten_subprocess_start_event_is_pass_through() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <scriptTask id="sub_script">
+                        <script>let x = 1;</script>
+                    </scriptTask>
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_script" />
+                    <sequenceFlow id="sf2" sourceRef="sub_script" targetRef="sub_e1" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+
+    assert!(
+        matches!(
+            def.nodes.get("sub1"),
+            Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "sub_script"
+        ),
+        "EmbeddedSubProcess must enter at the start event's target"
+    );
+    assert!(
+        !def.nodes.contains_key("sub_s1"),
+        "internal start event must not be materialised as a node"
+    );
+    assert!(
+        def.nodes.values().all(|element| !matches!(
+            element,
+            BpmnElement::ServiceTask { topic, .. } if topic == "noop"
+        )),
+        "no synthetic noop service task may be created"
+    );
+    assert!(
+        def.next_nodes("sub_s1").is_empty(),
+        "flows out of the internal start event must not remain as edges"
+    );
+    assert_eq!(def.next_node("sub_script"), Some("sub_e1"));
+}
+
+#[test]
+fn flatten_subprocess_start_event_with_multiple_flows_becomes_parallel_gateway() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <endEvent id="sub_e1" />
+                    <endEvent id="sub_e2" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_e1" />
+                    <sequenceFlow id="sf2" sourceRef="sub_s1" targetRef="sub_e2" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+
+    assert!(
+        matches!(def.nodes.get("sub_s1"), Some(BpmnElement::ParallelGateway)),
+        "an implicit split at the internal start event must become a parallel gateway"
+    );
+    assert!(
+        matches!(
+            def.nodes.get("sub1"),
+            Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "sub_s1"
+        ),
+        "EmbeddedSubProcess must enter at the fork gateway"
+    );
+    assert_eq!(def.next_nodes("sub_s1").len(), 2);
+}
+
+#[test]
+fn flatten_subprocess_without_start_event_is_rejected() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <endEvent id="sub_e1" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    assert!(
+        err.to_string().contains("has no startEvent"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn flatten_subprocess_with_multiple_start_events_is_rejected() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <startEvent id="sub_s2" />
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_e1" />
+                    <sequenceFlow id="sf2" sourceRef="sub_s2" targetRef="sub_e1" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    assert!(
+        err.to_string().contains("must have exactly one startEvent"),
+        "unexpected error: {err}"
+    );
+}

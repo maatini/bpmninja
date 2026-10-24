@@ -3,7 +3,7 @@
 ### ⚠️ Sub-process flattening changes graph structure
 
 Embedded sub-processes are not preserved at runtime. The parser inlines them:
-- Sub-process start/end events become `EmbeddedSubProcess` + `SubProcessEndEvent` nodes in the parent graph
+- Sub-process end events become `SubProcessEndEvent` nodes in the parent graph; the internal start event is not materialised — the `EmbeddedSubProcess` node continues at the start event's target
 - Sub-process boundaries are lost — this means boundary events on sub-processes won't work as expected in BPMN 2.0 spec
 
 If you need runtime sub-process scoping, you're looking for Call Activities (`callActivity` → `CallActivity`), not embedded sub-processes.
@@ -34,13 +34,17 @@ Assignee and topic are read from desktop `data-*` attributes first, then Camunda
 
 The desktop modeler writes both `data-assignee`/`data-topic` and `camunda:assignee`/`camunda:topic`. XML exported from Camunda Modeler deploys with the Camunda attributes. `quick-xml` strips the `camunda:` prefix on attributes, so the parser binds `camunda:assignee` as `@assignee` (with alias `@camunda:assignee`).
 
-### ⚠️ Multi-instance is rejected at parse time
+### ⚠️ Multi-instance: parallel service tasks only
 
-`multiInstanceLoopCharacteristics` is **not supported**. The runtime never emits `MultiInstanceFork`; mapping MI to `MultiInstanceDef` used to let diagrams run silently as single-instance.
+`multiInstanceLoopCharacteristics` is supported **only** on `serviceTask` and only in **parallel** form, with either `collection` + `elementVariable` or `loopCardinality` (positive integer). The runtime emits `MultiInstanceFork`/`MultiInstanceNext`, tracks `MultiInstanceProgress` and advances the token once after the last item completes.
 
-If the element is present on a task (`userTask`, `serviceTask`, `scriptTask`, `sendTask`, `receiveTask`, `manualTask`, `businessRuleTask`), parse fails with `EngineError::InvalidDefinition`:
+Everything else is rejected at parse time with `EngineError::InvalidDefinition`:
 
-`Multi-instance is not supported (element '<id>')`
+- `isSequential="true"` (`Sequential multi-instance is not supported yet`)
+- `multiInstanceLoopCharacteristics` on `userTask`, `scriptTask`, `sendTask`, `receiveTask`, `manualTask`, or `businessRuleTask`
+  (`Multi-instance is only supported for parallel service tasks; <kind> '<id>' is not supported`)
+- missing both `collection` and `loopCardinality`, or defining both
+- non-positive/non-integer `loopCardinality`
 
 Deploy must fail. Do not reintroduce a silent single-instance fallback.
 
@@ -58,11 +62,13 @@ Unknown or empty activity types used to become `ServiceTask` and enter the fetch
 | generic `task` | error — convert to a concrete type |
 | `scriptTask` with empty `<script>` and no `data-script` | error |
 | `intermediateCatchEvent` without timer or message | error |
-| Sub-process internal start events (flattening) | `ServiceTask` topic `"noop"` |
+| Sub-process internal start events (flattening) | pass-through: `EmbeddedSubProcess.start_node_id` points at the start event's target; several outgoing flows become a `ParallelGateway` (implicit split) |
 
 `sendTask` reads nested `messageEventDefinition/@messageRef` and the `sendTask/@messageRef` attribute. Empty `<timerEventDefinition/>` is rejected (no longer `Duration(0)`). Timer fields accept `xsi:type` FormalExpression wrappers.
 
 Embedded sub-process flattening includes `sendTask`, `inclusiveGateway`, `eventBasedGateway`, and intermediate catch/throw events. Missing those used to yield `NoSuchNode` at runtime.
+
+An embedded sub-process must contain exactly one start event; zero or several are rejected at parse time (`has no startEvent` / `must have exactly one startEvent`).
 
 `complexGateway` is a first-class `ComplexGateway { join_condition, default }` (`activationCondition` → `join_condition`). Compensation and escalation events (`compensateEventDefinition` / `escalationEventDefinition` on throw, end, and boundary) are first-class elements, not pass-through tasks.
 
