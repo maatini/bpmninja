@@ -18,11 +18,11 @@ Ziel: Eine Camunda-kompatible, aber deutlich schlankere Alternative mit Fokus au
 | Rust Edition       | 2024 (Tauri: 2021)                   | stable       |
 | Async Runtime      | Tokio                                | 1.x          |
 | Web Framework      | Axum                                 | 0.8          |
-| XML Parser         | quick-xml                            | 0.39         |
-| Scripting          | Rhai                                 | 1.19         |
-| Persistence        | NATS JetStream (async-nats)          | 0.47         |
+| XML Parser         | quick-xml                            | 0.42         |
+| Scripting          | Rhai                                 | 1.26         |
+| Persistence        | NATS JetStream (async-nats)          | 0.50         |
 | Concurrency        | DashMap                              | 6.x          |
-| Desktop            | Tauri 2.10 + React 19 + bpmn-js 18  | -            |
+| Desktop            | Tauri 2.12 + React 19 + bpmn-js 18  | -            |
 | Styling            | Tailwind CSS 4                       | -            |
 | Testing            | Playwright, cargo-fuzz, cargo-mutants| -            |
 
@@ -103,7 +103,7 @@ Das Projekt nutzt ein Agenten-System für dateibasierte Kontext-Injektion:
 
 ## Claude Workflow (unbedingt einhalten)
 
-1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `devbox run graphify` aktualisieren und ggf. aus `graphify-out/GRAPH_REPORT.md` einlesen. Falls das Tool in der Umgebung fehlt, vorher `devbox run graphify:install` aufrufen. Bei Baustein-Änderungen (Dateien erstellt/gelöscht): Den Graph zwingend neu aufbauen.
+1. **Graphify Knowledge-Graph nutzen:** Vor jeder neuen Aufgabe den Graphen durch Ausführen von `graphify update .` aktualisieren und ggf. aus `graphify-out/GRAPH_REPORT.md` einlesen. Installation: `pipx install graphifyy && graphify install`. Ein voller Rebuild (`graphify build .`) nur nach explizitem Auftrag.
 2. **Plan nur bei Bedarf:** Plan verpflichtend bei unklaren Anforderungen, Architekturentscheidungen oder Multi-Crate-Änderungen. Bei klaren, kleinen Tasks direkte Umsetzung. Wenn ein Plan erstellt wurde: Vor Implementierung auf `GO` warten.
 3. **Task Memory anlegen:** Bei Aufgaben die ≥2 Crates oder ≥3 Dateien berühren → `TASK_MEMORY.md` im Projekt-Root anlegen (siehe `.agent/rules/04_TASK_MEMORY_PROTOCOL.md`).
 4. Nach jeder großen Task: `/clear` oder neue Session
@@ -152,11 +152,20 @@ cargo test -p engine-core <test_name>        # einzelnen Test ausführen
 cargo test -p engine-core -- --nocapture     # mit println-Ausgabe
 
 # Devbox-Workflows (empfohlen)
-devbox run graphify                          # Knowledge-Graph aktualisieren
 devbox run lint                              # Clippy + fmt check
 devbox run test                              # cargo test --workspace
 devbox run check                             # cargo check --workspace
 devbox run verify-all                        # Komplett-Pipeline (build, lint, test)
+
+# Knowledge-Graph
+graphify update .                            # Graph inkrementell aktualisieren (Standard)
+graphify build .                             # Voller Rebuild — nur nach explizitem Auftrag
+
+# Nx (Orchestrierung; Projekte: rust, desktop, client, api-spec — siehe `npx nx show projects`)
+npx nx run-many -t lint test build           # alle Projekte, Tasks parallel
+npx nx affected -t lint test build           # nur betroffene Projekte (Basis: main)
+npx nx run rust:test                         # einzelnes Target ausführen
+npx nx graph                                 # Projekt-/Task-Graph im Browser
 
 # Desktop
 cd desktop-tauri && npm install && npm run tauri dev
@@ -166,6 +175,8 @@ cd desktop-tauri && npx playwright test
 docker compose up -d
 cargo run -p engine-server
 ```
+
+> Nx orchestriert nur den Ablauf — Cargo (bzw. `cargo nextest`) bleibt die Build-Engine. Die Rust-Targets sind mit `cache: false` konfiguriert, ihre Ergebnisse werden also nicht gecacht.
 
 ## Architektur-Regeln
 
@@ -204,5 +215,5 @@ cargo run -p engine-server
 
 ## Versionierung
 
-Alle Crates synchron auf Version **0.7.24** (aktuell).  
-Git-Tags: `v0.7.24`
+Alle Crates synchron auf Version **0.7.25** (aktuell).  
+Git-Tags: `v0.7.25`

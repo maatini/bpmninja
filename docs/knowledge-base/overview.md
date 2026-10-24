@@ -4,7 +4,7 @@
 
 BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible but leaner alternative focused on token-based execution, lock-free concurrency via DashMap, NATS JetStream persistence, and a Tauri React desktop UI with live bpmn-js tracking.
 
-**Version:** 0.7.24 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
+**Version:** 0.7.25 (Rust crates + desktop), 1.0.0 (external-task-client npm package)
 
 ## Tech Stack
 
@@ -13,11 +13,11 @@ BPMNinja is a BPMN 2.0 workflow engine written in Rust — a Camunda-compatible 
 | Language | Rust (edition 2024) | Tauri src-tauri uses edition 2021 |
 | Async Runtime | Tokio 1.x | full features |
 | Web Framework | Axum 0.8 | REST API, SSE |
-| XML Parser | quick-xml 0.39 + serde | BPMN 2.0 parsing |
-| Scripting | Rhai 1.25 | Execution listeners, script tasks; sandboxed via ops/memory budget/timeout |
-| Persistence | NATS JetStream (async-nats 0.49) | KV stores, Object Store, Streams |
+| XML Parser | quick-xml 0.42 + serde | BPMN 2.0 parsing |
+| Scripting | Rhai 1.26 | Execution listeners, script tasks; sandboxed via ops/memory budget/timeout |
+| Persistence | NATS JetStream (async-nats 0.50) | KV stores, Object Store, Streams |
 | Concurrency | DashMap 6.x | Lock-free wait-state queues |
-| Desktop | Tauri 2.10, React 19, bpmn-js 18 | Tailwind CSS 4 |
+| Desktop | Tauri 2.12, React 19, bpmn-js 18 | Tailwind CSS 4 |
 | External Client | TypeScript, ESM, Node ≥ 18 | Vitest tests |
 | Metrics | metrics-exporter-prometheus | /metrics endpoint |
 | Fuzzing | cargo-fuzz (libFuzzer) | 9 targets, AddressSanitizer |
@@ -100,15 +100,16 @@ flowchart LR
 
 | Crate | Unit | E2E | Total |
 |-------|------|-----|-------|
-| engine-core | 217 | 5 | 222 |
-| bpmn-parser | 32 | — | 32 |
-| persistence-nats | 4 | — | 4 |
-| engine-server | 1 | ~56 | ~57 |
-| desktop-tauri | — | 48 | 48 |
-| external-task-client | 68 | — | 68 |
-| **Total** | **~322** | **~109** | **~431** |
+| engine-core | 267 | 5 | 272 |
+| bpmn-parser | 52 | — | 52 |
+| persistence-nats | 14 | — | 14 |
+| persistence-memory | 2 | — | 2 |
+| engine-server | 20 | 92 | 112 |
+| desktop-tauri | — | 52 | 52 |
+| external-task-client | 77 | — | 77 |
+| **Total** | **432** | **149** | **581** |
 
-> Counts approximate; `cargo test --workspace` is the source of truth.
+> Snapshot 2026-10-24. Source of truth: `cargo test --workspace -- --list`, the Playwright and Vitest listings. See [README test metrics](../../README.md#test-metrics) for the module breakdown.
 
 ## Production Hardening (env)
 

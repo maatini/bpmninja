@@ -1,0 +1,16 @@
+{
+  "name": "bpmninja",
+  "private": true,
+  "description": "Nx workspace root for the bpmninja monorepo (Cargo remains the build engine)",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "affected": "nx affected",
+    "graph": "nx graph",
+    "version:sync": "node tools/sync-version.mjs",
+    "version:check": "node tools/sync-version.mjs --check",
+    "docs:check": "node tools/check-docs.mjs"
+  },
+  "devDependencies": {
+    "nx": "^24.0.1"
+  }
+}

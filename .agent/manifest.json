@@ -1,6 +1,6 @@
 {
   "project": "bpmninja",
-  "version": "0.7.24",
+  "version": "0.7.25",
   "agents": {
     "engine": {
       "path": "engine-core",
