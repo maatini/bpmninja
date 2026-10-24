@@ -46,4 +46,4 @@ struct AppState {
 - All commands use `&WorkflowEngine` directly (internal DashMap-based concurrency, no mutex locking)
 - Error handling: Return `Result<T, String>` — Tauri serializes the error string to the frontend
 - Keep logic minimal — delegate to `engine-core` methods
-- When adding a new command, also add a wrapper in `src/lib/tauri.ts`
+- When adding a new command, also add a wrapper in `src/shared/lib/tauri.ts`

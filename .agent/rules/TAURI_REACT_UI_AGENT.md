@@ -35,7 +35,7 @@ file_patterns: ["desktop-tauri/src/**"]
 | `ErrorBoundary.tsx` | React error boundary wrapper |
 | `components/ui/` | shadcn/ui components (DO NOT MODIFY) |
 | `hooks/use-toast.ts` | Toast notification hook |
-| `lib/tauri.ts` | All Tauri command wrappers (typed API layer) |
+| `src/shared/lib/tauri.ts` | All Tauri command wrappers (typed API layer) |
 | `lib/utils.ts` | `cn()` utility for Tailwind class merging |
 | `index.css` | Theme CSS variables (HSL) + bpmn-js helpers |
 
@@ -58,6 +58,6 @@ file_patterns: ["desktop-tauri/src/**"]
 ## Rules
 - Do NOT implement business logic in TypeScript — keep it in Rust
 - Do NOT modify files in `components/ui/` or `hooks/`
-- Use Tauri Commands (via `lib/tauri.ts`) for all engine interactions
+- Use Tauri Commands (via `src/shared/lib/tauri.ts`) for all engine interactions
 - Always run `npm run build` (or `/verify-ui`) after changes to catch strict TS errors
 - Input fields for code/variables must set `autoCapitalize="off"` and `spellCheck={false}`

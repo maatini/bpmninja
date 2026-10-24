@@ -70,7 +70,7 @@ desktop-tauri/
 5. **ESLint**: Zero ESLint errors. Run with strict mode.
 
 ### Cross-Stack
-- Follow `CROSS_CRATE_WORKFLOW.md`: Backend Rust changes (step 5) before frontend React changes (step 6).
+- Follow the implementation order in `.agent/rules/01_GLOBAL_DIRECTIVES.md`: Backend Rust changes (step 5) before frontend React changes (step 6).
 - After Rust backend changes: run `/verify`
 - After React frontend changes: run `/verify-ui`
 

@@ -71,7 +71,7 @@
         "graphify install"
       ],
       "graphify": [
-        "graphify ."
+        "graphify update ."
       ]
     }
   }
