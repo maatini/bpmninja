@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use quick_xml::de::from_str;
@@ -352,6 +352,103 @@ fn reject_multi_instance(
     Ok(())
 }
 
+/// Auflösung der Link-Events eines Scopes (Prozess oder Subprozess).
+struct LinkScope {
+    /// Link-Name → Zielknoten des zugehörigen Catch-Events.
+    targets: HashMap<String, String>,
+    /// Catch-Events, die nicht materialisiert werden.
+    catch_ids: HashSet<String>,
+}
+
+/// Baut die Link-Map eines Scopes (`name → catch-Ziel`) und validiert die Catch-Events.
+///
+/// Link-Events sind scope-lokal: Ein Throw findet nur Catches desselben Prozesses
+/// bzw. Subprozesses.
+fn resolve_link_scope(
+    scope_label: &str,
+    catches: &[crate::models::BpmnIntermediateCatchEvent],
+    flows: &[crate::models::BpmnSequenceFlow],
+) -> EngineResult<LinkScope> {
+    let mut scope = LinkScope {
+        targets: HashMap::new(),
+        catch_ids: HashSet::new(),
+    };
+
+    for catch_evt in catches {
+        let Some(link) = catch_evt.link_event_definition.as_ref() else {
+            continue;
+        };
+        let name = link.name.trim();
+        if name.is_empty() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' has an empty linkEventDefinition name",
+                catch_evt.id, scope_label
+            )));
+        }
+        if scope.targets.contains_key(name) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "duplicate link name '{}' in scope '{}' (catch event '{}')",
+                name, scope_label, catch_evt.id
+            )));
+        }
+        if flows.iter().any(|flow| flow.target_ref == catch_evt.id) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' must not have incoming sequence flows",
+                catch_evt.id, scope_label
+            )));
+        }
+        let mut outgoing = flows
+            .iter()
+            .filter(|flow| flow.source_ref == catch_evt.id)
+            .map(|flow| flow.target_ref.clone());
+        let Some(target) = outgoing.next() else {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' has no outgoing sequence flow",
+                catch_evt.id, scope_label
+            )));
+        };
+        if outgoing.next().is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' must have exactly one outgoing sequence flow",
+                catch_evt.id, scope_label
+            )));
+        }
+        scope.targets.insert(name.to_string(), target);
+        scope.catch_ids.insert(catch_evt.id.clone());
+    }
+
+    Ok(scope)
+}
+
+/// Liefert das Sprungziel eines Link-Throws und prüft die BPMN-Regeln dafür.
+fn resolve_link_throw(
+    scope: &LinkScope,
+    scope_label: &str,
+    throw_id: &str,
+    link: &crate::models::BpmnLinkEventDefinition,
+    flows: &[crate::models::BpmnSequenceFlow],
+) -> EngineResult<String> {
+    let name = link.name.trim();
+    if name.is_empty() {
+        return Err(EngineError::InvalidDefinition(format!(
+            "link throw event '{}' in scope '{}' has an empty linkEventDefinition name",
+            throw_id, scope_label
+        )));
+    }
+    if flows.iter().any(|flow| flow.source_ref == throw_id) {
+        return Err(EngineError::InvalidDefinition(format!(
+            "link throw event '{}' in scope '{}' must not have outgoing sequence flows",
+            throw_id, scope_label
+        )));
+    }
+    scope.targets.get(name).cloned().ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "link throw event '{}' references unknown link name '{}' in scope '{}': no matching link catch event",
+            throw_id, name, scope_label
+        ))
+    })
+}
+
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
 ///
 /// Note: Since `quick-xml` expects exact structure, the parsed XML must match
@@ -379,6 +476,20 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
+
+    if let Some(tx) = &process.transaction {
+        return Err(EngineError::InvalidDefinition(format!(
+            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
+            tx.id.as_deref().unwrap_or(&process_id)
+        )));
+    }
+
+    let link_scope = resolve_link_scope(
+        &process_id,
+        &process.intermediate_catch_events,
+        &process.sequence_flows,
+    )?;
+
     let mut builder = ProcessDefinitionBuilder::new(process_id.clone());
 
     // Lookup maps for messages and errors
@@ -438,6 +549,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 2. Process End Events
     for end in process.end_events {
         let node_id = end.id.clone();
+        if end.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (end event '{node_id}')"
+            )));
+        }
         if end.terminate_event_definition.is_some() {
             builder = builder.node(end.id, BpmnElement::TerminateEndEvent);
         } else if let Some(err) = end.error_event_definition {
@@ -668,6 +784,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 7. Intermediate catch events
     for catch_evt in process.intermediate_catch_events {
         let node_id = catch_evt.id.clone();
+        if catch_evt.link_event_definition.is_some() {
+            // Link-Catches werden nicht materialisiert: der Throw springt auf ihr Ziel.
+            continue;
+        }
         if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
@@ -690,6 +810,25 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 8. Intermediate throw events
     for evt in process.intermediate_throw_events {
         let node_id = evt.id.clone();
+        if let Some(link) = evt.link_event_definition {
+            let target = resolve_link_throw(
+                &link_scope,
+                &process_id,
+                &node_id,
+                &link,
+                &process.sequence_flows,
+            )?;
+            builder = builder.node(
+                evt.id,
+                BpmnElement::LinkThrowEvent {
+                    target: target.clone(),
+                },
+            );
+            // Synthetische Kante für die Graph-Validierung; der Handler springt direkt.
+            builder = builder.flow(node_id.clone(), target);
+            builder = add_listeners(builder, &node_id, evt.extension_elements);
+            continue;
+        }
         if let Some(msg) = evt.message_event_definition {
             let message_name = msg
                 .message_ref
@@ -734,6 +873,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         // cancelActivity is true by default
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
+        if bd.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{node_id}')"
+            )));
+        }
         if let Some(timer) = bd.timer_event_definition {
             let timer_def = parse_timer_definition(&bd.id, &timer)?;
             builder = builder.node(
@@ -796,6 +940,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
 
     // 10. Process Sequence Flows
     for flow in process.sequence_flows {
+        if link_scope.catch_ids.contains(&flow.source_ref) {
+            // Der Catch existiert nicht; sein Ziel wird über den Throw erreicht.
+            continue;
+        }
         if let Some(cond) = flow.condition_expression {
             builder = builder.conditional_flow(flow.source_ref, flow.target_ref, cond.value.trim());
         } else {
@@ -846,6 +994,19 @@ fn flatten_subprocess(
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
 
+    if let Some(tx) = &sp.transaction {
+        return Err(EngineError::InvalidDefinition(format!(
+            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
+            tx.id.as_deref().unwrap_or(&sub_process_id)
+        )));
+    }
+
+    let link_scope = resolve_link_scope(
+        &sub_process_id,
+        &sp.intermediate_catch_events,
+        &sp.sequence_flows,
+    )?;
+
     let start_event = sp.start_events.first().ok_or_else(|| {
         EngineError::InvalidDefinition(format!("subProcess '{sub_process_id}' has no startEvent"))
     })?;
@@ -884,6 +1045,12 @@ fn flatten_subprocess(
     }
 
     for end in sp.end_events {
+        if end.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (end event '{}')",
+                end.id
+            )));
+        }
         builder = builder.node(
             end.id,
             BpmnElement::SubProcessEndEvent {
@@ -1043,6 +1210,10 @@ fn flatten_subprocess(
     }
 
     for catch_evt in sp.intermediate_catch_events {
+        if catch_evt.link_event_definition.is_some() {
+            // Link-Catches werden nicht materialisiert: der Throw springt auf ihr Ziel.
+            continue;
+        }
         if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
@@ -1062,6 +1233,25 @@ fn flatten_subprocess(
     }
 
     for evt in sp.intermediate_throw_events {
+        if let Some(link) = evt.link_event_definition {
+            let target = resolve_link_throw(
+                &link_scope,
+                &sub_process_id,
+                &evt.id,
+                &link,
+                &sp.sequence_flows,
+            )?;
+            let throw_id = evt.id.clone();
+            builder = builder.node(
+                throw_id.clone(),
+                BpmnElement::LinkThrowEvent {
+                    target: target.clone(),
+                },
+            );
+            // Synthetische Kante für die Graph-Validierung; der Handler springt direkt.
+            builder = builder.flow(throw_id, target);
+            continue;
+        }
         if let Some(msg) = evt.message_event_definition {
             let message_name = resolve_message_ref(msg.message_ref, message_lookup)
                 .unwrap_or_else(|| "generic_throw".into());
@@ -1100,6 +1290,12 @@ fn flatten_subprocess(
         let attached_to = bd.attached_to_ref.clone();
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
+        if bd.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{}')",
+                bd.id
+            )));
+        }
         if let Some(timer) = bd.timer_event_definition {
             let timer_def = parse_timer_definition(&bd.id, &timer)?;
             builder = builder.node(
@@ -1160,6 +1356,10 @@ fn flatten_subprocess(
     for flow in sp.sequence_flows {
         if flow.source_ref == start_event_id && !start_forks {
             // Flows out of the internal start event define the sub-process entry point only.
+            continue;
+        }
+        if link_scope.catch_ids.contains(&flow.source_ref) {
+            // Der Catch existiert nicht; sein Ziel wird über den Throw erreicht.
             continue;
         }
         if let Some(cond) = flow.condition_expression {

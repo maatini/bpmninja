@@ -106,6 +106,24 @@ pub(crate) struct BpmnEscalationDef {
     pub escalation_code: Option<String>,
 }
 
+/// `<linkEventDefinition name="…"/>` — verbindet Throw und Catch innerhalb eines Scopes.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnLinkEventDefinition {
+    #[serde(rename = "@name")]
+    pub name: String,
+}
+
+/// `<cancelEventDefinition/>` — wird nur erkannt, um Cancel-Events abzulehnen.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnCancelEventDefinition {}
+
+/// `<transaction>` — wird nur erkannt, um Transaction-Subprozesse abzulehnen.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnTransaction {
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
+}
+
 /// A catch-all struct for elements we want to parse but otherwise ignore.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -157,6 +175,10 @@ pub(crate) struct BpmnProcess {
     // --- Future/Unsupported Elements ---
     #[serde(rename = "subProcess", default)]
     pub sub_processes: Vec<BpmnSubProcess>,
+
+    /// `<transaction>` wird nur erkannt, um den Deploy abzulehnen.
+    #[serde(rename = "transaction", default)]
+    pub transaction: Option<BpmnTransaction>,
 
     #[serde(rename = "boundaryEvent", default)]
     pub boundary_events: Vec<BpmnBoundaryEvent>,
@@ -260,6 +282,8 @@ pub(crate) struct BpmnEndEvent {
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
     #[serde(rename = "terminateEventDefinition")]
     pub terminate_event_definition: Option<IgnoredElement>,
+    #[serde(rename = "cancelEventDefinition")]
+    pub cancel_event_definition: Option<BpmnCancelEventDefinition>,
 }
 
 #[allow(dead_code)]
@@ -332,6 +356,8 @@ pub(crate) struct BpmnIntermediateThrowEvent {
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,6 +473,8 @@ pub(crate) struct BpmnIntermediateCatchEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -467,6 +495,8 @@ pub(crate) struct BpmnBoundaryEvent {
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "cancelEventDefinition")]
+    pub cancel_event_definition: Option<BpmnCancelEventDefinition>,
 }
 
 #[allow(dead_code)]
@@ -477,6 +507,10 @@ pub(crate) struct BpmnSubProcess {
 
     #[serde(rename = "@triggeredByEvent", default)]
     pub triggered_by_event: Option<bool>,
+
+    /// `<transaction>` wird auch in Subprozessen nur erkannt, um den Deploy abzulehnen.
+    #[serde(rename = "transaction", default)]
+    pub transaction: Option<BpmnTransaction>,
 
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,

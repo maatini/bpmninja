@@ -135,6 +135,7 @@ For full local verification, run the root checks plus module-specific checks fro
 | | **BoundaryCompensationEvent** | Registered when the attached activity completes successfully. Later executed by a compensation throw/end event. |
 | | **EscalationThrowEvent** | Throws a BPMN escalation. A matching `BoundaryEscalationEvent` handles it; uncaught escalations continue the token. |
 | | **CompensationThrowEvent** | Runs registered compensation handlers (`activityRef` or all in LIFO order) and continues. |
+| | **LinkThrowEvent** | Intermediate link throw: jumps to the successor of the matching link catch (`linkEventDefinition name`) in the same scope. The catch node itself is not materialised. |
 
 ### Activities & Sub-Processes
 
@@ -178,8 +179,9 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 
 The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Specific events:** `SignalEvent`, `CancelEvent`, `LinkEvent`, `ConditionalEvent`. The parser has no model for these event definitions: catch and boundary events fail deployment with `InvalidDefinition`, while triggers on start/end events are ignored (the event is treated as a plain start/end event).
-- **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
+- **Specific events:** `SignalEvent` and `ConditionalEvent` are not modelled: catch and boundary events fail deployment with `InvalidDefinition`, while triggers on start/end events are ignored (the event is treated as a plain start/end event). Link events are supported: a link throw jumps to the target of its link catch within the same scope; cross-scope links are rejected.
+- **Cancel events & transactions:** `cancelEventDefinition` on end and boundary events is recognised but rejected at deploy time with `InvalidDefinition` — cancel events require a BPMN transaction, and transaction sub-processes are not supported. A `<transaction>` element is rejected with the same reasoning.
+- **Extended sub-processes:** `Ad-Hoc Sub-Process`. (`Transaction Sub-Process` is rejected explicitly; see cancel events above.)
 - **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
 ---

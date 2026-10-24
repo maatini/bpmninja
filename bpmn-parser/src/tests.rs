@@ -1915,3 +1915,365 @@ fn flatten_subprocess_rejects_unknown_default_flow() {
         "unknown default flow must be InvalidDefinition: {err:?}"
     );
 }
+
+#[test]
+fn parse_link_events_resolve_throw_to_catch_target() {
+    // Camunda-typisches XML: der Catch hat keinen eingehenden, genau einen ausgehenden Flow.
+    let xml = r#"
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <bpmn:process id="proc_link" isExecutable="true">
+                <bpmn:startEvent id="s1" />
+                <bpmn:intermediateThrowEvent id="throw1">
+                    <bpmn:linkEventDefinition name="Jump" />
+                </bpmn:intermediateThrowEvent>
+                <bpmn:intermediateCatchEvent id="catch1">
+                    <bpmn:linkEventDefinition name="Jump" />
+                </bpmn:intermediateCatchEvent>
+                <bpmn:scriptTask id="after">
+                    <bpmn:script>let jumped = true;</bpmn:script>
+                </bpmn:scriptTask>
+                <bpmn:endEvent id="e1" />
+                <bpmn:sequenceFlow id="f1" sourceRef="s1" targetRef="throw1" />
+                <bpmn:sequenceFlow id="f2" sourceRef="catch1" targetRef="after" />
+                <bpmn:sequenceFlow id="f3" sourceRef="after" targetRef="e1" />
+            </bpmn:process>
+        </bpmn:definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+
+    assert!(
+        matches!(
+            def.nodes.get("throw1"),
+            Some(BpmnElement::LinkThrowEvent { target }) if target == "after"
+        ),
+        "throw must carry the catch successor as target"
+    );
+    assert!(
+        !def.nodes.contains_key("catch1"),
+        "link catch must not be materialised"
+    );
+    assert!(
+        def.next_nodes("catch1").is_empty(),
+        "flows out of the link catch must be dropped"
+    );
+    assert_eq!(
+        def.next_node("throw1"),
+        Some("after"),
+        "throw must be wired to its jump target for graph validation"
+    );
+    assert!(matches!(
+        def.nodes.get("after"),
+        Some(BpmnElement::ScriptTask { .. })
+    ));
+}
+
+#[test]
+fn parse_link_pair_inside_sub_process() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_link_sub" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s" />
+                    <intermediateThrowEvent id="sub_throw">
+                        <linkEventDefinition name="InnerJump" />
+                    </intermediateThrowEvent>
+                    <intermediateCatchEvent id="sub_catch">
+                        <linkEventDefinition name="InnerJump" />
+                    </intermediateCatchEvent>
+                    <scriptTask id="sub_after">
+                        <script>let inner_jumped = true;</script>
+                    </scriptTask>
+                    <endEvent id="sub_e" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s" targetRef="sub_throw" />
+                    <sequenceFlow id="sf2" sourceRef="sub_catch" targetRef="sub_after" />
+                    <sequenceFlow id="sf3" sourceRef="sub_after" targetRef="sub_e" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+
+    assert!(
+        matches!(
+            def.nodes.get("sub_throw"),
+            Some(BpmnElement::LinkThrowEvent { target }) if target == "sub_after"
+        ),
+        "link pair inside a sub-process must resolve within that sub-process"
+    );
+    assert!(!def.nodes.contains_key("sub_catch"));
+    assert_eq!(def.next_node("sub_throw"), Some("sub_after"));
+    assert!(
+        matches!(
+            def.nodes.get("sub1"),
+            Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "sub_throw"
+        ),
+        "sub-process entry must not change"
+    );
+}
+
+#[test]
+fn reject_link_throw_in_sub_process_targeting_outer_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_cross" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s" />
+                    <intermediateThrowEvent id="sub_throw">
+                        <linkEventDefinition name="OuterJump" />
+                    </intermediateThrowEvent>
+                    <endEvent id="sub_e" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s" targetRef="sub_throw" />
+                    <sequenceFlow id="sf3" sourceRef="sub_s" targetRef="sub_e" />
+                </subProcess>
+                <intermediateCatchEvent id="outer_catch">
+                    <linkEventDefinition name="OuterJump" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="outer_catch" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown link name 'OuterJump'") && err.contains("scope 'sub1'"),
+        "cross-scope link must be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn reject_link_throw_at_top_level_targeting_inner_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_cross" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="outer_throw">
+                    <linkEventDefinition name="InnerJump" />
+                </intermediateThrowEvent>
+                <subProcess id="sub1">
+                    <startEvent id="sub_s" />
+                    <intermediateCatchEvent id="sub_catch">
+                        <linkEventDefinition name="InnerJump" />
+                    </intermediateCatchEvent>
+                    <endEvent id="sub_e" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s" targetRef="sub_e" />
+                    <sequenceFlow id="sf2" sourceRef="sub_catch" targetRef="sub_e" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="outer_throw" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown link name 'InnerJump'") && err.contains("scope 'proc_cross'"),
+        "cross-scope link must be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn reject_duplicate_link_name_in_same_scope() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_dup" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="catch1">
+                    <linkEventDefinition name="Jump" />
+                </intermediateCatchEvent>
+                <intermediateCatchEvent id="catch2">
+                    <linkEventDefinition name="Jump" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+                <sequenceFlow id="f2" sourceRef="catch1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="catch2" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate link name 'Jump'") && err.contains("scope 'proc_dup'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_link_throw_without_matching_catch() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_missing" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="throw1">
+                    <linkEventDefinition name="Nowhere" />
+                </intermediateThrowEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="throw1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown link name 'Nowhere'") && err.contains("scope 'proc_missing'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_link_catch_with_two_outgoing_flows() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_fork" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="throw1">
+                    <linkEventDefinition name="Jump" />
+                </intermediateThrowEvent>
+                <intermediateCatchEvent id="catch1">
+                    <linkEventDefinition name="Jump" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="throw1" />
+                <sequenceFlow id="f2" sourceRef="catch1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="catch1" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("exactly one outgoing sequence flow") && err.contains("catch1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_link_throw_with_outgoing_flow() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_throw_flow" isExecutable="true">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="throw1">
+                    <linkEventDefinition name="Jump" />
+                </intermediateThrowEvent>
+                <intermediateCatchEvent id="catch1">
+                    <linkEventDefinition name="Jump" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="throw1" />
+                <sequenceFlow id="f2" sourceRef="throw1" targetRef="e2" />
+                <sequenceFlow id="f3" sourceRef="catch1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("must not have outgoing sequence flows") && err.contains("throw1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_cancel_end_event_in_regular_sub_process() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_cancel" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s" />
+                    <endEvent id="sub_cancel_end">
+                        <cancelEventDefinition />
+                    </endEvent>
+                    <sequenceFlow id="sf1" sourceRef="sub_s" targetRef="sub_cancel_end" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("cancel end events require a transaction sub-process")
+            && err.contains("sub_cancel_end"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_cancel_boundary_event() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_cancel_boundary" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1" data-topic="work" />
+                <boundaryEvent id="cancel_boundary" attachedToRef="svc1">
+                    <cancelEventDefinition />
+                </boundaryEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="cancel_boundary" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("cancel end events require a transaction sub-process")
+            && err.contains("cancel_boundary"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reject_transaction_sub_process() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_tx" isExecutable="true">
+                <startEvent id="s1" />
+                <transaction id="tx1">
+                    <startEvent id="tx_s" />
+                    <endEvent id="tx_e" />
+                    <sequenceFlow id="tx_f1" sourceRef="tx_s" targetRef="tx_e" />
+                </transaction>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="tx1" />
+                <sequenceFlow id="f2" sourceRef="tx1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("transaction sub-processes are not supported")
+            && err.contains("cancel events cannot be deployed")
+            && err.contains("tx1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn bpmn_without_cancel_events_stays_valid() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc_plain" isExecutable="true">
+                <startEvent id="s1" />
+                <serviceTask id="svc1" data-topic="work" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="svc1" />
+                <sequenceFlow id="f2" sourceRef="svc1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert!(matches!(
+        def.nodes.get("svc1"),
+        Some(BpmnElement::ServiceTask { .. })
+    ));
+}

@@ -53,6 +53,29 @@ Everything else is rejected at parse time with `EngineError::InvalidDefinition`:
 
 Deploy must fail. Do not reintroduce a silent single-instance fallback.
 
+### ⚠️ Link events are scope-local and drop the catch node
+
+`intermediateThrowEvent`/`intermediateCatchEvent` with `<linkEventDefinition name="…"/>` are resolved per scope (process or each sub-process):
+
+- The parser builds a map `link name → target of the catch's single outgoing flow`. The catch node is **not** materialised and its outgoing flow is dropped; the throw becomes `LinkThrowEvent { target }` with a synthetic edge to that target (the engine needs the edge for graph validation, the handler jumps directly).
+- Exactly one outgoing flow per link catch; zero or several are rejected. A catch must not have incoming flows.
+- Duplicate link names in the same scope, throws without a matching catch, and throws with outgoing flows are rejected with `InvalidDefinition`.
+- Link pairing never crosses a scope boundary: a throw inside a sub-process cannot reach a catch in the parent (or vice versa). The error names both the link name and the scope.
+
+Nested sub-processes each get their own map, so equal link names in sibling scopes do not collide.
+
+### ⚠️ Cancel events and transactions are rejected, not ignored
+
+`cancelEventDefinition` is modelled on `endEvent` and `boundaryEvent` only to fail deployment:
+
+| XML | Result |
+|-----|--------|
+| `endEvent` with `cancelEventDefinition` | `InvalidDefinition`: cancel end events require a transaction sub-process |
+| `boundaryEvent` with `cancelEventDefinition` | `InvalidDefinition`: same reason, with event ID |
+| `<transaction>` in a process or sub-process | `InvalidDefinition`: transaction sub-processes are not supported |
+
+Without these checks a cancel end event silently degraded to a plain `EndEvent`, which is semantically wrong: cancel only interrupts a transaction scope. Full transaction/cancel semantics (scope rollback, compensation interaction) are a separate plan — do not re-add silent fallbacks.
+
 ### ⚠️ Unsupported tasks are rejected, not queued
 
 Unknown or empty activity types used to become `ServiceTask` and enter the fetch-and-lock queue. They now fail parse with `InvalidDefinition`:

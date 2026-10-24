@@ -84,6 +84,9 @@ pub enum BpmnElement {
     CompensationThrowEvent { activity_ref: Option<String> },
     /// An end event that triggers compensation before completing.
     CompensationEndEvent { activity_ref: Option<String> },
+    /// An intermediate link throw event; jumps directly to the target of its
+    /// link catch event in the same scope. The catch itself is not materialised.
+    LinkThrowEvent { target: String },
     /// A boundary compensation event attached to an activity (registered on successful completion).
     BoundaryCompensationEvent { attached_to: String },
     /// A Call Activity that invokes another globally deployed process definition.

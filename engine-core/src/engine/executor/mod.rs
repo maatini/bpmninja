@@ -372,6 +372,10 @@ impl WorkflowEngine {
                 )
                 .await
             }
+            BpmnElement::LinkThrowEvent { target } => {
+                self.handle_link_throw_event(instance_id, token, &def_clone, &current_id, target)
+                    .await
+            }
             BpmnElement::BoundaryTimerEvent { .. }
             | BpmnElement::BoundaryMessageEvent { .. }
             | BpmnElement::BoundaryErrorEvent { .. }

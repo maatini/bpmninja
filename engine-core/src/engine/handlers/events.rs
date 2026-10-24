@@ -180,6 +180,34 @@ impl WorkflowEngine {
         Ok(NextAction::Continue(token.clone()))
     }
 
+    /// Handles an intermediate link throw event.
+    ///
+    /// The parser resolves the matching link catch within the same scope and stores
+    /// its successor as `target`; the catch node itself is never materialised.
+    pub(crate) async fn handle_link_throw_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def_clone: &Arc<ProcessDefinition>,
+        current_id: &str,
+        target: &str,
+    ) -> EngineResult<NextAction> {
+        self.run_end_scripts(instance_id, token, def_clone, current_id)
+            .await?;
+        token.current_node = target.to_string();
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = target.to_string();
+        inst.push_audit_log(format!(
+            "🔗 Link throw event '{current_id}' jumps to '{target}'"
+        ));
+        Ok(NextAction::Continue(token.clone()))
+    }
+
     /// Handles an escalation end event — ends the current path with an escalation code.
     pub(crate) async fn handle_escalation_end_event(
         &self,

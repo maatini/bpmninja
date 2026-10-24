@@ -6,6 +6,7 @@ pub mod helpers;
 pub mod inclusive_join;
 pub mod instance_admin;
 pub mod instance_pagination;
+pub mod link_events;
 pub mod migration;
 pub mod multi_instance;
 pub mod recurring_and_event_timer;
