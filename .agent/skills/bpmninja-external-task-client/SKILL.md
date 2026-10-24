@@ -1,8 +1,8 @@
 ---
 name: bpmninja-external-task-client
-description: Skill for the @bpmninja/external-task-client TypeScript package covering poll-based task consumption, retry with exponential backoff, automatic lock extension, and graceful shutdown. Implements EvoSkills co-evolutionary verification (arXiv 2604.01687).
+description: Skill for the @bpmninja/external-task-client TypeScript package covering poll-based task consumption, retry with exponential backoff, automatic lock extension, and graceful shutdown.
 version: 1.0.0
-tags: [typescript, esm, external-tasks, worker, fetch, pino, vitest, evoskills]
+tags: [typescript, esm, external-tasks, worker, fetch, pino, vitest]
 requires: [node]
 ---
 
@@ -88,38 +88,11 @@ bpmn-ninja-external-task-client/
 4. **Assertion strings**: Match exact log messages from the source (the logger receives a single string, not structured args).
 5. **Test isolation**: Each test gets a fresh `fetchMock` in `beforeEach`.
 
-## Co-Evolutionary Verification (EvoSkills, arXiv 2604.01687)
+## Verifikation
 
-Every change MUST go through this loop before commit:
-
-### Step 1 – Generate
-Use the Graphify MCP Tools first to analyze the relevant Graph Communities. Only after understanding the graph boundaries, read the specific source files. Produce diff-ready TypeScript changes.
-
-### Step 2 – Surrogate Verification (Self-Critique)
-Evaluate changes (score 0–10 each, **all must be ≥ 7**):
-
-| # | Criterion | Question |
-|---|---|---|
-| 1 | API Compatibility | Does the change maintain compatibility with BPMNinja engine REST endpoints? Are field names still snake_case? |
-| 2 | Retry Correctness | Is exponential backoff still correct (baseDelay × 2^(attempt-1), capped at 30s)? Does retry exhaustion correctly trigger `failure(retries: 0)`? |
-| 3 | Shutdown Safety | Does graceful shutdown still wait for in-flight handlers? Does AbortController abort pending fetches? |
-| 4 | Unit Conversion | Are ms→seconds conversions correct everywhere (Math.ceil)? Is `newDuration` sent in seconds? |
-| 5 | Test Determinism | Are all new tests using fake timers? No real HTTP calls? No race conditions from un-awaited promises? |
-| 6 | Type Safety | Does `strict: true` pass? No `any` casts except in test mocks? All public types properly exported from index.ts? |
-
-If ANY criterion scores < 7 → return to Step 1 with actionable diagnostic.
-
-### Step 3 – External Oracle
-Run verification:
 ```bash
 cd bpmn-ninja-external-task-client && npm run lint && npm run test
 ```
-Returns only **PASS** or **FAIL + exit code**.
-
-### Step 4 – Evolution Decision
-- **Surrogate FAIL** → Fix and retry (max 15 retries)
-- **Surrogate PASS, Oracle FAIL** → Escalate surrogate criteria, retry
-- **Oracle PASS** → Commit. Update Evolution Log.
 
 ## Common Pitfalls
 - Forgetting `Math.ceil(ms / 1000)` when sending `lockDuration` or `newDuration` to the engine
@@ -129,7 +102,3 @@ Returns only **PASS** or **FAIL + exit code**.
 - Adding HTTP dependencies (axios, node-fetch) — the package uses native `fetch()` exclusively
 - Breaking the barrel export in `index.ts` — always re-export new public types/classes
 
-## Evolution Log
-| Date | Change | Surrogate Rounds | Oracle Result | Notes |
-|---|---|---|---|---|
-| 2026-04-09 | Initial skill creation | 1 | PASS | 68 tests passing (13 retry + 20 TaskService + 35 ExternalTaskClient) |

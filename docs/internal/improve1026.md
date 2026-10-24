@@ -1,5 +1,7 @@
 # BPMNinja — Verbesserungsplan (2026-10-10)
 
+> **Historisch (2026-10-10).** Ersetzt durch `HANDOFF.md`; Wellen 1–5 sind umgesetzt. Nicht ausführen.
+
 Persistierte Kopie des Analyse-Plans. Quelle: Session-Plan vom 2026-10-10.
 
 Analyse mit sechs parallelen Sub-Agenten (Engine, Parser, Server/Security, Persistence, Desktop, Quality/CI). Code-Stand: `main` = `c599b51`, Crates/Desktop **0.7.23**. Letzter Produkt-Commit: `56c2915` (Docker native Multi-Arch). Seitdem nur Quality-Metrics-Bot und Dependabot.

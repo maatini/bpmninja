@@ -1,37 +1,35 @@
 ---
 trigger: file_match
-file_patterns: ["**/*.rs", "**/Cargo.toml"]
+file_patterns: ["**/*.rs", "**/Cargo.toml", "**/package.json", "**/tauri.conf.json"]
 ---
 
-> **Hinweis:** Diese Datei enthält workspace-weite Rust-Regeln. Für engine-core-spezifische Regeln (Hexagonal Architecture, EvoSkills-Loop, DashMap-Concurrency) siehe `RUST_ENGINE_AGENT.md`. Bei Konflikten hat `RUST_ENGINE_AGENT.md` Vorrang für `engine-core/**`.
+# Rust- und Manifest-Regeln
 
-# Rust Best Practices for BPMNinja
+## Workspace-weit
+- Rust 2024 für alle Crates; Ausnahme `desktop-tauri/src-tauri` (Edition 2021 für Tauri).
+- `Result<T, E>` mit `?`; `thiserror` für Fehlertypen, `anyhow` für Kontext an Crate-Grenzen.
+- `EngineError` in `engine-core/src/domain/error.rs` ist der zentrale Fehlertyp.
+- Async mit Tokio; im async-Kontext `.await`, kein `block_on`.
+- Logging über `tracing`, nie `println!`/`eprintln!`.
+- Zustände über Enums (`BpmnElement`, `InstanceState`, `NextAction`) und exhaustives Matching.
+- Geteilter Zustand: `Arc<dyn WorkflowPersistence>`, `Arc<ProcessDefinition>`, DashMap im Instance-Store.
+- Tests: `#[test]`/`#[tokio::test]`, `ProcessDefinitionBuilder` statt Raw-XML, keine Mock-Datenbanken in Integrationstests.
+- Gate: `cargo clippy --workspace --all-targets -- -D warnings` und `cargo fmt --all --check`.
 
-**Core Rules:**
-- Think step-by-step before writing code.
-- Always prioritize compile-time safety and idiomatic Rust.
-- Use proper error handling with `thiserror` + `anyhow`.
-- Run `/lint` workflow after every major change.
-- Write comprehensive unit + integration tests.
-- Keep the architecture clean and modular.
+## Dependencies
+- Gemeinsame Dependencies stehen in `[workspace.dependencies]` der Root-`Cargo.toml`; Crates referenzieren `workspace = true`.
+- Crate-spezifische Dependencies dürfen direkt deklariert werden.
+- Feature-Flags minimal halten (`in-memory` in `persistence-nats`).
+- Verboten: vendored Dependencies, Git-Dependencies in Produktion, exakte Pins (`=1.2.3`) ohne dokumentierten Grund.
 
-## Must-Follow Rust Rules
-- Use Rust 2024 edition for all workspace crates (exception: `desktop-tauri/src-tauri` uses 2021 for Tauri v1 compatibility).
-- Prefer `Result<T, E>` + `?` operator.
-- Custom errors with `thiserror`. Use `EngineError` enum (defined in `engine-core/src/error.rs`).
-- Async: Use `tokio` with `#[tokio::main]`.
-- For timers: `tokio::time::sleep` or `tokio::time::interval`.
-- State machines: Use enums for task types (`BpmnElement`) and process states (`InstanceState`).
-- Concurrency: Use `Arc<dyn WorkflowPersistence>` for shared persistence. Use `Arc<ProcessDefinition>` for shared definitions.
-- Logging: Use the `tracing` crate (`tracing::info!`, `tracing::error!`, `tracing::debug!`, `tracing::warn!`). Initialize with `tracing-subscriber`.
-- Testing: Always write `#[test]` and `#[tokio::test]`. Aim for >85% coverage on core logic.
-- Clippy: Fix all warnings. Run via `/lint` workflow.
-- Naming: `snake_case`, descriptive. Modules in separate files.
+## Versionen
+- Quelle ist `version.json`; `npm run version:check` prüft alle Manifeste, `npm run version:sync` schreibt sie.
+- Aktueller Stand: 0.7.25. Crates, `src-tauri`, `tauri.conf.json`, npm-Projekte und `.agent/manifest.json` bleiben synchron.
+- SemVer: MAJOR bei Breaking API, MINOR bei Features, PATCH bei Fixes.
+- Tauri-Crate und npm-Paket müssen in Major.Minor übereinstimmen (`tauri` ↔ `@tauri-apps/api`, Plugins ↔ `@tauri-apps/plugin-*`).
 
-## Anti-Patterns (NEVER do)
-- No `.unwrap()` in production paths. Use `.expect("reason")` only when the invariant is guaranteed and documented. `.unwrap()` is acceptable in tests.
-- No giant `main.rs` files — use proper module structure.
-- No shared mutable state without synchronization.
-- No ignoring compiler warnings.
-- No blocking the Tokio runtime (always `.await`, never `block_on` inside async).
-- No adding dependencies directly in crate `Cargo.toml` — use `[workspace.dependencies]` (see `DEPENDENCY_MANAGEMENT.md`).
+## Anti-Patterns
+- Kein `.unwrap()` in Produktionspfaden; `.expect("Grund")` nur bei garantierter Invariante, in Tests erlaubt.
+- Keine riesige `main.rs`; Module aufteilen.
+- Kein geteilter mutierbarer Zustand ohne Synchronisation.
+- Keine Compiler-Warnungen ignorieren.
