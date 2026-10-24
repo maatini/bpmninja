@@ -8,6 +8,12 @@ Embedded sub-processes are not preserved at runtime. The parser inlines them:
 
 If you need runtime sub-process scoping, you're looking for Call Activities (`callActivity` → `CallActivity`), not embedded sub-processes.
 
+### ⚠️ Boundary-Events auf Embedded Sub-Processes werden nicht registriert
+
+Boundary-Events, die an einem `subProcess` hängen (Timer, Message, Error, Escalation, Compensation), werden beim Betreten des Sub-Prozesses nicht als Wait-State registriert. `setup_boundary_events` läuft nur für User-Tasks, Service-Tasks und Call-Activities; ein Timer oder eine Message kann den eingebetteten Scope daher nicht unterbrechen. Das ist eine bekannte Lücke (Scope-Cancel und Token-Invalidierung fehlen) und nicht Teil des Default-Flow-Fixes — dafür ist ein eigener Folgeplan nötig.
+
+Default-Flows an `exclusiveGateway` und `complexGateway` werden auch innerhalb eines Sub-Prozesses von der Flow-ID auf den Zielknoten aufgelöst. Eine `default`-Flow-ID, die im Sub-Prozess nicht existiert, wird mit `EngineError::InvalidDefinition` abgelehnt (Meldung enthält Sub-Prozess- und Gateway-ID); ein stiller Fallback auf `None` findet nicht statt.
+
 ### ⚠️ ISO 8601 duration parsing is strict
 
 The parser handles these formats:

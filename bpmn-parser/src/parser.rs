@@ -822,6 +822,23 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     builder.build()
 }
 
+fn resolve_sub_process_default(
+    flow_lookup: &HashMap<String, String>,
+    sub_process_id: &str,
+    gateway_id: &str,
+    default: Option<String>,
+) -> EngineResult<Option<String>> {
+    default
+        .map(|flow_id| {
+            flow_lookup.get(&flow_id).cloned().ok_or_else(|| {
+                EngineError::InvalidDefinition(format!(
+                    "gateway '{gateway_id}' in subProcess '{sub_process_id}' references unknown default flow '{flow_id}'"
+                ))
+            })
+        })
+        .transpose()
+}
+
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_subprocess(
     sp: crate::models::BpmnSubProcess,
@@ -989,8 +1006,16 @@ fn flatten_subprocess(
         builder = builder.node(task.id, BpmnElement::CallActivity { called_element });
     }
 
+    // Default-Flows werden wie am Top-Level von der Flow-ID auf den Zielknoten abgebildet.
+    let flow_lookup: HashMap<String, String> = sp
+        .sequence_flows
+        .iter()
+        .map(|f| (f._id.clone(), f.target_ref.clone()))
+        .collect();
+
     for gw in sp.exclusive_gateways {
-        let default_target = gw.default.clone();
+        let default_target =
+            resolve_sub_process_default(&flow_lookup, &sub_process_id, &gw.id, gw.default)?;
         builder = builder.node(
             gw.id,
             BpmnElement::ExclusiveGateway {
@@ -1009,7 +1034,8 @@ fn flatten_subprocess(
     }
 
     for gw in sp.complex_gateways {
-        let default_target = gw.default.clone();
+        let default_target =
+            resolve_sub_process_default(&flow_lookup, &sub_process_id, &gw.id, gw.default)?;
         let join_condition = gw.activation_condition.map(|c| c.value.trim().to_string());
         builder = builder.node(
             gw.id,

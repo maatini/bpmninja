@@ -1707,3 +1707,86 @@ fn flatten_subprocess_with_multiple_start_events_is_rejected() {
         "unexpected error: {err}"
     );
 }
+
+const SUB_PROCESS_DEFAULT_GATEWAY_PREFIX: &str = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+"#;
+
+const SUB_PROCESS_DEFAULT_GATEWAY_SUFFIX: &str = r#"
+                    <scriptTask id="sub_default">
+                        <script>let x = 1;</script>
+                    </scriptTask>
+                    <scriptTask id="sub_cond">
+                        <script>let y = 1;</script>
+                    </scriptTask>
+                    <endEvent id="sub_e1" />
+                    <endEvent id="sub_e2" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_gw" />
+                    <sequenceFlow id="sf_cond" sourceRef="sub_gw" targetRef="sub_cond">
+                        <conditionExpression xsi:type="tFormalExpression">x == 1</conditionExpression>
+                    </sequenceFlow>
+                    <sequenceFlow id="sf_default" sourceRef="sub_gw" targetRef="sub_default" />
+                    <sequenceFlow id="sf2" sourceRef="sub_cond" targetRef="sub_e1" />
+                    <sequenceFlow id="sf3" sourceRef="sub_default" targetRef="sub_e2" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+"#;
+
+#[test]
+fn flatten_subprocess_resolves_exclusive_gateway_default() {
+    let xml = format!(
+        "{SUB_PROCESS_DEFAULT_GATEWAY_PREFIX}<exclusiveGateway id=\"sub_gw\" default=\"sf_default\" />{SUB_PROCESS_DEFAULT_GATEWAY_SUFFIX}"
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+
+    match def.nodes.get("sub_gw") {
+        Some(BpmnElement::ExclusiveGateway { default }) => assert_eq!(
+            default.as_deref(),
+            Some("sub_default"),
+            "the default flow id must be resolved to its target node"
+        ),
+        other => panic!("expected ExclusiveGateway, got {other:?}"),
+    }
+}
+
+#[test]
+fn flatten_subprocess_resolves_complex_gateway_default() {
+    let xml = format!(
+        "{SUB_PROCESS_DEFAULT_GATEWAY_PREFIX}<complexGateway id=\"sub_gw\" default=\"sf_default\" />{SUB_PROCESS_DEFAULT_GATEWAY_SUFFIX}"
+    );
+    let def = parse_bpmn_xml(&xml).unwrap();
+
+    match def.nodes.get("sub_gw") {
+        Some(BpmnElement::ComplexGateway { default, .. }) => assert_eq!(
+            default.as_deref(),
+            Some("sub_default"),
+            "the default flow id must be resolved to its target node"
+        ),
+        other => panic!("expected ComplexGateway, got {other:?}"),
+    }
+}
+
+#[test]
+fn flatten_subprocess_rejects_unknown_default_flow() {
+    let xml = format!(
+        "{SUB_PROCESS_DEFAULT_GATEWAY_PREFIX}<exclusiveGateway id=\"sub_gw\" default=\"missing_flow\" />{SUB_PROCESS_DEFAULT_GATEWAY_SUFFIX}"
+    );
+    let err = parse_bpmn_xml(&xml).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("sub_gw") && msg.contains("sub1") && msg.contains("missing_flow"),
+        "error must name sub-process, gateway and flow: {msg}"
+    );
+    assert!(
+        matches!(err, engine_core::error::EngineError::InvalidDefinition(_)),
+        "unknown default flow must be InvalidDefinition: {err:?}"
+    );
+}
