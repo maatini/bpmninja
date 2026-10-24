@@ -31,7 +31,7 @@ FOCUS_PATHS = {
     "persistence": "persistence-nats/src/**/*.rs, persistence-memory/src/**/*.rs",
     "server": "engine-server/src/**/*.rs, engine-server/tests/**/*.rs, api-spec",
     "desktop": "desktop-tauri/src/**/*.tsx, desktop-tauri/src/**/*.ts, desktop-tauri/src-tauri/src",
-    "docs": "README.md, docs/**/*.md, CLAUDE.md, api-spec",
+    "docs": "README.md, docs/**/*.md, AGENTS.md, api-spec",
     "quality": (
         "Cargo.toml, .github/workflows, fuzz, engine-core/src, "
         "engine-server/src, persistence-nats/src"

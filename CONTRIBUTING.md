@@ -92,7 +92,7 @@ Checkliste vor dem Öffnen:
 
 ## Weiterführende Doku
 
-- [CLAUDE.md](CLAUDE.md) — Projektleitfaden, Architektur-Regeln, Workflow
+- [AGENTS.md](AGENTS.md) — Projektleitfaden, Architektur-Regeln, Workflow
 - [docs/knowledge-base/index.md](docs/knowledge-base/index.md) — Module, Abhängigkeiten, Gotchas
 - [SECURITY.md](SECURITY.md) — Schwachstellen melden
 

@@ -5,7 +5,7 @@ repo_analysis_task:
 
     Vorgehen:
     1. Verschaffe dir mit repo_stats, cargo_metadata und git_log einen Überblick.
-    2. Lies README.md, CLAUDE.md, HANDOFF.md (falls vorhanden),
+    2. Lies README.md, AGENTS.md, HANDOFF.md (falls vorhanden),
        improvements.md und docs/knowledge-base/index.md, damit du bereits
        erledigte Arbeiten nicht erneut vorschlägst.
     3. Untersuche den Fokusbereich gezielt: Architektur, Fehlerbehandlung,
