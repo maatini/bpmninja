@@ -68,7 +68,7 @@ desktop-tauri/
 5. **ESLint**: Zero ESLint errors. Run with strict mode.
 
 ### Cross-Stack
-- Cross-Crate-Reihenfolge aus `CLAUDE.md`: Backend-Rust-Änderungen vor Frontend-React-Änderungen.
+- Cross-Crate-Reihenfolge aus `AGENTS.md`: Backend-Rust-Änderungen vor Frontend-React-Änderungen.
 - After Rust backend changes: `cd desktop-tauri/src-tauri && cargo clippy --all-targets -- -D warnings`
 - After React frontend changes: `npm run build`, bei UI-Flows `npx playwright test`
 

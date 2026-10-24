@@ -32,7 +32,7 @@ bpmn-parser/src/
 - `parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition>` – einziger öffentlicher Einstieg
 
 ### Relationship to engine-core
-The parser produces `ProcessDefinition` which engine-core's `domain/definition.rs` consumes. The parser's model types MUST be compatible with engine-core's domain types. When adding new elements to the parser, engine-core's domain model usually needs a corresponding update first (see `CLAUDE.md`).
+The parser produces `ProcessDefinition` which engine-core's `domain/definition.rs` consumes. The parser's model types MUST be compatible with engine-core's domain types. When adding new elements to the parser, engine-core's domain model usually needs a corresponding update first (see `AGENTS.md`).
 
 ## Domain Rules & Patterns
 

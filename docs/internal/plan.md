@@ -4,7 +4,7 @@
 
 Stand: 2026-10-10 (Handoff-Refresh). Quelle: `improve1026.md`. **Welle 1–5 sind lokal fertig, nicht committed.** Lokal 1 hinter origin/main (`069af0b` quality-metrics).
 
-Nächste Session: `HANDOFF.md` → `CLAUDE.md` → dieses File. Commit-Schnitt crate-basiert in `HANDOFF.md` (Wellen in engine-core/parser/server vermischt).
+Nächste Session: `HANDOFF.md` → `AGENTS.md` → dieses File. Commit-Schnitt crate-basiert in `HANDOFF.md` (Wellen in engine-core/parser/server vermischt).
 
 ---
 
@@ -131,7 +131,7 @@ Offen geblieben: M5 `unit_tests.rs` split, Desktop CSP/Identifier, Graphify comm
 ## Einstiegs-Prompt nächste Session
 
 ```
-Du bist Agent für BPMNinja (Deutsch). Lies HANDOFF.md, CLAUDE.md, plan.md.
+Du bist Agent für BPMNinja (Deutsch). Lies HANDOFF.md, AGENTS.md, plan.md.
 Welle 1–5 liegen uncommitted. Nicht neu analysieren, nicht neu implementieren.
 Nächster Schritt nur nach explizitem Auftrag: Commit (crate-Schnitt in HANDOFF).
 Frozen: Hexagon, Phase 0, Rust 1.99, Docker native Multi-Arch.

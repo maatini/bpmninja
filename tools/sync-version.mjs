@@ -82,8 +82,8 @@ function setDocsVersion(text) {
   return text.replace(pattern, `$1${version}`);
 }
 
-// CLAUDE.md pins the product version in two places (version bullet and tag).
-function setClaudeVersion(text) {
+// AGENTS.md pins the product version in two places (version bullet and tag).
+function setAgentsVersion(text) {
   const bullet = /(Alle Crates synchron auf Version \*\*)(\d+\.\d+\.\d+)(\*\*)/;
   const tag = /(Git-Tags:\s*`v)(\d+\.\d+\.\d+)(`)/;
   if (!bullet.test(text) || !tag.test(text)) {
@@ -168,7 +168,7 @@ const targets = [
     path: "docs/knowledge-base/modules/engine-core/dependencies.md",
     update: setCargoPackageVersion,
   },
-  { path: "CLAUDE.md", update: setClaudeVersion },
+  { path: "AGENTS.md", update: setAgentsVersion },
 ];
 
 const drifted = [];

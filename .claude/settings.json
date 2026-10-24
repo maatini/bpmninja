@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Lies CLAUDE.md. Bei Bedarf HANDOFF.md und die passende Pro-Crate-Regel aus .agent/rules/ lesen. Kein Graph- oder Task-Memory-Zwang."
+            "prompt": "Lies AGENTS.md. Bei Bedarf HANDOFF.md und die passende Pro-Crate-Regel aus .agent/rules/ lesen. Kein Graph- oder Task-Memory-Zwang."
           }
         ]
       }

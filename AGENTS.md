@@ -1,4 +1,4 @@
-# CLAUDE.md — BPMNinja
+# AGENTS.md — BPMNinja
 
 ## Mission
 BPMNinja ist eine schlanke, Camunda-kompatible BPMN-2.0-Workflow-Engine in Rust: token-basierte
