@@ -1,6 +1,44 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "cargo-llvm-cov@latest": {
+      "last_modified": "2026-10-02T22:55:44Z",
+      "resolved": "github:NixOS/nixpkgs/55ba7f49ef2962b42cbd126522b7df5f95037679#cargo-llvm-cov",
+      "source": "devbox-search",
+      "version": "0.9.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/5q1h285z8zzkw2qxig9a0b1avcsk1cf0-cargo-llvm-cov-0.9.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/5q1h285z8zzkw2qxig9a0b1avcsk1cf0-cargo-llvm-cov-0.9.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/iwpcfjah31fgn99ph32ajzz7i22j6al5-cargo-llvm-cov-0.9.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/iwpcfjah31fgn99ph32ajzz7i22j6al5-cargo-llvm-cov-0.9.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/4y8qxx0mlm22hnxlw2cmbcwpxispw02h-cargo-llvm-cov-0.9.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/4y8qxx0mlm22hnxlw2cmbcwpxispw02h-cargo-llvm-cov-0.9.0"
+        }
+      }
+    },
     "cargo-nextest@latest": {
       "last_modified": "2026-10-02T22:55:44Z",
       "resolved": "github:NixOS/nixpkgs/55ba7f49ef2962b42cbd126522b7df5f95037679#cargo-nextest",

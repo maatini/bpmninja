@@ -89,6 +89,10 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
       NATS_URL: nats://127.0.0.1:4222
+      # Jeder Test-Stream reserviert sein max_bytes im JetStream-Konto. 64 MiB
+      # statt 1 GiB verhindert, dass die vielen Test-Streams das Storage-Limit
+      # des CI-NATS aufbrauchen.
+      BPMNINJA_STREAM_MAX_BYTES: "67108864"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -128,6 +132,68 @@ jobs:
 
       - name: Run tests
         run: cargo nextest run --workspace
+
+  coverage:
+    name: Rust line coverage
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',rust,')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      nats:
+        image: nats:alpine
+        command: "-js -m 8222"
+        ports:
+          - 4222:4222
+          - 8222:8222
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      NATS_URL: nats://127.0.0.1:4222
+      BPMNINJA_STREAM_MAX_BYTES: "67108864"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: llvm-tools-preview
+
+      - name: Enable sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Wait for NATS JetStream
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then
+              echo "NATS ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "NATS failed to become ready"
+          exit 1
+
+      - name: Measure coverage
+        run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info --fail-under-lines 75
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: lcov.info
+          if-no-files-found: warn
+          retention-days: 30
 
   external-task-client:
     name: External task client tests
