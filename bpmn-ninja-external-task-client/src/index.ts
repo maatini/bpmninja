@@ -43,5 +43,6 @@ export type {
   Subscription,
   Logger,
   TaskServiceInterface,
+  TaskRequestOptions,
   ResolvedConfig,
 } from "./types.js";

@@ -13,8 +13,26 @@ import type {
   FailureRequest,
   BpmnErrorRequest,
   Logger,
+  TaskRequestOptions,
   TaskServiceInterface,
 } from "./types.js";
+import { calculateBackoff, sleep } from "./utils/retry.js";
+
+const DEFAULT_REQUEST_OPTIONS: TaskRequestOptions = {
+  timeoutMs: 10_000,
+  // The client opts into retries; direct TaskService users keep single-shot calls.
+  maxRetries: 0,
+  retryDelayMs: 250,
+};
+
+/** 408/429 and 5xx are transient; everything else is a deterministic client error. */
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
 
 /**
  * TaskService — scoped to one ExternalTask.
@@ -23,6 +41,7 @@ import type {
  * into the user's handler alongside the task itself.
  *
  * Uses native `fetch()` (Node 18+) — no external HTTP library needed.
+ * Task-state calls use a per-request timeout and retry transient failures.
  */
 export class TaskService implements TaskServiceInterface {
   private readonly baseUrl: string;
@@ -30,6 +49,7 @@ export class TaskService implements TaskServiceInterface {
   private readonly workerId: string;
   private readonly logger: Logger;
   private readonly apiKey?: string;
+  private readonly requestOptions: TaskRequestOptions;
 
   constructor(
     baseUrl: string,
@@ -37,12 +57,14 @@ export class TaskService implements TaskServiceInterface {
     workerId: string,
     logger: Logger,
     apiKey?: string,
+    requestOptions?: Partial<TaskRequestOptions>,
   ) {
     this.baseUrl = baseUrl;
     this.taskId = task.id;
     this.workerId = workerId;
     this.logger = logger;
     this.apiKey = apiKey;
+    this.requestOptions = { ...DEFAULT_REQUEST_OPTIONS, ...requestOptions };
   }
 
   /** JSON headers plus optional `Authorization: Bearer <apiKey>`. */
@@ -54,6 +76,89 @@ export class TaskService implements TaskServiceInterface {
       headers.Authorization = `Bearer ${this.apiKey}`;
     }
     return headers;
+  }
+
+  /**
+   * Sends one POST with an abort-based timeout.
+   *
+   * A timer clears on every outcome so a resolved request cannot keep the
+   * process alive or abort a later call.
+   */
+  private async fetchWithTimeout(url: string, body: unknown): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.requestOptions.timeoutMs,
+    );
+
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: this.jsonHeaders(),
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Executes a task-state call with timeout and bounded retries.
+   *
+   * Retries network errors, timeouts, and 408/429/5xx responses. Other 4xx
+   * responses (e.g. a completed task or a lock owned by another worker) are
+   * returned immediately because repeating them cannot succeed.
+   */
+  private async requestWithRetry(
+    url: string,
+    body: unknown,
+    failurePrefix: string,
+  ): Promise<void> {
+    const { maxRetries, retryDelayMs, timeoutMs } = this.requestOptions;
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        await sleep(calculateBackoff(attempt, retryDelayMs));
+      }
+
+      let response: Response;
+      try {
+        response = await this.fetchWithTimeout(url, body);
+      } catch (err) {
+        const error = toError(err);
+        lastError =
+          error.name === "AbortError" || error.name === "TimeoutError"
+            ? new Error(`${failurePrefix}: request timed out after ${timeoutMs}ms`)
+            : new Error(`${failurePrefix}: ${error.message}`);
+        if (attempt === maxRetries) {
+          break;
+        }
+        this.logger.warn(
+          `${lastError.message} — retrying ` +
+            `(${attempt + 1}/${maxRetries})`,
+        );
+        continue;
+      }
+
+      if (response.ok) {
+        return;
+      }
+
+      const text = await response.text();
+      const error = new Error(`${failurePrefix}: ${response.status} ${text}`);
+      if (!isRetryableStatus(response.status) || attempt === maxRetries) {
+        throw error;
+      }
+      lastError = error;
+      this.logger.warn(
+        `${failurePrefix}: HTTP ${response.status} — retrying ` +
+          `(${attempt + 1}/${maxRetries})`,
+      );
+    }
+
+    throw lastError ?? new Error(`${failurePrefix}: request failed`);
   }
 
   /**
@@ -69,18 +174,11 @@ export class TaskService implements TaskServiceInterface {
       variables,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.jsonHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(
-        `Failed to complete task ${this.taskId}: ${res.status} ${text}`,
-      );
-    }
+    await this.requestWithRetry(
+      url,
+      body,
+      `Failed to complete task ${this.taskId}`,
+    );
 
     this.logger.info(`Task ${this.taskId} completed successfully`);
   }
@@ -107,18 +205,11 @@ export class TaskService implements TaskServiceInterface {
       errorDetails,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.jsonHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(
-        `Failed to report failure for task ${this.taskId}: ${res.status} ${text}`,
-      );
-    }
+    await this.requestWithRetry(
+      url,
+      body,
+      `Failed to report failure for task ${this.taskId}`,
+    );
 
     this.logger.warn(
       `Task ${this.taskId} reported as failed (retries=${retries}): ${errorMessage}`,
@@ -139,18 +230,11 @@ export class TaskService implements TaskServiceInterface {
       newDuration: additionalDurationMs,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.jsonHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(
-        `Failed to extend lock for task ${this.taskId}: ${res.status} ${text}`,
-      );
-    }
+    await this.requestWithRetry(
+      url,
+      body,
+      `Failed to extend lock for task ${this.taskId}`,
+    );
 
     this.logger.debug(
       `Task ${this.taskId}: lock extended by ${additionalDurationMs}ms`,
@@ -170,18 +254,11 @@ export class TaskService implements TaskServiceInterface {
       errorCode,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.jsonHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(
-        `Failed to throw BPMN error for task ${this.taskId}: ${res.status} ${text}`,
-      );
-    }
+    await this.requestWithRetry(
+      url,
+      body,
+      `Failed to throw BPMN error for task ${this.taskId}`,
+    );
 
     this.logger.info(
       `Task ${this.taskId}: BPMN error '${errorCode}' thrown`,

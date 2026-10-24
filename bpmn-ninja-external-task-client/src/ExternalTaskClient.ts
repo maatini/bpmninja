@@ -43,6 +43,9 @@ const DEFAULTS = {
   baseRetryDelay: 1_000,
   autoExtendLock: false,
   autoExtendLockInterval: 10_000,
+  requestTimeout: 10_000,
+  requestMaxRetries: 2,
+  requestRetryDelay: 250,
 } as const;
 
 /**
@@ -86,6 +89,11 @@ export class ExternalTaskClient {
       autoExtendLock: userConfig.autoExtendLock ?? DEFAULTS.autoExtendLock,
       autoExtendLockInterval:
         userConfig.autoExtendLockInterval ?? DEFAULTS.autoExtendLockInterval,
+      requestTimeout: userConfig.requestTimeout ?? DEFAULTS.requestTimeout,
+      requestMaxRetries:
+        userConfig.requestMaxRetries ?? DEFAULTS.requestMaxRetries,
+      requestRetryDelay:
+        userConfig.requestRetryDelay ?? DEFAULTS.requestRetryDelay,
       logger,
     };
 
@@ -339,6 +347,11 @@ export class ExternalTaskClient {
       this.config.workerId,
       this.config.logger.child({ taskId: task.id, topic: task.topic }),
       this.config.apiKey,
+      {
+        timeoutMs: this.config.requestTimeout,
+        maxRetries: this.config.requestMaxRetries,
+        retryDelayMs: this.config.requestRetryDelay,
+      },
     );
 
     // Optional: automatic lock extension timer

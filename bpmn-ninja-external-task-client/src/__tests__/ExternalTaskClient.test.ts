@@ -381,7 +381,11 @@ describe('ExternalTaskClient', () => {
     });
 
     it('failure()-Error bei Incident-Report -> wird geloggt (kein Crash)', async () => {
-      const client = new ExternalTaskClient({ logger: mockLogger, maxRetries: 0 });
+      const client = new ExternalTaskClient({
+        logger: mockLogger,
+        maxRetries: 0,
+        requestMaxRetries: 0,
+      });
       client.subscribe('t', async () => { throw new Error('Crash'); });
 
       // Engine returns a task
