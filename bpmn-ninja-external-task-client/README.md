@@ -9,6 +9,7 @@ Analogous to the [Camunda External Task Client](https://github.com/camunda/camun
 - 🔄 **Long-Polling** — Efficient fetch-and-lock with configurable timeout
 - 📌 **Multi-Topic Subscriptions** — Subscribe to multiple service task topics simultaneously
 - 🔁 **Global Retry with Exponential Backoff** — Automatic retry on handler failures (1s → 2s → 4s → …)
+- ⏱️ **Request Timeout and Retry** — `complete`, `failure`, `extendLock`, and `bpmnError` time out and retry transient HTTP errors
 - 🔒 **Automatic Lock Extension** — Prevents lock expiration during long-running tasks
 - 🚨 **Incident Creation** — Reports unrecoverable failures as incidents to the engine
 - ⚡ **BPMN Error Throwing** — Trigger boundary error events from worker code
@@ -73,6 +74,9 @@ client.start();
 | `baseRetryDelay` | `number` | `1000` | Base delay for exponential backoff in ms |
 | `autoExtendLock` | `boolean` | `false` | Auto-extend locks for long tasks |
 | `autoExtendLockInterval` | `number` | `10000` | Lock extension interval in ms |
+| `requestTimeout` | `number` | `10000` | Timeout in ms for `complete`/`failure`/`extendLock`/`bpmnError` |
+| `requestMaxRetries` | `number` | `2` | Retries for transient request failures (network, timeout, 408/429/5xx) |
+| `requestRetryDelay` | `number` | `250` | Base delay in ms for request retry backoff |
 | `logger` | `Logger \| false` | pino (pretty) | Custom logger or `false` to disable |
 
 ## API Reference
@@ -194,6 +198,24 @@ See [`example/simple-worker.ts`](./example/simple-worker.ts) for a complete work
 - Retry demonstration
 - Graceful shutdown
 
+## Testing
+
+```bash
+npm test                 # unit tests + integration test when a server binary exists
+npm run test:integration # only the real-server integration test
+```
+
+The integration test starts `target/debug/engine-server` with in-memory state
+(`REQUIRE_NATS=false`) and exercises deploy, start, fetch-and-lock, complete,
+failure/incident, and `start/latest` end to end. Build the binary first:
+
+```bash
+cargo build -p engine-server
+```
+
+Set `BPMNINJA_SERVER_BIN` to use a binary at a different path. Without a binary
+the integration suite is skipped with a warning.
+
 ## Project Structure
 
 ```
@@ -203,12 +225,14 @@ bpmn-ninja-external-task-client/
 │   ├── ExternalTaskClient.ts    # Main client (poll loop, subscriptions)
 │   ├── TaskService.ts           # Per-task API helper (complete, fail, etc.)
 │   ├── types.ts                 # All TypeScript interfaces
+│   ├── __tests__/               # Unit and real-server integration tests
 │   └── utils/
 │       └── retry.ts             # Exponential backoff retry utility
 ├── example/
 │   └── simple-worker.ts         # Usage example
 ├── package.json
 ├── tsconfig.json
+├── tsconfig.build.json          # Build config (excludes tests from dist)
 └── README.md
 ```
 

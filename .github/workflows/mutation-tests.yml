@@ -38,8 +38,10 @@ jobs:
         # -j 2 verhindert OOM-Kills auf dem CI-Runner
         # --output is forced to the workspace so the metrics parser always finds outcomes.json
         # continue-on-error: cargo-mutants exits non-zero when mutants survive.
-        # Score ~68 % is expected; the job still publishes metrics. Tool crashes
-        # without outcomes.json fail the summary step below.
+        # Score ~68 % is expected; the job still publishes metrics. Die Schwelle
+        # (65 %) und der Trend gegenüber dem letzten Wochenlauf werden separat
+        # im Schritt "Mutation-Trend prüfen" ausgewertet. Tool crashes without
+        # outcomes.json fail the summary step below.
         continue-on-error: true
         run: |
           cargo mutants -p engine-core -j 2 --timeout 120 \
@@ -59,6 +61,25 @@ jobs:
       - name: Build mutation metrics JSON
         if: always()
         run: python3 .github/scripts/build_mutation_metrics.py -o mutation-metrics.json
+
+      - name: Mutation-Trend prüfen
+        if: always()
+        run: |
+          set -euo pipefail
+          if git fetch --depth=1 origin "+refs/heads/metrics:refs/remotes/origin/metrics"; then
+            echo "Branch metrics geladen."
+          else
+            echo "::warning::Branch metrics konnte nicht geladen werden; Trend ohne Vorwert."
+          fi
+          if git show origin/metrics:docs/quality-metrics.json > /tmp/previous-quality-metrics.json 2>/dev/null; then
+            echo "Vorheriger Metrikstand aus origin/metrics geladen."
+          else
+            echo "::warning::Kein vorheriger Metrikstand auf origin/metrics; Trend ohne Vorwert."
+            rm -f /tmp/previous-quality-metrics.json
+          fi
+          python3 .github/scripts/check_mutation_trend.py \
+            --current mutation-metrics.json \
+            --previous /tmp/previous-quality-metrics.json
 
       - name: Upload mutation metrics
         if: always()

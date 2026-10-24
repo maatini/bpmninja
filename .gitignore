@@ -13,12 +13,14 @@ build/
 .svelte-kit/
 out/
 
-# Lockfiles (optional – meist committen, aber hier ignorieren wenn du willst)
+# Lockfiles werden versioniert; der Root-package-lock.json gehört zu Nx und bleibt im Repo
 # pnpm-lock.yaml
 # yarn.lock
-# package-lock.json
-/package-lock.json
 .venv/
+
+# Nx Cache (Root)
+.nx/cache
+.nx/workspace-data
 
 # ========================
 # Logs & Debug
@@ -49,7 +51,8 @@ engine_logs.jsonl
 # ========================
 kladde.md
 HANDOFF.md
-/reports/crewai/
+/reports/*
+!/reports/README.md
 
 # ========================
 # Editoren & OS

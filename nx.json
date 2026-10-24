@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*"],
+    "production": ["default"],
+    "rust": [
+      "{workspaceRoot}/**/*.rs",
+      "{workspaceRoot}/**/Cargo.toml",
+      "{workspaceRoot}/Cargo.lock",
+      "{workspaceRoot}/rust-toolchain.toml",
+      "!{workspaceRoot}/desktop-tauri/**",
+      "!{workspaceRoot}/target/**"
+    ],
+    "docs": [
+      "{workspaceRoot}/README.md",
+      "{workspaceRoot}/docs/**/*.md",
+      "{workspaceRoot}/docs/openapi.yaml",
+      "{workspaceRoot}/tools/check-docs.mjs"
+    ],
+    "version": [
+      "{workspaceRoot}/version.json",
+      "{workspaceRoot}/tools/sync-version.mjs"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "cache": true
+    },
+    "test": {
+      "cache": true
+    },
+    "lint": {
+      "cache": true
+    },
+    "typecheck": {
+      "cache": true
+    }
+  }
+}

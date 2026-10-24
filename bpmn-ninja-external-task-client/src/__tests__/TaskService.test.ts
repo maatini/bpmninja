@@ -224,4 +224,106 @@ describe('TaskService', () => {
       expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
     });
   });
+
+  describe('Timeout und Retry für Task-State-Calls', () => {
+    const makeService = (requestOptions: {
+      timeoutMs: number;
+      maxRetries: number;
+      retryDelayMs: number;
+    }) =>
+      new TaskService(
+        'http://localhost:8080',
+        { id: 'task-1' } as any,
+        'worker-1',
+        mockLogger,
+        undefined,
+        requestOptions,
+      );
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('complete bricht nach requestTimeout ab', async () => {
+      fetchMock.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              const error = new Error('Aborted');
+              error.name = 'AbortError';
+              reject(error);
+            });
+          }),
+      );
+
+      const service = makeService({ timeoutMs: 5, maxRetries: 0, retryDelayMs: 1 });
+      await expect(service.complete()).rejects.toThrow(
+        'Failed to complete task task-1: request timed out after 5ms',
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('complete wiederholt 503 und ist danach erfolgreich', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: vi.fn().mockResolvedValue('busy'),
+      });
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        text: vi.fn(),
+      });
+
+      const service = makeService({ timeoutMs: 1000, maxRetries: 1, retryDelayMs: 1 });
+      await service.complete();
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('HTTP 503'),
+      );
+    });
+
+    it('failure wiederholt Netzwerkfehler und ist danach erfolgreich', async () => {
+      fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        text: vi.fn(),
+      });
+
+      const service = makeService({ timeoutMs: 1000, maxRetries: 1, retryDelayMs: 1 });
+      await service.failure('boom');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('failure wiederholt 400 nicht', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: vi.fn().mockResolvedValue('invalid'),
+      });
+
+      const service = makeService({ timeoutMs: 1000, maxRetries: 2, retryDelayMs: 1 });
+      await expect(service.failure('boom')).rejects.toThrow(
+        'Failed to report failure for task task-1: 400 invalid',
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('gibt nach requestMaxRetries auf', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: vi.fn().mockResolvedValue('down'),
+      });
+
+      const service = makeService({ timeoutMs: 1000, maxRetries: 2, retryDelayMs: 1 });
+      await expect(service.complete()).rejects.toThrow(
+        'Failed to complete task task-1: 500 down',
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+  });
 });

@@ -1,0 +1,25 @@
+{
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "name": "api-spec",
+  "root": "api-spec",
+  "projectType": "library",
+  "targets": {
+    "compile": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "outputs": ["{projectRoot}/tsp-output"],
+      "options": {
+        "command": "npm run compile",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "npm run check",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

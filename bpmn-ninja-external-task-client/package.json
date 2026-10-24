@@ -1,10 +1,14 @@
 {
   "name": "@bpmninja/external-task-client",
-  "version": "1.0.0",
+  "version": "0.7.25",
   "description": "Production-ready External Task Worker Client for BPMNinja BPMN Engine",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,13 +16,15 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "example": "tsx example/simple-worker.ts",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:integration": "vitest run src/__tests__/integration.test.ts",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "bpmn",

@@ -3,6 +3,7 @@ use axum::{
     Json,
     extract::{Path, State},
 };
+use engine_core::history::ActorType;
 use engine_core::persistence::CompletedInstanceQuery;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -11,11 +12,27 @@ use std::sync::Arc;
 pub(crate) struct ServerHistoryQuery {
     pub event_types: Option<String>,
     pub node_id: Option<String>,
+    /// `actor_types` is the legacy desktop parameter name and still accepted.
+    #[serde(alias = "actor_types")]
     pub actor_type: Option<String>,
     pub from: Option<chrono::DateTime<chrono::Utc>>,
     pub to: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+}
+
+/// Parses the `actor_type` filter case-insensitively (`engine` == `Engine`).
+///
+/// Unknown values are ignored, matching the previous lenient behavior.
+fn parse_actor_type(raw: &str) -> Option<ActorType> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "engine" => Some(ActorType::Engine),
+        "user" => Some(ActorType::User),
+        "serviceworker" | "service_worker" => Some(ActorType::ServiceWorker),
+        "timer" => Some(ActorType::Timer),
+        "listener" => Some(ActorType::Listener),
+        _ => None,
+    }
 }
 
 pub(crate) async fn get_instance_history(
@@ -31,9 +48,7 @@ pub(crate) async fn get_instance_history(
                 .collect::<Vec<_>>()
         });
 
-        let parsed_actor_type = query
-            .actor_type
-            .and_then(|s| serde_json::from_value(serde_json::json!(s.trim())).ok());
+        let parsed_actor_type = query.actor_type.as_deref().and_then(parse_actor_type);
 
         let history_query = engine_core::persistence::HistoryQuery {
             instance_id,
@@ -139,4 +154,31 @@ pub(crate) async fn get_completed_instance(
         .map_err(|e| AppError::BadRequest(format!("{:?}", e)))?;
 
     Ok(Json(instance))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actor_type_filter_is_case_insensitive() {
+        assert_eq!(parse_actor_type("engine"), Some(ActorType::Engine));
+        assert_eq!(
+            parse_actor_type(" ServiceWorker "),
+            Some(ActorType::ServiceWorker)
+        );
+        assert_eq!(
+            parse_actor_type("service_worker"),
+            Some(ActorType::ServiceWorker)
+        );
+        assert_eq!(parse_actor_type("Timer"), Some(ActorType::Timer));
+        assert_eq!(parse_actor_type("unknown"), None);
+    }
+
+    #[test]
+    fn history_query_accepts_legacy_plural_actor_types_key() {
+        let query: ServerHistoryQuery =
+            serde_json::from_str(r#"{"actor_types":"Engine"}"#).expect("query deserializes");
+        assert_eq!(query.actor_type.as_deref(), Some("Engine"));
+    }
 }

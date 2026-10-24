@@ -1,0 +1,69 @@
+{
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "name": "rust",
+  "root": ".",
+  "projectType": "library",
+  "targets": {
+    "fmt": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "rust"
+      ],
+      "options": {
+        "command": "cargo fmt --all --check"
+      }
+    },
+    "clippy": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "rust"
+      ],
+      "options": {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "rust"
+      ],
+      "options": {
+        "command": "cargo nextest run --workspace"
+      }
+    },
+    "deny": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "rust"
+      ],
+      "options": {
+        "command": "cargo deny check"
+      }
+    },
+    "version-check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "version",
+        "rust"
+      ],
+      "options": {
+        "command": "node tools/sync-version.mjs --check"
+      }
+    },
+    "docs:check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "inputs": [
+        "docs"
+      ],
+      "options": {
+        "command": "node tools/check-docs.mjs"
+      }
+    }
+  }
+}

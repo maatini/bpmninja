@@ -1,0 +1,78 @@
+name: Feature-Anfrage
+description: Vorschlag für ein neues Feature oder eine Verbesserung
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke für den Vorschlag. Bitte beschreibe zuerst das Problem, nicht nur
+        die gewünschte Lösung — so lässt sich der Nutzen besser einordnen.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Welche Aufgabe lässt sich heute nicht oder nur umständlich lösen?
+      placeholder: "Beispiel: Ein Modellierer kann im Desktop keine Assignee-Properties setzen."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Vorschlag
+      description: Wie könnte die Lösung aussehen? API, UI, Konfiguration?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativen
+      description: Welche Workarounds oder anderen Ansätze hast du geprüft?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: bpmn_scope
+    attributes:
+      label: BPMN-Bezug
+      description: Welcher Bereich ist betroffen?
+      options:
+        - Engine-Ausführung (Tasks, Gateways, Events)
+        - Parser / Modell-Interop (Camunda, bpmn-js)
+        - Persistence / Restore
+        - REST-API / External Task Client
+        - Desktop-UI
+        - Betrieb, Tooling oder Doku
+        - Kein direkter BPMN-Bezug
+    validations:
+      required: true
+
+  - type: input
+    id: element
+    attributes:
+      label: Betroffene BPMN-Elemente
+      description: Optional, falls konkret — zum Beispiel `inclusiveGateway`, `intermediateCatchEvent`, `callActivity`.
+      placeholder: "inclusiveGateway, boundaryEvent"
+    validations:
+      required: false
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Camunda-Kompatibilität
+      description: Gibt es ein entsprechendes Camunda-Verhalten oder eine Spezifikationsstelle?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checkliste
+      options:
+        - label: Ich habe nach bestehenden Issues und im Roadmap-Abschnitt der README gesucht.
+          required: true
+        - label: Der Vorschlag passt zum Projektumfang (keine DMN-, FEEL- oder Multi-Node-Erweiterung).
+          required: true

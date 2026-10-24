@@ -45,9 +45,11 @@ model ProcessInstance {
   parent_instance_id?: string;
   state: unknown;
   current_node?: string;
-  variables: Record<VariableValue>;
+  audit_log: string[];
+  variables: Record<unknown>;
   started_at?: string;
   completed_at?: string;
+  incidents: Incident[];
 }
 
 model DeployRequest {
@@ -58,6 +60,7 @@ model DeployRequest {
 
 model DeployResponse {
   definition_key: string;
+  version: int32;
 }
 
 model StartRequest {
@@ -77,12 +80,21 @@ model StartResponse {
   instance_id: string;
 }
 
+model StartLatestResponse {
+  instance_id: string;
+  definition_key: string;
+  version: int32;
+}
+
 model CompleteRequest {
   variables?: Record<unknown>;
 }
 
 model MoveTokenRequest {
   target_node_id: string;
+  variables?: Record<unknown>;
+  @doc("Cancel the token currently at the source node (default: true).")
+  cancel_current?: boolean;
 }
 
 model MigrateInstanceRequest {
@@ -93,25 +105,30 @@ model MigrateInstanceRequest {
 }
 
 model PendingUserTask {
-  id: string;
+  task_id: string;
   instance_id: string;
   node_id: string;
-  state: "Pending" | "Completed";
+  assignee: string;
+  token_id: string;
   created_at: string;
+  business_key?: string;
 }
 
 model PendingServiceTask {
   id: string;
   instance_id: string;
-  definition_key?: string;
+  definition_key: string;
   node_id: string;
   topic: string;
-  state: string;
-  locked_by?: string;
-  lock_expires_at?: string;
-  variables: Record<VariableValue>;
-  retries?: int32;
+  token_id: string;
+  business_key?: string;
+  variables_snapshot: Record<unknown>;
+  created_at: string;
+  worker_id?: string;
+  lock_expiration?: string;
+  retries: int32;
   error_message?: string;
+  error_details?: string;
 }
 
 model TopicRequest {
@@ -155,6 +172,7 @@ model DefinitionInfo {
   bpmn_id: string;
   version: int32;
   node_count: int32;
+  is_latest: boolean;
 }
 
 model CorrelateMessageRequest {
@@ -172,28 +190,51 @@ model ProcessTimersResponse {
 }
 
 model PendingTimer {
+  id: string;
   instance_id: string;
   node_id: string;
-  fire_at: string;
+  expires_at: string;
+  token_id: string;
+  remaining_repetitions?: int32;
 }
 
 model PendingMessage {
+  id: string;
   instance_id: string;
   node_id: string;
   message_name: string;
+  token_id: string;
+}
+
+model StorageStatus {
+  state: "ready" | "failed" | "in-memory";
+  detail: string;
 }
 
 model BackendInfo {
   backend_type: string;
   nats_url?: string;
   connected: boolean;
+  storage_status: StorageStatus;
+}
+
+model BucketInfo {
+  name: string;
+  bucket_type: string;
+  entries: int64;
+  size_bytes: int64;
 }
 
 model StorageInfo {
+  backend_name: string;
+  version: string;
   host: string;
   port: int32;
-  messages: int32;
-  bytes: int64;
+  memory_bytes: int64;
+  storage_bytes: int64;
+  streams: int32;
+  consumers: int32;
+  buckets: BucketInfo[];
 }
 
 model MonitoringData {
@@ -203,29 +244,120 @@ model MonitoringData {
   instances_completed: int32;
   pending_user_tasks: int32;
   pending_service_tasks: int32;
+  pending_timers: int32;
+  pending_message_catches: int32;
+  persistence_errors: int64;
   storage_info?: StorageInfo;
+  storage_status: StorageStatus;
 }
 
 model BucketEntry {
   key: string;
   size_bytes?: int64;
-  revision?: int64;
-  updated_at?: string;
+  created_at?: string;
 }
 
 model BucketEntryDetail {
   key: string;
-  value: unknown;
+  data: string;
+  @doc("`utf8` for text/JSON/XML, `base64` for binary payloads.")
+  encoding: string;
+}
+
+enum ActorType {
+  Engine,
+  User,
+  ServiceWorker,
+  Timer,
+  Listener,
+}
+
+enum HistoryEventType {
+  InstanceStarted,
+  InstanceCompleted,
+  InstanceDeleted,
+  TaskCompleted,
+  VariableUpdated,
+  GatewayTaken,
+  ListenerExecuted,
+  TokenAdvanced,
+  TokenForked,
+  TokenJoined,
+  BranchCompleted,
+  Error,
+  CallActivityStarted,
+  CallActivityCompleted,
+  InstanceSuspended,
+  InstanceResumed,
+  TokenMoved,
+  EscalationThrown,
+  CompensationTriggered,
+  InstanceMigrated,
+}
+
+model VariableDiff {
+  added: Record<unknown>;
+  removed: string[];
+  changed: Record<unknown>;
+}
+
+model HistoryDiff {
+  variables?: VariableDiff | null;
+  @doc("[old_status, new_status]")
+  status?: [string, string] | null;
+  @doc("[old_node, new_node]")
+  current_node?: [string, string] | null;
+  human_readable?: string | null;
 }
 
 model HistoryEntry {
   id: string;
   instance_id: string;
-  node_id?: string;
-  event_type: string;
-  actor_type: string;
   timestamp: string;
-  details: unknown;
+  event_type: HistoryEventType;
+  node_id?: string | null;
+  description: string;
+  actor_type: ActorType;
+  actor_id?: string | null;
+  diff?: HistoryDiff | null;
+  context: Record<unknown>;
+  metadata?: unknown;
+  definition_version?: int32 | null;
+  is_snapshot: boolean;
+  full_state_snapshot?: unknown;
+}
+
+enum IncidentKind {
+  service_task,
+  timer,
+  persistence,
+  bpmn_error,
+}
+
+model Incident {
+  id: string;
+  kind: IncidentKind;
+  node_id?: string | null;
+  task_id?: string | null;
+  message: string;
+  details?: string | null;
+  created_at: string;
+  last_seen_at: string;
+  occurrences: int32;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+}
+
+model ResolveInstanceIncidentRequest {
+  resolvedBy?: string;
+}
+
+model RetryIncidentRequest {
+  retries?: int32;
+}
+
+model ResolveIncidentRequest {
+  variables?: Record<unknown>;
 }
 
 model UpdateVariablesRequest {
@@ -260,7 +392,7 @@ namespace Api {
 
   @post @route("/start/latest")
   @doc("Start an instance of the latest deployed version of a BPMN definition (by bpmn_process_id; `bpmn_id` is accepted as a legacy alias).")
-  op startLatest(@body request: StartLatestRequest): StartResponse | AppError;
+  op startLatest(@body request: StartLatestRequest): StartLatestResponse | AppError;
 
   @post @route("/start/timer")
   @doc("Start an instance whose start event carries a timerEventDefinition.")
@@ -292,6 +424,18 @@ namespace Api {
 
   @delete @route("/instances/{id}")
   op deleteInstance(@path id: string): { @statusCode statusCode: 204 } | AppError;
+
+  @get @route("/instances/{id}/incidents")
+  @doc("List incidents of an instance, including already resolved ones.")
+  op getInstanceIncidents(@path id: string): Incident[] | AppError;
+
+  @post @route("/instances/{id}/incidents/{incident_id}/resolve")
+  @doc("Resolve an instance incident manually. Returns the updated incident.")
+  op resolveInstanceIncident(
+    @path id: string,
+    @path incident_id: string,
+    @body request: ResolveInstanceIncidentRequest
+  ): Incident | AppError;
 
   @put @route("/instances/{id}/variables")
   op updateInstanceVariables(@path id: string, @body request: UpdateVariablesRequest): { @statusCode statusCode: 204 } | AppError;
@@ -404,10 +548,10 @@ namespace Api {
   op failServiceTask(@path id: string, @body request: FailServiceTaskRequest): { @statusCode statusCode: 204 } | AppError;
 
   @post @route("/service-task/{id}/retry")
-  op retryIncident(@path id: string): { @statusCode statusCode: 204 } | AppError;
+  op retryIncident(@path id: string, @body request: RetryIncidentRequest): { @statusCode statusCode: 204 } | AppError;
 
   @post @route("/service-task/{id}/resolve")
-  op resolveIncident(@path id: string): { @statusCode statusCode: 204 } | AppError;
+  op resolveIncident(@path id: string, @body request: ResolveIncidentRequest): { @statusCode statusCode: 204 } | AppError;
 
   @post @route("/service-task/{id}/extendLock")
   op extendLock(@path id: string, @body request: ExtendLockRequest): { @statusCode statusCode: 204 } | AppError;

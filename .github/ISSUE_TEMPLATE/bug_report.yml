@@ -1,0 +1,122 @@
+name: Fehlerbericht
+description: Etwas verhält sich anders als erwartet
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke für den Bericht. Bitte fülle die Felder so genau wie möglich aus —
+        je kleiner die Reproduktion, desto schneller der Fix.
+
+        Sicherheitslücken bitte **nicht** hier melden, sondern über
+        [SECURITY.md](https://github.com/maatini/bpmninja/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Beschreibung
+      description: Was ist das Problem? Ein bis drei Sätze reichen.
+      placeholder: "Beispiel: Ein Inclusive-Split mit einem von drei Pfaden blockiert am Join."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zur Reproduktion
+      description: Am besten mit BPMN-XML, HTTP-Request oder UI-Klicks.
+      placeholder: |
+        1. Engine starten: `devbox run engine:run`
+        2. Prozess deployen: `curl -X POST ...`
+        3. Instanz starten: `curl -X POST ...`
+        4. ...
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Erwartetes Verhalten
+      placeholder: "Beispiel: Der Prozess endet nach dem Service-Task."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Tatsächliches Verhalten
+      description: Inklusive Fehlermeldung, Statuscode oder beobachtetem Zustand.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version bzw. Commit
+      description: Release-Tag oder Commit-Hash von `main`.
+      placeholder: "0.7.x / <commit>"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Betriebssystem
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Docker / Container
+        - Anderes
+    validations:
+      required: true
+
+  - type: input
+    id: rust
+    attributes:
+      label: Rust-Version
+      description: Ausgabe von `rustc --version`.
+      placeholder: "rustc 1.99.0 (…)"
+    validations:
+      required: true
+
+  - type: input
+    id: nats
+    attributes:
+      label: NATS / Persistence
+      description: NATS-Version und ob JetStream aktiv ist, oder `persistence-memory`.
+      placeholder: "nats-server 2.x mit JetStream, lokal via Docker Compose"
+    validations:
+      required: true
+
+  - type: input
+    id: docker
+    attributes:
+      label: Docker / Compose
+      description: Falls betroffen — Image-Tag oder Compose-Variante.
+      placeholder: "docker compose, Image bpmninja-engine:latest"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevante `tracing`-Ausgaben, Panics oder Serverantworten. Bitte Secrets entfernen.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checkliste
+      options:
+        - label: Ich habe nach bestehenden Issues gesucht.
+          required: true
+        - label: Ich nutze die aktuelle Version der 0.7-Reihe.
+          required: true
+        - label: Die Reproduktion enthält keine Secrets oder personenbezogenen Daten.
+          required: true

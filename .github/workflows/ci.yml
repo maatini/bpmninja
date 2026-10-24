@@ -15,13 +15,72 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_WARNINGS: deny
 
 jobs:
+  plan:
+    name: Affected projects
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      projects: ${{ steps.affected.outputs.projects }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Nx
+        run: npm ci
+
+      - name: Derive affected base and head SHAs
+        uses: nrwl/nx-set-shas@v4
+
+      - name: Determine affected projects
+        id: affected
+        run: |
+          # Target-Filter verhindert, dass das Root-Projekt `rust` bei reinen
+          # Doku-Änderungen als betroffen gilt. Nx ordnet Dateien dem tiefsten
+          # Projekt-Root zu; ohne Filter besitzt `rust` (root `.`) auch README/docs.
+          projects=$(npx nx show projects --affected --base="$NX_BASE" --head="$NX_HEAD" \
+            --with-target=fmt --with-target=clippy --with-target=test --with-target=deny \
+            --with-target=lint --with-target=typecheck --with-target=build --with-target=e2e \
+            --with-target=tauri:build --with-target=compile --with-target=check \
+            | paste -sd, -)
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+          echo "Affected projects: ${projects:-<none>}"
+
+      - name: Check version consistency
+        run: node tools/sync-version.mjs --check
+
+      - name: Check documentation links and versions
+        run: node tools/check-docs.mjs
+
   rust:
     name: Rust clippy and tests
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',rust,')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+    services:
+      nats:
+        image: nats:alpine
+        command: "-js -m 8222"
+        ports:
+          - 4222:4222
+          - 8222:8222
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      NATS_URL: nats://127.0.0.1:4222
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -32,20 +91,14 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
 
+      - name: Enable sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run clippy
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: Start NATS JetStream
+      - name: Wait for NATS JetStream
         run: |
-          docker run -d --name bpmninja-nats \
-            -p 4222:4222 -p 8222:8222 \
-            nats:alpine --js --http_port 8222
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then
               echo "NATS ready"
@@ -54,18 +107,30 @@ jobs:
             sleep 1
           done
           echo "NATS failed to become ready"
-          docker logs bpmninja-nats
           exit 1
 
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests
-        env:
-          NATS_URL: nats://127.0.0.1:4222
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
 
   external-task-client:
     name: External task client tests
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',client,')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: bpmn-ninja-external-task-client
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -78,21 +143,35 @@ jobs:
           cache-dependency-path: bpmn-ninja-external-task-client/package-lock.json
 
       - name: Install dependencies
-        working-directory: bpmn-ninja-external-task-client
         run: npm ci
 
       - name: Run TypeScript lint
-        working-directory: bpmn-ninja-external-task-client
         run: npm run lint
 
-      - name: Run tests
-        working-directory: bpmn-ninja-external-task-client
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build engine-server for integration test
+        working-directory: .
+        run: cargo build -p engine-server
+
+      - name: Run tests (incl. real engine-server integration)
+        env:
+          BPMNINJA_SERVER_BIN: ${{ github.workspace }}/target/debug/engine-server
         run: npm test
 
   typespec:
     name: TypeSpec compile
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',api-spec,')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -112,10 +191,16 @@ jobs:
         working-directory: api-spec
         run: npm run compile
 
+      - name: Fail on drifted generated spec
+        run: git diff --exit-code api-spec/tsp-output
+
   cargo-deny:
     name: cargo deny
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',rust,')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -133,21 +218,14 @@ jobs:
       - name: Run cargo deny check
         run: cargo deny check
 
-  ci-scripts:
-    name: CI helper scripts
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Test quality-metrics parsers
-        run: python3 .github/scripts/tests/test_mutation_metrics.py
-
   desktop-frontend:
     name: Desktop frontend lint, build, and E2E
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',desktop,')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -175,6 +253,12 @@ jobs:
         working-directory: desktop-tauri
         run: npm run build
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('desktop-tauri/package-lock.json') }}
+
       - name: Install Playwright Chromium
         working-directory: desktop-tauri
         run: npx playwright install --with-deps chromium
@@ -182,3 +266,47 @@ jobs:
       - name: Run Playwright E2E
         working-directory: desktop-tauri
         run: npm run test:e2e
+
+  desktop-build:
+    name: Desktop backend check
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.projects), ',desktop,')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri
+
+      - name: Assert Tauri dependency parity
+        run: node desktop-tauri/scripts/assert-tauri-parity.mjs
+
+      - name: Check Tauri backend
+        run: cargo check --manifest-path desktop-tauri/src-tauri/Cargo.toml
+
+  ci-scripts:
+    name: CI helper scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Test quality-metrics parsers
+        run: python3 .github/scripts/tests/test_mutation_metrics.py

@@ -74,6 +74,21 @@ export interface ClientConfig {
    */
   autoExtendLockInterval?: number;
 
+  /**
+   * Timeout in ms for task-state calls (`complete`, `failure`, `extendLock`,
+   * `bpmnError`) (default: 10000).
+   */
+  requestTimeout?: number;
+
+  /**
+   * Retries for transient failures (network errors, timeouts, 408/429/5xx)
+   * on task-state calls (default: 2). Non-retryable 4xx responses are not retried.
+   */
+  requestMaxRetries?: number;
+
+  /** Base delay in ms for request retries with exponential backoff (default: 250). */
+  requestRetryDelay?: number;
+
   /** Custom logger instance (must conform to pino interface). Pass `false` to disable logging. */
   logger?: Logger | false;
 }
@@ -94,7 +109,20 @@ export interface ResolvedConfig {
   baseRetryDelay: number;
   autoExtendLock: boolean;
   autoExtendLockInterval: number;
+  requestTimeout: number;
+  requestMaxRetries: number;
+  requestRetryDelay: number;
   logger: Logger;
+}
+
+/** Timeout and retry settings for task-state HTTP calls. */
+export interface TaskRequestOptions {
+  /** Per-request timeout in ms. */
+  timeoutMs: number;
+  /** Retries after the initial attempt. */
+  maxRetries: number;
+  /** Base delay in ms for exponential backoff. */
+  retryDelayMs: number;
 }
 
 // ---------------------------------------------------------------------------

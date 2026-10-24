@@ -57,6 +57,107 @@ async fn start_server_with_nats() -> Option<String> {
     Some(base_url)
 }
 
+/// Helper: starts the server with the in-memory persistence adapter so history
+/// queries work without a NATS instance.
+async fn start_server_in_memory() -> String {
+    let persistence: Arc<dyn engine_core::persistence::WorkflowPersistence> =
+        Arc::new(engine_core::adapter::InMemoryPersistence::new());
+    let engine = engine_core::engine::WorkflowEngine::new().with_persistence(persistence.clone());
+
+    let app = engine_server::build_app_with_config(
+        Arc::new(engine),
+        Some(persistence),
+        std::collections::HashMap::new(),
+        None,
+        Arc::new(engine_server::LogBuffer::new()),
+        engine_server::AppBuildConfig {
+            require_nats: Some(false),
+            api_key: Some(None),
+            worker_api_key: Some(None),
+            ..Default::default()
+        },
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind to random port");
+    let addr = listener.local_addr().expect("failed to get local addr");
+    let base_url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("server error");
+    });
+
+    base_url
+}
+
+#[tokio::test]
+async fn actor_type_filter_accepts_plural_key_and_lowercase_value() {
+    let base = start_server_in_memory().await;
+    let client = reqwest::Client::new();
+
+    let deploy_body: Value = client
+        .post(format!("{base}/api/deploy"))
+        .json(&serde_json::json!({
+            "xml": MINIMAL_BPMN_XML,
+            "name": "History actor filter"
+        }))
+        .send()
+        .await
+        .expect("deploy request failed")
+        .json()
+        .await
+        .expect("parse deploy response");
+    let def_key = deploy_body["definition_key"]
+        .as_str()
+        .expect("definition_key missing");
+
+    let start_body: Value = client
+        .post(format!("{base}/api/start"))
+        .json(&serde_json::json!({ "definition_key": def_key }))
+        .send()
+        .await
+        .expect("start request failed")
+        .json()
+        .await
+        .expect("parse start response");
+    let instance_id = start_body["instance_id"].as_str().expect("instance_id");
+
+    for query in ["actor_type=engine", "actor_types=Engine"] {
+        let entries: Vec<Value> = client
+            .get(format!(
+                "{base}/api/instances/{instance_id}/history?{query}"
+            ))
+            .send()
+            .await
+            .expect("history request failed")
+            .json()
+            .await
+            .expect("parse history response");
+
+        assert!(!entries.is_empty(), "filter {query} returned no entries");
+        assert!(
+            entries.iter().all(|e| e["actor_type"] == "Engine"),
+            "filter {query} returned foreign actor types"
+        );
+    }
+
+    let no_entries: Vec<Value> = client
+        .get(format!(
+            "{base}/api/instances/{instance_id}/history?actor_type=serviceworker"
+        ))
+        .send()
+        .await
+        .expect("history request failed")
+        .json()
+        .await
+        .expect("parse history response");
+    assert!(
+        no_entries.is_empty(),
+        "service worker filter must not match engine history"
+    );
+}
+
 #[tokio::test]
 async fn verify_instance_history_is_generated_and_retrieved() {
     let base = match start_server_with_nats().await {

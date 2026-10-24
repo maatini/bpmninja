@@ -1,0 +1,49 @@
+{
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "name": "desktop",
+  "root": "desktop-tauri",
+  "projectType": "application",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "npm run lint",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "npm exec -- tsc -b",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "command": "npm run build",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "e2e": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "npm run test:e2e",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "tauri:build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "npm run tauri build",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

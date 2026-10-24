@@ -11,7 +11,7 @@ info:
     `GET /api/ready` require `Authorization: Bearer <key>` or `X-API-Key: <key>`.
     Unset key means no authentication. XML/JSON bodies are capped at 10 MiB
     (`MAX_XML_BYTES`). `lockDuration` / `newDuration` are milliseconds.
-  version: 0.7.24
+  version: 0.7.25
   contact:
     name: bpmninja
   license:
@@ -214,7 +214,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StartResponse'
+                $ref: '#/components/schemas/StartLatestResponse'
         '404':
           description: No definition found with this BPMN process ID
         '400':
@@ -321,6 +321,55 @@ paths:
         '404':
           description: Instance not found
 
+  /api/instances/{id}/incidents:
+    get:
+      tags: [Instances]
+      summary: List instance incidents
+      description: Returns the incidents of an instance, including already resolved ones.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: List of incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Incident'
+        '404':
+          description: Instance not found
+
+  /api/instances/{id}/incidents/{incident_id}/resolve:
+    post:
+      tags: [Instances]
+      summary: Resolve an instance incident
+      description: Resolves an incident manually and returns the updated incident.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveInstanceIncidentRequest'
+      responses:
+        '200':
+          description: Incident resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '404':
+          description: Instance or incident not found
+        '409':
+          description: Incident already resolved
+
   /api/instances/{id}/suspend:
     post:
       tags: [Instances]
@@ -366,6 +415,14 @@ paths:
               properties:
                 target_node_id:
                   type: string
+                variables:
+                  type: object
+                  additionalProperties: true
+                  description: Optional variables applied to the target token.
+                cancel_current:
+                  type: boolean
+                  default: true
+                  description: Cancel the token's current position before moving it.
       responses:
         '204':
           description: Token moved
@@ -629,11 +686,25 @@ paths:
       description: Retries a failed service task that has become an incident.
       parameters:
         - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetryIncidentRequest'
       responses:
         '204':
           description: Retry scheduled
         '404':
           description: Service task not found
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/resolve:
     post:
@@ -642,11 +713,25 @@ paths:
       description: Marks the incident resolved without completing the worker task.
       parameters:
         - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveIncidentRequest'
       responses:
         '204':
           description: Incident resolved
         '404':
           description: Service task not found
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   # ────────────────────────────── Variables ───────────────────────────────────
 
@@ -664,8 +749,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/UpdateVariablesRequest'
       responses:
         '204':
           description: Variables updated
@@ -763,11 +847,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message_name]
+              required: [messageName]
               properties:
-                message_name:
+                messageName:
                   type: string
-                business_key:
+                businessKey:
                   type: string
                 variables:
                   type: object
@@ -780,7 +864,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  affected_instances:
+                  affectedInstances:
                     type: array
                     items:
                       type: string
@@ -810,7 +894,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  processed:
+                  triggered:
                     type: integer
 
   /api/timers:
@@ -825,16 +909,7 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    instance_id:
-                      type: string
-                      format: uuid
-                    node_id:
-                      type: string
-                    fire_at:
-                      type: string
-                      format: date-time
+                  $ref: '#/components/schemas/PendingTimer'
 
   /api/messages:
     get:
@@ -848,15 +923,7 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    instance_id:
-                      type: string
-                      format: uuid
-                    node_id:
-                      type: string
-                    message_name:
-                      type: string
+                  $ref: '#/components/schemas/PendingMessage'
 
   # ─────────────────────────────── History ────────────────────────────────────
 
@@ -1071,12 +1138,7 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    key:
-                      type: string
-                    value:
-                      type: object
+                  $ref: '#/components/schemas/BucketEntry'
 
   /api/monitoring/buckets/{bucket}/entries/{key}:
     get:
@@ -1100,7 +1162,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/BucketEntryDetail'
         '404':
           description: Key not found
 
@@ -1241,12 +1303,14 @@ components:
 
     DeployResponse:
       type: object
+      required: [definition_key, version]
       properties:
         definition_key:
           type: string
           format: uuid
         version:
           type: integer
+          description: Newly created definition version (starts at 1).
 
     StartRequest:
       type: object
@@ -1264,10 +1328,25 @@ components:
 
     StartResponse:
       type: object
+      required: [instance_id]
       properties:
         instance_id:
           type: string
           format: uuid
+
+    StartLatestResponse:
+      type: object
+      required: [instance_id, definition_key, version]
+      properties:
+        instance_id:
+          type: string
+          format: uuid
+        definition_key:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          description: Version of the definition that was started.
 
     CompleteRequest:
       type: object
@@ -1275,6 +1354,77 @@ components:
         variables:
           type: object
           additionalProperties: true
+
+    UpdateVariablesRequest:
+      type: object
+      required: [variables]
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+
+    IncidentKind:
+      type: string
+      enum: [service_task, timer, persistence, bpmn_error]
+
+    Incident:
+      type: object
+      required: [id, kind, message, created_at, last_seen_at, occurrences]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/IncidentKind'
+        node_id:
+          type: string
+          nullable: true
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+        message:
+          type: string
+        details:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        occurrences:
+          type: integer
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          type: string
+          nullable: true
+
+    ResolveInstanceIncidentRequest:
+      type: object
+      properties:
+        resolvedBy:
+          type: string
+          description: Optional identifier of the operator resolving the incident.
+
+    RetryIncidentRequest:
+      type: object
+      properties:
+        retries:
+          type: integer
+          description: Retries to restore before the task is offered again.
+
+    ResolveIncidentRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          description: Variables written before the incident is resolved.
 
     DefinitionInfo:
       type: object
@@ -1288,6 +1438,9 @@ components:
           type: integer
         node_count:
           type: integer
+        is_latest:
+          type: boolean
+          description: True for the highest deployed version of this BPMN process.
 
     ProcessInstance:
       type: object
@@ -1324,6 +1477,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
 
     PendingUserTask:
       type: object
@@ -1344,6 +1501,52 @@ components:
         created_at:
           type: string
           format: date-time
+        business_key:
+          type: string
+          nullable: true
+
+    PendingTimer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        instance_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        token_id:
+          type: string
+          format: uuid
+        timer_def:
+          type: object
+          nullable: true
+          description: Original timer definition (used for recurring timers).
+        remaining_repetitions:
+          type: integer
+          nullable: true
+          description: Remaining repetitions for repeating-interval timers.
+
+    PendingMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        instance_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        message_name:
+          type: string
+        token_id:
+          type: string
+          format: uuid
 
     PendingServiceTask:
       type: object
@@ -1383,6 +1586,9 @@ components:
           type: string
           nullable: true
         error_details:
+          type: string
+          nullable: true
+        business_key:
           type: string
           nullable: true
 
@@ -1453,6 +1659,7 @@ components:
 
     HistoryEntry:
       type: object
+      required: [id, instance_id, timestamp, event_type, description, actor_type, context, is_snapshot]
       properties:
         id:
           type: string
@@ -1480,6 +1687,12 @@ components:
             - Error
             - CallActivityStarted
             - CallActivityCompleted
+            - InstanceSuspended
+            - InstanceResumed
+            - TokenMoved
+            - EscalationThrown
+            - CompensationTriggered
+            - InstanceMigrated
         node_id:
           type: string
           nullable: true
@@ -1493,11 +1706,22 @@ components:
           nullable: true
         diff:
           $ref: '#/components/schemas/HistoryDiff'
+        context:
+          type: object
+          additionalProperties: true
+          description: Event-specific structured context.
+        metadata:
+          nullable: true
+          description: Optional free-form event metadata.
+        definition_version:
+          type: integer
+          nullable: true
+          description: Definition version active when the event was recorded.
         is_snapshot:
           type: boolean
         full_state_snapshot:
-          type: object
           nullable: true
+          description: Full instance state captured for snapshot events.
 
     HistoryDiff:
       type: object
@@ -1547,6 +1771,19 @@ components:
           nullable: true
         connected:
           type: boolean
+        storage_status:
+          $ref: '#/components/schemas/StorageStatus'
+
+    StorageStatus:
+      type: object
+      required: [state, detail]
+      properties:
+        state:
+          type: string
+          enum: [ready, failed, in-memory]
+        detail:
+          type: string
+          description: Human-readable bootstrap summary or failure cause.
 
     MonitoringData:
       type: object
@@ -1602,6 +1839,35 @@ components:
                     type: integer
                   size_bytes:
                     type: integer
+        storage_status:
+          $ref: '#/components/schemas/StorageStatus'
+
+    BucketEntry:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+        size_bytes:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BucketEntryDetail:
+      type: object
+      required: [key, data, encoding]
+      properties:
+        key:
+          type: string
+        data:
+          type: string
+          description: JSON/text payload, or Base64 when `encoding` is `base64`.
+        encoding:
+          type: string
+          enum: [utf8, base64]
 
     LogEntry:
       type: object
