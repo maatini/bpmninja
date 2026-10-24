@@ -16,17 +16,26 @@ impl WorkflowEngine {
         current_id: &str,
         called_element: &str,
     ) -> EngineResult<NextAction> {
-        let (pending_timers, pending_msgs) =
-            setup_boundary_events(def_clone, current_id, instance_id, token);
-        for t in pending_timers {
+        let boundary = setup_boundary_events(def_clone, current_id, instance_id, token);
+        for t in boundary.timers {
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
-        for m in pending_msgs {
+        for m in boundary.messages {
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
+        }
+        for s in boundary.signals {
+            let id = s.id;
+            self.pending_signal_catches.insert(id, s);
+            self.persist_signal_catch(id).await;
+        }
+        for c in boundary.conditionals {
+            let id = c.id;
+            self.pending_conditional_catches.insert(id, c);
+            self.persist_conditional_catch(id).await;
         }
 
         let inst_arc = self

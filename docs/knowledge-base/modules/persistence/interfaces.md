@@ -8,7 +8,7 @@ Both backends implement this trait (defined in `engine-core/src/port/persistence
 - **Instance CRUD**: `save_instance`, `list_instances`, `delete_instance`
 - **Definition CRUD**: `save_definition`, `list_definitions`, `delete_definition`
 - **Task Queues**: `save_user_task`, `delete_user_task`, `list_user_tasks`; same for service tasks
-- **Wait States**: `save_timer`, `delete_timer`, `list_timers`; same for message catches
+- **Wait States**: `save_timer`, `delete_timer`, `list_timers`; same for message, signal and conditional catches
 - **File Storage**: `save_file`, `load_file`, `delete_file` (Object Store)
 - **BPMN XML**: `save_bpmn_xml`, `load_bpmn_xml`, `list_bpmn_xml_ids`
 - **History**: `append_history_entry`, `query_history`

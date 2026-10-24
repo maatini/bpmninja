@@ -158,6 +158,8 @@ sequenceDiagram
         SC->>SC: restore_service_tasks(engine)
         SC->>SC: restore_timers(engine)
         SC->>SC: restore_message_catches(engine)
+        SC->>SC: restore_signal_catches(engine)
+        SC->>SC: restore_conditional_catches(engine)
     else Connect fail + REQUIRE_NATS=true
         Main-->>Main: exit (fail-fast)
     else Connect fail + REQUIRE_NATS=false

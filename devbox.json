@@ -9,7 +9,8 @@
     "nodejs@latest",
     "python3@latest",
     "pipx@latest",
-    "cargo-nextest@latest"
+    "cargo-nextest@latest",
+    "cargo-llvm-cov@latest"
   ],
   "env": {
     "NATS_URL": "nats://localhost:4222",
@@ -32,7 +33,10 @@
         "cargo fmt --all --check"
       ],
       "test": [
-        "cargo test --workspace"
+        "BPMNINJA_STREAM_MAX_BYTES=${BPMNINJA_STREAM_MAX_BYTES:-67108864} cargo test --workspace"
+      ],
+      "coverage": [
+        "BPMNINJA_STREAM_MAX_BYTES=${BPMNINJA_STREAM_MAX_BYTES:-67108864} cargo llvm-cov --workspace --all-targets --summary-only"
       ],
       "nats:up": [
         "docker compose up -d nats"

@@ -26,142 +26,171 @@ impl WorkflowEngine {
         instance_id: Uuid,
         initial_token: Token,
     ) -> EngineResult<()> {
-        let mut queue = VecDeque::new();
-        queue.push_back(initial_token);
+        self.run_instance_batch_with_tokens(instance_id, vec![initial_token])
+            .await
+    }
+
+    /// Runs a batch starting with multiple tokens (e.g. several conditional
+    /// catches that fired at the same time).
+    pub(crate) async fn run_instance_batch_with_tokens(
+        &self,
+        instance_id: Uuid,
+        initial_tokens: Vec<Token>,
+    ) -> EngineResult<()> {
+        let mut queue: VecDeque<Token> = initial_tokens.into_iter().collect();
         let mut step_count: u32 = 0;
 
-        while let Some(mut token) = queue.pop_front() {
-            step_count += 1;
+        loop {
+            while let Some(mut token) = queue.pop_front() {
+                step_count += 1;
 
-            // Cooperative scheduling: yield to Tokio every N steps
-            if step_count.is_multiple_of(crate::runtime::YIELD_EVERY_N_STEPS) {
-                tokio::task::yield_now().await;
-            }
-
-            // Hard abort: prevent infinite BPMN loops
-            if step_count > crate::runtime::MAX_EXECUTION_STEPS {
-                tracing::error!(
-                    "Instance {} exceeded {} execution steps — aborting (possible infinite loop)",
-                    instance_id,
-                    crate::runtime::MAX_EXECUTION_STEPS
-                );
-                if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                    let mut inst = inst_arc.write().await;
-                    inst.state = InstanceState::CompletedWithError {
-                        error_code: "EXECUTION_LIMIT_EXCEEDED".to_string(),
-                    };
-                    inst.completed_at = Some(chrono::Utc::now());
-                    inst.push_audit_log(format!(
-                        "ABORTED: Exceeded {} execution steps",
-                        crate::runtime::MAX_EXECUTION_STEPS
-                    ));
+                // Cooperative scheduling: yield to Tokio every N steps
+                if step_count.is_multiple_of(crate::runtime::YIELD_EVERY_N_STEPS) {
+                    tokio::task::yield_now().await;
                 }
-                self.persist_instance(instance_id).await;
-                return Err(EngineError::ExecutionLimitExceeded(format!(
-                    "Instance {} exceeded execution step limit ({})",
+
+                // Hard abort: prevent infinite BPMN loops
+                if step_count > crate::runtime::MAX_EXECUTION_STEPS {
+                    tracing::error!(
+                        "Instance {} exceeded {} execution steps — aborting (possible infinite loop)",
+                        instance_id,
+                        crate::runtime::MAX_EXECUTION_STEPS
+                    );
+                    if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                        let mut inst = inst_arc.write().await;
+                        inst.state = InstanceState::CompletedWithError {
+                            error_code: "EXECUTION_LIMIT_EXCEEDED".to_string(),
+                        };
+                        inst.completed_at = Some(chrono::Utc::now());
+                        inst.push_audit_log(format!(
+                            "ABORTED: Exceeded {} execution steps",
+                            crate::runtime::MAX_EXECUTION_STEPS
+                        ));
+                    }
+                    self.persist_instance(instance_id).await;
+                    return Err(EngineError::ExecutionLimitExceeded(format!(
+                        "Instance {} exceeded execution step limit ({})",
+                        instance_id,
+                        crate::runtime::MAX_EXECUTION_STEPS
+                    )));
+                }
+
+                let old_snapshot = if let Some(lk) = self.instances.get(&instance_id).await {
+                    Some(crate::history::DiffSnapshot::from_instance(
+                        &*lk.read().await,
+                    ))
+                } else {
+                    None
+                };
+                let current_gateway_id = token.current_node.clone();
+
+                let action = self.execute_step(instance_id, &mut token).await?;
+
+                let (event_type, description) = match &action {
+                    NextAction::Continue(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Token advanced".to_string(),
+                    ),
+                    NextAction::ContinueMultiple(_) => (
+                        crate::history::HistoryEventType::TokenForked,
+                        "Token forked at gateway".to_string(),
+                    ),
+                    NextAction::WaitForJoin { .. } => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Token arrived at join".to_string(),
+                    ),
+                    NextAction::WaitForUser(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for user task".to_string(),
+                    ),
+                    NextAction::WaitForServiceTask(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for service task".to_string(),
+                    ),
+                    NextAction::WaitForTimer(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for timer".to_string(),
+                    ),
+                    NextAction::WaitForMessage(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for message".to_string(),
+                    ),
+                    NextAction::WaitForSignal(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for signal".to_string(),
+                    ),
+                    NextAction::WaitForCondition(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for condition".to_string(),
+                    ),
+                    NextAction::WaitForCallActivity { .. } => (
+                        crate::history::HistoryEventType::CallActivityStarted,
+                        "Spawned call activity".to_string(),
+                    ),
+                    NextAction::Complete => (
+                        crate::history::HistoryEventType::BranchCompleted,
+                        "Execution path completed".to_string(),
+                    ),
+                    NextAction::ErrorEnd { error_code } => (
+                        crate::history::HistoryEventType::BranchCompleted,
+                        format!("Execution path completed with error '{}'", error_code),
+                    ),
+                    NextAction::EscalationEnd { escalation_code } => (
+                        crate::history::HistoryEventType::EscalationThrown,
+                        format!("Escalation '{}' thrown at end event", escalation_code),
+                    ),
+                    NextAction::SpawnAndContinue { .. } => (
+                        crate::history::HistoryEventType::TokenForked,
+                        "Escalation handler spawned (non-interrupting)".to_string(),
+                    ),
+                    NextAction::Terminate => (
+                        crate::history::HistoryEventType::BranchCompleted,
+                        "Process terminated".to_string(),
+                    ),
+                    NextAction::WaitForEventGroup(_) => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Waiting for multiple alternative events".to_string(),
+                    ),
+                    NextAction::MultiInstanceFork { .. } => (
+                        crate::history::HistoryEventType::TokenForked,
+                        "Spawned Multi-Instance parallel tokens".to_string(),
+                    ),
+                    NextAction::MultiInstanceNext { .. } => (
+                        crate::history::HistoryEventType::TokenAdvanced,
+                        "Advanced to next Multi-Instance sequential iteration".to_string(),
+                    ),
+                };
+
+                self.record_history_event_from_snapshot(
                     instance_id,
-                    crate::runtime::MAX_EXECUTION_STEPS
-                )));
+                    event_type,
+                    &description,
+                    crate::history::ActorType::Engine,
+                    None,
+                    old_snapshot.as_ref(),
+                )
+                .await;
+
+                let token_id = token.id;
+                self.handle_next_action(
+                    action,
+                    instance_id,
+                    token_id,
+                    &current_gateway_id,
+                    &mut queue,
+                )
+                .await?;
+            } // end while
+
+            // Conditional-Catches werden erst ausgewertet, wenn die Queue leer ist.
+            // Die Schleife läuft nur weiter, wenn mindestens ein Catch gefeuert hat;
+            // step_count bleibt der gemeinsame Schutz gegen Endlosschleifen.
+            let fired = self.fire_conditional_catches(instance_id).await?;
+            if fired.is_empty() {
+                break;
             }
-
-            let old_snapshot = if let Some(lk) = self.instances.get(&instance_id).await {
-                Some(crate::history::DiffSnapshot::from_instance(
-                    &*lk.read().await,
-                ))
-            } else {
-                None
-            };
-            let current_gateway_id = token.current_node.clone();
-
-            let action = self.execute_step(instance_id, &mut token).await?;
-
-            let (event_type, description) = match &action {
-                NextAction::Continue(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Token advanced".to_string(),
-                ),
-                NextAction::ContinueMultiple(_) => (
-                    crate::history::HistoryEventType::TokenForked,
-                    "Token forked at gateway".to_string(),
-                ),
-                NextAction::WaitForJoin { .. } => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Token arrived at join".to_string(),
-                ),
-                NextAction::WaitForUser(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Waiting for user task".to_string(),
-                ),
-                NextAction::WaitForServiceTask(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Waiting for service task".to_string(),
-                ),
-                NextAction::WaitForTimer(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Waiting for timer".to_string(),
-                ),
-                NextAction::WaitForMessage(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Waiting for message".to_string(),
-                ),
-                NextAction::WaitForCallActivity { .. } => (
-                    crate::history::HistoryEventType::CallActivityStarted,
-                    "Spawned call activity".to_string(),
-                ),
-                NextAction::Complete => (
-                    crate::history::HistoryEventType::BranchCompleted,
-                    "Execution path completed".to_string(),
-                ),
-                NextAction::ErrorEnd { error_code } => (
-                    crate::history::HistoryEventType::BranchCompleted,
-                    format!("Execution path completed with error '{}'", error_code),
-                ),
-                NextAction::EscalationEnd { escalation_code } => (
-                    crate::history::HistoryEventType::EscalationThrown,
-                    format!("Escalation '{}' thrown at end event", escalation_code),
-                ),
-                NextAction::SpawnAndContinue { .. } => (
-                    crate::history::HistoryEventType::TokenForked,
-                    "Escalation handler spawned (non-interrupting)".to_string(),
-                ),
-                NextAction::Terminate => (
-                    crate::history::HistoryEventType::BranchCompleted,
-                    "Process terminated".to_string(),
-                ),
-                NextAction::WaitForEventGroup(_) => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Waiting for multiple alternative events".to_string(),
-                ),
-                NextAction::MultiInstanceFork { .. } => (
-                    crate::history::HistoryEventType::TokenForked,
-                    "Spawned Multi-Instance parallel tokens".to_string(),
-                ),
-                NextAction::MultiInstanceNext { .. } => (
-                    crate::history::HistoryEventType::TokenAdvanced,
-                    "Advanced to next Multi-Instance sequential iteration".to_string(),
-                ),
-            };
-
-            self.record_history_event_from_snapshot(
-                instance_id,
-                event_type,
-                &description,
-                crate::history::ActorType::Engine,
-                None,
-                old_snapshot.as_ref(),
-            )
-            .await;
-
-            let token_id = token.id;
-            self.handle_next_action(
-                action,
-                instance_id,
-                token_id,
-                &current_gateway_id,
-                &mut queue,
-            )
-            .await?;
-        } // end while
+            queue.extend(fired);
+        }
 
         // Flush persistence for the entire batch
         self.persist_instance(instance_id).await;
@@ -243,7 +272,8 @@ impl WorkflowEngine {
         match &element {
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)
-            | BpmnElement::MessageStartEvent { .. } => {
+            | BpmnElement::MessageStartEvent { .. }
+            | BpmnElement::SignalStartEvent { .. } => {
                 self.handle_start_event(instance_id, token, &def_clone, &current_id)
                     .await
             }
@@ -313,6 +343,34 @@ impl WorkflowEngine {
                 self.handle_message_catch_event(instance_id, token, &current_id, message_name)
                     .await
             }
+            BpmnElement::SignalCatchEvent { signal_name } => {
+                self.handle_signal_catch_event(instance_id, token, &current_id, signal_name)
+                    .await
+            }
+            BpmnElement::ConditionalCatchEvent { condition } => {
+                self.handle_conditional_catch_event(instance_id, token, &current_id, condition)
+                    .await
+            }
+            BpmnElement::SignalThrowEvent { signal_name } => {
+                self.handle_signal_throw_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
+            BpmnElement::SignalEndEvent { signal_name } => {
+                self.handle_signal_end_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
             BpmnElement::CallActivity { called_element } => {
                 self.handle_call_activity(
                     instance_id,
@@ -372,8 +430,14 @@ impl WorkflowEngine {
                 )
                 .await
             }
+            BpmnElement::LinkThrowEvent { target } => {
+                self.handle_link_throw_event(instance_id, token, &def_clone, &current_id, target)
+                    .await
+            }
             BpmnElement::BoundaryTimerEvent { .. }
             | BpmnElement::BoundaryMessageEvent { .. }
+            | BpmnElement::BoundarySignalEvent { .. }
+            | BpmnElement::BoundaryConditionalEvent { .. }
             | BpmnElement::BoundaryErrorEvent { .. }
             | BpmnElement::BoundaryEscalationEvent { .. } => {
                 self.handle_boundary_event(instance_id, token, &def_clone, &current_id)

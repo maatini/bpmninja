@@ -11,7 +11,7 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `WorkflowEngine` | `engine/mod.rs` | Central engine — all operations |
 | `ProcessDefinition` | `domain/definition.rs` | Immutable BPMN definition with nodes, edges, listeners |
 | `ProcessDefinitionBuilder` | `domain/definition.rs` | Builder pattern for constructing definitions (used in tests) |
-| `BpmnElement` | `domain/element.rs` | Enum: 29 BPMN element variants |
+| `BpmnElement` | `domain/element.rs` | Enum: 37 BPMN element variants (inkl. Signal- und Conditional-Events, LinkThrowEvent) |
 | `Token` | `domain/token.rs` | Execution token with id, current_node, variables |
 | `SequenceFlow` | `domain/flow.rs` | Edge between nodes with optional condition |
 | `TimerDefinition` | `domain/timer.rs` | ISO 8601 timer: Duration, AbsoluteDate, CronCycle, RepeatingInterval |
@@ -29,8 +29,8 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 |------|----------|---------|
 | `ProcessInstance` | `runtime/instance.rs` | Live process instance with tokens, state, variables |
 | `ProcessInstance.incidents` | `runtime/instance.rs` | `Vec<Incident>`, `#[serde(default)]`, max. 100 pro Instanz |
-| `InstanceState` | `runtime/instance.rs` | Enum: Running, WaitingOn*, Completed, Suspended, etc. |
-| `NextAction` | `runtime/instance.rs` | Execution loop dispatch: Continue, WaitFor*, Complete, Terminate, etc. |
+| `InstanceState` | `runtime/instance.rs` | Enum: Running, `WaitingOnSignal`, `WaitingOnCondition`, WaitingOn*, Completed, Suspended, etc. |
+| `NextAction` | `runtime/instance.rs` | Execution loop dispatch: Continue, `WaitForSignal`, `WaitForCondition`, WaitFor*, Complete, Terminate, etc. |
 | `ActiveToken` | `runtime/instance.rs` | Token traveling through graph with fork_id and branch_index |
 | `JoinBarrier` | `runtime/instance.rs` | Synchronization barrier at converging gateway |
 | `MultiInstanceProgress` | `runtime/instance.rs` | Progress tracking for multi-instance tasks |
@@ -39,7 +39,9 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `PendingServiceTask` | `runtime/pending.rs` | Service task with lock, retries, variables_snapshot |
 | `PendingTimer` | `runtime/pending.rs` | Timer with expiry and optional repeat config |
 | `PendingMessageCatch` | `runtime/pending.rs` | Message subscription awaiting correlation |
-| `EngineStats` | `runtime/stats.rs` | Monitoring statistics (instance/task/timer counts) |
+| `PendingSignalCatch` | `runtime/pending.rs` | Signal subscription awaiting broadcast |
+| `PendingConditionalCatch` | `runtime/pending.rs` | Conditional catch with `last_result` for `false → true` edge detection |
+| `EngineStats` | `runtime/stats.rs` | Monitoring statistics (instance/task/timer/message/signal/conditional counts) |
 
 ### Error Types
 
@@ -53,12 +55,14 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | Type | Purpose |
 |------|---------|
 | `HistoryEntry` | Single audit event with timestamp, type, diff, actor, snapshot |
-| `HistoryEventType` | Enum: 29 event types (InstanceStarted, TaskCompleted, TokenForked, etc.) |
+| `HistoryEventType` | Enum: 23 event types (InstanceStarted, TaskCompleted, TokenForked, SignalCaught, ConditionalCaught, etc.) |
 | `HistoryDiff` | Diff between two states (variables, status, node) |
 | `VariableDiff` | Added/removed/changed variables |
 | `ActorType` | Who caused the change: Engine, User, ServiceWorker, Timer, Listener |
 
 ### Persistence Trait
+
+41 async methods. Wait-state methods are grouped per event type; a future consolidation into a generic wait-state port is planned.
 
 ```rust
 #[async_trait]
@@ -89,6 +93,12 @@ pub trait WorkflowPersistence: Send + Sync {
     async fn save_message_catch(&self, catch: &PendingMessageCatch) -> EngineResult<()>;
     async fn delete_message_catch(&self, catch_id: Uuid) -> EngineResult<()>;
     async fn list_message_catches(&self) -> EngineResult<Vec<PendingMessageCatch>>;
+    async fn save_signal_catch(&self, catch: &PendingSignalCatch) -> EngineResult<()>;
+    async fn delete_signal_catch(&self, catch_id: Uuid) -> EngineResult<()>;
+    async fn list_signal_catches(&self) -> EngineResult<Vec<PendingSignalCatch>>;
+    async fn save_conditional_catch(&self, catch: &PendingConditionalCatch) -> EngineResult<()>;
+    async fn delete_conditional_catch(&self, catch_id: Uuid) -> EngineResult<()>;
+    async fn list_conditional_catches(&self) -> EngineResult<Vec<PendingConditionalCatch>>;
     
     // File Storage (Object Store)
     async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()>;
@@ -180,5 +190,31 @@ Quellen: Service-Task mit `retries <= 0` bzw. unbehandeltem `bpmnError`; fehlsch
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool` | `condition.rs` | Evaluate gateway conditions |
+| `evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool` | `condition.rs` | Wertet Gateway-Bedingungen aus (siehe unten) |
+| `validate_condition(expr: &str) -> Result<(), String>` | `condition.rs` | Prüft die Syntax; Fehler enthalten die 1-basierte Zeichenposition |
 | `parse_iso8601_duration(s: &str) -> EngineResult<Duration>` | (via bpmn-parser) | Parse ISO 8601 duration strings |
+
+### Bedingungssprache (`condition.rs`)
+
+Eigener Lexer + Recursive-Descent-Parser, keine Rhai-/`eval`-Abhängigkeit. Grammatik (Kurzschluss bei `&&`/`||`):
+
+```
+or      := and (("||" | "or") and)*
+and     := not (("&&" | "and") not)*
+not     := ("!" | "not") not | comparison
+compare := additive (("==" | "!=" | ">" | "<" | ">=" | "<=") additive)?
+additive:= multiplicative (("+" | "-") multiplicative)*
+mult    := unary (("*" | "/" | "%") unary)*
+unary   := "-" unary | primary
+primary := Zahl | String | true | false | null | "(" or ")" | Pfad
+Pfad    := Ident (("." Ident) | ("[" Ganzzahl "]"))*
+```
+
+| Aspekt | Verhalten |
+|--------|-----------|
+| Wrapper | Nur eine vollständige `${…}`-/`#{…}`-Umhüllung wird entfernt; mitten im Ausdruck oder ohne `}` → Syntaxfehler |
+| Fehlende Variablen/Pfade | Internes `undefined`: jeder Vergleich ergibt `false` (auch `!=`); `undefined` ist nicht `null` |
+| Truthiness | Bool direkt; `null`/`undefined`/`0`/leerer String → `false`, Arrays und Objekte → `true` |
+| Zahlenvergleich | `f64`-Epsilon (`< f64::EPSILON`), wie zuvor |
+| Arithmetik | Nur Zahlen; `undefined` propagiert, Division/Modulo durch Null und Typfehler → `false` + `tracing::warn!` |
+| Deploy-Validierung | `ProcessDefinitionBuilder::build` prüft alle `SequenceFlow.condition` und `ComplexGateway.join_condition` → `EngineError::InvalidDefinition` mit Quelle/Ziel bzw. Gateway-ID |

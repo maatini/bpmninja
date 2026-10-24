@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use quick_xml::de::from_str;
 
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessDefinitionBuilder};
+use engine_core::validate_condition;
 
 use crate::models::{BpmnDefinitions, BpmnExtensionElements};
 
@@ -183,6 +184,52 @@ fn resolve_message_ref(
     nonempty_attr(message_ref).map(|r| lookup.get(&r).cloned().unwrap_or(r))
 }
 
+/// Löst einen `signalRef` über die globalen `<signal>`-Definitionen auf.
+///
+/// Signale haben keine generische Ersatzdefinition: ein fehlender oder unbekannter
+/// Verweis macht das Modell ungültig.
+fn resolve_signal_ref(
+    signal_ref: Option<String>,
+    lookup: &HashMap<String, String>,
+    element_kind: &str,
+    element_id: &str,
+) -> EngineResult<String> {
+    let Some(signal_ref) = nonempty_attr(signal_ref) else {
+        return Err(EngineError::InvalidDefinition(format!(
+            "signalEventDefinition on {element_kind} '{element_id}' has no signalRef"
+        )));
+    };
+    lookup.get(&signal_ref).cloned().ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "signalEventDefinition on {element_kind} '{element_id}' references unknown signal '{signal_ref}'"
+        ))
+    })
+}
+
+/// Liest die Bedingung eines `<conditionalEventDefinition>` und validiert sie.
+fn parse_conditional_condition(
+    definition: &crate::models::BpmnConditionalEventDefinition,
+    element_kind: &str,
+    element_id: &str,
+) -> EngineResult<String> {
+    let condition = definition
+        .condition
+        .as_ref()
+        .map(|c| c.value.trim())
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| {
+            EngineError::InvalidDefinition(format!(
+                "conditionalEventDefinition on {element_kind} '{element_id}' has no conditionExpression"
+            ))
+        })?;
+    validate_condition(condition).map_err(|error| {
+        EngineError::InvalidDefinition(format!(
+            "invalid condition on conditional event '{element_id}': {error}"
+        ))
+    })?;
+    Ok(condition.to_string())
+}
+
 fn send_task_message_name(
     task: &crate::models::BpmnSendTask,
     lookup: &HashMap<String, String>,
@@ -276,7 +323,7 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
 
 /// Baut eine Multi-Instance-Definition für Service Tasks.
 ///
-/// Unterstützt wird nur paralleles MI mit genau einer Quelle:
+/// Unterstützt werden paralleles und sequentielles MI mit genau einer Quelle:
 /// `collection` (Variablenreferenz auf ein Array) oder `loopCardinality`.
 fn parse_multi_instance(
     mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
@@ -286,11 +333,7 @@ fn parse_multi_instance(
         return Ok(None);
     };
 
-    if mi.is_sequential.unwrap_or(false) {
-        return Err(EngineError::InvalidDefinition(format!(
-            "Sequential multi-instance is not supported yet (element '{element_id}')"
-        )));
-    }
+    let is_sequential = mi.is_sequential.unwrap_or(false);
 
     let collection = mi
         .collection
@@ -334,7 +377,7 @@ fn parse_multi_instance(
     };
 
     Ok(Some(engine_core::model::MultiInstanceDef {
-        is_sequential: false,
+        is_sequential,
         loop_cardinality,
         collection,
         element_variable,
@@ -342,7 +385,7 @@ fn parse_multi_instance(
 }
 
 /// Lehnt `multiInstanceLoopCharacteristics` für Elemente ab, die kein
-/// paralleler Service Task sind.
+/// Service Task sind.
 fn reject_multi_instance(
     mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
     element_id: &str,
@@ -350,10 +393,107 @@ fn reject_multi_instance(
 ) -> EngineResult<()> {
     if mi.is_some() {
         return Err(EngineError::InvalidDefinition(format!(
-            "Multi-instance is only supported for parallel service tasks; {element_kind} '{element_id}' is not supported"
+            "Multi-instance is only supported for service tasks; {element_kind} '{element_id}' is not supported"
         )));
     }
     Ok(())
+}
+
+/// Auflösung der Link-Events eines Scopes (Prozess oder Subprozess).
+struct LinkScope {
+    /// Link-Name → Zielknoten des zugehörigen Catch-Events.
+    targets: HashMap<String, String>,
+    /// Catch-Events, die nicht materialisiert werden.
+    catch_ids: HashSet<String>,
+}
+
+/// Baut die Link-Map eines Scopes (`name → catch-Ziel`) und validiert die Catch-Events.
+///
+/// Link-Events sind scope-lokal: Ein Throw findet nur Catches desselben Prozesses
+/// bzw. Subprozesses.
+fn resolve_link_scope(
+    scope_label: &str,
+    catches: &[crate::models::BpmnIntermediateCatchEvent],
+    flows: &[crate::models::BpmnSequenceFlow],
+) -> EngineResult<LinkScope> {
+    let mut scope = LinkScope {
+        targets: HashMap::new(),
+        catch_ids: HashSet::new(),
+    };
+
+    for catch_evt in catches {
+        let Some(link) = catch_evt.link_event_definition.as_ref() else {
+            continue;
+        };
+        let name = link.name.trim();
+        if name.is_empty() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' has an empty linkEventDefinition name",
+                catch_evt.id, scope_label
+            )));
+        }
+        if scope.targets.contains_key(name) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "duplicate link name '{}' in scope '{}' (catch event '{}')",
+                name, scope_label, catch_evt.id
+            )));
+        }
+        if flows.iter().any(|flow| flow.target_ref == catch_evt.id) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' must not have incoming sequence flows",
+                catch_evt.id, scope_label
+            )));
+        }
+        let mut outgoing = flows
+            .iter()
+            .filter(|flow| flow.source_ref == catch_evt.id)
+            .map(|flow| flow.target_ref.clone());
+        let Some(target) = outgoing.next() else {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' has no outgoing sequence flow",
+                catch_evt.id, scope_label
+            )));
+        };
+        if outgoing.next().is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "link catch event '{}' in scope '{}' must have exactly one outgoing sequence flow",
+                catch_evt.id, scope_label
+            )));
+        }
+        scope.targets.insert(name.to_string(), target);
+        scope.catch_ids.insert(catch_evt.id.clone());
+    }
+
+    Ok(scope)
+}
+
+/// Liefert das Sprungziel eines Link-Throws und prüft die BPMN-Regeln dafür.
+fn resolve_link_throw(
+    scope: &LinkScope,
+    scope_label: &str,
+    throw_id: &str,
+    link: &crate::models::BpmnLinkEventDefinition,
+    flows: &[crate::models::BpmnSequenceFlow],
+) -> EngineResult<String> {
+    let name = link.name.trim();
+    if name.is_empty() {
+        return Err(EngineError::InvalidDefinition(format!(
+            "link throw event '{}' in scope '{}' has an empty linkEventDefinition name",
+            throw_id, scope_label
+        )));
+    }
+    if flows.iter().any(|flow| flow.source_ref == throw_id) {
+        return Err(EngineError::InvalidDefinition(format!(
+            "link throw event '{}' in scope '{}' must not have outgoing sequence flows",
+            throw_id, scope_label
+        )));
+    }
+    scope.targets.get(name).cloned().ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "link throw event '{}' references unknown link name '{}' in scope '{}': no matching link catch event",
+            throw_id, name, scope_label
+        ))
+    })
 }
 
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
@@ -383,6 +523,20 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let process = defs.processes.remove(executable_idx);
 
     let process_id = process.id.clone();
+
+    if let Some(tx) = &process.transaction {
+        return Err(EngineError::InvalidDefinition(format!(
+            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
+            tx.id.as_deref().unwrap_or(&process_id)
+        )));
+    }
+
+    let link_scope = resolve_link_scope(
+        &process_id,
+        &process.intermediate_catch_events,
+        &process.sequence_flows,
+    )?;
+
     let mut builder = ProcessDefinitionBuilder::new(process_id.clone());
 
     // Lookup maps for messages and errors
@@ -390,6 +544,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         .messages
         .iter()
         .map(|m| (m.id.clone(), m.name.clone()))
+        .collect();
+
+    let signal_lookup: HashMap<String, String> = defs
+        .signals
+        .iter()
+        .map(|s| (s.id.clone(), s.name.clone()))
         .collect();
 
     let error_lookup: HashMap<String, String> = defs
@@ -424,6 +584,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 1. Process Start Events
     for start in process.start_events {
         let node_id = start.id.clone();
+        if start.conditional_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "conditional start events are not supported; no global variable scope (start event '{node_id}')"
+            )));
+        }
         if let Some(timer) = start.timer_event_definition {
             let timer_def = parse_timer_definition(&start.id, &timer)?;
             builder = builder.node(start.id, BpmnElement::TimerStartEvent(timer_def));
@@ -433,6 +598,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 .and_then(|ref_id| message_lookup.get(&ref_id).cloned())
                 .unwrap_or_else(|| "generic_message".into());
             builder = builder.node(start.id, BpmnElement::MessageStartEvent { message_name });
+        } else if let Some(sig) = start.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "startEvent", &start.id)?;
+            builder = builder.node(start.id, BpmnElement::SignalStartEvent { signal_name });
         } else {
             builder = builder.node(start.id, BpmnElement::StartEvent);
         }
@@ -442,6 +611,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 2. Process End Events
     for end in process.end_events {
         let node_id = end.id.clone();
+        if end.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (end event '{node_id}')"
+            )));
+        }
         if end.terminate_event_definition.is_some() {
             builder = builder.node(end.id, BpmnElement::TerminateEndEvent);
         } else if let Some(err) = end.error_event_definition {
@@ -463,6 +637,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     activity_ref: comp.activity_ref,
                 },
             );
+        } else if let Some(sig) = end.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "endEvent", &end.id)?;
+            builder = builder.node(end.id, BpmnElement::SignalEndEvent { signal_name });
         } else {
             builder = builder.node(end.id, BpmnElement::EndEvent);
         }
@@ -672,6 +850,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 7. Intermediate catch events
     for catch_evt in process.intermediate_catch_events {
         let node_id = catch_evt.id.clone();
+        if catch_evt.link_event_definition.is_some() {
+            // Link-Catches werden nicht materialisiert: der Throw springt auf ihr Ziel.
+            continue;
+        }
         if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
@@ -682,9 +864,24 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                &signal_lookup,
+                "intermediateCatchEvent",
+                &catch_evt.id,
+            )?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
+        } else if let Some(cond) = catch_evt.conditional_event_definition {
+            let condition =
+                parse_conditional_condition(&cond, "intermediateCatchEvent", &catch_evt.id)?;
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent { condition },
+            );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, signalEventDefinition, or conditionalEventDefinition",
                 node_id
             )));
         }
@@ -694,6 +891,25 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 8. Intermediate throw events
     for evt in process.intermediate_throw_events {
         let node_id = evt.id.clone();
+        if let Some(link) = evt.link_event_definition {
+            let target = resolve_link_throw(
+                &link_scope,
+                &process_id,
+                &node_id,
+                &link,
+                &process.sequence_flows,
+            )?;
+            builder = builder.node(
+                evt.id,
+                BpmnElement::LinkThrowEvent {
+                    target: target.clone(),
+                },
+            );
+            // Synthetische Kante für die Graph-Validierung; der Handler springt direkt.
+            builder = builder.flow(node_id.clone(), target);
+            builder = add_listeners(builder, &node_id, evt.extension_elements);
+            continue;
+        }
         if let Some(msg) = evt.message_event_definition {
             let message_name = msg
                 .message_ref
@@ -706,6 +922,14 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     multi_instance: None,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                &signal_lookup,
+                "intermediateThrowEvent",
+                &evt.id,
+            )?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else if let Some(esc) = evt.escalation_event_definition {
             let escalation_code = esc
                 .escalation_ref
@@ -724,7 +948,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, signal, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -738,6 +962,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         // cancelActivity is true by default
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
+        if bd.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{node_id}')"
+            )));
+        }
         if let Some(timer) = bd.timer_event_definition {
             let timer_def = parse_timer_definition(&bd.id, &timer)?;
             builder = builder.node(
@@ -758,6 +987,27 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 BpmnElement::BoundaryMessageEvent {
                     attached_to,
                     message_name,
+                    cancel_activity,
+                },
+            );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
+        } else if let Some(cond) = bd.conditional_event_definition {
+            let condition = parse_conditional_condition(&cond, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
                     cancel_activity,
                 },
             );
@@ -791,7 +1041,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, conditional, error, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -800,6 +1050,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
 
     // 10. Process Sequence Flows
     for flow in process.sequence_flows {
+        if link_scope.catch_ids.contains(&flow.source_ref) {
+            // Der Catch existiert nicht; sein Ziel wird über den Throw erreicht.
+            continue;
+        }
         if let Some(cond) = flow.condition_expression {
             builder = builder.conditional_flow(flow.source_ref, flow.target_ref, cond.value.trim());
         } else {
@@ -814,6 +1068,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             &process_id,
             builder,
             &message_lookup,
+            &signal_lookup,
             &error_lookup,
             &escalation_lookup,
         )?;
@@ -822,16 +1077,47 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     builder.build()
 }
 
+fn resolve_sub_process_default(
+    flow_lookup: &HashMap<String, String>,
+    sub_process_id: &str,
+    gateway_id: &str,
+    default: Option<String>,
+) -> EngineResult<Option<String>> {
+    default
+        .map(|flow_id| {
+            flow_lookup.get(&flow_id).cloned().ok_or_else(|| {
+                EngineError::InvalidDefinition(format!(
+                    "gateway '{gateway_id}' in subProcess '{sub_process_id}' references unknown default flow '{flow_id}'"
+                ))
+            })
+        })
+        .transpose()
+}
+
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_subprocess(
     sp: crate::models::BpmnSubProcess,
     _parent_id: &str,
     mut builder: ProcessDefinitionBuilder,
     message_lookup: &HashMap<String, String>,
+    signal_lookup: &HashMap<String, String>,
     error_lookup: &HashMap<String, String>,
     escalation_lookup: &HashMap<String, String>,
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
+
+    if let Some(tx) = &sp.transaction {
+        return Err(EngineError::InvalidDefinition(format!(
+            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
+            tx.id.as_deref().unwrap_or(&sub_process_id)
+        )));
+    }
+
+    let link_scope = resolve_link_scope(
+        &sub_process_id,
+        &sp.intermediate_catch_events,
+        &sp.sequence_flows,
+    )?;
 
     let start_event = sp.start_events.first().ok_or_else(|| {
         EngineError::InvalidDefinition(format!("subProcess '{sub_process_id}' has no startEvent"))
@@ -842,6 +1128,11 @@ fn flatten_subprocess(
         )));
     }
     let start_event_id = start_event.id.clone();
+    if start_event.conditional_event_definition.is_some() {
+        return Err(EngineError::InvalidDefinition(format!(
+            "conditional start events are not supported; no global variable scope (start event '{start_event_id}' in subProcess '{sub_process_id}')"
+        )));
+    }
     let mut start_targets: Vec<String> = sp
         .sequence_flows
         .iter()
@@ -852,6 +1143,8 @@ fn flatten_subprocess(
     // Internal start events are pass-throughs: the EmbeddedSubProcess node continues at
     // the start event's target, so no node is materialised for it. Several outgoing
     // flows are all taken (BPMN implicit split) and stay in the graph as a parallel gateway.
+    // Signal-Start-Events in eingebetteten Sub-Prozessen (Event-Subprozesse) werden wie
+    // bisher ignoriert; sie sind nicht Teil dieser Ausbaustufe.
     let (start_node_id, start_forks) = match start_targets.len() {
         0 => {
             return Err(EngineError::InvalidDefinition(format!(
@@ -871,6 +1164,14 @@ fn flatten_subprocess(
     }
 
     for end in sp.end_events {
+        // End-Events beenden den eingebetteten Scope. Signal-End-Events werden wie die
+        // uebrigen End-Event-Definitionen geflattet und senden kein Signal.
+        if end.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (end event '{}')",
+                end.id
+            )));
+        }
         builder = builder.node(
             end.id,
             BpmnElement::SubProcessEndEvent {
@@ -989,8 +1290,16 @@ fn flatten_subprocess(
         builder = builder.node(task.id, BpmnElement::CallActivity { called_element });
     }
 
+    // Default-Flows werden wie am Top-Level von der Flow-ID auf den Zielknoten abgebildet.
+    let flow_lookup: HashMap<String, String> = sp
+        .sequence_flows
+        .iter()
+        .map(|f| (f._id.clone(), f.target_ref.clone()))
+        .collect();
+
     for gw in sp.exclusive_gateways {
-        let default_target = gw.default.clone();
+        let default_target =
+            resolve_sub_process_default(&flow_lookup, &sub_process_id, &gw.id, gw.default)?;
         builder = builder.node(
             gw.id,
             BpmnElement::ExclusiveGateway {
@@ -1009,7 +1318,8 @@ fn flatten_subprocess(
     }
 
     for gw in sp.complex_gateways {
-        let default_target = gw.default.clone();
+        let default_target =
+            resolve_sub_process_default(&flow_lookup, &sub_process_id, &gw.id, gw.default)?;
         let join_condition = gw.activation_condition.map(|c| c.value.trim().to_string());
         builder = builder.node(
             gw.id,
@@ -1021,6 +1331,10 @@ fn flatten_subprocess(
     }
 
     for catch_evt in sp.intermediate_catch_events {
+        if catch_evt.link_event_definition.is_some() {
+            // Link-Catches werden nicht materialisiert: der Throw springt auf ihr Ziel.
+            continue;
+        }
         if let Some(timer) = catch_evt.timer_event_definition {
             let timer_def = parse_timer_definition(&catch_evt.id, &timer)?;
             builder = builder.node(catch_evt.id, BpmnElement::TimerCatchEvent(timer_def));
@@ -1031,15 +1345,49 @@ fn flatten_subprocess(
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                signal_lookup,
+                "intermediateCatchEvent",
+                &catch_evt.id,
+            )?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
+        } else if let Some(cond) = catch_evt.conditional_event_definition {
+            let condition =
+                parse_conditional_condition(&cond, "intermediateCatchEvent", &catch_evt.id)?;
+            builder = builder.node(
+                catch_evt.id,
+                BpmnElement::ConditionalCatchEvent { condition },
+            );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, signalEventDefinition, or conditionalEventDefinition",
                 catch_evt.id
             )));
         }
     }
 
     for evt in sp.intermediate_throw_events {
+        if let Some(link) = evt.link_event_definition {
+            let target = resolve_link_throw(
+                &link_scope,
+                &sub_process_id,
+                &evt.id,
+                &link,
+                &sp.sequence_flows,
+            )?;
+            let throw_id = evt.id.clone();
+            builder = builder.node(
+                throw_id.clone(),
+                BpmnElement::LinkThrowEvent {
+                    target: target.clone(),
+                },
+            );
+            // Synthetische Kante für die Graph-Validierung; der Handler springt direkt.
+            builder = builder.flow(throw_id, target);
+            continue;
+        }
         if let Some(msg) = evt.message_event_definition {
             let message_name = resolve_message_ref(msg.message_ref, message_lookup)
                 .unwrap_or_else(|| "generic_throw".into());
@@ -1050,6 +1398,14 @@ fn flatten_subprocess(
                     multi_instance: None,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                signal_lookup,
+                "intermediateThrowEvent",
+                &evt.id,
+            )?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else if let Some(esc) = evt.escalation_event_definition {
             let escalation_code = esc
                 .escalation_ref
@@ -1068,7 +1424,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, signal, escalation, or compensate definition",
                 evt.id
             )));
         }
@@ -1078,6 +1434,12 @@ fn flatten_subprocess(
         let attached_to = bd.attached_to_ref.clone();
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
+        if bd.cancel_event_definition.is_some() {
+            return Err(EngineError::InvalidDefinition(format!(
+                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{}')",
+                bd.id
+            )));
+        }
         if let Some(timer) = bd.timer_event_definition {
             let timer_def = parse_timer_definition(&bd.id, &timer)?;
             builder = builder.node(
@@ -1096,6 +1458,27 @@ fn flatten_subprocess(
                 BpmnElement::BoundaryMessageEvent {
                     attached_to,
                     message_name,
+                    cancel_activity,
+                },
+            );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, signal_lookup, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
+        } else if let Some(cond) = bd.conditional_event_definition {
+            let condition = parse_conditional_condition(&cond, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundaryConditionalEvent {
+                    attached_to,
+                    condition,
                     cancel_activity,
                 },
             );
@@ -1129,7 +1512,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, conditional, error, escalation, or compensate definition",
                 bd.id
             )));
         }
@@ -1138,6 +1521,10 @@ fn flatten_subprocess(
     for flow in sp.sequence_flows {
         if flow.source_ref == start_event_id && !start_forks {
             // Flows out of the internal start event define the sub-process entry point only.
+            continue;
+        }
+        if link_scope.catch_ids.contains(&flow.source_ref) {
+            // Der Catch existiert nicht; sein Ziel wird über den Throw erreicht.
             continue;
         }
         if let Some(cond) = flow.condition_expression {
@@ -1157,6 +1544,7 @@ fn flatten_subprocess(
             &sub_process_id,
             builder,
             message_lookup,
+            signal_lookup,
             error_lookup,
             escalation_lookup,
         )?;

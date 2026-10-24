@@ -1,5 +1,8 @@
 use crate::domain::{FileReference, Incident, IncidentKind, MAX_INCIDENTS_PER_INSTANCE, Token};
-use crate::runtime::{PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask};
+use crate::runtime::{
+    PendingConditionalCatch, PendingMessageCatch, PendingServiceTask, PendingSignalCatch,
+    PendingTimer, PendingUserTask,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,6 +25,10 @@ pub enum NextAction {
     WaitForTimer(PendingTimer),
     /// The engine must pause — a message catch is pending.
     WaitForMessage(PendingMessageCatch),
+    /// The engine must pause — a signal catch is pending (broadcast, no correlation).
+    WaitForSignal(PendingSignalCatch),
+    /// The engine must pause — a conditional catch is pending.
+    WaitForCondition(PendingConditionalCatch),
     /// The engine must pause at an event-based gateway, registering multiple event listeners.
     WaitForEventGroup(Vec<NextAction>),
     /// The process reached an end event.
@@ -56,6 +63,10 @@ pub struct MultiInstanceProgress {
     pub completed: usize,
     /// For sequential MI: the token that will re-execute the task
     pub sequential_token: Option<Token>,
+    /// Items of a sequential MI activity (parallel MI leaves this empty).
+    /// Older snapshots without this field deserialize to an empty vector.
+    #[serde(default)]
+    pub items: Vec<Option<Value>>,
 }
 
 /// The state of a process instance.
@@ -73,6 +84,12 @@ pub enum InstanceState {
     },
     WaitingOnMessage {
         message_id: Uuid,
+    },
+    WaitingOnSignal {
+        catch_id: Uuid,
+    },
+    WaitingOnCondition {
+        catch_id: Uuid,
     },
     WaitingOnEventBasedGateway,
     /// Multiple tokens are active; some may be waiting, some running.

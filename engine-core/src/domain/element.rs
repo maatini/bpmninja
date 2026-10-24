@@ -63,6 +63,28 @@ pub enum BpmnElement {
         message_name: String,
         cancel_activity: bool,
     },
+    /// A start event triggered by a broadcast signal (`correlate_signal`).
+    SignalStartEvent { signal_name: String },
+    /// An intermediate catch event waiting for a broadcast signal.
+    SignalCatchEvent { signal_name: String },
+    /// An intermediate throw event that broadcasts a signal and continues.
+    SignalThrowEvent { signal_name: String },
+    /// An end event that broadcasts a signal and ends the path.
+    SignalEndEvent { signal_name: String },
+    /// A boundary signal event attached to an activity.
+    BoundarySignalEvent {
+        attached_to: String,
+        signal_name: String,
+        cancel_activity: bool,
+    },
+    /// An intermediate catch event that waits until the condition becomes true.
+    ConditionalCatchEvent { condition: String },
+    /// A boundary conditional event attached to an activity.
+    BoundaryConditionalEvent {
+        attached_to: String,
+        condition: String,
+        cancel_activity: bool,
+    },
     /// A boundary error event attached to an activity.
     BoundaryErrorEvent {
         attached_to: String,
@@ -84,6 +106,9 @@ pub enum BpmnElement {
     CompensationThrowEvent { activity_ref: Option<String> },
     /// An end event that triggers compensation before completing.
     CompensationEndEvent { activity_ref: Option<String> },
+    /// An intermediate link throw event; jumps directly to the target of its
+    /// link catch event in the same scope. The catch itself is not materialised.
+    LinkThrowEvent { target: String },
     /// A boundary compensation event attached to an activity (registered on successful completion).
     BoundaryCompensationEvent { attached_to: String },
     /// A Call Activity that invokes another globally deployed process definition.

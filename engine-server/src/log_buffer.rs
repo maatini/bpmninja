@@ -374,3 +374,153 @@ impl tracing::field::Visit for MessageVisitor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn entry(level: &str, target: &str, message: &str) -> LogEntry {
+        LogEntry {
+            timestamp: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            level: level.to_string(),
+            target: target.to_string(),
+            message: message.to_string(),
+        }
+    }
+
+    fn temp_path() -> PathBuf {
+        std::env::temp_dir().join(format!("bpmninja-log-buffer-{}.jsonl", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn entries_filter_by_level_and_search() {
+        let buffer = LogBuffer::new();
+        buffer.push(entry("ERROR", "engine_core::engine", "worker failed"));
+        buffer.push(entry("INFO", "engine_server::api", "request handled"));
+        buffer.push(entry("DEBUG", "engine_server::api", "cache hit"));
+
+        let errors = buffer.entries(Some("error"), None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "worker failed");
+
+        let info = buffer.entries(Some("info"), None);
+        assert_eq!(info.len(), 2);
+
+        let search = buffer.entries(None, Some("REQUEST"));
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].target, "engine_server::api");
+
+        let target_search = buffer.entries(None, Some("engine_core"));
+        assert_eq!(target_search.len(), 1);
+
+        assert_eq!(buffer.entries(None, None).len(), 3);
+    }
+
+    #[test]
+    fn populate_replaces_entries_and_caps_at_max() {
+        let buffer = LogBuffer::new();
+        buffer.push(entry("INFO", "a", "old"));
+        buffer.populate(vec![
+            entry("WARN", "b", "new-1"),
+            entry("INFO", "b", "new-2"),
+        ]);
+
+        let entries = buffer.entries(None, None);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].message, "new-1");
+        assert_eq!(entries[1].message, "new-2");
+
+        let many: Vec<LogEntry> = (0..MAX_ENTRIES + 1)
+            .map(|i| entry("INFO", "a", &i.to_string()))
+            .collect();
+        buffer.populate(many);
+
+        let capped = buffer.entries(None, None);
+        assert_eq!(capped.len(), MAX_ENTRIES);
+        assert_eq!(capped.first().map(|e| e.message.as_str()), Some("1"));
+        assert_eq!(
+            capped.last().map(|e| e.message.clone()),
+            Some(MAX_ENTRIES.to_string())
+        );
+    }
+
+    #[test]
+    fn file_persistence_appends_and_reloads() {
+        let path = temp_path();
+        {
+            let buffer = LogBuffer::new_with_persistence(&path);
+            buffer.push(entry("INFO", "test", "first"));
+            buffer.push(entry("ERROR", "test", "second"));
+        }
+
+        let reloaded = LogBuffer::new_with_persistence(&path);
+        let entries = reloaded.entries(None, None);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].message, "first");
+        assert_eq!(entries[1].level, "ERROR");
+
+        std::fs::remove_file(&path).expect("temp log file must be removable");
+    }
+
+    #[test]
+    fn file_persistence_ignores_malformed_lines() {
+        let path = temp_path();
+        let valid = serde_json::to_string(&entry("INFO", "test", "valid")).expect("serialize");
+        std::fs::write(&path, format!("not-json\n\n{valid}\n")).expect("write fixture");
+
+        let buffer = LogBuffer::new_with_persistence(&path);
+        let entries = buffer.entries(None, None);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].message, "valid");
+
+        std::fs::remove_file(&path).expect("temp log file must be removable");
+    }
+
+    #[test]
+    fn file_is_compacted_after_threshold() {
+        let path = temp_path();
+        let buffer = LogBuffer::new_with_persistence(&path);
+        for i in 0..COMPACT_AFTER {
+            buffer.push(entry("INFO", "test", &i.to_string()));
+        }
+
+        let contents = std::fs::read_to_string(&path).expect("log file must exist");
+        assert_eq!(contents.lines().count(), COMPACT_AFTER);
+        assert!(!path.with_extension("jsonl.tmp").exists());
+
+        std::fs::remove_file(&path).expect("temp log file must be removable");
+    }
+
+    #[test]
+    fn nats_sink_receives_entries_and_disables_file_persistence() {
+        let path = temp_path();
+        let buffer = LogBuffer::new_with_persistence(&path);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        buffer.enable_nats(tx);
+
+        buffer.push(entry("WARN", "test", "to-nats"));
+
+        let received = rx.try_recv().expect("entry must be sent to NATS sink");
+        assert_eq!(received.message, "to-nats");
+        assert!(!path.exists(), "file persistence must be disabled");
+    }
+
+    #[test]
+    fn layer_captures_tracing_events() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let buffer = LogBuffer::new();
+        let subscriber = tracing_subscriber::registry().with(buffer.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "bpmninja.test", "layer message");
+        });
+
+        let entries = buffer.entries(None, None);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].level, "INFO");
+        assert_eq!(entries[0].target, "bpmninja.test");
+        assert_eq!(entries[0].message, "layer message");
+    }
+}

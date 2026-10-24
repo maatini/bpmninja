@@ -58,7 +58,7 @@ impl WorkflowEngine {
         self.remove_persisted_user_task(task_id).await;
         self.cancel_boundary_timers(instance_id, &pending.node_id)
             .await;
-        self.cancel_boundary_message_catches(instance_id, &pending.node_id)
+        self.cancel_boundary_waits(instance_id, &pending.node_id)
             .await;
 
         let old_state = if let Some(lk) = self.instances.get(&instance_id).await {

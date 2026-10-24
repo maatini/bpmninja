@@ -73,7 +73,7 @@ limits.
 
 ### ⚠️ KV bucket names cannot change after creation
 
-NATS KV bucket names are hardcoded in `trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definitions`, `instances`, `user_tasks`, `service_tasks`, `timers`, `message_catches`, `tokens`, `bpmn_xml`, `history`.
+NATS KV bucket names are hardcoded in `client.rs`/`trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`.
 
 ### ⚠️ Token keys include instance ID for scoping
 

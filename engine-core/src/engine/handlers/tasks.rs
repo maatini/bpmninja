@@ -71,17 +71,26 @@ impl WorkflowEngine {
         current_id: &str,
         assignee: &String,
     ) -> EngineResult<NextAction> {
-        let (pending_timers, pending_msgs) =
-            setup_boundary_events(def_clone, current_id, instance_id, token);
-        for t in pending_timers {
+        let boundary = setup_boundary_events(def_clone, current_id, instance_id, token);
+        for t in boundary.timers {
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
-        for m in pending_msgs {
+        for m in boundary.messages {
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
+        }
+        for s in boundary.signals {
+            let id = s.id;
+            self.pending_signal_catches.insert(id, s);
+            self.persist_signal_catch(id).await;
+        }
+        for c in boundary.conditionals {
+            let id = c.id;
+            self.pending_conditional_catches.insert(id, c);
+            self.persist_conditional_catch(id).await;
         }
 
         let inst_arc = self
@@ -225,17 +234,26 @@ impl WorkflowEngine {
             return Ok(NextAction::Continue(token.clone()));
         }
 
-        let (pending_timers, pending_msgs) =
-            setup_boundary_events(def_clone, current_id, instance_id, token);
-        for t in pending_timers {
+        let boundary = setup_boundary_events(def_clone, current_id, instance_id, token);
+        for t in boundary.timers {
             let id = t.id;
             self.insert_pending_timer(t);
             self.persist_timer(id).await;
         }
-        for m in pending_msgs {
+        for m in boundary.messages {
             let id = m.id;
             self.pending_message_catches.insert(id, m);
             self.persist_message_catch(id).await;
+        }
+        for s in boundary.signals {
+            let id = s.id;
+            self.pending_signal_catches.insert(id, s);
+            self.persist_signal_catch(id).await;
+        }
+        for c in boundary.conditionals {
+            let id = c.id;
+            self.pending_conditional_catches.insert(id, c);
+            self.persist_conditional_catch(id).await;
         }
 
         if let (Some(mi), Some(items)) = (multi_instance, mi_items) {
@@ -245,6 +263,66 @@ impl WorkflowEngine {
                 .get(&instance_id)
                 .await
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
+
+            // Sequentiell: immer genau ein offener Task. Der Token bleibt in
+            // der Instanz und wird nach jedem Abschluss für das nächste Item
+            // wiederverwendet.
+            if mi.is_sequential {
+                let first = {
+                    let mut inst = inst_arc.write().await;
+                    let mut variables_snapshot = token.variables.clone();
+                    variables_snapshot.insert("loopCounter".to_string(), Value::from(1_u64));
+                    if let (Some(element_variable), Some(value)) = (
+                        mi.element_variable.as_ref(),
+                        items.first().cloned().flatten(),
+                    ) {
+                        variables_snapshot.insert(element_variable.clone(), value);
+                    }
+                    let first = PendingServiceTask {
+                        id: Uuid::new_v4(),
+                        instance_id,
+                        definition_key: def_clone.key,
+                        node_id: current_id.to_string(),
+                        topic: topic.to_string(),
+                        token_id: token.id,
+                        variables_snapshot,
+                        created_at: Utc::now(),
+                        worker_id: None,
+                        lock_expiration: None,
+                        retries: 3,
+                        error_message: None,
+                        error_details: None,
+                        business_key: if inst.business_key.is_empty() {
+                            None
+                        } else {
+                            Some(inst.business_key.clone())
+                        },
+                    };
+
+                    inst.current_node = current_id.to_string();
+                    inst.tokens.insert(token.id, token.clone());
+                    inst.multi_instance_state.insert(
+                        current_id.to_string(),
+                        MultiInstanceProgress {
+                            node_id: current_id.to_string(),
+                            total,
+                            completed: 0,
+                            sequential_token: Some(token.clone()),
+                            items,
+                        },
+                    );
+                    inst.push_audit_log(format!(
+                        "🔗 Sequential multi-instance service task '{current_id}' started item 1/{total} for topic '{topic}'"
+                    ));
+                    first
+                };
+
+                tracing::info!(
+                    "Instance {instance_id}: sequential multi-instance service task '{current_id}' pending with item 1/{total} for topic '{topic}'"
+                );
+                return Ok(NextAction::WaitForServiceTask(first));
+            }
+
             let pending_tasks = {
                 let mut inst = inst_arc.write().await;
                 let mut tasks = Vec::with_capacity(total);
@@ -288,6 +366,7 @@ impl WorkflowEngine {
                         total,
                         completed: 0,
                         sequential_token: None,
+                        items: Vec::new(),
                     },
                 );
                 inst.push_audit_log(format!(

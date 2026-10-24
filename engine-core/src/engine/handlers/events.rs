@@ -3,7 +3,9 @@ use crate::domain::{ProcessDefinition, Token};
 use crate::engine::WorkflowEngine;
 use crate::engine::executor::resolve_next_target;
 use crate::runtime::CompensationRecord;
-use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
+use crate::runtime::{
+    NextAction, PendingConditionalCatch, PendingMessageCatch, PendingSignalCatch, PendingTimer,
+};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -159,6 +161,154 @@ impl WorkflowEngine {
         Ok(NextAction::WaitForMessage(pending))
     }
 
+    pub(crate) async fn handle_signal_catch_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        current_id: &str,
+        signal_name: &str,
+    ) -> EngineResult<NextAction> {
+        let pending = PendingSignalCatch {
+            id: Uuid::new_v4(),
+            instance_id,
+            node_id: current_id.to_string(),
+            signal_name: signal_name.to_string(),
+            token_id: token.id,
+        };
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = current_id.to_string();
+        inst.tokens.insert(token.id, token.clone());
+        inst.push_audit_log(format!(
+            "📡 Signal catch event '{current_id}' waiting for '{signal_name}'"
+        ));
+        Ok(NextAction::WaitForSignal(pending))
+    }
+
+    /// Registriert einen wartenden Conditional-Catch.
+    ///
+    /// Die Auswertung erfolgt zentral am Ende des Ausführungs-Batches; ist die
+    /// Bedingung dann bereits wahr, läuft der Token ohne Halt weiter.
+    pub(crate) async fn handle_conditional_catch_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        current_id: &str,
+        condition: &str,
+    ) -> EngineResult<NextAction> {
+        let pending = PendingConditionalCatch {
+            id: Uuid::new_v4(),
+            instance_id,
+            node_id: current_id.to_string(),
+            condition: condition.to_string(),
+            token_id: token.id,
+            last_result: false,
+        };
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = current_id.to_string();
+        inst.tokens.insert(token.id, token.clone());
+        inst.push_audit_log(format!(
+            "⏳ Conditional catch event '{current_id}' waiting for '{condition}'"
+        ));
+        Ok(NextAction::WaitForCondition(pending))
+    }
+
+    /// Broadcastet ein Signal und setzt den Token hinter dem Throw-Event fort.
+    ///
+    /// Interne Throws wecken nur lokale Catches und starten keine Instanzen.
+    pub(crate) async fn handle_signal_throw_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def_clone: &Arc<ProcessDefinition>,
+        current_id: &str,
+        signal_name: &str,
+    ) -> EngineResult<NextAction> {
+        self.run_end_scripts(instance_id, token, def_clone, current_id)
+            .await?;
+
+        let affected = self
+            .broadcast_signal(signal_name, &token.variables, false)
+            .await?;
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::SignalThrown,
+            &format!("Signal '{}' thrown at '{}'", signal_name, current_id),
+            crate::history::ActorType::Engine,
+            None,
+            None,
+        )
+        .await;
+
+        let next = resolve_next_target(def_clone, current_id, &token.variables)?;
+        token.current_node = next.clone();
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = next;
+        inst.push_audit_log(format!(
+            "📡 Signal '{signal_name}' broadcast at '{current_id}' — {} local catch(es) resumed",
+            affected.len()
+        ));
+        Ok(NextAction::Continue(token.clone()))
+    }
+
+    /// Broadcastet ein Signal am End-Event und beendet den Pfad.
+    pub(crate) async fn handle_signal_end_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def_clone: &Arc<ProcessDefinition>,
+        current_id: &str,
+        signal_name: &str,
+    ) -> EngineResult<NextAction> {
+        self.run_end_scripts(instance_id, token, def_clone, current_id)
+            .await?;
+
+        let affected = self
+            .broadcast_signal(signal_name, &token.variables, false)
+            .await?;
+
+        self.record_history_event(
+            instance_id,
+            crate::history::HistoryEventType::SignalThrown,
+            &format!(
+                "Signal '{}' thrown at end event '{}'",
+                signal_name, current_id
+            ),
+            crate::history::ActorType::Engine,
+            None,
+            None,
+        )
+        .await;
+
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = current_id.to_string();
+        inst.push_audit_log(format!(
+            "📡 Signal '{signal_name}' broadcast at end event '{current_id}' — {} local catch(es) resumed",
+            affected.len()
+        ));
+        Ok(NextAction::Complete)
+    }
+
     pub(crate) async fn handle_boundary_event(
         &self,
         instance_id: Uuid,
@@ -177,6 +327,34 @@ impl WorkflowEngine {
             .ok_or(EngineError::NoSuchInstance(instance_id))?;
         let mut inst = inst_arc.write().await;
         inst.current_node = next;
+        Ok(NextAction::Continue(token.clone()))
+    }
+
+    /// Handles an intermediate link throw event.
+    ///
+    /// The parser resolves the matching link catch within the same scope and stores
+    /// its successor as `target`; the catch node itself is never materialised.
+    pub(crate) async fn handle_link_throw_event(
+        &self,
+        instance_id: Uuid,
+        token: &mut Token,
+        def_clone: &Arc<ProcessDefinition>,
+        current_id: &str,
+        target: &str,
+    ) -> EngineResult<NextAction> {
+        self.run_end_scripts(instance_id, token, def_clone, current_id)
+            .await?;
+        token.current_node = target.to_string();
+        let inst_arc = self
+            .instances
+            .get(&instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+        let mut inst = inst_arc.write().await;
+        inst.current_node = target.to_string();
+        inst.push_audit_log(format!(
+            "🔗 Link throw event '{current_id}' jumps to '{target}'"
+        ));
         Ok(NextAction::Continue(token.clone()))
     }
 

@@ -43,10 +43,11 @@
 | `.bpmn_error(task_id, error_code)` | `()` | Route to BoundaryErrorEvent |
 | `.process_timers()` | `usize` | Process all expired timers (called by server background task) |
 | `.correlate_message(name, biz_key, vars)` | `Vec<Uuid>` | Correlate an incoming message with waiting catches |
+| `.correlate_signal(name, vars)` | `Vec<Uuid>` | Broadcast a signal to all matching catches and start matching signal-start definitions |
 | `.suspend_instance(id)` / `.resume_instance(id)` | `()` | Pause/resume an instance |
 | `.move_token(id, token_id, target_node)` | `()` | Manually move a token to a different node |
 | `.migrate_instance(id, new_key, mapping)` | `()` | Migrate to a different definition version |
-| `.update_variables(id, vars)` | `()` | Update instance variables at runtime |
+| `.update_variables(id, vars)` | `()` | Update instance variables at runtime and fire newly satisfied conditional catches |
 | `.get_instance_incidents(id)` | `Vec<Incident>` | Listet offene und aufgelöste Incidents einer Instanz |
 | `.resolve_instance_incident(id, incident_id, resolved_by)` | `Incident` | Löst einen Incident auf und persistiert die Instanz |
 | `.shutdown()` | `()` | Gracefully shut down retry worker |
@@ -67,6 +68,8 @@
 | `service_task.rs` | `src/engine/service_task.rs` | Service task fetch-and-lock, complete, failure, bpmnError, lock extension |
 | `timer_processor.rs` | `src/engine/timer_processor.rs` | Timer scanning, expiry processing, repeating timer setup |
 | `message_processor.rs` | `src/engine/message_processor.rs` | Message correlation logic |
+| `signal_processor.rs` | `src/engine/signal_processor.rs` | Signal correlation/broadcast, catch resume, activity cancellation for interrupting boundary signals |
+| `conditional_events.rs` | `src/engine/conditional_events.rs` | Conditional catch/boundary evaluation with `false → true` edge detection |
 | `process_start.rs` | `src/engine/process_start.rs` | Instance creation from various start triggers |
 | `incidents.rs` | `src/engine/incidents.rs` | Incident-Liste/Resolve am `ProcessInstance`, gemeinsame Anlage-/Dedup-Helfer für Engine und Retry-Worker |
 | `definition_ops.rs` | `src/engine/definition_ops.rs` | Definition CRUD, list, versioning, deploy |

@@ -23,6 +23,7 @@ pub(crate) struct MonitoringData {
     pub pending_service_tasks: usize,
     pub pending_timers: usize,
     pub pending_message_catches: usize,
+    pub pending_signal_catches: usize,
     pub persistence_errors: u64,
     pub storage_info: Option<StorageInfo>,
     /// Ergebnis des NATS/JetStream-Bootstraps beim Serverstart.
@@ -105,6 +106,7 @@ pub(crate) async fn get_monitoring_data(
         pending_service_tasks: stats.pending_service_tasks,
         pending_timers: stats.pending_timers,
         pending_message_catches: stats.pending_message_catches,
+        pending_signal_catches: stats.pending_signal_catches,
         persistence_errors: stats.persistence_errors,
         storage_info,
         storage_status: state.storage_status.clone(),

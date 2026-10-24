@@ -6,8 +6,9 @@
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::{
     BucketEntry, BucketEntryDetail, CompletedInstanceQuery, HistoryEntry, HistoryQuery,
-    PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessDefinition,
-    ProcessInstance, StorageInfo, Token, WorkflowPersistence,
+    PendingConditionalCatch, PendingMessageCatch, PendingServiceTask, PendingSignalCatch,
+    PendingTimer, PendingUserTask, ProcessDefinition, ProcessInstance, StorageInfo, Token,
+    WorkflowPersistence,
 };
 use engine_server::AppBuildConfig;
 use serde_json::Value;
@@ -89,6 +90,24 @@ impl WorkflowPersistence for FailSaveXmlPersistence {
         Ok(())
     }
     async fn list_message_catches(&self) -> EngineResult<Vec<PendingMessageCatch>> {
+        Ok(vec![])
+    }
+    async fn save_signal_catch(&self, _: &PendingSignalCatch) -> EngineResult<()> {
+        Ok(())
+    }
+    async fn delete_signal_catch(&self, _: uuid::Uuid) -> EngineResult<()> {
+        Ok(())
+    }
+    async fn list_signal_catches(&self) -> EngineResult<Vec<PendingSignalCatch>> {
+        Ok(vec![])
+    }
+    async fn save_conditional_catch(&self, _: &PendingConditionalCatch) -> EngineResult<()> {
+        Ok(())
+    }
+    async fn delete_conditional_catch(&self, _: uuid::Uuid) -> EngineResult<()> {
+        Ok(())
+    }
+    async fn list_conditional_catches(&self) -> EngineResult<Vec<PendingConditionalCatch>> {
         Ok(vec![])
     }
     async fn save_file(&self, _: &str, _: &[u8]) -> EngineResult<()> {

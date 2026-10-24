@@ -185,6 +185,15 @@ model CorrelateMessageResponse {
   affectedInstances: string[];
 }
 
+model CorrelateSignalRequest {
+  signalName: string;
+  variables?: Record<unknown>;
+}
+
+model CorrelateSignalResponse {
+  affectedInstances: string[];
+}
+
 model ProcessTimersResponse {
   triggered: int32;
 }
@@ -203,6 +212,14 @@ model PendingMessage {
   instance_id: string;
   node_id: string;
   message_name: string;
+  token_id: string;
+}
+
+model PendingSignal {
+  id: string;
+  instance_id: string;
+  node_id: string;
+  signal_name: string;
   token_id: string;
 }
 
@@ -246,6 +263,7 @@ model MonitoringData {
   pending_service_tasks: int32;
   pending_timers: int32;
   pending_message_catches: int32;
+  pending_signal_catches: int32;
   persistence_errors: int64;
   storage_info?: StorageInfo;
   storage_status: StorageStatus;
@@ -292,6 +310,8 @@ enum HistoryEventType {
   TokenMoved,
   EscalationThrown,
   CompensationTriggered,
+  SignalCaught,
+  SignalThrown,
   InstanceMigrated,
 }
 
@@ -532,6 +552,14 @@ namespace Api {
 
   @get @route("/messages")
   op getPendingMessages(): PendingMessage[] | AppError;
+
+  // ---- Signals (broadcast, keine Korrelation) ----
+
+  @post @route("/signal")
+  op correlateSignal(@body request: CorrelateSignalRequest): CorrelateSignalResponse | AppError;
+
+  @get @route("/signals")
+  op getPendingSignals(): PendingSignal[] | AppError;
 
   // ---- Service tasks (External-Task-Worker-kompatibel) ----
 

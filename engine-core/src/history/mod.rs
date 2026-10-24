@@ -35,6 +35,9 @@ pub enum HistoryEventType {
     TokenMoved,
     EscalationThrown,
     CompensationTriggered,
+    SignalCaught,
+    SignalThrown,
+    ConditionalCaught,
     InstanceMigrated,
 }
 
@@ -61,6 +64,9 @@ impl HistoryEventType {
             Self::TokenMoved => "Token was manually moved to a different node".into(),
             Self::EscalationThrown => "An escalation was thrown".into(),
             Self::CompensationTriggered => "Compensation was triggered".into(),
+            Self::SignalCaught => "A signal was caught".into(),
+            Self::SignalThrown => "A signal was thrown".into(),
+            Self::ConditionalCaught => "A conditional event was caught".into(),
             Self::InstanceMigrated => "Process instance was migrated to a new definition".into(),
         }
     }

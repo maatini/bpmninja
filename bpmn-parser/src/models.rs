@@ -71,6 +71,10 @@ pub(crate) struct BpmnDefinitions {
     #[serde(rename = "message", default)]
     pub messages: Vec<BpmnMessage>,
 
+    /// Globale `<signal>`-Definitionen (Signal-ID -> Name).
+    #[serde(rename = "signal", default)]
+    pub signals: Vec<BpmnSignalDef>,
+
     #[serde(rename = "error", default)]
     pub errors: Vec<BpmnErrorDef>,
 
@@ -80,6 +84,15 @@ pub(crate) struct BpmnDefinitions {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnMessage {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name")]
+    pub name: String,
+}
+
+/// `<signal id="…" name="…"/>` — globale Signal-Definition.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalDef {
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "@name")]
@@ -104,6 +117,24 @@ pub(crate) struct BpmnEscalationDef {
     pub name: Option<String>,
     #[serde(rename = "@escalationCode", default)]
     pub escalation_code: Option<String>,
+}
+
+/// `<linkEventDefinition name="…"/>` — verbindet Throw und Catch innerhalb eines Scopes.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnLinkEventDefinition {
+    #[serde(rename = "@name")]
+    pub name: String,
+}
+
+/// `<cancelEventDefinition/>` — wird nur erkannt, um Cancel-Events abzulehnen.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnCancelEventDefinition {}
+
+/// `<transaction>` — wird nur erkannt, um Transaction-Subprozesse abzulehnen.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnTransaction {
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
 }
 
 /// A catch-all struct for elements we want to parse but otherwise ignore.
@@ -158,6 +189,10 @@ pub(crate) struct BpmnProcess {
     #[serde(rename = "subProcess", default)]
     pub sub_processes: Vec<BpmnSubProcess>,
 
+    /// `<transaction>` wird nur erkannt, um den Deploy abzulehnen.
+    #[serde(rename = "transaction", default)]
+    pub transaction: Option<BpmnTransaction>,
+
     #[serde(rename = "boundaryEvent", default)]
     pub boundary_events: Vec<BpmnBoundaryEvent>,
 
@@ -207,6 +242,10 @@ pub(crate) struct BpmnStartEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,6 +262,18 @@ pub(crate) struct BpmnTimerEventDefinition {
 pub(crate) struct BpmnMessageEventDefinition {
     #[serde(rename = "@messageRef")]
     pub message_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalEventDefinition {
+    #[serde(rename = "@signalRef")]
+    pub signal_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnConditionalEventDefinition {
+    #[serde(rename = "conditionExpression")]
+    pub condition: Option<BpmnConditionExpression>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,12 +305,16 @@ pub(crate) struct BpmnEndEvent {
     #[allow(dead_code)]
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
     #[serde(rename = "terminateEventDefinition")]
     pub terminate_event_definition: Option<IgnoredElement>,
+    #[serde(rename = "cancelEventDefinition")]
+    pub cancel_event_definition: Option<BpmnCancelEventDefinition>,
 }
 
 #[allow(dead_code)]
@@ -328,10 +383,14 @@ pub(crate) struct BpmnIntermediateThrowEvent {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,6 +506,12 @@ pub(crate) struct BpmnIntermediateCatchEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
+    #[serde(rename = "linkEventDefinition")]
+    pub link_event_definition: Option<BpmnLinkEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -463,10 +528,16 @@ pub(crate) struct BpmnBoundaryEvent {
     pub error_event_definition: Option<BpmnErrorEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
     pub compensate_event_definition: Option<BpmnCompensateEventDefinition>,
+    #[serde(rename = "cancelEventDefinition")]
+    pub cancel_event_definition: Option<BpmnCancelEventDefinition>,
+    #[serde(rename = "conditionalEventDefinition")]
+    pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
 }
 
 #[allow(dead_code)]
@@ -477,6 +548,10 @@ pub(crate) struct BpmnSubProcess {
 
     #[serde(rename = "@triggeredByEvent", default)]
     pub triggered_by_event: Option<bool>,
+
+    /// `<transaction>` wird auch in Subprozessen nur erkannt, um den Deploy abzulehnen.
+    #[serde(rename = "transaction", default)]
+    pub transaction: Option<BpmnTransaction>,
 
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,

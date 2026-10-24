@@ -1,3 +1,4 @@
+use crate::condition::validate_condition;
 use crate::domain::{
     BpmnElement, ExecutionListener, ListenerEvent, ScopeEventListener, SequenceFlow,
 };
@@ -53,6 +54,7 @@ impl ProcessDefinition {
                     BpmnElement::StartEvent
                         | BpmnElement::TimerStartEvent(_)
                         | BpmnElement::MessageStartEvent { .. }
+                        | BpmnElement::SignalStartEvent { .. }
                 )
             })
             .count();
@@ -80,6 +82,7 @@ impl ProcessDefinition {
                         | BpmnElement::CompensationEndEvent { .. }
                         | BpmnElement::TerminateEndEvent
                         | BpmnElement::SubProcessEndEvent { .. }
+                        | BpmnElement::SignalEndEvent { .. }
                 )
             })
             .count();
@@ -107,6 +110,8 @@ impl ProcessDefinition {
             | BpmnElement::BoundaryMessageEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
+            | BpmnElement::BoundarySignalEvent { attached_to, .. }
+            | BpmnElement::BoundaryConditionalEvent { attached_to, .. }
             | BpmnElement::BoundaryCompensationEvent { attached_to, .. } = element
                 && !nodes.contains_key(attached_to)
             {
@@ -126,6 +131,7 @@ impl ProcessDefinition {
                     | BpmnElement::CompensationEndEvent { .. }
                     | BpmnElement::TerminateEndEvent
                     | BpmnElement::SubProcessEndEvent { .. }
+                    | BpmnElement::SignalEndEvent { .. }
                     | BpmnElement::EmbeddedSubProcess { .. }
                     | BpmnElement::BoundaryCompensationEvent { .. }
             ) {
@@ -175,11 +181,13 @@ impl ProcessDefinition {
                     if let Some(target_element) = nodes.get(&sf.target)
                         && !matches!(
                             target_element,
-                            BpmnElement::MessageCatchEvent { .. } | BpmnElement::TimerCatchEvent(_)
+                            BpmnElement::MessageCatchEvent { .. }
+                                | BpmnElement::TimerCatchEvent(_)
+                                | BpmnElement::SignalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
-                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
+                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets; conditional catch events are not supported here. Node '{}' is invalid.",
                             sf.target
                         )));
                     }
@@ -207,6 +215,7 @@ impl ProcessDefinition {
                 BpmnElement::StartEvent
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
+                    | BpmnElement::SignalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {
@@ -275,6 +284,57 @@ impl ProcessDefinition {
 // ---------------------------------------------------------------------------
 // Builder helper (ergonomic construction)
 // ---------------------------------------------------------------------------
+
+/// Prüft alle Bedingungsausdrücke vor dem Bau der Definition.
+///
+/// Sequenzflüsse nennen Quelle und Ziel, Complex-Gateways ihre Node-ID, damit
+/// ein fehlerhaftes Modell beim Deploy eindeutig zuzuordnen ist.
+fn validate_condition_expressions(
+    nodes: &HashMap<String, BpmnElement>,
+    flows: &HashMap<String, Vec<SequenceFlow>>,
+) -> EngineResult<()> {
+    for (source, outgoing) in flows {
+        for flow in outgoing {
+            if let Some(condition) = &flow.condition {
+                validate_condition(condition).map_err(|error| {
+                    EngineError::InvalidDefinition(format!(
+                        "Invalid condition on sequence flow '{source}' -> '{}': {error}",
+                        flow.target
+                    ))
+                })?;
+            }
+        }
+    }
+
+    for (node_id, element) in nodes {
+        if let BpmnElement::ComplexGateway {
+            join_condition: Some(condition),
+            ..
+        } = element
+        {
+            validate_condition(condition).map_err(|error| {
+                EngineError::InvalidDefinition(format!(
+                    "Invalid join condition on complex gateway '{node_id}': {error}"
+                ))
+            })?;
+        }
+
+        let event_condition = match element {
+            BpmnElement::ConditionalCatchEvent { condition }
+            | BpmnElement::BoundaryConditionalEvent { condition, .. } => Some(condition),
+            _ => None,
+        };
+        if let Some(condition) = event_condition {
+            validate_condition(condition).map_err(|error| {
+                EngineError::InvalidDefinition(format!(
+                    "Invalid condition on conditional event '{node_id}': {error}"
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
 
 /// Fluent builder for creating a `ProcessDefinition`.
 pub struct ProcessDefinitionBuilder {
@@ -374,6 +434,7 @@ impl ProcessDefinitionBuilder {
 
     /// Builds and validates the definition.
     pub fn build(self) -> EngineResult<ProcessDefinition> {
+        validate_condition_expressions(&self.nodes, &self.flows)?;
         let mut def = ProcessDefinition::new(
             self.id,
             self.version,
