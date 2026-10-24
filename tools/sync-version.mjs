@@ -140,6 +140,8 @@ const targets = [
   {
     path: "fuzz/Cargo.lock",
     update: setCargoLockVersions(["engine-core", "bpmn-parser", "persistence-memory"]),
+    // Gitignored build artifact: absent on clean CI checkouts.
+    optional: true,
   },
   { path: "desktop-tauri/src-tauri/Cargo.toml", update: setCargoPackageVersion },
   {
@@ -171,6 +173,7 @@ const targets = [
 
 const drifted = [];
 const unreadable = [];
+let checked = 0;
 
 for (const target of targets) {
   const file = join(root, target.path);
@@ -178,9 +181,13 @@ for (const target of targets) {
   try {
     before = readFileSync(file, "utf8");
   } catch (error) {
+    if (target.optional && error.code === "ENOENT") {
+      continue;
+    }
     unreadable.push(`${target.path} (${error.code ?? error.message})`);
     continue;
   }
+  checked += 1;
   const after = target.update(before);
   if (after === null) {
     unreadable.push(`${target.path} (version marker not found)`);
@@ -204,14 +211,14 @@ if (checkOnly) {
     console.error(`drift: ${path} is not at ${version}`);
   }
   if (drifted.length === 0 && unreadable.length === 0) {
-    console.log(`ok: all ${targets.length} files are at version ${version}`);
+    console.log(`ok: all ${checked} files are at version ${version}`);
   }
 } else {
   for (const path of drifted) {
     console.log(`updated: ${path}`);
   }
   console.log(
-    `version ${version}: ${drifted.length} file(s) updated, ${targets.length - drifted.length} already in sync`,
+    `version ${version}: ${drifted.length} file(s) updated, ${checked - drifted.length} already in sync`,
   );
 }
 
