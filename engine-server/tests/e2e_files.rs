@@ -97,13 +97,6 @@ async fn test_file_upload_download_delete() {
     assert_eq!(file_var["size_bytes"], file_content.len() as u64);
 
     // 5. Download the file
-    /* NOTE: downloading tests depend on persistence being configured.
-       Wait, in memory `build_app()` doesn't configure a persistence Mock, so `persistence` is None!
-       Our upload and download functions have things like `if let Some(persistence) = &state.persistence`.
-       Upload works because it just ignores persistence saving, but it updates the variable.
-       Download fails with 400 "No persistence configured". Let's test that it actually returns 400 in this case.
-       If we had a MockPersistence, it could return 200...
-    */
     let download_resp = client
         .get(format!(
             "{}/api/instances/{}/files/greeting_file",

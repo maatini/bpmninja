@@ -1,4 +1,4 @@
-use crate::server::state::AppState;
+use crate::server::state::{AppState, StorageState, StorageStatus};
 use axum::{Json, extract::State, response::IntoResponse};
 use engine_core::persistence::StorageInfo;
 use serde::Serialize;
@@ -9,6 +9,8 @@ pub(crate) struct BackendInfo {
     pub backend_type: String,
     pub nats_url: Option<String>,
     pub connected: bool,
+    /// Ergebnis des NATS/JetStream-Bootstraps beim Serverstart.
+    pub storage_status: StorageStatus,
 }
 
 #[derive(Serialize)]
@@ -23,6 +25,8 @@ pub(crate) struct MonitoringData {
     pub pending_message_catches: usize,
     pub persistence_errors: u64,
     pub storage_info: Option<StorageInfo>,
+    /// Ergebnis des NATS/JetStream-Bootstraps beim Serverstart.
+    pub storage_status: StorageStatus,
 }
 
 pub(crate) async fn ready_endpoint(State(state): State<Arc<AppState>>) -> axum::response::Response {
@@ -32,6 +36,17 @@ pub(crate) async fn ready_endpoint(State(state): State<Arc<AppState>>) -> axum::
         return (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "Persistence required but not configured",
+        )
+            .into_response();
+    }
+    // Bootstrap failure stays visible: stream/KV/object-store setup is part of readiness.
+    if state.storage_status.state == StorageState::Failed {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "Persistence bootstrap failed: {}",
+                state.storage_status.detail
+            ),
         )
             .into_response();
     }
@@ -54,12 +69,14 @@ pub(crate) async fn get_backend_info(State(state): State<Arc<AppState>>) -> Json
             backend_type: "persistent".to_string(),
             nats_url: info.as_ref().map(|i| format!("{}:{}", i.host, i.port)),
             connected: true,
+            storage_status: state.storage_status.clone(),
         })
     } else {
         Json(BackendInfo {
             backend_type: "in-memory".to_string(),
             nats_url: Some(state.nats_url.clone()),
             connected: false,
+            storage_status: state.storage_status.clone(),
         })
     }
 }
@@ -90,6 +107,7 @@ pub(crate) async fn get_monitoring_data(
         pending_message_catches: stats.pending_message_catches,
         persistence_errors: stats.persistence_errors,
         storage_info,
+        storage_status: state.storage_status.clone(),
     })
 }
 

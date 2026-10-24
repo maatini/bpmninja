@@ -1,8 +1,8 @@
 # desktop-tauri — Interfaces
 
-## Tauri Command Wrappers (lib/tauri.ts)
+## Tauri Command Wrappers (src/shared/lib/tauri.ts)
 
-All API calls go through typed wrappers exported from `lib/tauri.ts`:
+All API calls go through typed wrappers exported from `src/shared/lib/tauri.ts`:
 
 ```typescript
 // Definitions

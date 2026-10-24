@@ -1,4 +1,4 @@
-use crate::server::state::{AppError, AppState, MAX_XML_BYTES, parse_uuid};
+use crate::server::state::{ApiJson, AppError, AppState, MAX_XML_BYTES, parse_uuid};
 use axum::{
     Json,
     extract::{Path, State},
@@ -25,11 +25,11 @@ pub(crate) struct DeployResponse {
 
 pub(crate) async fn deploy_definition(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<DeployRequest>,
+    ApiJson(payload): ApiJson<DeployRequest>,
 ) -> Result<Json<DeployResponse>, AppError> {
     // Shared with DefaultBodyLimit: default `MAX_XML_BYTES` (10 MiB); env may override.
     if payload.xml.len() > state.max_xml_bytes {
-        return Err(AppError::BadRequest(format!(
+        return Err(AppError::PayloadTooLarge(format!(
             "XML too large: {} bytes (max {})",
             payload.xml.len(),
             state.max_xml_bytes
@@ -124,7 +124,7 @@ pub(crate) async fn get_definition_xml(
         return Ok(xml);
     }
 
-    Err(AppError::BadRequest(format!(
+    Err(AppError::NotFound(format!(
         "No XML found for definition '{id}'"
     )))
 }

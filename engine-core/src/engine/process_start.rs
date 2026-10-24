@@ -200,6 +200,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            incidents: Vec::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }
@@ -460,6 +461,17 @@ impl WorkflowEngine {
                     token: token.clone(),
                 };
                 inst.push_audit_log(format!("💥 INCIDENT: Child {completed_instance_id} failed with unhandled BPMN error '{}'", error_code.as_deref().unwrap_or_default()));
+                inst.push_or_touch_incident(
+                    crate::domain::IncidentKind::BpmnError,
+                    Some(called_node_id.clone()),
+                    None,
+                    format!(
+                        "Unhandled BPMN error '{}' from child instance {completed_instance_id}",
+                        error_code.as_deref().unwrap_or_default()
+                    ),
+                    None,
+                );
+                metrics::counter!("bpmn_incidents_total", "kind" => "bpmn_error").increment(1);
                 self.persist_instance(parent_id).await;
                 return Ok(());
             }
@@ -549,6 +561,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            incidents: Vec::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -727,6 +740,7 @@ impl WorkflowEngine {
             multi_instance_state: std::collections::HashMap::new(),
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
+            incidents: Vec::new(),
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };

@@ -274,19 +274,86 @@ fn parse_repeating_interval(s: &str) -> EngineResult<TimerDefinition> {
     })
 }
 
-/// Multi-instance is not executed at runtime. Presence of
-/// `multiInstanceLoopCharacteristics` must fail deploy instead of mapping
-/// silently to a single-instance activity.
+/// Baut eine Multi-Instance-Definition für Service Tasks.
+///
+/// Unterstützt wird nur paralleles MI mit genau einer Quelle:
+/// `collection` (Variablenreferenz auf ein Array) oder `loopCardinality`.
 fn parse_multi_instance(
     mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
     element_id: &str,
 ) -> EngineResult<Option<engine_core::model::MultiInstanceDef>> {
-    if mi.is_some() {
+    let Some(mi) = mi else {
+        return Ok(None);
+    };
+
+    if mi.is_sequential.unwrap_or(false) {
         return Err(EngineError::InvalidDefinition(format!(
-            "Multi-instance is not supported (element '{element_id}')"
+            "Sequential multi-instance is not supported yet (element '{element_id}')"
         )));
     }
-    Ok(None)
+
+    let collection = mi
+        .collection
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
+    let loop_cardinality = mi
+        .loop_cardinality
+        .and_then(|lc| lc.value)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let element_variable = mi
+        .element_variable
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+
+    let (collection, loop_cardinality) = match (collection, loop_cardinality) {
+        (Some(_), Some(_)) => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance element '{element_id}' must define either collection or loopCardinality, not both"
+            )));
+        }
+        (None, None) => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "Multi-instance element '{element_id}' requires either collection or loopCardinality"
+            )));
+        }
+        (Some(collection), None) => (Some(collection), None),
+        (None, Some(cardinality)) => {
+            let value: u32 = cardinality.parse().map_err(|_| {
+                EngineError::InvalidDefinition(format!(
+                    "Multi-instance loopCardinality of element '{element_id}' must be a positive integer, got '{cardinality}'"
+                ))
+            })?;
+            if value == 0 {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "Multi-instance loopCardinality of element '{element_id}' must be a positive integer, got '{cardinality}'"
+                )));
+            }
+            (None, Some(value.to_string()))
+        }
+    };
+
+    Ok(Some(engine_core::model::MultiInstanceDef {
+        is_sequential: false,
+        loop_cardinality,
+        collection,
+        element_variable,
+    }))
+}
+
+/// Lehnt `multiInstanceLoopCharacteristics` für Elemente ab, die kein
+/// paralleler Service Task sind.
+fn reject_multi_instance(
+    mi: Option<crate::models::BpmnMultiInstanceLoopCharacteristics>,
+    element_id: &str,
+    element_kind: &str,
+) -> EngineResult<()> {
+    if mi.is_some() {
+        return Err(EngineError::InvalidDefinition(format!(
+            "Multi-instance is only supported for parallel service tasks; {element_kind} '{element_id}' is not supported"
+        )));
+    }
+    Ok(())
 }
 
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
@@ -422,7 +489,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.user_tasks {
         let node_id = task.id.clone();
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        reject_multi_instance(task.multi_instance, &node_id, "userTask")?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
@@ -437,7 +504,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             .or(task.data_script)
             .unwrap_or_default();
 
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "scriptTask")?;
 
         if script_content.trim().is_empty() {
             return Err(EngineError::InvalidDefinition(format!(
@@ -449,7 +516,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             task.id,
             BpmnElement::ScriptTask {
                 script: script_content,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -459,12 +526,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.send_tasks {
         let node_id = task.id.clone();
         let message_name = send_task_message_name(&task, &message_lookup);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "sendTask")?;
         builder = builder.node(
             task.id,
             BpmnElement::SendTask {
                 message_name,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -473,7 +540,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 5c. receiveTask waits for a message (same runtime as MessageCatchEvent)
     for task in process.receive_tasks {
         let node_id = task.id.clone();
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        reject_multi_instance(task.multi_instance, &node_id, "receiveTask")?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
                 .as_ref()
@@ -493,7 +560,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for task in process.manual_tasks {
         let node_id = task.id.clone();
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &node_id)?;
+        reject_multi_instance(task.multi_instance, &node_id, "manualTask")?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
@@ -514,12 +581,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             )));
         }
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "businessRuleTask")?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
         builder = add_listeners(builder, &node_id, task.extension_elements);
@@ -820,36 +887,36 @@ fn flatten_subprocess(
                 task.id
             )));
         }
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "scriptTask")?;
         builder = builder.node(
             task.id,
             BpmnElement::ScriptTask {
                 script,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
 
     for task in sp.user_tasks {
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "userTask")?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
     }
 
     for task in sp.send_tasks {
         let message_name = send_task_message_name(&task, message_lookup);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "sendTask")?;
         builder = builder.node(
             task.id,
             BpmnElement::SendTask {
                 message_name,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }
 
     for task in sp.receive_tasks {
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "receiveTask")?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
                 .as_ref()
@@ -866,7 +933,7 @@ fn flatten_subprocess(
 
     for task in sp.manual_tasks {
         let assignee = user_task_assignee(&task);
-        parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "manualTask")?;
         builder = builder.node(task.id, BpmnElement::UserTask(assignee));
     }
 
@@ -884,12 +951,12 @@ fn flatten_subprocess(
             )));
         }
         let topic = service_task_topic(&task);
-        let multi_instance = parse_multi_instance(task.multi_instance, &task.id)?;
+        reject_multi_instance(task.multi_instance, &task.id, "businessRuleTask")?;
         builder = builder.node(
             task.id,
             BpmnElement::ServiceTask {
                 topic,
-                multi_instance,
+                multi_instance: None,
             },
         );
     }

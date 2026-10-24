@@ -143,3 +143,65 @@ async fn deploy_invalid_xml_returns_400() {
         "deploying invalid XML should return 400 BAD REQUEST"
     );
 }
+
+#[tokio::test]
+async fn definition_xml_is_plain_text() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let deploy_res = client
+        .post(format!("{}/api/deploy", base))
+        .json(&serde_json::json!({
+            "xml": MINIMAL_BPMN_XML,
+            "name": "MinimalProcess"
+        }))
+        .send()
+        .await
+        .expect("deploy request failed");
+    let def_key = deploy_res.json::<Value>().await.unwrap()["definition_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let res = client
+        .get(format!("{}/api/definitions/{}/xml", base, def_key))
+        .send()
+        .await
+        .expect("xml request failed");
+
+    assert_eq!(res.status(), 200);
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .expect("content-type header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.starts_with("text/plain"),
+        "expected text/plain, got {content_type}"
+    );
+    let body = res.text().await.unwrap();
+    assert!(body.contains("<process id=\"MinimalProcess\">"));
+}
+
+#[tokio::test]
+async fn definition_xml_unknown_id_returns_404_json() {
+    let base = start_server().await;
+    let missing = uuid::Uuid::new_v4();
+
+    let res = reqwest::Client::new()
+        .get(format!("{}/api/definitions/{}/xml", base, missing))
+        .send()
+        .await
+        .expect("xml request failed");
+
+    assert_eq!(res.status(), 404);
+    let body: Value = res.json().await.expect("error body must be JSON");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("No XML found for definition")
+    );
+}

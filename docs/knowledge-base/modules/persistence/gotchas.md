@@ -30,7 +30,46 @@ If NATS is unreachable, `engine-server` behavior depends on **`REQUIRE_NATS`**:
 - `true` (default, docker-compose / production): **refuse to start**
 - `false` (explicit local opt-in): start with no persistence + error log (data lost on restart)
 
-`/api/ready` returns **503** when `require_nats` is set but no persistence is attached, or when the backend storage check fails.
+`/api/ready` returns **503** when `require_nats` is set but no persistence is attached, when the JetStream bootstrap failed, or when the backend storage check fails.
+
+`NatsPersistence::connect` is fail-closed for the whole JetStream bootstrap: errors from
+`create_stream` / `create_key_value` / `create_object_store` propagate as
+`EngineError::PersistenceError` with the affected resource and the server-side cause. Only the
+"already exists" conflict (`STREAM_NAME_EXIST`, surface code 10058) is accepted; the existing
+KV/object-store bucket is then re-validated via `get_key_value` / `get_object_store`. With
+`REQUIRE_NATS=true` a permissions problem in the NATS account therefore aborts the server start;
+with `REQUIRE_NATS=false` the in-memory server starts but `/api/ready` stays 503 and
+`/api/info` + `/api/monitoring` expose `storage_status: { state: "failed", detail: "<cause>" }`.
+
+### ⚠️ JetStream streams have explicit retention and replication (R7)
+
+`WORKFLOW_EVENTS` and `WORKFLOW_HISTORY` are created **and reconciled** with bounded limits
+(`max_age`, `max_bytes`, `num_replicas`). Defaults:
+
+| Stream | `max_age` | `max_bytes` | `num_replicas` |
+|--------|-----------|-------------|----------------|
+| `WORKFLOW_EVENTS` | 7 days | 1 GiB | 1 |
+| `WORKFLOW_HISTORY` | 30 days | 1 GiB | 1 |
+
+Overrides (read by `persistence-nats` at every `connect`):
+
+| Env var | Meaning | Default | `0` means |
+|---------|---------|---------|-----------|
+| `BPMNINJA_EVENT_RETENTION_DAYS` | `WORKFLOW_EVENTS` `max_age` | `7` | unlimited |
+| `BPMNINJA_HISTORY_RETENTION_DAYS` | `WORKFLOW_HISTORY` `max_age` | `30` | unlimited |
+| `BPMNINJA_STREAM_MAX_BYTES` | `max_bytes` per workflow stream | `1073741824` (1 GiB) | unlimited |
+| `BPMNINJA_STREAM_REPLICAS` | `num_replicas` per workflow stream | `1` | invalid (clamped to 1); values >5 are clamped to 5 |
+
+Invalid values fall back to the default with a `tracing::warn!`.
+
+**Migration of existing streams:** on startup `connect` reads the current stream config and
+merges only `max_age`, `max_bytes`, `num_replicas` via `update_stream`; subjects, storage type,
+discard policy and other fields are preserved. The first start with lower limits **applies them
+immediately**, so NATS discards messages older/larger than the new bounds. To keep existing
+history, set the retention variables to `0` (or a sufficiently large value) before the first
+upgraded start, or raise the limits after inspecting the stream. If the account forbids
+`STREAM.UPDATE`, startup fails with the server-side cause instead of silently keeping the old
+limits.
 
 ### ⚠️ KV bucket names cannot change after creation
 

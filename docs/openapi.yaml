@@ -73,11 +73,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeployResponse'
         '400':
-          description: Invalid BPMN XML or XML too large
+          description: Invalid BPMN XML
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/definitions:
     get:
@@ -109,7 +115,7 @@ paths:
             default: false
           description: If true, deletes all instances of this definition first
       responses:
-        '200':
+        '204':
           description: Definition deleted
         '404':
           description: Definition not found
@@ -129,7 +135,7 @@ paths:
             type: string
           description: The BPMN process ID (not the UUID key)
       responses:
-        '200':
+        '204':
           description: All versions deleted
         '404':
           description: No definitions found with this BPMN process ID
@@ -142,16 +148,13 @@ paths:
         - $ref: '#/components/parameters/ResourceId'
       responses:
         '200':
-          description: BPMN XML content
+          description: BPMN XML content as plain text
           content:
-            application/json:
+            text/plain:
               schema:
-                type: object
-                properties:
-                  xml:
-                    type: string
+                type: string
         '404':
-          description: Definition not found
+          description: No stored XML for this definition
 
   # ─────────────────────────────── Instances ─────────────────────────────────
 
@@ -174,6 +177,14 @@ paths:
                 $ref: '#/components/schemas/StartResponse'
         '404':
           description: Definition not found
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/start/latest:
     post:
@@ -190,7 +201,10 @@ paths:
               properties:
                 bpmn_process_id:
                   type: string
-                  description: The BPMN process ID (not the UUID key)
+                  description: The BPMN process ID (not the UUID key). Legacy clients may send `bpmn_id`.
+                business_key:
+                  type: string
+                  description: Optional business key stored on the instance.
                 variables:
                   type: object
                   additionalProperties: true
@@ -203,6 +217,14 @@ paths:
                 $ref: '#/components/schemas/StartResponse'
         '404':
           description: No definition found with this BPMN process ID
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/start/timer:
     post:
@@ -224,6 +246,16 @@ paths:
                 $ref: '#/components/schemas/StartResponse'
         '400':
           description: Definition has no timer start event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/instances:
     get:
@@ -284,7 +316,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ResourceId'
       responses:
-        '200':
+        '204':
           description: Instance deleted
         '404':
           description: Instance not found
@@ -341,6 +373,14 @@ paths:
           description: Instance or node not found
         '409':
           description: Operation blocked (e.g. suspended instance)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/instances/{id}/migrate:
     post:
@@ -372,6 +412,16 @@ paths:
           description: Instance or target definition not found
         '422':
           description: Orphaned token (unmapped node missing in target definition)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
 
   # ─────────────────────────────── User Tasks ────────────────────────────────
 
@@ -401,10 +451,18 @@ paths:
             schema:
               $ref: '#/components/schemas/CompleteRequest'
       responses:
-        '200':
+        '204':
           description: Task completed, process continued
         '409':
           description: Task not pending
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   # ────────────────────────────── Service Tasks ──────────────────────────────
 
@@ -447,6 +505,14 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/PendingServiceTask'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/complete:
     post:
@@ -461,12 +527,20 @@ paths:
             schema:
               $ref: '#/components/schemas/CompleteServiceTaskRequest'
       responses:
-        '200':
+        '204':
           description: Task completed
         '404':
           description: Service task not found
         '409':
           description: Task locked by another worker
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/failure:
     post:
@@ -482,8 +556,16 @@ paths:
             schema:
               $ref: '#/components/schemas/FailServiceTaskRequest'
       responses:
-        '200':
+        '204':
           description: Failure recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/extendLock:
     post:
@@ -498,8 +580,16 @@ paths:
             schema:
               $ref: '#/components/schemas/ExtendLockRequest'
       responses:
-        '200':
+        '204':
           description: Lock extended
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/bpmnError:
     post:
@@ -517,10 +607,20 @@ paths:
             schema:
               $ref: '#/components/schemas/BpmnErrorRequest'
       responses:
-        '200':
+        '204':
           description: Error handled, token rerouted to boundary event
         '400':
           description: No matching boundary error event found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/service-task/{id}/retry:
     post:
@@ -567,10 +667,18 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        '200':
+        '204':
           description: Variables updated
         '404':
           description: Instance not found
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   # ─────────────────────────────── Files ─────────────────────────────────────
 
@@ -677,6 +785,14 @@ paths:
                     items:
                       type: string
                       format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/timers/process:
     post:
@@ -1078,6 +1194,32 @@ components:
         format: uuid
       description: UUID of the resource
 
+  responses:
+    BadRequest:
+      description: Malformed request (invalid JSON syntax, bad UUID, invalid BPMN XML)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Request body exceeds the configured limit (default 10 MiB)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnsupportedMediaType:
+      description: Missing or unsupported `Content-Type` (expected `application/json`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Body is valid JSON but does not match the request schema
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
     ErrorResponse:
       type: object
@@ -1113,6 +1255,9 @@ components:
         definition_key:
           type: string
           format: uuid
+        business_key:
+          type: string
+          description: Optional business key stored on the instance.
         variables:
           type: object
           additionalProperties: true

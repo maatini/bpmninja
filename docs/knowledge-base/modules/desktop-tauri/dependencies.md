@@ -41,7 +41,7 @@ graph TD
         end
         
         subgraph "Bridge"
-            TauriAPI["lib/tauri.ts<br>typed command wrappers"]
+            TauriAPI["src/shared/lib/tauri.ts<br>typed command wrappers"]
             TauriCmd["src-tauri/<br>Rust commands"]
         end
         

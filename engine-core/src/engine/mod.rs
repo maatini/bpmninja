@@ -26,6 +26,7 @@ pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;
 pub(crate) mod handlers;
+mod incidents;
 mod instance_ops;
 pub(crate) mod instance_store;
 mod message_processor;
@@ -55,6 +56,8 @@ pub struct WorkflowEngine {
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Number of timer processing failures since engine start.
+    pub(crate) timer_processing_errors: std::sync::atomic::AtomicU64,
     pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
     pub(crate) retry_worker_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Hardened Rhai script execution configuration.
@@ -87,6 +90,7 @@ impl WorkflowEngine {
             pending_message_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            timer_processing_errors: std::sync::atomic::AtomicU64::new(0),
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
             script_config,
@@ -134,8 +138,8 @@ impl WorkflowEngine {
     }
 
     /// Shuts down the engine gracefully.
-    /// This signals the background persistence retry worker to flush and exit,
-    /// and waits for it to complete.
+    /// This signals the background persistence retry worker to drain the jobs
+    /// still queued in the bounded channel and exit, and waits for it to finish.
     pub async fn shutdown(&self) {
         if let Some(tx) = &self.retry_tx {
             // Async send waits for capacity so Shutdown is not lost when the

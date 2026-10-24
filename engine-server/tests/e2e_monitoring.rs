@@ -66,6 +66,41 @@ async fn ready_endpoint_returns_503_when_nats_required() {
 }
 
 #[tokio::test]
+async fn ready_endpoint_exposes_bootstrap_failure() {
+    // R3: Ein fehlgeschlagener JetStream-Bootstrap bleibt über /api/ready sichtbar,
+    // auch wenn der Server im In-Memory-Modus (REQUIRE_NATS=false) weiterläuft.
+    let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
+        require_nats: Some(false),
+        api_key: Some(None),
+        storage_status: Some(engine_server::StorageStatus::failed(
+            "JetStream bootstrap failed for KV bucket 'tokens': permissions violation",
+        )),
+        ..Default::default()
+    });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failed");
+    let addr = listener.local_addr().expect("addr failed");
+    let base = format!("http://{}", addr);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let res = reqwest::get(format!("{}/api/ready", base)).await.unwrap();
+    assert_eq!(
+        res.status(),
+        503,
+        "Bootstrap failure must make readiness fail"
+    );
+    let body = res.text().await.unwrap();
+    assert!(
+        body.contains("bootstrap failed") && body.contains("permissions violation"),
+        "readiness body must carry the cause, got: {body}"
+    );
+}
+
+#[tokio::test]
 async fn info_endpoint_returns_backend_type() {
     let base = start_server().await;
     let res = reqwest::get(format!("{}/api/info", base)).await.unwrap();

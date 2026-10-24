@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
-use engine_server::{LogBuffer, NatsLogSink, StartupCoordinator, build_app_with_engine};
+use engine_server::{
+    AppBuildConfig, LogBuffer, NatsLogSink, StartupCoordinator, StorageStatus,
+    build_app_with_config,
+};
 use persistence_nats::NatsPersistence;
 use tracing_subscriber::prelude::*;
 
@@ -79,11 +82,20 @@ async fn main() -> anyhow::Result<()> {
     // to allow in-memory mode without persistence (state is lost on restart).
     let require_nats = engine_server::require_nats_from_env();
 
-    let (engine, nats_persistence) = match NatsPersistence::connect(&nats_url, "WORKFLOW_EVENTS")
-        .await
+    let (engine, nats_persistence, storage_status) = match NatsPersistence::connect(
+        &nats_url,
+        "WORKFLOW_EVENTS",
+    )
+    .await
     {
         Ok(p) => {
-            tracing::info!("Connected to NATS at {}", nats_url);
+            // Bootstrap has verified/created every stream, KV and object store.
+            let bootstrap = p.bootstrap_report().clone();
+            tracing::info!(
+                "NATS connected at {} — JetStream bootstrap verified: {}",
+                nats_url,
+                bootstrap.summary()
+            );
             let p_arc = Arc::new(p);
             let mut engine = WorkflowEngine::new()
                 .with_persistence(p_arc.clone() as Arc<dyn WorkflowPersistence>);
@@ -96,22 +108,32 @@ async fn main() -> anyhow::Result<()> {
             let restored = log_buffer.attach_nats_sink(log_sink).await;
             tracing::info!("Log-Persistenz: {} Einträge aus NATS geladen.", restored);
 
-            (engine, Some(p_arc as Arc<dyn WorkflowPersistence>))
+            (
+                engine,
+                Some(p_arc as Arc<dyn WorkflowPersistence>),
+                StorageStatus::ready(bootstrap.summary()),
+            )
         }
         Err(e) => {
+            // Connect OR bootstrap (stream/KV/object-store) failed — both are fatal
+            // when durability is required; the message carries the precise cause.
             if require_nats {
                 anyhow::bail!(
-                    "NATS not available at {} and REQUIRE_NATS is enabled (default) — refusing to start with in-memory fallback. Set REQUIRE_NATS=false for ephemeral local runs. Error: {}",
+                    "NATS/JetStream bootstrap failed at {} and REQUIRE_NATS is enabled (default) — refusing to start with in-memory fallback. Set REQUIRE_NATS=false for ephemeral local runs. Error: {}",
                     nats_url,
                     e
                 );
             }
             tracing::error!(
-                "NATS not available at {} - running IN-MEMORY only! Error: {}",
+                "NATS/JetStream bootstrap failed at {} - running IN-MEMORY only (REQUIRE_NATS=false)! Error: {}",
                 nats_url,
                 e
             );
-            (WorkflowEngine::new(), None)
+            (
+                WorkflowEngine::new(),
+                None,
+                StorageStatus::failed(e.to_string()),
+            )
         }
     };
 
@@ -120,12 +142,27 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Prometheus metrics enabled at /metrics");
 
     let engine_arc = Arc::new(engine);
-    let app = build_app_with_engine(
+
+    let port = env::var("PORT").unwrap_or_else(|_| "8081".to_string());
+    let host = env::var("BIND_ADDR")
+        .or_else(|_| env::var("BIND_ADDRESS"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    let addr = format!("{host}:{port}");
+
+    let app = build_app_with_config(
         engine_arc.clone(),
         nats_persistence,
         xml_cache,
         Some(prometheus_handle),
         log_buffer,
+        AppBuildConfig {
+            storage_status: Some(storage_status),
+            bind_addr: Some(host),
+            ..Default::default()
+        },
     );
 
     // Background timer scheduler — processes expired timers automatically
@@ -159,14 +196,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let port = env::var("PORT").unwrap_or_else(|_| "8081".to_string());
-    let host = env::var("BIND_ADDR")
-        .or_else(|_| env::var("BIND_ADDRESS"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "0.0.0.0".to_string());
-    let addr = format!("{host}:{port}");
     tracing::info!("Server starting on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -180,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
 
-    tracing::info!("Flushing persistence queues...");
+    tracing::info!("Draining persistence retry queue...");
     engine_arc.shutdown().await;
 
     let _ = timer_task.await;

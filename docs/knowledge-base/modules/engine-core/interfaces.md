@@ -20,12 +20,15 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `ScopeEventListener` | `domain/listener.rs` | Timer/Message/Error event sub-process listener |
 | `MultiInstanceDef` | `domain/multi_instance.rs` | Multi-instance configuration |
 | `FileReference` | `domain/file_ref.rs` | File variable metadata (object_key, filename, mime_type, size) |
+| `Incident` | `domain/incident.rs` | Incident an einer Instanz: kind, node_id, task_id, message, details, occurrences, resolved_at/by |
+| `IncidentKind` | `domain/incident.rs` | Enum: `ServiceTask`, `Timer`, `Persistence`, `BpmnError` (Serde snake_case) |
 
 ### Runtime Types
 
 | Type | Location | Purpose |
 |------|----------|---------|
 | `ProcessInstance` | `runtime/instance.rs` | Live process instance with tokens, state, variables |
+| `ProcessInstance.incidents` | `runtime/instance.rs` | `Vec<Incident>`, `#[serde(default)]`, max. 100 pro Instanz |
 | `InstanceState` | `runtime/instance.rs` | Enum: Running, WaitingOn*, Completed, Suspended, etc. |
 | `NextAction` | `runtime/instance.rs` | Execution loop dispatch: Continue, WaitFor*, Complete, Terminate, etc. |
 | `ActiveToken` | `runtime/instance.rs` | Token traveling through graph with fork_id and branch_index |
@@ -42,7 +45,7 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 
 | Type | Purpose |
 |------|---------|
-| `EngineError` | Enum: all engine errors (NoSuchDefinition, NoSuchInstance, TaskNotPending, ServiceTaskLocked, etc.) |
+| `EngineError` | Enum: all engine errors (NoSuchDefinition, NoSuchInstance, TaskNotPending, ServiceTaskLocked, IncidentNotFound, IncidentAlreadyResolved, etc.) |
 | `EngineResult<T>` | Type alias: `Result<T, EngineError>` |
 
 ### History Types
@@ -135,13 +138,42 @@ pub enum EngineEvent {
 
 `max_memory` does **not** call a Rhai heap API (none exists). It scales `set_max_string_size` / `set_max_array_size` / `set_max_map_size` relative to the 2 MiB default.
 
+### Incident-Modell und Lebenszyklus
+
+```rust
+pub struct Incident {
+    pub id: Uuid,
+    pub kind: IncidentKind,          // service_task | timer | persistence | bpmn_error
+    pub node_id: Option<String>,
+    pub task_id: Option<Uuid>,
+    pub message: String,
+    pub details: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub occurrences: u32,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub resolved_by: Option<String>,
+}
+```
+
+| Phase | Verhalten |
+|-------|-----------|
+| Anlage | `ProcessInstance::push_or_touch_incident(kind, node_id, task_id, message, details)` |
+| Dedup | Offener Incident mit gleichem `(kind, node_id, task_id)` → `occurrences += 1`, `last_seen_at`/`message` aktualisiert |
+| Limit | Max. `MAX_INCIDENTS_PER_INSTANCE = 100`; beim Trimmen weichen aufgelöste vor offenen, jeweils die ältesten |
+| Auflösen | `WorkflowEngine::resolve_instance_incident(instance_id, incident_id, resolved_by)` setzt `resolved_at`/`resolved_by` und persistiert die Instanz |
+| Persistenz | Incidents sind Teil des `ProcessInstance`-Dokuments (`#[serde(default)]`), keine eigene `WorkflowPersistence`-Methode |
+| Metrik | `bpmn_incidents_total{kind="service_task" / "timer" / "persistence" / "bpmn_error"}` |
+
+Quellen: Service-Task mit `retries <= 0` bzw. unbehandeltem `bpmnError`; fehlschlagende Timer-Auswertung (dedupliziert trotz 2-s-Retry); Persistenz-Job nach 50 Retries (Instanz-Zuordnung über `SaveInstance`, `AppendHistoryEntry` bzw. Pending-Maps); ungefangener `ErrorEndEvent` am Prozessscope sowie unbehandelter Child-Error einer Call Activity.
+
 ### Retry queue (internal)
 
 | Item | Detail |
 |------|--------|
 | Channel | Bounded `mpsc` (default 10 000; `PERSISTENCE_RETRY_QUEUE_CAPACITY`) |
 | Enqueue | Non-blocking `try_send`; on `Full` → drop + `bpmn_persistence_retry_dropped_total` |
-| Exhausted | After 50 background retries → `bpmn_persistence_retry_exhausted_total` |
+| Exhausted | After 50 background retries → `bpmn_persistence_retry_exhausted_total` + Persistence-Incident an der zuordenbaren Instanz |
 | Shutdown | Async `send(Shutdown)` then await worker join |
 
 ### Public Functions

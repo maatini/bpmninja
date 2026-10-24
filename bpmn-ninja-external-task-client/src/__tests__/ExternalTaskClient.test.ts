@@ -486,6 +486,40 @@ describe('ExternalTaskClient', () => {
       await stopClientAndFlush(client);
     });
 
+    it('autoExtendLock: nutzt den lockDuration-Optionswert des Topics', async () => {
+      const client = new ExternalTaskClient({
+        logger: false,
+        autoExtendLock: true,
+        autoExtendLockInterval: 5000,
+        lockDuration: 10000,
+      });
+
+      client.subscribe(
+        'special-topic',
+        async () => {
+          await new Promise(r => setTimeout(r, 12000));
+        },
+        { lockDuration: 120000 },
+      );
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true, status: 200, json: () => Promise.resolve([createMockTask({ id: 'task-1', topic: 'special-topic' })])
+      } as any);
+      fetchMock.mockResolvedValue({ ok: true, status: 204 } as any);
+
+      client.start();
+      await vi.advanceTimersByTimeAsync(1); // handler starts
+      await vi.advanceTimersByTimeAsync(5000); // interval 1
+
+      const extendCalls = fetchMock.mock.calls.filter(c => String(c[0]).includes('extendLock'));
+      expect(extendCalls.length).toBe(1);
+      const body = JSON.parse((extendCalls[0][1] as RequestInit).body as string);
+      expect(body.newDuration).toBe(120000);
+
+      await vi.advanceTimersByTimeAsync(5000); // finish handler
+      await stopClientAndFlush(client);
+    });
+
     it('Lock-Extension-Timer wird nach Handler-Abschluss bereinigt', async () => {
       const client = new ExternalTaskClient({ logger: mockLogger, autoExtendLock: true, autoExtendLockInterval: 5000 });
       client.subscribe('t', async () => {

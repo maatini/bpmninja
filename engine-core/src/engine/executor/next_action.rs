@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use uuid::Uuid;
 
-use crate::domain::{BpmnElement, EngineError, EngineResult, Token};
+use crate::domain::{BpmnElement, EngineError, EngineResult, IncidentKind, Token};
 use crate::engine::WorkflowEngine;
 use crate::runtime::*;
 
@@ -243,6 +243,18 @@ impl WorkflowEngine {
                         inst.audit_log.push(format!(
                             "💥 All tokens completed at Error End with code '{error_code}'"
                         ));
+                        // Ungefangener BPMN-Error am Prozessscope: die Instanz
+                        // endet fehlerhaft, also Incident mit Ursache festhalten.
+                        let error_node = inst.current_node.clone();
+                        inst.push_or_touch_incident(
+                            IncidentKind::BpmnError,
+                            Some(error_node),
+                            None,
+                            format!("Unhandled BPMN error '{error_code}'"),
+                            None,
+                        );
+                        metrics::counter!("bpmn_incidents_total", "kind" => "bpmn_error")
+                            .increment(1);
                     } // ← Write-Lock hier freigegeben
                     self.record_history_event(
                         instance_id,

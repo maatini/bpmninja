@@ -19,10 +19,6 @@ import type {
 
 export * from '../types/engine';
 
-export async function deploySimpleProcess(): Promise<string> {
-  return invoke('deploy_simple_process');
-}
-
 export async function deployDefinition(xml: string, name: string): Promise<string> {
   return invoke('deploy_definition', { xml, name });
 }
@@ -136,10 +132,6 @@ export async function deleteAllDefinitions(bpmnId: string, cascade: boolean = fa
 // Backend info & switching
 // ---------------------------------------------------------------------------
 
-export async function resetDatabase(): Promise<void> {
-  return invoke('reset_database');
-}
-
 export async function correlateMessage(
   messageName: string,
   businessKey?: string,
@@ -204,12 +196,6 @@ export async function downloadInstanceFile(
   return invoke('download_instance_file', { instanceId, varName, savePath });
 }
 
-export async function deleteInstanceFile(
-  instanceId: string, varName: string
-): Promise<void> {
-  return invoke('delete_instance_file', { instanceId, varName });
-}
-
 // ---------------------------------------------------------------------------
 // Overview: Timers & Messages
 // ---------------------------------------------------------------------------
@@ -236,10 +222,6 @@ export async function queryCompletedInstances(query: CompletedInstanceQuery = {}
     limit: query.limit ?? null,
     offset: query.offset ?? null,
   });
-}
-
-export async function getCompletedInstance(instanceId: string): Promise<ProcessInstance> {
-  return invoke('get_completed_instance', { instanceId });
 }
 
 export async function getLogEntries(

@@ -579,7 +579,7 @@ tokio::spawn(async move {
 | `SettingsPage.tsx` | ~165 | API URL config + connection verify |
 | `ErrorBoundary.tsx` | ~72 | React error boundary |
 | `MessageDialog.tsx` | ~93 | Message correlation dialog |
-| `lib/tauri.ts` | ~170 | All Tauri command wrappers (typed API layer) |
+| `src/shared/lib/tauri.ts` | ~170 | All Tauri command wrappers (typed API layer) |
 | Custom Properties | ~290 | Condition, script, topic extensions for bpmn-js |
 | `index.css` | ~165 | TailwindCSS + HSL design token variables |
 

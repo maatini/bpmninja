@@ -14,6 +14,7 @@
 //! | `bpmn_errors_total`                     | Counter   | Script/engine errors                          |
 //! | `bpmn_script_execution_duration_seconds`| Histogram | Rhai script execution latency                 |
 //! | `bpmn_active_instances`                 | Gauge     | Currently active (non-completed) instances    |
+//! | `bpmn_auth_failures_total`              | Counter   | Rejected API requests (reason: 401/403)       |
 //! | `http_requests_total`                   | Counter   | HTTP requests (method, path, status)          |
 //! | `http_request_duration_seconds`         | Histogram | HTTP request latency (method, path)           |
 
@@ -64,6 +65,10 @@ pub fn install_prometheus_recorder() -> PrometheusHandle {
         "Number of currently active (non-completed) instances"
     );
     metrics::describe_counter!("http_requests_total", "Total HTTP requests handled");
+    metrics::describe_counter!(
+        "bpmn_auth_failures_total",
+        "Rejected API requests (reason: invalid_or_missing_key, worker_role_forbidden)"
+    );
     metrics::describe_histogram!(
         "http_request_duration_seconds",
         "HTTP request duration in seconds"

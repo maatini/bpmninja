@@ -38,7 +38,3 @@ pub enum ScopeEventListener {
         target_definition: String,
     },
 }
-
-// ---------------------------------------------------------------------------
-// Sequence flow (edge with optional condition)
-// ---------------------------------------------------------------------------

@@ -263,14 +263,11 @@ dependencies = [
 name = "bpmn-parser"
 version = "0.7.24"
 dependencies = [
- "anyhow",
  "chrono",
  "croner",
  "engine-core",
  "quick-xml",
  "serde",
- "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
@@ -830,14 +827,11 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "persistence-nats",
- "pin-project-lite",
  "reqwest",
  "serde",
  "serde_json",
- "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
- "tower",
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",

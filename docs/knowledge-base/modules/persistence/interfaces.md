@@ -25,10 +25,22 @@ pub struct NatsPersistence {
 
 impl NatsPersistence {
     /// Connect to a NATS server and initialize JetStream resources.
+    /// Fail-closed: any bootstrap error except "already exists" is returned.
     pub async fn connect(nats_url: &str, stream_name: &str) -> Result<Self, EngineError>;
-    
+
+    /// Bootstrap outcome (created / existing / retention-updated resources).
+    pub fn bootstrap_report(&self) -> &BootstrapReport;
+
     /// Access the JetStream context (for LogSink, etc.)
     pub fn jetstream(&self) -> &async_nats::jetstream::Context;
+}
+
+pub struct BootstrapReport { /* created, existing, updated */ }
+impl BootstrapReport {
+    pub fn created(&self) -> &[String];
+    pub fn existing(&self) -> &[String];
+    pub fn updated(&self) -> &[String];
+    pub fn summary(&self) -> String;
 }
 
 // models.rs
@@ -78,6 +90,16 @@ pub struct BucketEntryDetail {
     pub key: String,
     pub data: String,             // JSON, XML, or base64-encoded binary
     pub encoding: String,         // "utf8" or "base64"
+}
+```
+
+`engine-server` exposes the bootstrap result next to these structures
+(`/api/info`, `/api/monitoring`):
+
+```rust
+pub struct StorageStatus {
+    pub state: StorageState,      // "ready" | "failed" | "in-memory"
+    pub detail: String,           // bootstrap summary or failure cause
 }
 ```
 

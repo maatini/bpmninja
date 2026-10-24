@@ -93,7 +93,3 @@ pub enum BpmnElement {
     /// Internal end event of a Sub-Process, signaling completion to the parent scope.
     SubProcessEndEvent { sub_process_id: String },
 }
-
-// ---------------------------------------------------------------------------
-// Scope Event Listeners (Event Sub-Processes)
-// ---------------------------------------------------------------------------

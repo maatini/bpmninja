@@ -18,8 +18,10 @@ const TIMER_START_BPMN_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 
 /// Helper: starts the engine-server on a random port and returns the base URL.
 async fn start_server() -> String {
-    let app = engine_server::build_app();
+    start_server_with(engine_server::build_app()).await
+}
 
+async fn start_server_with(app: axum::Router) -> String {
     // Bind to port 0 → OS assigns a free port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -32,6 +34,16 @@ async fn start_server() -> String {
     });
 
     base_url
+}
+
+/// JSON-body errors must keep the documented `{ "error": ... }` shape.
+async fn assert_json_error(res: reqwest::Response, expected_status: u16) {
+    assert_eq!(res.status(), expected_status);
+    let body: Value = res.json().await.expect("error body must be JSON");
+    assert!(
+        body["error"].as_str().is_some_and(|msg| !msg.is_empty()),
+        "missing error message: {body}"
+    );
 }
 
 #[tokio::test]
@@ -161,4 +173,68 @@ async fn start_instance_with_timer_start_returns_400() {
             .unwrap()
             .contains("Use trigger_timer_start")
     );
+}
+
+#[tokio::test]
+async fn malformed_json_returns_error_object() {
+    let base = start_server().await;
+    let res = reqwest::Client::new()
+        .post(format!("{}/api/start", base))
+        .header("content-type", "application/json")
+        .body("{\"definition_key\": ")
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_json_error(res, 400).await;
+}
+
+#[tokio::test]
+async fn json_type_mismatch_returns_422_error_object() {
+    let base = start_server().await;
+    let res = reqwest::Client::new()
+        .post(format!("{}/api/start", base))
+        .json(&serde_json::json!({ "definition_key": 42 }))
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_json_error(res, 422).await;
+}
+
+#[tokio::test]
+async fn non_json_content_type_returns_415_error_object() {
+    let base = start_server().await;
+    let res = reqwest::Client::new()
+        .post(format!("{}/api/start", base))
+        .header("content-type", "text/plain")
+        .body("{}")
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_json_error(res, 415).await;
+}
+
+#[tokio::test]
+async fn oversized_json_body_returns_413_error_object() {
+    let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
+        require_nats: Some(false),
+        max_xml_bytes: Some(128),
+        api_key: Some(None),
+        bind_addr: Some("127.0.0.1".to_string()),
+        ..Default::default()
+    });
+    let base = start_server_with(app).await;
+
+    let res = reqwest::Client::new()
+        .post(format!("{}/api/start", base))
+        .json(&serde_json::json!({
+            "definition_key": "x".repeat(4096)
+        }))
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_json_error(res, 413).await;
 }

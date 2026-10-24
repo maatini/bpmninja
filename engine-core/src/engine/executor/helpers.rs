@@ -41,29 +41,6 @@ pub(crate) fn find_boundary_error_event(
     })
 }
 
-/// Finds a boundary escalation event attached to the given node matching the escalation code.
-/// Wildcard: `escalation_code: None` catches any escalation.
-#[allow(dead_code)]
-pub(crate) fn find_boundary_escalation_event(
-    def: &ProcessDefinition,
-    attached_to_node: &str,
-    escalation_code: &str,
-) -> Option<(String, bool)> {
-    def.nodes.iter().find_map(|(node_id, node)| {
-        if let BpmnElement::BoundaryEscalationEvent {
-            attached_to,
-            escalation_code: bound_esc,
-            cancel_activity,
-        } = node
-            && attached_to == attached_to_node
-            && (bound_esc.is_none() || bound_esc.as_deref() == Some(escalation_code))
-        {
-            return Some((node_id.clone(), *cancel_activity));
-        }
-        None
-    })
-}
-
 /// Scans all nodes for a BoundaryEscalationEvent matching the escalation code (any attachment).
 pub(crate) fn find_any_boundary_escalation_event(
     def: &ProcessDefinition,

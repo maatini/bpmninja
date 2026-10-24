@@ -5,6 +5,8 @@ info:
     Optional API-key auth when env BPMNINJA_API_KEY is set.
     Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
     GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
+    JSON bodies are limited to 10 MiB (413). Malformed JSON returns 400, schema mismatches 422,
+    and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`.
   version: 0.0.0
 tags: []
 paths:
@@ -1007,7 +1009,7 @@ paths:
   /api/start/latest:
     post:
       operationId: Api_startLatest
-      description: Start an instance of the latest deployed version of a BPMN definition (by bpmn_id).
+      description: Start an instance of the latest deployed version of a BPMN definition (by bpmn_process_id; `bpmn_id` is accepted as a legacy alias).
       parameters: []
       responses:
         '200':
@@ -1507,10 +1509,11 @@ components:
     StartLatestRequest:
       type: object
       required:
-        - bpmn_id
+        - bpmn_process_id
       properties:
-        bpmn_id:
+        bpmn_process_id:
           type: string
+          description: BPMN process ID (not the definition UUID). Legacy clients may send `bpmn_id`.
         business_key:
           type: string
         variables:
