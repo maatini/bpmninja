@@ -17,6 +17,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Nx dient hier ausschließlich der Ermittlung betroffener Projekte; die Jobs
+  # führen ihre Schritte direkt mit cargo/npm aus. Bewusst kein Nx-Cache in CI:
+  # actions/cache, sccache und rust-cache übernehmen die Beschleunigung, und ein
+  # Nx-Cache könnte bei den Client-Integrationstests veraltete Erfolge melden.
   plan:
     name: Affected projects
     runs-on: ubuntu-latest
@@ -49,6 +53,7 @@ jobs:
           # Target-Filter verhindert, dass das Root-Projekt `rust` bei reinen
           # Doku-Änderungen als betroffen gilt. Nx ordnet Dateien dem tiefsten
           # Projekt-Root zu; ohne Filter besitzt `rust` (root `.`) auch README/docs.
+          # Die gefilterten Target-Namen stammen aus den Target-Inputs in nx.json.
           projects=$(npx nx show projects --affected --base="$NX_BASE" --head="$NX_HEAD" \
             --with-target=fmt --with-target=clippy --with-target=test --with-target=deny \
             --with-target=lint --with-target=typecheck --with-target=build --with-target=e2e \

@@ -4,13 +4,21 @@
   "namedInputs": {
     "default": ["{projectRoot}/**/*"],
     "production": ["default"],
-    "rust": [
+    "rustSources": [
       "{workspaceRoot}/**/*.rs",
       "{workspaceRoot}/**/Cargo.toml",
       "{workspaceRoot}/Cargo.lock",
       "{workspaceRoot}/rust-toolchain.toml",
       "!{workspaceRoot}/desktop-tauri/**",
       "!{workspaceRoot}/target/**"
+    ],
+    "rust": [
+      "rustSources",
+      "{workspaceRoot}/deny.toml",
+      "{workspaceRoot}/.github/workflows/**",
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/package-lock.json",
+      "{workspaceRoot}/nx.json"
     ],
     "docs": [
       "{workspaceRoot}/README.md",

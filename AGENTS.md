@@ -55,7 +55,8 @@ npm run version:check          # Versionen in allen Manifesten
 node tools/check-docs.mjs      # Doku-Links und Metriken
 
 cd desktop-tauri && npm run build && npx playwright test
-npm exec -- nx affected -t lint test build typecheck check   # optional, statt Einzelkommandos
+npm exec -- nx affected -t lint test build   # optional, statt Einzelkommandos
+npm exec -- nx run rust:fmt                  # einzelnes Rust-Target (fmt/clippy/test/deny)
 ```
 
 ## Nie machen

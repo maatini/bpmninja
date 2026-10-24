@@ -1,8 +1,9 @@
 # Plan: Release, CI/CD und Projektzustand mit Nx
 
 **Stand:** 2026-10-24
-**Basis:** `main` @ `83b2075`
-**Status:** Vorschlag, nicht umgesetzt
+**Basis:** `main` @ `83b2075`; Umsetzungsstand Nx aus `fcf697c`
+**Status:** Teilweise umgesetzt — Phase 1 und 1b (Nx-Projekte, Affected-CI) laufen seit
+`fcf697c`. Nicht umgesetzt: `nx release`, ein separates `workspace`-Projekt und Nx Cloud.
 **Ziel:** Release-Assets zuverlässig erzeugen, CI auf betroffene Projekte zuschneiden, Projektzustand bereinigen — orchestriert mit Nx.
 
 ## Ausgangslage
@@ -118,13 +119,13 @@ Begründung: `tauri-action` und der Tauri-Build erwarten `desktop-tauri/package-
 
 | Projekt | Root | Targets | Cache |
 |---|---|---|---|
-| `rust` | `.` | `fmt`, `clippy`, `test`, `deny` | nein (sccache + cargo nextest) |
-| `desktop` | `desktop-tauri` | `lint`, `typecheck`, `build`, `e2e`, `tauri:build` | ja |
-| `client` | `bpmn-ninja-external-task-client` | `build`, `lint`, `test` | ja |
-| `api-spec` | `api-spec` | `compile`, `check` | ja |
-| `workspace` | `.` | `version-check`, `docs:check` | ja |
+| `rust` | `.` | `fmt`, `clippy`, `test`, `deny`, `version-check`, `docs:check` | nein |
+| `desktop` | `desktop-tauri` | `lint`, `typecheck`, `build`, `e2e`, `tauri:build` | ja für `lint`, `typecheck`, `build`; `e2e` und `tauri:build` ohne Cache |
+| `client` | `bpmn-ninja-external-task-client` | `build`, `lint`, `test` | ja (`test` nutzt `rustSources` als Input) |
+| `api-spec` | `api-spec` | `compile`, `check` | `compile` mit Cache, `check` ohne |
 
-Rust bleibt ein einziges Nx-Projekt. Targets pro Crate würden parallel um den Cargo-Lock konkurrieren und mehrfach kompilieren.
+Rust bleibt ein einziges Nx-Projekt. `version-check` und `docs:check` liegen im Projekt `rust`
+statt in einem eigenen `workspace`-Projekt. Targets pro Crate würden parallel um den Cargo-Lock konkurrieren und mehrfach kompilieren.
 
 ### 1.3 `nx.json`
 
@@ -184,9 +185,9 @@ Rust bleibt ein einziges Nx-Projekt. Targets pro Crate würden parallel um den C
 ### 1.6 Lokale Befehle
 
 ```bash
-nx run-many -t lint test build
-nx affected -t lint test build
-nx graph
+npm exec -- nx run-many -t lint test build
+npm exec -- nx affected -t lint test build
+npm exec -- nx graph
 ```
 
 **Akzeptanz:** `nx affected` überspringt bei einer Docs-Änderung alle Build-Targets; bei einer Rust-Änderung läuft der Rust-Job, der Desktop-Job nicht.
@@ -207,7 +208,7 @@ plan:
       with: { fetch-depth: 0 }
     - uses: nrwl/nx-set-shas@v4
     - id: affected
-      run: echo "projects=$(npx nx show projects --affected --base=$NX_BASE --head=$NX_HEAD | paste -sd, -)" >> "$GITHUB_OUTPUT"
+      run: echo "projects=$(npm exec -- nx show projects --affected --base=$NX_BASE --head=$NX_HEAD | paste -sd, -)" >> "$GITHUB_OUTPUT"
 ```
 
 ### 1b.2 Jobs
@@ -249,13 +250,13 @@ Der TypeSpec-Diff fängt den bestehenden OpenAPI-Drift künftig automatisch.
 
 Der TS-Client bleibt als eigenständiges Paket bei 1.0.0, falls er separat veröffentlicht wird.
 
-`nx run workspace:version-check` prüft im CI auf Drift.
+`npm exec -- nx run rust:version-check` prüft im CI auf Drift.
 
 ### 2.2 Release-Ablauf
 
-1. `nx release version minor --skip-publish` — npm-Pakete und `CHANGELOG.md`
+1. `nx release version minor --skip-publish` (nicht umgesetzt) — npm-Pakete und `CHANGELOG.md`
 2. `node tools/sync-version.mjs` — Cargo und Tauri
-3. `nx run workspace:version-check` und `npm run test:deps` müssen grün sein
+3. `npm exec -- nx run rust:version-check` und `npm run test:deps` müssen grün sein
 4. Commit, Tag, Push
 5. Release-Workflow erzeugt Draft, baut, publiziert
 

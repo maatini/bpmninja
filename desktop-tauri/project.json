@@ -31,7 +31,7 @@
     },
     "e2e": {
       "executor": "nx:run-commands",
-      "cache": true,
+      "cache": false,
       "options": {
         "command": "npm run test:e2e",
         "cwd": "{projectRoot}"
@@ -39,7 +39,7 @@
     },
     "tauri:build": {
       "executor": "nx:run-commands",
-      "cache": true,
+      "cache": false,
       "options": {
         "command": "npm run tauri build",
         "cwd": "{projectRoot}"
