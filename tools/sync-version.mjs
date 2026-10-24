@@ -151,6 +151,14 @@ const targets = [
   { path: "desktop-tauri/package-lock.json", update: setLockfileVersions },
   { path: "api-spec/package.json", update: replaceFirstVersionField },
   { path: "api-spec/package-lock.json", update: setLockfileVersions },
+  {
+    path: "bpmn-ninja-external-task-client/package.json",
+    update: replaceFirstVersionField,
+  },
+  {
+    path: "bpmn-ninja-external-task-client/package-lock.json",
+    update: setLockfileVersions,
+  },
   { path: ".agent/manifest.json", update: replaceFirstVersionField },
   { path: "docs/openapi.yaml", update: setOpenapiInfoVersion },
   { path: "docs/knowledge-base/overview.md", update: setDocsVersion },
