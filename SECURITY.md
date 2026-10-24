@@ -69,7 +69,61 @@ sind folgende Punkte zu prüfen:
 - **Compose:** NATS läuft mit Authentifizierung und Loopback-Ports; diese
   Einstellungen nicht ungeprüft nach außen öffnen.
 - **TLS:** Die Engine terminiert kein TLS. Für Internet-Exposition einen
-  Reverse-Proxy mit TLS und vorgeschalteter Authentifizierung verwenden.
+  Reverse-Proxy mit TLS und vorgeschalteter Authentifizierung verwenden —
+  Details im Abschnitt „Betriebshärtung" unten.
+
+## Betriebshärtung: TLS, Rate-Limiting, Credentials
+
+Weder TLS-Terminierung noch Rate-Limiting sind in der Engine implementiert.
+Beides gehört in die vorgelagerte Infrastruktur (Reverse Proxy / Ingress); die
+folgenden Punkte sind Betriebsempfehlungen, keine eingebauten Features.
+
+### TLS-Terminierung
+
+- Reverse Proxy (nginx, Caddy, Traefik oder Cloud-Loadbalancer) vor `PORT`
+  (Default 8081) setzen und `engine-server` nur im internen Netz bzw. im
+  Compose-/Pod-Netz lauschen lassen.
+- Nach außen ausschließlich `https://` und `wss://` anbieten (die Desktop-UI
+  spricht HTTP/WebSocket); Klartext-Ports am Proxy auf HTTPS umleiten.
+- Zertifikate am Proxy verwalten (ACME/Let's Encrypt). Die Engine hat keine
+  Zertifikats- oder Keystore-Konfiguration.
+- NATS ebenfalls absichern: Client und Server über ein vertrauenswürdiges Netz
+  oder TLS (`tls://…` in `NATS_URL`, Zertifikate in der `nats-server`-Konfiguration).
+  Sonst laufen JetStream-Daten und Log-Streams im Klartext.
+- Der Proxy kann `X-Forwarded-Proto`/`X-Forwarded-For` setzen; die Engine wertet
+  diese Header nicht aus. Auth-Entscheidungen hängen nur an `BIND_ADDR`,
+  gesetzten API-Keys und `BPMNINJA_ALLOW_UNAUTHENTICATED`.
+
+### Rate-Limiting
+
+Rate-Limits im Proxy pro Client (API-Key bzw. IP) durchsetzen, nicht in der
+Engine. Startwerte:
+
+| Route | Empfehlung | Begründung |
+|---|---|---|
+| `POST /api/deploy` | 10 req/min | XML-Parsing und Deployment, teuer pro Request |
+| `POST /api/start`, `/api/message`, `/api/service-task/fetchAndLock` | 60 req/min | schreiben Instanz- und Task-Zustand |
+| übrige `/api/*`-Lesezugriffe | 300 req/min | UI-Polling und Monitoring |
+| `GET /metrics` | nur intern | Prometheus-Scrape, nicht öffentlich |
+
+Zusätzlich die Body-Limits (`MAX_XML_BYTES` 10 MiB, `MAX_UPLOAD_BYTES` 5 MiB) im
+Proxy spiegeln (z. B. `client_max_body_size 10m`). Die In-Process-Limits schützen
+nur gegen große Bodies, nicht gegen Request-Fluten; 429/413-Antworten nicht
+automatisch wiederholen.
+
+### Credentials in `NATS_URL`
+
+- `NATS_URL` kann Credentials (`nats://user:pass@nats:4222`) oder einen Token im
+  Query-String (`?token=…`) enthalten. Werte über Docker-/Kubernetes-Secret oder
+  eine `.env` außerhalb des Repos injizieren, nicht im Compose-File oder als
+  Image-`ENV` hinterlegen. Das `ENV NATS_URL=nats://nats:4222` im Image ist
+  bewusst credential-frei.
+- Die Engine maskiert die URL in ihren Logs, Startfehlern und in
+  `GET /api/info` (`nats://***@nats:4222`, Query-String → `?***`).
+- Credentials rotieren: NATS-User/Account neu anlegen, Secret aktualisieren,
+  Container neu starten. `NATS_URL` wird nur beim Start gelesen.
+- `docker inspect` und Compose-Environment sind für jeden mit Docker-Zugriff
+  lesbar — deshalb Secrets statt Umgebungsvariablen bevorzugen.
 
 ## Umfang
 

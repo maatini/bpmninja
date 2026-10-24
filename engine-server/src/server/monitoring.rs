@@ -74,7 +74,7 @@ pub(crate) async fn get_backend_info(State(state): State<Arc<AppState>>) -> Json
     } else {
         Json(BackendInfo {
             backend_type: "in-memory".to_string(),
-            nats_url: Some(state.nats_url.clone()),
+            nats_url: Some(crate::redact::redact_nats_url(&state.nats_url)),
             connected: false,
             storage_status: state.storage_status.clone(),
         })
