@@ -53,6 +53,9 @@ pub struct AppBuildConfig {
     pub cors_origins: Option<Vec<String>>,
     /// Ergebnis des NATS-Bootstraps; `None` leitet den Status aus `persistence` ab.
     pub storage_status: Option<StorageStatus>,
+    /// Anzeige-URL für `/api/info`; `None` = aus `NATS_URL`. Wird vor der
+    /// Ausgabe über [`crate::redact::redact_nats_url`] maskiert.
+    pub nats_url: Option<String>,
 }
 
 /// Builds the Axum router with all routes and middleware.
@@ -78,6 +81,7 @@ pub fn build_app() -> Router {
             allow_unauthenticated: None,
             cors_origins: Some(default_cors_origins()),
             storage_status: None,
+            nats_url: None,
         },
     )
 }
@@ -119,8 +123,11 @@ pub fn build_app_with_config(
     log_buffer: Arc<LogBuffer>,
     config: AppBuildConfig,
 ) -> Router {
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = config.nats_url.unwrap_or_else(|| {
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+    });
+    // Credentials (Userinfo/Token-Query) dürfen die API nicht verlassen.
+    let nats_url = crate::redact::redact_nats_url(&nats_url);
 
     // `Some(None)` is the explicit "auth off" switch (tests / dev helpers).
     let explicit_auth_off = matches!(config.api_key, Some(None));

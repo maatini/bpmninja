@@ -224,6 +224,8 @@ pub struct AppState {
     pub(crate) engine: Arc<WorkflowEngine>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) deployed_xml: Arc<RwLock<HashMap<String, String>>>,
+    /// Für API-Ausgaben maskierte NATS-URL (`nats://***@host:4222`, Query → `?***`);
+    /// wird in `build_app_with_config` über [`crate::redact::redact_nats_url`] gesetzt.
     pub(crate) nats_url: String,
     pub(crate) log_buffer: Arc<LogBuffer>,
     /// Ergebnis des Persistenz-Bootstraps aus `main`.

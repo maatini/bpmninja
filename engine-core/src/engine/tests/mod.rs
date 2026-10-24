@@ -13,6 +13,7 @@ pub mod scripting;
 pub mod service_incidents;
 pub mod start_tasks;
 pub mod stress_tests;
+pub mod sub_process;
 pub mod timer_due_index;
 pub mod timers_messages;
 pub mod topic_index;

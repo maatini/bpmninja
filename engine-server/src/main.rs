@@ -6,7 +6,7 @@ use engine_core::WorkflowEngine;
 use engine_core::persistence::WorkflowPersistence;
 use engine_server::{
     AppBuildConfig, LogBuffer, NatsLogSink, StartupCoordinator, StorageStatus,
-    build_app_with_config,
+    build_app_with_config, redact_nats_url,
 };
 use persistence_nats::NatsPersistence;
 use tracing_subscriber::prelude::*;
@@ -75,6 +75,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting bpmninja engine-server...");
 
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    // Credentials dürfen weder in Logs noch in Fehlermeldungen landen.
+    let nats_url_log = redact_nats_url(&nats_url);
 
     let mut xml_cache = HashMap::new();
 
@@ -93,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
             let bootstrap = p.bootstrap_report().clone();
             tracing::info!(
                 "NATS connected at {} — JetStream bootstrap verified: {}",
-                nats_url,
+                nats_url_log,
                 bootstrap.summary()
             );
             let p_arc = Arc::new(p);
@@ -120,13 +122,13 @@ async fn main() -> anyhow::Result<()> {
             if require_nats {
                 anyhow::bail!(
                     "NATS/JetStream bootstrap failed at {} and REQUIRE_NATS is enabled (default) — refusing to start with in-memory fallback. Set REQUIRE_NATS=false for ephemeral local runs. Error: {}",
-                    nats_url,
+                    nats_url_log,
                     e
                 );
             }
             tracing::error!(
                 "NATS/JetStream bootstrap failed at {} - running IN-MEMORY only (REQUIRE_NATS=false)! Error: {}",
-                nats_url,
+                nats_url_log,
                 e
             );
             (

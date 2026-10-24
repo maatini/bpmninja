@@ -114,6 +114,42 @@ async fn info_endpoint_returns_backend_type() {
 }
 
 #[tokio::test]
+async fn info_endpoint_redacts_nats_credentials() {
+    // Explicit config — no process-wide env mutation (safe under parallel tests).
+    let app = engine_server::build_app_with_options(engine_server::AppBuildConfig {
+        require_nats: Some(false),
+        api_key: Some(None),
+        nats_url: Some("nats://bpmninja:s3cret@nats:4222?token=abc123".to_string()),
+        ..Default::default()
+    });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failed");
+    let addr = listener.local_addr().expect("addr failed");
+    let base = format!("http://{}", addr);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let res = reqwest::get(format!("{}/api/info", base))
+        .await
+        .expect("info request failed");
+    assert_eq!(res.status(), 200);
+    let text = res.text().await.expect("body read failed");
+    assert!(
+        !text.contains("s3cret") && !text.contains("abc123"),
+        "credentials must not be exposed: {text}"
+    );
+    let body: Value = serde_json::from_str(&text).expect("invalid json body");
+    assert_eq!(
+        body["nats_url"], "nats://***@nats:4222?***",
+        "nats_url must be masked, got: {}",
+        body["nats_url"]
+    );
+}
+
+#[tokio::test]
 async fn monitoring_endpoint_returns_stats() {
     let base = start_server().await;
     let client = reqwest::Client::new();

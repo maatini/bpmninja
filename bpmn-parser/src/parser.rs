@@ -833,25 +833,41 @@ fn flatten_subprocess(
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
 
-    let start_node_id = sp
-        .start_events
-        .first()
-        .map(|s| s.id.clone())
-        .unwrap_or_else(|| format!("{}_start", sub_process_id));
+    let start_event = sp.start_events.first().ok_or_else(|| {
+        EngineError::InvalidDefinition(format!("subProcess '{sub_process_id}' has no startEvent"))
+    })?;
+    if sp.start_events.len() > 1 {
+        return Err(EngineError::InvalidDefinition(format!(
+            "subProcess '{sub_process_id}' must have exactly one startEvent"
+        )));
+    }
+    let start_event_id = start_event.id.clone();
+    let mut start_targets: Vec<String> = sp
+        .sequence_flows
+        .iter()
+        .filter(|flow| flow.source_ref == start_event_id)
+        .map(|flow| flow.target_ref.clone())
+        .collect();
+
+    // Internal start events are pass-throughs: the EmbeddedSubProcess node continues at
+    // the start event's target, so no node is materialised for it. Several outgoing
+    // flows are all taken (BPMN implicit split) and stay in the graph as a parallel gateway.
+    let (start_node_id, start_forks) = match start_targets.len() {
+        0 => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "startEvent '{start_event_id}' in subProcess '{sub_process_id}' has no outgoing sequence flow"
+            )));
+        }
+        1 => (start_targets.remove(0), false),
+        _ => (start_event_id.clone(), true),
+    };
+
     builder = builder.node(
         sub_process_id.clone(),
         BpmnElement::EmbeddedSubProcess { start_node_id },
     );
-
-    for start in sp.start_events {
-        // Internal start events are just pass-throughs, execution jumps here from the EmbeddedSubProcess node
-        builder = builder.node(
-            start.id,
-            BpmnElement::ServiceTask {
-                topic: "noop".into(),
-                multi_instance: None,
-            },
-        );
+    if start_forks {
+        builder = builder.node(start_event_id.clone(), BpmnElement::ParallelGateway);
     }
 
     for end in sp.end_events {
@@ -1120,6 +1136,10 @@ fn flatten_subprocess(
     }
 
     for flow in sp.sequence_flows {
+        if flow.source_ref == start_event_id && !start_forks {
+            // Flows out of the internal start event define the sub-process entry point only.
+            continue;
+        }
         if let Some(cond) = flow.condition_expression {
             builder = builder.conditional_flow(
                 flow.source_ref,

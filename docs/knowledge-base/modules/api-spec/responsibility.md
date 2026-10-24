@@ -2,7 +2,7 @@
 
 ## What It Owns
 
-1. **@tag:api-spec** — OpenAPI 3.0 specification for all 46 REST endpoints.
+1. **@tag:api-spec** — OpenAPI 3.0 specification for all REST endpoints (45 paths, 48 operations in the TypeSpec output).
 2. TypeSpec source (`main.tsp`) compiled to OpenAPI YAML.
 3. Generated Redoc portal hosted via GitHub Pages.
 
