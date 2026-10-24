@@ -9,7 +9,7 @@ import { readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-const BUNDLE_EXTENSIONS = [".deb", ".AppImage", ".msi", ".exe", ".dmg", ".app.tar.gz"];
+const BUNDLE_EXTENSIONS = [".deb", ".rpm", ".AppImage", ".msi", ".exe", ".dmg", ".app.tar.gz"];
 const DEFAULT_ROOT = path.join("desktop-tauri", "src-tauri", "target");
 
 // Tauri legt das Updater-Bundle auf macOS als `bpmninja-desktop.app.tar.gz` ab,
