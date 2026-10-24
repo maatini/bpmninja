@@ -180,5 +180,31 @@ Quellen: Service-Task mit `retries <= 0` bzw. unbehandeltem `bpmnError`; fehlsch
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool` | `condition.rs` | Evaluate gateway conditions |
+| `evaluate_condition(expr: &str, variables: &HashMap<String, Value>) -> bool` | `condition.rs` | Wertet Gateway-Bedingungen aus (siehe unten) |
+| `validate_condition(expr: &str) -> Result<(), String>` | `condition.rs` | Prüft die Syntax; Fehler enthalten die 1-basierte Zeichenposition |
 | `parse_iso8601_duration(s: &str) -> EngineResult<Duration>` | (via bpmn-parser) | Parse ISO 8601 duration strings |
+
+### Bedingungssprache (`condition.rs`)
+
+Eigener Lexer + Recursive-Descent-Parser, keine Rhai-/`eval`-Abhängigkeit. Grammatik (Kurzschluss bei `&&`/`||`):
+
+```
+or      := and (("||" | "or") and)*
+and     := not (("&&" | "and") not)*
+not     := ("!" | "not") not | comparison
+compare := additive (("==" | "!=" | ">" | "<" | ">=" | "<=") additive)?
+additive:= multiplicative (("+" | "-") multiplicative)*
+mult    := unary (("*" | "/" | "%") unary)*
+unary   := "-" unary | primary
+primary := Zahl | String | true | false | null | "(" or ")" | Pfad
+Pfad    := Ident (("." Ident) | ("[" Ganzzahl "]"))*
+```
+
+| Aspekt | Verhalten |
+|--------|-----------|
+| Wrapper | Nur eine vollständige `${…}`-/`#{…}`-Umhüllung wird entfernt; mitten im Ausdruck oder ohne `}` → Syntaxfehler |
+| Fehlende Variablen/Pfade | Internes `undefined`: jeder Vergleich ergibt `false` (auch `!=`); `undefined` ist nicht `null` |
+| Truthiness | Bool direkt; `null`/`undefined`/`0`/leerer String → `false`, Arrays und Objekte → `true` |
+| Zahlenvergleich | `f64`-Epsilon (`< f64::EPSILON`), wie zuvor |
+| Arithmetik | Nur Zahlen; `undefined` propagiert, Division/Modulo durch Null und Typfehler → `false` + `tracing::warn!` |
+| Deploy-Validierung | `ProcessDefinitionBuilder::build` prüft alle `SequenceFlow.condition` und `ComplexGateway.join_condition` → `EngineError::InvalidDefinition` mit Quelle/Ziel bzw. Gateway-ID |

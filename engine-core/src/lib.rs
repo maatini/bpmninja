@@ -7,7 +7,7 @@ pub mod port;
 pub mod runtime;
 pub mod scripting;
 
-pub use condition::evaluate_condition;
+pub use condition::{evaluate_condition, validate_condition};
 
 pub use domain::*;
 pub use engine::WorkflowEngine;

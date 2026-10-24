@@ -148,7 +148,7 @@ For full local verification, run the root checks plus module-specific checks fro
 
 | Feature | Description |
 |---------|-------------|
-| **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`). Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, truthy checks. |
+| **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`, `${amount > 100 && approved}`). Supports `&&`/`and`, `\|\|`/`or`, `!`/`not`, `==`, `!=`, `>`, `<`, `>=`, `<=`, arithmetic `+ - * / %`, parentheses, numbers, single- and double-quoted strings with escapes, `true`/`false`/`null`, and dotted/array paths (`order.amount`, `items[0].id`). |
 | **Execution Listeners** | Start/end scripts on nodes (Rhai). Can read and mutate variables. |
 | **Scope Event Listeners** | Timer/message/error event sub-processes at scope level (interrupting/non-interrupting). |
 | **File Variables** | Upload/download of files as process variables via NATS Object Store. |
@@ -158,6 +158,8 @@ For full local verification, run the root checks plus module-specific checks fro
 | **Instance Archival** | Completed instances are archived to a dedicated store. Searchable by definition key, business key, date range, status with pagination. |
 | **Persistent Wait States** | Timers, messages, user/service tasks survive server restarts via NATS KV. |
 | **Structured JSON Logging** | Configurable via `tracing-subscriber` with the JSON feature and `RUST_LOG` filter. |
+
+**Conditional flow details.** A complete `${…}` or `#{…}` wrapper is stripped before evaluation; a wrapper in the middle of an expression or a missing closing brace is a syntax error. `&&`/`||` short-circuit, missing variables compare as `false`, and a missing value is not the same as `null`. Invalid `conditionExpression` and `complexGateway` `activationCondition` values are rejected at deploy time with `InvalidDefinition` (source/target node plus character position), so a broken model no longer falls through to the default flow silently.
 
 ### Deviations from the BPMN 2.0 Standard
 
@@ -604,7 +606,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `engine::tests::timers_messages` | 25 | Timers, boundary timer/message, message start/catch, event-based gateway races, failed-timer incidents |
 | `engine::tests::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
 | `engine::tests::call_errors` | 18 | Call activity lifecycle, variable/error propagation, error boundary events, compensation |
-| `engine::tests::gateways` | 18 | XOR/OR/AND forks and joins, defaults, downstream join detection |
+| `engine::tests::gateways` | 20 | XOR/OR/AND forks and joins, defaults, downstream join detection, compound conditions |
 | `engine::tests::start_tasks` | 12 | User/service tasks, conditional routing, lock/retry, BPMN error handling |
 | `engine::tests::topic_index` | 7 | Per-topic lock durations, orphaned entries, restore, incident filtering |
 | `engine::retry_queue::tests` | 7 | Display, shutdown/drain budget, skip missing entities, full-queue drop, persistence incidents |
@@ -625,15 +627,15 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `domain::tests` | 21 | ProcessDefinition builder, gateway validation, token serialization, timer definitions |
 | `domain::timer::tests` | 15 | Remaining time per timer type, recurring detection, infinite limits |
 | `runtime::instance::tests` | 14 | Audit log limits, file variables, file references, incident caps |
-| `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
+| `condition::tests` | 22 | Condition parser/evaluator: precedence, short-circuit, wrappers, escapes, paths, validity |
 | `adapter::in_memory::tests` | 2 | Storage info, history query filters |
 | Integration tests | 5 | BPMN compliance (3), complex gateways (2) |
 
-### bpmn-parser Tests (56 tests)
+### bpmn-parser Tests (58 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
-| Basic parsing | 8 | Simple BPMN, conditional flows, interleaved bpmn-js output, execution listeners, executable-process selection, Camunda attribute precedence |
+| Basic parsing | 10 | Simple BPMN, conditional flows, condition validation (flow and join condition), interleaved bpmn-js output, execution listeners, executable-process selection, Camunda attribute precedence |
 | Gateways | 5 | Parallel, exclusive with default, inclusive, event-based, complex |
 | Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, IntermediateMessageThrow |
 | Boundary events | 2 | BoundaryTimer, BoundaryError |

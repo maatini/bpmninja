@@ -1,3 +1,4 @@
+use crate::condition::validate_condition;
 use crate::domain::{
     BpmnElement, ExecutionListener, ListenerEvent, ScopeEventListener, SequenceFlow,
 };
@@ -276,6 +277,44 @@ impl ProcessDefinition {
 // Builder helper (ergonomic construction)
 // ---------------------------------------------------------------------------
 
+/// Prüft alle Bedingungsausdrücke vor dem Bau der Definition.
+///
+/// Sequenzflüsse nennen Quelle und Ziel, Complex-Gateways ihre Node-ID, damit
+/// ein fehlerhaftes Modell beim Deploy eindeutig zuzuordnen ist.
+fn validate_condition_expressions(
+    nodes: &HashMap<String, BpmnElement>,
+    flows: &HashMap<String, Vec<SequenceFlow>>,
+) -> EngineResult<()> {
+    for (source, outgoing) in flows {
+        for flow in outgoing {
+            if let Some(condition) = &flow.condition {
+                validate_condition(condition).map_err(|error| {
+                    EngineError::InvalidDefinition(format!(
+                        "Invalid condition on sequence flow '{source}' -> '{}': {error}",
+                        flow.target
+                    ))
+                })?;
+            }
+        }
+    }
+
+    for (node_id, element) in nodes {
+        if let BpmnElement::ComplexGateway {
+            join_condition: Some(condition),
+            ..
+        } = element
+        {
+            validate_condition(condition).map_err(|error| {
+                EngineError::InvalidDefinition(format!(
+                    "Invalid join condition on complex gateway '{node_id}': {error}"
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Fluent builder for creating a `ProcessDefinition`.
 pub struct ProcessDefinitionBuilder {
     id: String,
@@ -374,6 +413,7 @@ impl ProcessDefinitionBuilder {
 
     /// Builds and validates the definition.
     pub fn build(self) -> EngineResult<ProcessDefinition> {
+        validate_condition_expressions(&self.nodes, &self.flows)?;
         let mut def = ProcessDefinition::new(
             self.id,
             self.version,

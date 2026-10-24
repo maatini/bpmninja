@@ -1,5 +1,5 @@
 use crate::parser::parse_bpmn_xml;
-use engine_core::model::{BpmnElement, ListenerEvent};
+use engine_core::model::{BpmnElement, EngineError, ListenerEvent};
 
 #[test]
 fn parse_simple_bpmn() {
@@ -76,6 +76,67 @@ fn parse_conditional_flows() {
 
     let flow2 = flows.iter().find(|f| f.target == "end2").unwrap();
     assert_eq!(flow2.condition, None);
+}
+
+#[test]
+fn reject_invalid_condition_expression() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="start1" />
+                <exclusiveGateway id="gw1" />
+                <userTask id="ut1" data-assignee="alice" />
+                <userTask id="ut2" data-assignee="bob" />
+                <endEvent id="end1" />
+                <sequenceFlow id="f1" sourceRef="start1" targetRef="gw1" />
+                <sequenceFlow id="f2" sourceRef="gw1" targetRef="ut1">
+                    <conditionExpression xsi:type="tFormalExpression">${a &amp;&amp;}</conditionExpression>
+                </sequenceFlow>
+                <sequenceFlow id="f3" sourceRef="gw1" targetRef="ut2" />
+                <sequenceFlow id="f4" sourceRef="ut1" targetRef="end1" />
+                <sequenceFlow id="f5" sourceRef="ut2" targetRef="end1" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    assert!(
+        matches!(err, EngineError::InvalidDefinition(_)),
+        "expected InvalidDefinition, got: {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("gw1") && msg.contains("ut1") && msg.contains("position"),
+        "error should name source, target and position: {msg}"
+    );
+}
+
+#[test]
+fn reject_invalid_join_condition_expression() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="start1" />
+                <complexGateway id="cgw">
+                    <activationCondition xsi:type="tFormalExpression">tokens &gt;</activationCondition>
+                </complexGateway>
+                <endEvent id="end1" />
+                <sequenceFlow id="f1" sourceRef="start1" targetRef="cgw" />
+                <sequenceFlow id="f2" sourceRef="cgw" targetRef="end1" />
+            </process>
+        </definitions>
+    "#;
+
+    let err = parse_bpmn_xml(xml).unwrap_err();
+    assert!(
+        matches!(err, EngineError::InvalidDefinition(_)),
+        "expected InvalidDefinition, got: {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("complex gateway 'cgw'") && msg.contains("position"),
+        "unexpected error: {msg}"
+    );
 }
 
 #[test]

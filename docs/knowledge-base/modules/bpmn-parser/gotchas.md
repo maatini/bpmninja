@@ -85,6 +85,14 @@ An embedded sub-process must contain exactly one start event; zero or several ar
 
 The parser maps `inclusiveGateway` to `InclusiveGateway` with no extra join metadata. Engine-core still infers the join partner at runtime (`find_downstream_join`) and sets `JoinBarrier.expected_count` to the number of paths actually taken at the matching split (including 1-of-N). Unstructured diagrams without a same-type downstream join still wait on structural `incoming_flow_count` and can stall.
 
+### ⚠️ Bedingungen werden beim Deploy validiert
+
+`conditionExpression` an Sequenzflüssen und `activationCondition` an `complexGateway` werden beim Bau der `ProcessDefinition` über `engine_core::validate_condition` geprüft. Ein Syntaxfehler bricht den Deploy mit `EngineError::InvalidDefinition` ab; die Meldung nennt Quelle und Ziel des Flusses bzw. die Gateway-ID und die 1-basierte Zeichenposition.
+
+Akzeptiert werden `&&`/`and`, `||`/`or`, `!`/`not`, `==`, `!=`, `>`, `<`, `>=`, `<=`, Arithmetik `+ - * / %`, Klammern, Zahlen, Strings mit einfachen oder doppelten Anführungszeichen (inkl. Escapes), `true`/`false`/`null` sowie Pfade mit Punkten und Array-Indizes (`order.amount`, `items[0].id`). Eine `${…}`-/`#{…}`-Umhüllung ist nur vollständig um den gesamten Ausdruck erlaubt.
+
+Das ist eine bewusste Breaking Change: zuvor still akzeptierte, kaputte Ausdrücke (z. B. `${a &&}`) liefen in den Default-Pfad und werden jetzt abgelehnt. `=` als Vergleichsoperator, Funktionsaufrufe und Rhai-Syntax sind ungültig.
+
 ### ⚠️ Invalid XML returns EngineError, never panics
 
 All parsing errors produce `EngineError::InvalidDefinition(msg)` with a descriptive message. The parser uses `Result` throughout — no `.unwrap()` calls in the parser path.

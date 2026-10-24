@@ -66,6 +66,127 @@ async fn exclusive_gateway_takes_matching_path() {
     assert!(gw_entry.contains("high"), "Expected high path: {gw_entry}");
 }
 
+/// Bedingter Pfad mit `&&` und `${…}`-Umhüllung statt Default.
+#[tokio::test]
+async fn exclusive_gateway_takes_compound_condition_path() {
+    let engine = WorkflowEngine::new();
+
+    let def = ProcessDefinitionBuilder::new("xor_compound")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "gw",
+            BpmnElement::ExclusiveGateway {
+                default: Some("low".into()),
+            },
+        )
+        .node(
+            "high",
+            BpmnElement::ServiceTask {
+                topic: "noop".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "low",
+            BpmnElement::ServiceTask {
+                topic: "noop".into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "gw")
+        .conditional_flow("gw", "high", "${amount > 100 && approved}")
+        .flow("gw", "low")
+        .flow("high", "end")
+        .flow("low", "end")
+        .build()
+        .unwrap();
+
+    let (def_key, _) = engine.deploy_definition(def).await;
+
+    let mut vars = HashMap::new();
+    vars.insert("amount".into(), Value::Number(500.into()));
+    vars.insert("approved".into(), Value::Bool(true));
+    let inst_id = engine
+        .start_instance_with_variables(def_key, vars)
+        .await
+        .unwrap();
+
+    complete_all_service_tasks(&engine, "worker_1", HashMap::new()).await;
+
+    assert_eq!(
+        engine.get_instance_state(inst_id).await.unwrap(),
+        InstanceState::Completed
+    );
+    let log = engine.get_audit_log(inst_id).await.unwrap();
+    let gw_entry = log
+        .iter()
+        .find(|l| l.contains("Exclusive gateway"))
+        .unwrap();
+    assert!(gw_entry.contains("high"), "Expected high path: {gw_entry}");
+}
+
+/// Bedingter Pfad mit `||` gegen den Default.
+#[tokio::test]
+async fn exclusive_gateway_takes_alternative_condition_path() {
+    let engine = WorkflowEngine::new();
+
+    let def = ProcessDefinitionBuilder::new("xor_alternative")
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "gw",
+            BpmnElement::ExclusiveGateway {
+                default: Some("low".into()),
+            },
+        )
+        .node(
+            "high",
+            BpmnElement::ServiceTask {
+                topic: "noop".into(),
+                multi_instance: None,
+            },
+        )
+        .node(
+            "low",
+            BpmnElement::ServiceTask {
+                topic: "noop".into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "gw")
+        .conditional_flow("gw", "high", "amount > 100 || vip")
+        .flow("gw", "low")
+        .flow("high", "end")
+        .flow("low", "end")
+        .build()
+        .unwrap();
+
+    let (def_key, _) = engine.deploy_definition(def).await;
+
+    // amount liegt unter der Schwelle; nur `vip` macht die Bedingung wahr.
+    let mut vars = HashMap::new();
+    vars.insert("amount".into(), Value::Number(50.into()));
+    vars.insert("vip".into(), Value::Bool(true));
+    let inst_id = engine
+        .start_instance_with_variables(def_key, vars)
+        .await
+        .unwrap();
+
+    complete_all_service_tasks(&engine, "worker_1", HashMap::new()).await;
+
+    assert_eq!(
+        engine.get_instance_state(inst_id).await.unwrap(),
+        InstanceState::Completed
+    );
+    let log = engine.get_audit_log(inst_id).await.unwrap();
+    let gw_entry = log
+        .iter()
+        .find(|l| l.contains("Exclusive gateway"))
+        .unwrap();
+    assert!(gw_entry.contains("high"), "Expected high path: {gw_entry}");
+}
+
 #[tokio::test]
 async fn exclusive_gateway_uses_default_when_no_match() {
     let engine = WorkflowEngine::new();
