@@ -669,6 +669,20 @@ async fn persistence_error_counter_increments() {
         ) -> EngineResult<Vec<crate::runtime::PendingMessageCatch>> {
             Ok(vec![])
         }
+        async fn save_signal_catch(
+            &self,
+            _: &crate::runtime::PendingSignalCatch,
+        ) -> EngineResult<()> {
+            Ok(())
+        }
+        async fn delete_signal_catch(&self, _: uuid::Uuid) -> EngineResult<()> {
+            Ok(())
+        }
+        async fn list_signal_catches(
+            &self,
+        ) -> EngineResult<Vec<crate::runtime::PendingSignalCatch>> {
+            Ok(vec![])
+        }
         async fn save_file(&self, _: &str, _: &[u8]) -> EngineResult<()> {
             Ok(())
         }

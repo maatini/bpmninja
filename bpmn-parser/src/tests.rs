@@ -2277,3 +2277,271 @@ fn bpmn_without_cancel_events_stays_valid() {
         Some(BpmnElement::ServiceTask { .. })
     ));
 }
+
+// --- Signal-Events ---
+
+#[test]
+fn parse_signal_start_event() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="GlobalStart" />
+            <process id="proc1">
+                <startEvent id="s1">
+                    <signalEventDefinition signalRef="sig1" />
+                </startEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("s1").unwrap() {
+        BpmnElement::SignalStartEvent { signal_name } => {
+            assert_eq!(signal_name, "GlobalStart");
+        }
+        other => panic!("Expected SignalStartEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_signal_catch_event() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="PaymentConfirmed" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait_signal">
+                    <signalEventDefinition signalRef="sig1" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait_signal" />
+                <sequenceFlow id="f2" sourceRef="wait_signal" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("wait_signal").unwrap() {
+        BpmnElement::SignalCatchEvent { signal_name } => {
+            assert_eq!(signal_name, "PaymentConfirmed");
+        }
+        other => panic!("Expected SignalCatchEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_signal_throw_event() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="NotifyAll" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="throw_signal">
+                    <signalEventDefinition signalRef="sig1" />
+                </intermediateThrowEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="throw_signal" />
+                <sequenceFlow id="f2" sourceRef="throw_signal" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("throw_signal").unwrap() {
+        BpmnElement::SignalThrowEvent { signal_name } => {
+            assert_eq!(signal_name, "NotifyAll");
+        }
+        other => panic!("Expected SignalThrowEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_signal_end_event() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="Finished" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <endEvent id="e1">
+                    <signalEventDefinition signalRef="sig1" />
+                </endEvent>
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("e1").unwrap() {
+        BpmnElement::SignalEndEvent { signal_name } => {
+            assert_eq!(signal_name, "Finished");
+        }
+        other => panic!("Expected SignalEndEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_boundary_signal_event() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="Abort" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <serviceTask id="task1" data-topic="charge" />
+                <boundaryEvent id="on_signal" attachedToRef="task1" cancelActivity="false">
+                    <signalEventDefinition signalRef="sig1" />
+                </boundaryEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="task1" />
+                <sequenceFlow id="f2" sourceRef="task1" targetRef="e1" />
+                <sequenceFlow id="f3" sourceRef="on_signal" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    match def.nodes.get("on_signal").unwrap() {
+        BpmnElement::BoundarySignalEvent {
+            attached_to,
+            signal_name,
+            cancel_activity,
+        } => {
+            assert_eq!(attached_to, "task1");
+            assert_eq!(signal_name, "Abort");
+            assert!(!*cancel_activity);
+        }
+        other => panic!("Expected BoundarySignalEvent, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_signal_event_without_ref_is_rejected() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="s1" />
+                <intermediateCatchEvent id="wait_signal">
+                    <signalEventDefinition />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="wait_signal" />
+                <sequenceFlow id="f2" sourceRef="wait_signal" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("no signalRef") && msg.contains("wait_signal"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn parse_signal_event_with_unknown_ref_is_rejected() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="s1" />
+                <intermediateThrowEvent id="throw_signal">
+                    <signalEventDefinition signalRef="missing_signal" />
+                </intermediateThrowEvent>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="throw_signal" />
+                <sequenceFlow id="f2" sourceRef="throw_signal" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let msg = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        msg.contains("unknown signal") && msg.contains("missing_signal"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn flatten_subprocess_keeps_signal_events() {
+    let xml = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="InnerSignal" />
+            <process id="proc1" isExecutable="true">
+                <startEvent id="s1" />
+                <subProcess id="sub1">
+                    <startEvent id="sub_s1" />
+                    <intermediateCatchEvent id="sub_wait">
+                        <signalEventDefinition signalRef="sig1" />
+                    </intermediateCatchEvent>
+                    <intermediateThrowEvent id="sub_throw">
+                        <signalEventDefinition signalRef="sig1" />
+                    </intermediateThrowEvent>
+                    <endEvent id="sub_e1" />
+                    <sequenceFlow id="sf1" sourceRef="sub_s1" targetRef="sub_wait" />
+                    <sequenceFlow id="sf2" sourceRef="sub_wait" targetRef="sub_throw" />
+                    <sequenceFlow id="sf3" sourceRef="sub_throw" targetRef="sub_e1" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert!(
+        matches!(
+            def.nodes.get("sub_wait"),
+            Some(BpmnElement::SignalCatchEvent { signal_name }) if signal_name == "InnerSignal"
+        ),
+        "signal catch inside subProcess must be flattened"
+    );
+    assert!(
+        matches!(
+            def.nodes.get("sub_throw"),
+            Some(BpmnElement::SignalThrowEvent { signal_name }) if signal_name == "InnerSignal"
+        ),
+        "signal throw inside subProcess must be flattened"
+    );
+    assert!(matches!(
+        def.nodes.get("sub1"),
+        Some(BpmnElement::EmbeddedSubProcess { start_node_id }) if start_node_id == "sub_wait"
+    ));
+}
+
+#[test]
+fn event_based_gateway_accepts_signal_catch_targets() {
+    let xml = r#"
+        <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <signal id="sig1" name="First" />
+            <signal id="sig2" name="Second" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <eventBasedGateway id="gw" />
+                <intermediateCatchEvent id="wait_first">
+                    <signalEventDefinition signalRef="sig1" />
+                </intermediateCatchEvent>
+                <intermediateCatchEvent id="wait_second">
+                    <signalEventDefinition signalRef="sig2" />
+                </intermediateCatchEvent>
+                <endEvent id="e1" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="gw" />
+                <sequenceFlow id="f2" sourceRef="gw" targetRef="wait_first" />
+                <sequenceFlow id="f3" sourceRef="gw" targetRef="wait_second" />
+                <sequenceFlow id="f4" sourceRef="wait_first" targetRef="e1" />
+                <sequenceFlow id="f5" sourceRef="wait_second" targetRef="e2" />
+            </process>
+        </definitions>
+    "#;
+
+    let def = parse_bpmn_xml(xml).unwrap();
+    assert!(matches!(
+        def.nodes.get("wait_first"),
+        Some(BpmnElement::SignalCatchEvent { .. })
+    ));
+    assert!(matches!(
+        def.nodes.get("wait_second"),
+        Some(BpmnElement::SignalCatchEvent { .. })
+    ));
+}

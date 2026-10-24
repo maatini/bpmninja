@@ -925,6 +925,63 @@ paths:
                 items:
                   $ref: '#/components/schemas/PendingMessage'
 
+  /api/signal:
+    post:
+      tags: [Messages & Timers]
+      summary: Broadcast a signal
+      description: |
+        Signals are broadcast without a business key. Resumes every waiting
+        `SignalCatchEvent` with a matching `signalName` and starts new instances
+        for matching `SignalStartEvent` definitions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signalName]
+              properties:
+                signalName:
+                  type: string
+                variables:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Affected instance IDs (deduplicated)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  affectedInstances:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/signals:
+    get:
+      tags: [Messages & Timers]
+      summary: List pending signal catch events
+      responses:
+        '200':
+          description: Pending signal catches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingSignal'
+
   # ─────────────────────────────── History ────────────────────────────────────
 
   /api/instances/{id}/history:
@@ -1543,6 +1600,23 @@ components:
         node_id:
           type: string
         message_name:
+          type: string
+        token_id:
+          type: string
+          format: uuid
+
+    PendingSignal:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        instance_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        signal_name:
           type: string
         token_id:
           type: string

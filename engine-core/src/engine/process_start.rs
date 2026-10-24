@@ -35,6 +35,24 @@ impl WorkflowEngine {
             .await
     }
 
+    /// Starts an instance for a signal start event (`correlate_signal`).
+    ///
+    /// Only this internal path may start a `SignalStartEvent` definition.
+    pub(crate) async fn start_instance_from_signal(
+        &self,
+        definition_key: Uuid,
+        variables: &HashMap<String, Value>,
+    ) -> EngineResult<Uuid> {
+        self.start_instance_with_variables_parent_and_id(
+            definition_key,
+            variables.clone(),
+            None,
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Starts a new instance from the latest version of a BPMN process ID.
     ///
     /// Looks up the definition with the highest version matching `bpmn_id`
@@ -65,8 +83,9 @@ impl WorkflowEngine {
         mut variables: HashMap<String, Value>,
         parent_instance_id: Option<Uuid>,
         predetermined_id: Option<Uuid>,
+        allow_signal_start: bool,
     ) -> EngineResult<Uuid> {
-        let (def, start_id) = self.validate_start_request(definition_key)?;
+        let (def, start_id) = self.validate_start_request(definition_key, allow_signal_start)?;
 
         let instance_id = predetermined_id.unwrap_or_else(Uuid::new_v4);
         let business_key = variables
@@ -154,6 +173,7 @@ impl WorkflowEngine {
     pub(crate) fn validate_start_request(
         &self,
         definition_key: Uuid,
+        allow_signal_start: bool,
     ) -> EngineResult<(Arc<crate::domain::ProcessDefinition>, String)> {
         let def = self
             .definitions
@@ -167,6 +187,12 @@ impl WorkflowEngine {
         if matches!(start_element, BpmnElement::TimerStartEvent(_)) {
             return Err(EngineError::InvalidDefinition(
                 "Use trigger_timer_start() for timer start events".into(),
+            ));
+        }
+
+        if matches!(start_element, BpmnElement::SignalStartEvent { .. }) && !allow_signal_start {
+            return Err(EngineError::InvalidDefinition(
+                "Definition has a signal start event; use correlate_signal() to start it".into(),
             ));
         }
 
@@ -218,6 +244,7 @@ impl WorkflowEngine {
             variables,
             parent_instance_id,
             None,
+            false,
         )
         .await
     }
@@ -290,6 +317,7 @@ impl WorkflowEngine {
                 token.variables.clone(),
                 Some(parent_instance_id),
                 Some(child_id),
+                false,
             )
             .await
         {

@@ -9,7 +9,7 @@ use crate::persistence::CompletedInstanceQuery;
 use super::WorkflowEngine;
 use crate::runtime::{
     EngineStats, InstancePage, InstanceState, PendingMessageCatch, PendingServiceTask,
-    PendingTimer, PendingUserTask, ProcessInstance,
+    PendingSignalCatch, PendingTimer, PendingUserTask, ProcessInstance,
 };
 
 impl WorkflowEngine {
@@ -41,6 +41,7 @@ impl WorkflowEngine {
             pending_service_tasks: self.pending_service_tasks.len(),
             pending_timers: self.pending_timers.len(),
             pending_message_catches: self.pending_message_catches.len(),
+            pending_signal_catches: self.pending_signal_catches.len(),
             persistence_errors: self
                 .persistence_error_count
                 .load(std::sync::atomic::Ordering::Relaxed),
@@ -132,6 +133,14 @@ impl WorkflowEngine {
     /// Returns all currently pending message catch events.
     pub fn get_pending_message_catches(&self) -> Vec<PendingMessageCatch> {
         self.pending_message_catches
+            .iter()
+            .map(|it| it.value().clone())
+            .collect()
+    }
+
+    /// Returns all currently pending signal catch events.
+    pub fn get_pending_signal_catches(&self) -> Vec<PendingSignalCatch> {
+        self.pending_signal_catches
             .iter()
             .map(|it| it.value().clone())
             .collect()
@@ -527,6 +536,20 @@ impl WorkflowEngine {
                     let _ = p.delete_message_catch(*tid).await;
                 }
             }
+
+            // Remove pending signal catches
+            let signal_ids: Vec<Uuid> = self
+                .pending_signal_catches
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+                .map(|t| t.id)
+                .collect();
+            for tid in &signal_ids {
+                self.pending_signal_catches.remove(tid);
+                if let Some(p) = &self.persistence {
+                    let _ = p.delete_signal_catch(*tid).await;
+                }
+            }
         }
 
         // --- 4. Create a fresh token at the target node ---
@@ -780,6 +803,13 @@ impl WorkflowEngine {
                 entry.node_id = new_node.clone();
             }
         }
+        for mut entry in self.pending_signal_catches.iter_mut() {
+            if entry.instance_id == instance_id
+                && let Some(new_node) = node_mapping.get(&entry.node_id)
+            {
+                entry.node_id = new_node.clone();
+            }
+        }
 
         // --- 7. Record history ---
         self.record_history_event(
@@ -851,6 +881,14 @@ impl WorkflowEngine {
             {
                 let _ = persistence.delete_message_catch(catch.id).await;
             }
+            // Delete associated signal catches from persistence
+            for catch in self
+                .pending_signal_catches
+                .iter()
+                .filter(|t| t.instance_id == instance_id)
+            {
+                let _ = persistence.delete_signal_catch(catch.id).await;
+            }
             // Delete instance from persistence
             persistence
                 .delete_instance(&instance_id.to_string())
@@ -869,6 +907,10 @@ impl WorkflowEngine {
 
         // Clean up pending message catches in memory
         self.pending_message_catches
+            .retain(|_, t| t.instance_id != instance_id);
+
+        // Clean up pending signal catches in memory
+        self.pending_signal_catches
             .retain(|_, t| t.instance_id != instance_id);
 
         Ok(())

@@ -14,6 +14,7 @@ pub struct RestoreStats {
     pub service_tasks: usize,
     pub timers: usize,
     pub message_catches: usize,
+    pub signal_catches: usize,
 }
 
 pub struct StartupCoordinator {
@@ -36,6 +37,7 @@ impl StartupCoordinator {
         let service_tasks = self.restore_service_tasks(engine).await;
         let timers = self.restore_timers(engine).await;
         let message_catches = self.restore_message_catches(engine).await;
+        let signal_catches = self.restore_signal_catches(engine).await;
 
         RestoreStats {
             definitions,
@@ -44,6 +46,7 @@ impl StartupCoordinator {
             service_tasks,
             timers,
             message_catches,
+            signal_catches,
         }
     }
 
@@ -217,6 +220,23 @@ impl StartupCoordinator {
             }
             Err(e) => {
                 tracing::error!("Message-Catches aus NATS laden fehlgeschlagen: {:?}", e);
+                0
+            }
+        }
+    }
+
+    async fn restore_signal_catches(&self, engine: &mut WorkflowEngine) -> usize {
+        match self.nats.list_signal_catches().await {
+            Ok(catches) => {
+                let num = catches.len();
+                for catch in catches {
+                    engine.restore_signal_catch(catch);
+                }
+                tracing::info!("{num} Signal-Catch(es) wiederhergestellt.");
+                num
+            }
+            Err(e) => {
+                tracing::error!("Signal-Catches aus NATS laden fehlgeschlagen: {:?}", e);
                 0
             }
         }

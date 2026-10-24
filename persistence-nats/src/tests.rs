@@ -300,3 +300,35 @@ async fn test_stream_retention_limits_are_applied() {
         "bootstrap report must mention WORKFLOW_HISTORY: {report:?}"
     );
 }
+
+/// Signal-Catches überleben den Reload aus dem KV-Bucket.
+#[tokio::test]
+async fn test_signal_catch_save_list_and_delete() {
+    let persistence = match setup_nats_test().await {
+        Some(p) => p,
+        None => return,
+    };
+
+    let catch = engine_core::PendingSignalCatch {
+        id: Uuid::new_v4(),
+        instance_id: Uuid::new_v4(),
+        node_id: "wait_signal".into(),
+        signal_name: "ORDER_READY".into(),
+        token_id: Uuid::new_v4(),
+    };
+
+    persistence.save_signal_catch(&catch).await.unwrap();
+
+    let listed = persistence.list_signal_catches().await.unwrap();
+    let found = listed
+        .iter()
+        .find(|c| c.id == catch.id)
+        .expect("signal catch must be listed after reload");
+    assert_eq!(found.instance_id, catch.instance_id);
+    assert_eq!(found.signal_name, "ORDER_READY");
+    assert_eq!(found.token_id, catch.token_id);
+
+    persistence.delete_signal_catch(catch.id).await.unwrap();
+    let after = persistence.list_signal_catches().await.unwrap();
+    assert!(after.iter().all(|c| c.id != catch.id));
+}

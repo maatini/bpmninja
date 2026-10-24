@@ -12,6 +12,7 @@ pub mod multi_instance;
 pub mod recurring_and_event_timer;
 pub mod scripting;
 pub mod service_incidents;
+pub mod signals;
 pub mod start_tasks;
 pub mod stress_tests;
 pub mod sub_process;

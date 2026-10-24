@@ -126,6 +126,18 @@ impl WorkflowEngine {
                 self.persist_message_catch(message_id).await;
                 self.persist_instance(instance_id).await;
             }
+            NextAction::WaitForSignal(pending) => {
+                let catch_id = pending.id;
+                if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                    let mut inst = inst_arc.write().await;
+                    if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
+                        inst.state = InstanceState::WaitingOnSignal { catch_id };
+                    }
+                }
+                self.pending_signal_catches.insert(catch_id, pending);
+                self.persist_signal_catch(catch_id).await;
+                self.persist_instance(instance_id).await;
+            }
             NextAction::WaitForEventGroup(actions) => {
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
@@ -144,6 +156,11 @@ impl WorkflowEngine {
                             let message_id = pending.id;
                             self.pending_message_catches.insert(message_id, pending);
                             self.persist_message_catch(message_id).await;
+                        }
+                        NextAction::WaitForSignal(pending) => {
+                            let catch_id = pending.id;
+                            self.pending_signal_catches.insert(catch_id, pending);
+                            self.persist_signal_catch(catch_id).await;
                         }
                         _ => {} // EventBasedGateway validation ensures this won't happen
                     }
@@ -310,6 +327,8 @@ impl WorkflowEngine {
                 self.clear_pending_service_tasks_for_instance(instance_id);
                 self.retain_pending_timers(|_, t| t.instance_id != instance_id);
                 self.pending_message_catches
+                    .retain(|_, t| t.instance_id != instance_id);
+                self.pending_signal_catches
                     .retain(|_, t| t.instance_id != instance_id);
 
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {

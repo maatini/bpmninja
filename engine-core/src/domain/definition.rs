@@ -54,6 +54,7 @@ impl ProcessDefinition {
                     BpmnElement::StartEvent
                         | BpmnElement::TimerStartEvent(_)
                         | BpmnElement::MessageStartEvent { .. }
+                        | BpmnElement::SignalStartEvent { .. }
                 )
             })
             .count();
@@ -81,6 +82,7 @@ impl ProcessDefinition {
                         | BpmnElement::CompensationEndEvent { .. }
                         | BpmnElement::TerminateEndEvent
                         | BpmnElement::SubProcessEndEvent { .. }
+                        | BpmnElement::SignalEndEvent { .. }
                 )
             })
             .count();
@@ -108,6 +110,7 @@ impl ProcessDefinition {
             | BpmnElement::BoundaryMessageEvent { attached_to, .. }
             | BpmnElement::BoundaryErrorEvent { attached_to, .. }
             | BpmnElement::BoundaryEscalationEvent { attached_to, .. }
+            | BpmnElement::BoundarySignalEvent { attached_to, .. }
             | BpmnElement::BoundaryCompensationEvent { attached_to, .. } = element
                 && !nodes.contains_key(attached_to)
             {
@@ -127,6 +130,7 @@ impl ProcessDefinition {
                     | BpmnElement::CompensationEndEvent { .. }
                     | BpmnElement::TerminateEndEvent
                     | BpmnElement::SubProcessEndEvent { .. }
+                    | BpmnElement::SignalEndEvent { .. }
                     | BpmnElement::EmbeddedSubProcess { .. }
                     | BpmnElement::BoundaryCompensationEvent { .. }
             ) {
@@ -176,11 +180,13 @@ impl ProcessDefinition {
                     if let Some(target_element) = nodes.get(&sf.target)
                         && !matches!(
                             target_element,
-                            BpmnElement::MessageCatchEvent { .. } | BpmnElement::TimerCatchEvent(_)
+                            BpmnElement::MessageCatchEvent { .. }
+                                | BpmnElement::TimerCatchEvent(_)
+                                | BpmnElement::SignalCatchEvent { .. }
                         )
                     {
                         return Err(EngineError::InvalidDefinition(format!(
-                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
+                            "EventBasedGateway '{node_id}' can only connect to MessageCatchEvent, SignalCatchEvent or TimerCatchEvent targets. Node '{}' is invalid.",
                             sf.target
                         )));
                     }
@@ -208,6 +214,7 @@ impl ProcessDefinition {
                 BpmnElement::StartEvent
                     | BpmnElement::TimerStartEvent(_)
                     | BpmnElement::MessageStartEvent { .. }
+                    | BpmnElement::SignalStartEvent { .. }
             ) {
                 Some((id.as_str(), e))
             } else {

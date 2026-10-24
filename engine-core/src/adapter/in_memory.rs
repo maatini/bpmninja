@@ -14,7 +14,8 @@ use crate::persistence::{
     WorkflowPersistence,
 };
 use crate::runtime::{
-    PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask, ProcessInstance,
+    PendingMessageCatch, PendingServiceTask, PendingSignalCatch, PendingTimer, PendingUserTask,
+    ProcessInstance,
 };
 
 #[derive(Default, Clone)]
@@ -26,6 +27,7 @@ pub struct InMemoryPersistence {
     service_tasks: Arc<RwLock<HashMap<uuid::Uuid, PendingServiceTask>>>,
     timers: Arc<RwLock<HashMap<uuid::Uuid, PendingTimer>>>,
     message_catches: Arc<RwLock<HashMap<uuid::Uuid, PendingMessageCatch>>>,
+    signal_catches: Arc<RwLock<HashMap<uuid::Uuid, PendingSignalCatch>>>,
     files: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     bpmn_xmls: Arc<RwLock<HashMap<String, String>>>,
     history: Arc<RwLock<HashMap<uuid::Uuid, Vec<HistoryEntry>>>>,
@@ -173,6 +175,23 @@ impl WorkflowPersistence for InMemoryPersistence {
         Ok(m.values().cloned().collect())
     }
 
+    async fn save_signal_catch(&self, catch: &PendingSignalCatch) -> EngineResult<()> {
+        let mut s = self.signal_catches.write().await;
+        s.insert(catch.id, catch.clone());
+        Ok(())
+    }
+
+    async fn delete_signal_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()> {
+        let mut s = self.signal_catches.write().await;
+        s.remove(&catch_id);
+        Ok(())
+    }
+
+    async fn list_signal_catches(&self) -> EngineResult<Vec<PendingSignalCatch>> {
+        let s = self.signal_catches.read().await;
+        Ok(s.values().cloned().collect())
+    }
+
     async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()> {
         let mut f = self.files.write().await;
         f.insert(object_key.to_string(), data.to_vec());
@@ -220,6 +239,7 @@ impl WorkflowPersistence for InMemoryPersistence {
         let st_len = self.service_tasks.read().await.len();
         let t_len = self.timers.read().await.len();
         let m_len = self.message_catches.read().await.len();
+        let sig_len = self.signal_catches.read().await.len();
         let h_len: usize = self.history.read().await.values().map(|v| v.len()).sum();
         let bpmn_len = self.bpmn_xmls.read().await.len();
 
@@ -259,6 +279,12 @@ impl WorkflowPersistence for InMemoryPersistence {
                 bucket_type: "kv".into(),
                 entries: m_len as u64,
                 size_bytes: (m_len * 128) as u64,
+            },
+            crate::persistence::BucketInfo {
+                name: "pending_signal_catches".into(),
+                bucket_type: "kv".into(),
+                entries: sig_len as u64,
+                size_bytes: (sig_len * 128) as u64,
             },
             crate::persistence::BucketInfo {
                 name: "bpmn_xml".into(),

@@ -381,6 +381,32 @@ impl WorkflowEngine {
         }
     }
 
+    /// Persists a pending signal catch event to the KV store.
+    pub(crate) async fn persist_signal_catch(&self, catch_id: Uuid) {
+        if let Some(p) = &self.persistence
+            && let Some(catch_ref) = self.pending_signal_catches.get(&catch_id)
+        {
+            inline_retry!(
+                self,
+                p.save_signal_catch(&catch_ref),
+                format!("save_signal_catch({})", catch_id),
+                PersistJob::SaveSignalCatch(catch_id)
+            );
+        }
+    }
+
+    /// Deletes a completed or cancelled pending signal catch event from the KV store.
+    pub(crate) async fn remove_persisted_signal_catch(&self, catch_id: Uuid) {
+        if let Some(p) = &self.persistence {
+            inline_retry!(
+                self,
+                p.delete_signal_catch(catch_id),
+                format!("delete_signal_catch({})", catch_id),
+                PersistJob::DeleteSignalCatch(catch_id)
+            );
+        }
+    }
+
     /// Archives a completed instance to the history store (for history queries/filtering),
     /// but intentionally keeps the instance in the active DashMap and active persistence bucket.
     ///

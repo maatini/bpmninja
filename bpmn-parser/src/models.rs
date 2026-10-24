@@ -71,6 +71,10 @@ pub(crate) struct BpmnDefinitions {
     #[serde(rename = "message", default)]
     pub messages: Vec<BpmnMessage>,
 
+    /// Globale `<signal>`-Definitionen (Signal-ID -> Name).
+    #[serde(rename = "signal", default)]
+    pub signals: Vec<BpmnSignalDef>,
+
     #[serde(rename = "error", default)]
     pub errors: Vec<BpmnErrorDef>,
 
@@ -80,6 +84,15 @@ pub(crate) struct BpmnDefinitions {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BpmnMessage {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name")]
+    pub name: String,
+}
+
+/// `<signal id="…" name="…"/>` — globale Signal-Definition.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalDef {
     #[serde(rename = "@id")]
     pub id: String,
     #[serde(rename = "@name")]
@@ -229,6 +242,8 @@ pub(crate) struct BpmnStartEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,6 +260,12 @@ pub(crate) struct BpmnTimerEventDefinition {
 pub(crate) struct BpmnMessageEventDefinition {
     #[serde(rename = "@messageRef")]
     pub message_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BpmnSignalEventDefinition {
+    #[serde(rename = "@signalRef")]
+    pub signal_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,6 +297,8 @@ pub(crate) struct BpmnEndEvent {
     #[allow(dead_code)]
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
@@ -352,6 +375,8 @@ pub(crate) struct BpmnIntermediateThrowEvent {
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]
@@ -473,6 +498,8 @@ pub(crate) struct BpmnIntermediateCatchEvent {
     pub timer_event_definition: Option<BpmnTimerEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "linkEventDefinition")]
     pub link_event_definition: Option<BpmnLinkEventDefinition>,
 }
@@ -491,6 +518,8 @@ pub(crate) struct BpmnBoundaryEvent {
     pub error_event_definition: Option<BpmnErrorEventDefinition>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
+    #[serde(rename = "signalEventDefinition")]
+    pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "escalationEventDefinition")]
     pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
     #[serde(rename = "compensateEventDefinition")]

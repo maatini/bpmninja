@@ -81,6 +81,10 @@ pub(crate) enum PersistJob {
     SaveMessageCatch(Uuid),
     /// Delete a message catch from NATS.
     DeleteMessageCatch(Uuid),
+    /// Re-read signal catch from pending_signal_catches and save to NATS.
+    SaveSignalCatch(Uuid),
+    /// Delete a signal catch from NATS.
+    DeleteSignalCatch(Uuid),
     /// Append a history entry to NATS.
     AppendHistoryEntry(Box<HistoryEntry>),
     /// Instructs the worker to drain the remaining jobs and exit.
@@ -100,6 +104,8 @@ impl std::fmt::Display for PersistJob {
             Self::DeleteTimer(id) => write!(f, "DeleteTimer({})", id),
             Self::SaveMessageCatch(id) => write!(f, "SaveMessageCatch({})", id),
             Self::DeleteMessageCatch(id) => write!(f, "DeleteMessageCatch({})", id),
+            Self::SaveSignalCatch(id) => write!(f, "SaveSignalCatch({})", id),
+            Self::DeleteSignalCatch(id) => write!(f, "DeleteSignalCatch({})", id),
             Self::AppendHistoryEntry(e) => write!(f, "AppendHistoryEntry({})", e.instance_id),
             Self::Shutdown => write!(f, "Shutdown"),
         }
@@ -145,6 +151,7 @@ pub(crate) fn spawn_retry_worker(
     pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
     pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
+    pending_signal_catches: Arc<DashMap<Uuid, PendingSignalCatch>>,
     error_counter: Arc<std::sync::atomic::AtomicU64>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -165,6 +172,7 @@ pub(crate) fn spawn_retry_worker(
                     pending_service_tasks: &pending_service_tasks,
                     pending_timers: &pending_timers,
                     pending_message_catches: &pending_message_catches,
+                    pending_signal_catches: &pending_signal_catches,
                     error_counter: &error_counter,
                 };
                 let drained = drain_retry_queue(&mut rx, budget, &ctx).await;
@@ -208,6 +216,7 @@ pub(crate) fn spawn_retry_worker(
                     &pending_service_tasks,
                     &pending_timers,
                     &pending_message_catches,
+                    &pending_signal_catches,
                 )
                 .await;
 
@@ -227,6 +236,7 @@ pub(crate) fn spawn_retry_worker(
                             &pending_service_tasks,
                             &pending_timers,
                             &pending_message_catches,
+                            &pending_signal_catches,
                         )
                         .await;
                         tracing::error!(
@@ -277,6 +287,7 @@ struct DrainContext<'a> {
     pending_service_tasks: &'a Arc<DashMap<Uuid, PendingServiceTask>>,
     pending_timers: &'a Arc<DashMap<Uuid, PendingTimer>>,
     pending_message_catches: &'a Arc<DashMap<Uuid, PendingMessageCatch>>,
+    pending_signal_catches: &'a Arc<DashMap<Uuid, PendingSignalCatch>>,
     error_counter: &'a Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -291,6 +302,7 @@ impl DrainContext<'_> {
             self.pending_service_tasks,
             self.pending_timers,
             self.pending_message_catches,
+            self.pending_signal_catches,
         )
         .await
     }
@@ -357,6 +369,7 @@ async fn execute_job(
     pending_service_tasks: &Arc<DashMap<Uuid, PendingServiceTask>>,
     pending_timers: &Arc<DashMap<Uuid, PendingTimer>>,
     pending_message_catches: &Arc<DashMap<Uuid, PendingMessageCatch>>,
+    pending_signal_catches: &Arc<DashMap<Uuid, PendingSignalCatch>>,
 ) -> Result<(), String> {
     match job {
         PersistJob::SaveInstance(id) => {
@@ -437,6 +450,20 @@ async fn execute_job(
             .delete_message_catch(*id)
             .await
             .map_err(|e| e.to_string()),
+        PersistJob::SaveSignalCatch(id) => {
+            if let Some(catch_ref) = pending_signal_catches.get(id) {
+                persistence
+                    .save_signal_catch(&catch_ref)
+                    .await
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        }
+        PersistJob::DeleteSignalCatch(id) => persistence
+            .delete_signal_catch(*id)
+            .await
+            .map_err(|e| e.to_string()),
         PersistJob::AppendHistoryEntry(entry) => persistence
             .append_history_entry(entry)
             .await
@@ -455,6 +482,7 @@ fn job_instance_id(
     pending_service_tasks: &DashMap<Uuid, PendingServiceTask>,
     pending_timers: &DashMap<Uuid, PendingTimer>,
     pending_message_catches: &DashMap<Uuid, PendingMessageCatch>,
+    pending_signal_catches: &DashMap<Uuid, PendingSignalCatch>,
 ) -> Option<Uuid> {
     match job {
         PersistJob::SaveInstance(id) => Some(*id),
@@ -474,6 +502,11 @@ fn job_instance_id(
                 .get(id)
                 .map(|catch| catch.instance_id)
         }
+        PersistJob::SaveSignalCatch(id) | PersistJob::DeleteSignalCatch(id) => {
+            pending_signal_catches
+                .get(id)
+                .map(|catch| catch.instance_id)
+        }
     }
 }
 
@@ -488,6 +521,7 @@ async fn record_exhausted_job(
     pending_service_tasks: &Arc<DashMap<Uuid, PendingServiceTask>>,
     pending_timers: &Arc<DashMap<Uuid, PendingTimer>>,
     pending_message_catches: &Arc<DashMap<Uuid, PendingMessageCatch>>,
+    pending_signal_catches: &Arc<DashMap<Uuid, PendingSignalCatch>>,
 ) {
     let Some(instance_id) = job_instance_id(
         job,
@@ -495,6 +529,7 @@ async fn record_exhausted_job(
         pending_service_tasks,
         pending_timers,
         pending_message_catches,
+        pending_signal_catches,
     ) else {
         return;
     };
@@ -539,6 +574,7 @@ mod tests {
         let pending_service_tasks = Arc::new(DashMap::new());
         let pending_timers = Arc::new(DashMap::new());
         let pending_message_catches = Arc::new(DashMap::new());
+        let pending_signal_catches = Arc::new(DashMap::new());
         let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let handle = spawn_retry_worker(
@@ -550,6 +586,7 @@ mod tests {
             pending_service_tasks,
             pending_timers,
             pending_message_catches,
+            Arc::clone(&pending_signal_catches),
             error_counter,
         );
 
@@ -571,6 +608,7 @@ mod tests {
         let pending_service_tasks = Arc::new(DashMap::new());
         let pending_timers = Arc::new(DashMap::new());
         let pending_message_catches = Arc::new(DashMap::new());
+        let pending_signal_catches = Arc::new(DashMap::new());
         let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let handle = spawn_retry_worker(
@@ -582,6 +620,7 @@ mod tests {
             pending_service_tasks,
             pending_timers,
             pending_message_catches,
+            pending_signal_catches,
             error_counter.clone(),
         );
 
@@ -623,6 +662,7 @@ mod tests {
         let pending_service_tasks = Arc::new(DashMap::new());
         let pending_timers = Arc::new(DashMap::new());
         let pending_message_catches = Arc::new(DashMap::new());
+        let pending_signal_catches = Arc::new(DashMap::new());
         let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let instance_id = Uuid::new_v4();
@@ -656,6 +696,7 @@ mod tests {
             pending_service_tasks,
             pending_timers,
             pending_message_catches,
+            pending_signal_catches,
             Arc::clone(&error_counter),
         );
 
@@ -689,6 +730,7 @@ mod tests {
         let pending_service_tasks = Arc::new(DashMap::new());
         let pending_timers = Arc::new(DashMap::new());
         let pending_message_catches = Arc::new(DashMap::new());
+        let pending_signal_catches = Arc::new(DashMap::new());
 
         record_exhausted_job(
             &PersistJob::SaveInstance(instance_id),
@@ -698,6 +740,7 @@ mod tests {
             &pending_service_tasks,
             &pending_timers,
             &pending_message_catches,
+            &pending_signal_catches,
         )
         .await;
 
@@ -731,6 +774,7 @@ mod tests {
             &pending_service_tasks,
             &pending_timers,
             &pending_message_catches,
+            &pending_signal_catches,
         )
         .await;
 
@@ -747,6 +791,7 @@ mod tests {
             &pending_service_tasks,
             &pending_timers,
             &pending_message_catches,
+            &pending_signal_catches,
         )
         .await;
     }
@@ -766,6 +811,7 @@ mod tests {
         let pending_service_tasks = Arc::new(DashMap::new());
         let pending_timers = Arc::new(DashMap::new());
         let pending_message_catches = Arc::new(DashMap::new());
+        let pending_signal_catches = Arc::new(DashMap::new());
         let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let ctx = DrainContext {
@@ -776,6 +822,7 @@ mod tests {
             pending_service_tasks: &pending_service_tasks,
             pending_timers: &pending_timers,
             pending_message_catches: &pending_message_catches,
+            pending_signal_catches: &pending_signal_catches,
             error_counter: &error_counter,
         };
         let drained = drain_retry_queue(&mut rx, Duration::ZERO, &ctx).await;

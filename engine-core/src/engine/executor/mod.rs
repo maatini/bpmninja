@@ -104,6 +104,10 @@ impl WorkflowEngine {
                     crate::history::HistoryEventType::TokenAdvanced,
                     "Waiting for message".to_string(),
                 ),
+                NextAction::WaitForSignal(_) => (
+                    crate::history::HistoryEventType::TokenAdvanced,
+                    "Waiting for signal".to_string(),
+                ),
                 NextAction::WaitForCallActivity { .. } => (
                     crate::history::HistoryEventType::CallActivityStarted,
                     "Spawned call activity".to_string(),
@@ -243,7 +247,8 @@ impl WorkflowEngine {
         match &element {
             BpmnElement::StartEvent
             | BpmnElement::TimerStartEvent(_)
-            | BpmnElement::MessageStartEvent { .. } => {
+            | BpmnElement::MessageStartEvent { .. }
+            | BpmnElement::SignalStartEvent { .. } => {
                 self.handle_start_event(instance_id, token, &def_clone, &current_id)
                     .await
             }
@@ -313,6 +318,30 @@ impl WorkflowEngine {
                 self.handle_message_catch_event(instance_id, token, &current_id, message_name)
                     .await
             }
+            BpmnElement::SignalCatchEvent { signal_name } => {
+                self.handle_signal_catch_event(instance_id, token, &current_id, signal_name)
+                    .await
+            }
+            BpmnElement::SignalThrowEvent { signal_name } => {
+                self.handle_signal_throw_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
+            BpmnElement::SignalEndEvent { signal_name } => {
+                self.handle_signal_end_event(
+                    instance_id,
+                    token,
+                    &def_clone,
+                    &current_id,
+                    signal_name,
+                )
+                .await
+            }
             BpmnElement::CallActivity { called_element } => {
                 self.handle_call_activity(
                     instance_id,
@@ -378,6 +407,7 @@ impl WorkflowEngine {
             }
             BpmnElement::BoundaryTimerEvent { .. }
             | BpmnElement::BoundaryMessageEvent { .. }
+            | BpmnElement::BoundarySignalEvent { .. }
             | BpmnElement::BoundaryErrorEvent { .. }
             | BpmnElement::BoundaryEscalationEvent { .. } => {
                 self.handle_boundary_event(instance_id, token, &def_clone, &current_id)

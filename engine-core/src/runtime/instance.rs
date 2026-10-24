@@ -1,5 +1,7 @@
 use crate::domain::{FileReference, Incident, IncidentKind, MAX_INCIDENTS_PER_INSTANCE, Token};
-use crate::runtime::{PendingMessageCatch, PendingServiceTask, PendingTimer, PendingUserTask};
+use crate::runtime::{
+    PendingMessageCatch, PendingServiceTask, PendingSignalCatch, PendingTimer, PendingUserTask,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,6 +24,8 @@ pub enum NextAction {
     WaitForTimer(PendingTimer),
     /// The engine must pause — a message catch is pending.
     WaitForMessage(PendingMessageCatch),
+    /// The engine must pause — a signal catch is pending (broadcast, no correlation).
+    WaitForSignal(PendingSignalCatch),
     /// The engine must pause at an event-based gateway, registering multiple event listeners.
     WaitForEventGroup(Vec<NextAction>),
     /// The process reached an end event.
@@ -77,6 +81,9 @@ pub enum InstanceState {
     },
     WaitingOnMessage {
         message_id: Uuid,
+    },
+    WaitingOnSignal {
+        catch_id: Uuid,
     },
     WaitingOnEventBasedGateway,
     /// Multiple tokens are active; some may be waiting, some running.

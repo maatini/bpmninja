@@ -35,6 +35,7 @@ mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+mod signal_processor;
 mod timer_index;
 mod timer_processor;
 mod topic_index;
@@ -54,6 +55,9 @@ pub struct WorkflowEngine {
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
+    /// Wartende Signal-Catches. Signale sind Broadcast: alle Einträge mit
+    /// passendem Namen werden von `correlate_signal` bedient.
+    pub(crate) pending_signal_catches: Arc<DashMap<Uuid, PendingSignalCatch>>,
     pub(crate) persistence: Option<Arc<dyn WorkflowPersistence>>,
     pub(crate) persistence_error_count: Arc<std::sync::atomic::AtomicU64>,
     /// Number of timer processing failures since engine start.
@@ -88,6 +92,7 @@ impl WorkflowEngine {
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
             pending_message_catches: Arc::new(DashMap::new()),
+            pending_signal_catches: Arc::new(DashMap::new()),
             persistence: None,
             persistence_error_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             timer_processing_errors: std::sync::atomic::AtomicU64::new(0),
@@ -128,6 +133,7 @@ impl WorkflowEngine {
             Arc::clone(&self.pending_service_tasks),
             Arc::clone(&self.pending_timers),
             Arc::clone(&self.pending_message_catches),
+            Arc::clone(&self.pending_signal_catches),
             Arc::clone(&self.persistence_error_count),
         );
 
@@ -208,6 +214,17 @@ impl WorkflowEngine {
         self.pending_message_catches.insert(catch.id, catch);
     }
 
+    /// Restores a pending signal catch from persistence (e.g. on server startup).
+    pub fn restore_signal_catch(&self, catch: PendingSignalCatch) {
+        tracing::info!(
+            "Restored signal catch {} (instance: {}, signal: {})",
+            catch.id,
+            catch.instance_id,
+            catch.signal_name
+        );
+        self.pending_signal_catches.insert(catch.id, catch);
+    }
+
     /// Helper to cancel any pending boundary timers attached to a task node that is being completed/aborted.
     pub(crate) async fn cancel_boundary_timers(&self, instance_id: Uuid, task_node_id: &str) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
@@ -259,12 +276,9 @@ impl WorkflowEngine {
         }
     }
 
-    /// Helper to cancel any pending boundary message catches attached to a task node that is being completed/aborted.
-    pub(crate) async fn cancel_boundary_message_catches(
-        &self,
-        instance_id: Uuid,
-        task_node_id: &str,
-    ) {
+    /// Helper to cancel pending boundary message and signal catches attached to a
+    /// task node that is being completed or aborted.
+    pub(crate) async fn cancel_boundary_waits(&self, instance_id: Uuid, task_node_id: &str) {
         let def_key = if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let inst = inst_arc.read().await;
             inst.definition_key
@@ -272,38 +286,44 @@ impl WorkflowEngine {
             return;
         };
 
-        let bound_messages: Vec<String> = if let Some(def) = self.definitions.get(&def_key) {
-            def.nodes
-                .iter()
-                .filter_map(|(id, node)| {
-                    if let crate::domain::BpmnElement::BoundaryMessageEvent {
-                        attached_to, ..
-                    } = node
+        let mut bound_messages: Vec<String> = Vec::new();
+        let mut bound_signals: Vec<String> = Vec::new();
+        if let Some(def) = self.definitions.get(&def_key) {
+            for (id, node) in &def.nodes {
+                match node {
+                    crate::domain::BpmnElement::BoundaryMessageEvent { attached_to, .. }
+                        if attached_to == task_node_id =>
                     {
-                        if attached_to == task_node_id {
-                            Some(id.clone())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                        bound_messages.push(id.clone());
                     }
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+                    crate::domain::BpmnElement::BoundarySignalEvent { attached_to, .. }
+                        if attached_to == task_node_id =>
+                    {
+                        bound_signals.push(id.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
 
-        // Collect message catch IDs to delete from persistence
+        // Collect catch IDs to delete from persistence
         let msg_ids_to_delete: std::collections::HashSet<Uuid> = self
             .pending_message_catches
             .iter()
             .filter(|r| r.instance_id == instance_id && bound_messages.contains(&r.node_id))
             .map(|r| r.id)
             .collect();
+        let signal_ids_to_delete: std::collections::HashSet<Uuid> = self
+            .pending_signal_catches
+            .iter()
+            .filter(|r| r.instance_id == instance_id && bound_signals.contains(&r.node_id))
+            .map(|r| r.id)
+            .collect();
 
         self.pending_message_catches
             .retain(|_, m| !(m.instance_id == instance_id && bound_messages.contains(&m.node_id)));
+        self.pending_signal_catches
+            .retain(|_, s| !(s.instance_id == instance_id && bound_signals.contains(&s.node_id)));
 
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -311,6 +331,14 @@ impl WorkflowEngine {
                 if let Err(e) = persistence.delete_message_catch(msg_id).await {
                     self.log_persistence_error(
                         &format!("delete_boundary_message_catch({})", msg_id),
+                        e,
+                    );
+                }
+            }
+            for signal_id in signal_ids_to_delete {
+                if let Err(e) = persistence.delete_signal_catch(signal_id).await {
+                    self.log_persistence_error(
+                        &format!("delete_boundary_signal_catch({})", signal_id),
                         e,
                     );
                 }
@@ -337,8 +365,19 @@ impl WorkflowEngine {
             .map(|r| r.id)
             .collect();
 
+        // Collect signal catch IDs to delete
+        let signals_to_delete: Vec<Uuid> = self
+            .pending_signal_catches
+            .iter()
+            .filter(|r| r.instance_id == instance_id && &r.token_id == token_id)
+            .map(|r| r.id)
+            .collect();
+
         // Log to instance audit log
-        if !timers_to_delete.is_empty() || !messages_to_delete.is_empty() {
+        if !timers_to_delete.is_empty()
+            || !messages_to_delete.is_empty()
+            || !signals_to_delete.is_empty()
+        {
             if let Some(inst_arc) = self.instances.get(&instance_id).await {
                 let mut inst = inst_arc.write().await;
                 if !timers_to_delete.is_empty() {
@@ -351,6 +390,12 @@ impl WorkflowEngine {
                     inst.audit_log.push(format!(
                         "⭮ Event-based gateway: {} alternative message catch(es) cancelled",
                         messages_to_delete.len()
+                    ));
+                }
+                if !signals_to_delete.is_empty() {
+                    inst.audit_log.push(format!(
+                        "⭮ Event-based gateway: {} alternative signal catch(es) cancelled",
+                        signals_to_delete.len()
                     ));
                 }
             }
@@ -372,6 +417,8 @@ impl WorkflowEngine {
         });
         self.pending_message_catches
             .retain(|_, m| !(m.instance_id == instance_id && &m.token_id == token_id));
+        self.pending_signal_catches
+            .retain(|_, s| !(s.instance_id == instance_id && &s.token_id == token_id));
 
         // Delete from persistence
         if let Some(persistence) = &self.persistence {
@@ -383,6 +430,11 @@ impl WorkflowEngine {
             for msg_id in messages_to_delete {
                 if let Err(e) = persistence.delete_message_catch(msg_id).await {
                     self.log_persistence_error(&format!("delete_message_catch({})", msg_id), e);
+                }
+            }
+            for signal_id in signals_to_delete {
+                if let Err(e) = persistence.delete_signal_catch(signal_id).await {
+                    self.log_persistence_error(&format!("delete_signal_catch({})", signal_id), e);
                 }
             }
         }

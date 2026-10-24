@@ -283,6 +283,56 @@ impl WorkflowPersistence for NatsPersistence {
         self.list_kv_entries("messages", "message catch").await
     }
 
+    async fn save_signal_catch(&self, catch: &engine_core::PendingSignalCatch) -> EngineResult<()> {
+        let store = self
+            .js
+            .get_key_value("pending_signal_catches")
+            .await
+            .map_err(|e| {
+                EngineError::PersistenceError(format!(
+                    "Failed to get pending_signal_catches KV: {}",
+                    e
+                ))
+            })?;
+
+        let json = serde_json::to_vec(catch).map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to serialize signal catch: {}", e))
+        })?;
+
+        store
+            .put(catch.id.to_string(), json.into())
+            .await
+            .map_err(|e| {
+                EngineError::PersistenceError(format!("Failed to put signal catch to KV: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    async fn delete_signal_catch(&self, catch_id: uuid::Uuid) -> EngineResult<()> {
+        let store = self
+            .js
+            .get_key_value("pending_signal_catches")
+            .await
+            .map_err(|e| {
+                EngineError::PersistenceError(format!(
+                    "Failed to get pending_signal_catches KV: {}",
+                    e
+                ))
+            })?;
+
+        store.delete(catch_id.to_string()).await.map_err(|e| {
+            EngineError::PersistenceError(format!("Failed to delete signal catch from KV: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    async fn list_signal_catches(&self) -> EngineResult<Vec<engine_core::PendingSignalCatch>> {
+        self.list_kv_entries("pending_signal_catches", "signal catch")
+            .await
+    }
+
     async fn save_file(&self, object_key: &str, data: &[u8]) -> EngineResult<()> {
         const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
         if data.len() > MAX_FILE_SIZE {
@@ -422,6 +472,7 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "pending_signal_catches",
         ];
         for name in &kv_bucket_names {
             match self.js.get_key_value(*name).await {
@@ -620,6 +671,7 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "pending_signal_catches",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -764,6 +816,7 @@ impl WorkflowPersistence for NatsPersistence {
             "service_tasks",
             "timers",
             "messages",
+            "pending_signal_catches",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {

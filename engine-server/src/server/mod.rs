@@ -8,6 +8,7 @@ pub(crate) mod instances;
 pub(crate) mod logs;
 pub(crate) mod messages;
 pub(crate) mod monitoring;
+pub(crate) mod signals;
 pub(crate) mod state;
 pub(crate) mod tasks;
 pub(crate) mod timers;
@@ -287,6 +288,8 @@ pub fn build_app_with_config(
         .route("/api/timers", get(timers::get_pending_timers))
         .route("/api/timers/process", post(timers::process_timers))
         .route("/api/messages", get(messages::get_pending_messages))
+        .route("/api/signal", post(signals::correlate_signal))
+        .route("/api/signals", get(signals::get_pending_signals))
         // Service Task endpoints
         .route("/api/service-tasks", get(tasks::get_service_tasks))
         .route(

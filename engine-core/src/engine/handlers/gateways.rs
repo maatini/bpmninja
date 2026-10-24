@@ -1,7 +1,7 @@
 use crate::domain::{BpmnElement, ProcessDefinition, Token};
 use crate::domain::{EngineError, EngineResult};
 use crate::engine::WorkflowEngine;
-use crate::runtime::{NextAction, PendingMessageCatch, PendingTimer};
+use crate::runtime::{NextAction, PendingMessageCatch, PendingSignalCatch, PendingTimer};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -165,6 +165,16 @@ impl WorkflowEngine {
                             token_id: token.id,
                         };
                         actions.push(NextAction::WaitForMessage(pending));
+                    }
+                    BpmnElement::SignalCatchEvent { signal_name } => {
+                        let pending = PendingSignalCatch {
+                            id: Uuid::new_v4(),
+                            instance_id,
+                            node_id: target_node.clone(),
+                            signal_name: signal_name.clone(),
+                            token_id: token.id,
+                        };
+                        actions.push(NextAction::WaitForSignal(pending));
                     }
                     _ => {
                         return Err(EngineError::InvalidDefinition(format!(

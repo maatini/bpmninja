@@ -20,6 +20,9 @@ pub struct EngineStats {
     pub pending_service_tasks: usize,
     pub pending_timers: usize,
     pub pending_message_catches: usize,
+    /// Anzahl wartender Signal-Catches (Broadcast-Wait-States).
+    #[serde(default)]
+    pub pending_signal_catches: usize,
     /// Number of persistence write failures since engine start.
     pub persistence_errors: u64,
     /// Number of pending retry jobs in the background queue (0 = healthy).

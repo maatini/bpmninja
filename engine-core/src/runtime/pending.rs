@@ -82,3 +82,17 @@ pub struct PendingMessageCatch {
     /// Reference to the token stored in ProcessInstance.tokens
     pub token_id: Uuid,
 }
+
+/// Ein wartender Signal-Catch.
+///
+/// Signale sind Broadcast: Es gibt keinen Business-Key und keine Korrelation,
+/// `correlate_signal` bedient alle Catches mit passendem Namen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingSignalCatch {
+    pub id: Uuid,
+    pub instance_id: Uuid,
+    pub node_id: String,
+    pub signal_name: String,
+    /// Reference to the token stored in ProcessInstance.tokens
+    pub token_id: Uuid,
+}

@@ -183,6 +183,28 @@ fn resolve_message_ref(
     nonempty_attr(message_ref).map(|r| lookup.get(&r).cloned().unwrap_or(r))
 }
 
+/// Löst einen `signalRef` über die globalen `<signal>`-Definitionen auf.
+///
+/// Signale haben keine generische Ersatzdefinition: ein fehlender oder unbekannter
+/// Verweis macht das Modell ungültig.
+fn resolve_signal_ref(
+    signal_ref: Option<String>,
+    lookup: &HashMap<String, String>,
+    element_kind: &str,
+    element_id: &str,
+) -> EngineResult<String> {
+    let Some(signal_ref) = nonempty_attr(signal_ref) else {
+        return Err(EngineError::InvalidDefinition(format!(
+            "signalEventDefinition on {element_kind} '{element_id}' has no signalRef"
+        )));
+    };
+    lookup.get(&signal_ref).cloned().ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "signalEventDefinition on {element_kind} '{element_id}' references unknown signal '{signal_ref}'"
+        ))
+    })
+}
+
 fn send_task_message_name(
     task: &crate::models::BpmnSendTask,
     lookup: &HashMap<String, String>,
@@ -499,6 +521,12 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         .map(|m| (m.id.clone(), m.name.clone()))
         .collect();
 
+    let signal_lookup: HashMap<String, String> = defs
+        .signals
+        .iter()
+        .map(|s| (s.id.clone(), s.name.clone()))
+        .collect();
+
     let error_lookup: HashMap<String, String> = defs
         .errors
         .iter()
@@ -540,6 +568,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 .and_then(|ref_id| message_lookup.get(&ref_id).cloned())
                 .unwrap_or_else(|| "generic_message".into());
             builder = builder.node(start.id, BpmnElement::MessageStartEvent { message_name });
+        } else if let Some(sig) = start.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "startEvent", &start.id)?;
+            builder = builder.node(start.id, BpmnElement::SignalStartEvent { signal_name });
         } else {
             builder = builder.node(start.id, BpmnElement::StartEvent);
         }
@@ -575,6 +607,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     activity_ref: comp.activity_ref,
                 },
             );
+        } else if let Some(sig) = end.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "endEvent", &end.id)?;
+            builder = builder.node(end.id, BpmnElement::SignalEndEvent { signal_name });
         } else {
             builder = builder.node(end.id, BpmnElement::EndEvent);
         }
@@ -798,9 +834,17 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                &signal_lookup,
+                "intermediateCatchEvent",
+                &catch_evt.id,
+            )?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, or signalEventDefinition",
                 node_id
             )));
         }
@@ -841,6 +885,14 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     multi_instance: None,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                &signal_lookup,
+                "intermediateThrowEvent",
+                &evt.id,
+            )?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else if let Some(esc) = evt.escalation_event_definition {
             let escalation_code = esc
                 .escalation_ref
@@ -859,7 +911,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, signal, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -901,6 +953,17 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                     cancel_activity,
                 },
             );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, &signal_lookup, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
         } else if let Some(err) = bd.error_event_definition {
             let error_code = err
                 .error_ref
@@ -931,7 +994,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
                 node_id
             )));
         }
@@ -958,6 +1021,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
             &process_id,
             builder,
             &message_lookup,
+            &signal_lookup,
             &error_lookup,
             &escalation_lookup,
         )?;
@@ -989,6 +1053,7 @@ fn flatten_subprocess(
     _parent_id: &str,
     mut builder: ProcessDefinitionBuilder,
     message_lookup: &HashMap<String, String>,
+    signal_lookup: &HashMap<String, String>,
     error_lookup: &HashMap<String, String>,
     escalation_lookup: &HashMap<String, String>,
 ) -> EngineResult<ProcessDefinitionBuilder> {
@@ -1026,6 +1091,8 @@ fn flatten_subprocess(
     // Internal start events are pass-throughs: the EmbeddedSubProcess node continues at
     // the start event's target, so no node is materialised for it. Several outgoing
     // flows are all taken (BPMN implicit split) and stay in the graph as a parallel gateway.
+    // Signal-Start-Events in eingebetteten Sub-Prozessen (Event-Subprozesse) werden wie
+    // bisher ignoriert; sie sind nicht Teil dieser Ausbaustufe.
     let (start_node_id, start_forks) = match start_targets.len() {
         0 => {
             return Err(EngineError::InvalidDefinition(format!(
@@ -1045,6 +1112,8 @@ fn flatten_subprocess(
     }
 
     for end in sp.end_events {
+        // End-Events beenden den eingebetteten Scope. Signal-End-Events werden wie die
+        // uebrigen End-Event-Definitionen geflattet und senden kein Signal.
         if end.cancel_event_definition.is_some() {
             return Err(EngineError::InvalidDefinition(format!(
                 "cancel end events require a transaction sub-process; transactions are not supported (end event '{}')",
@@ -1224,9 +1293,17 @@ fn flatten_subprocess(
                 catch_evt.id,
                 BpmnElement::MessageCatchEvent { message_name },
             );
+        } else if let Some(sig) = catch_evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                signal_lookup,
+                "intermediateCatchEvent",
+                &catch_evt.id,
+            )?;
+            builder = builder.node(catch_evt.id, BpmnElement::SignalCatchEvent { signal_name });
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateCatchEvent '{}' has no timerEventDefinition or messageEventDefinition",
+                "intermediateCatchEvent '{}' has no timerEventDefinition, messageEventDefinition, or signalEventDefinition",
                 catch_evt.id
             )));
         }
@@ -1262,6 +1339,14 @@ fn flatten_subprocess(
                     multi_instance: None,
                 },
             );
+        } else if let Some(sig) = evt.signal_event_definition {
+            let signal_name = resolve_signal_ref(
+                sig.signal_ref,
+                signal_lookup,
+                "intermediateThrowEvent",
+                &evt.id,
+            )?;
+            builder = builder.node(evt.id, BpmnElement::SignalThrowEvent { signal_name });
         } else if let Some(esc) = evt.escalation_event_definition {
             let escalation_code = esc
                 .escalation_ref
@@ -1280,7 +1365,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "intermediateThrowEvent '{}' has no message, escalation, or compensate definition",
+                "intermediateThrowEvent '{}' has no message, signal, escalation, or compensate definition",
                 evt.id
             )));
         }
@@ -1317,6 +1402,17 @@ fn flatten_subprocess(
                     cancel_activity,
                 },
             );
+        } else if let Some(sig) = bd.signal_event_definition {
+            let signal_name =
+                resolve_signal_ref(sig.signal_ref, signal_lookup, "boundaryEvent", &bd.id)?;
+            builder = builder.node(
+                bd.id,
+                BpmnElement::BoundarySignalEvent {
+                    attached_to,
+                    signal_name,
+                    cancel_activity,
+                },
+            );
         } else if let Some(err) = bd.error_event_definition {
             let error_code = err
                 .error_ref
@@ -1347,7 +1443,7 @@ fn flatten_subprocess(
             );
         } else {
             return Err(EngineError::InvalidDefinition(format!(
-                "boundaryEvent '{}' has no timer, message, error, escalation, or compensate definition",
+                "boundaryEvent '{}' has no timer, message, signal, error, escalation, or compensate definition",
                 bd.id
             )));
         }
@@ -1379,6 +1475,7 @@ fn flatten_subprocess(
             &sub_process_id,
             builder,
             message_lookup,
+            signal_lookup,
             error_lookup,
             escalation_lookup,
         )?;
