@@ -156,4 +156,5 @@ jobs:
       - name: Draft veröffentlichen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: gh release edit "$TAG" --draft=false
