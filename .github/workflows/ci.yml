@@ -148,7 +148,21 @@ jobs:
       - name: Run TypeScript lint
         run: npm run lint
 
-      - name: Run tests
+      - name: Install Rust 1.99.0 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build engine-server for integration test
+        working-directory: .
+        run: cargo build -p engine-server
+
+      - name: Run tests (incl. real engine-server integration)
+        env:
+          BPMNINJA_SERVER_BIN: ${{ github.workspace }}/target/debug/engine-server
         run: npm test
 
   typespec:
