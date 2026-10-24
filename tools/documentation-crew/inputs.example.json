@@ -1,0 +1,20 @@
+{
+  "project_name": "BPMNinja",
+  "project_description": "Open-Source-BPMN-2.0-Workflow-Engine in Rust mit Axum-REST-API, NATS-JetStream-Persistenz, Tauri-Desktop-UI und Camunda-kompatiblen External-Task-Workern.",
+  "domain_topic": "BPMN 2.0, Workflow-Engines, Prozessautomatisierung, Token-basierte Ausführung und External-Task-Integration",
+  "existing_docs_path": [
+    "../../README.md",
+    "../../docs"
+  ],
+  "target_audience": [
+    "Einsteiger und Lernende",
+    "Entwickler und Integratoren",
+    "Betriebsteams und Plattform-Administratoren",
+    "Stakeholder und Entscheider"
+  ],
+  "output_path": "../../reports/documentation-crew-run",
+  "repository_path": "../..",
+  "documentation_language": "Deutsch",
+  "quality_threshold": 90,
+  "max_revision_rounds": 2
+}
