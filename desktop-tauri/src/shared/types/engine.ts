@@ -59,6 +59,17 @@ export interface PendingServiceTask {
   business_key: string | null;
 }
 
+export interface HistoryDiff {
+  variables: {
+    added: Record<string, unknown>;
+    removed: string[];
+    changed: Record<string, [unknown, unknown]>;
+  } | null;
+  status: [string, string] | null;
+  current_node: [string, string] | null;
+  human_readable: string | null;
+}
+
 export interface HistoryEntry {
   id: string;
   instance_id: string;
@@ -68,20 +79,17 @@ export interface HistoryEntry {
   description: string;
   actor_type: string;
   actor_id: string | null;
-  diff: {
-    changes: Record<string, any>;
-    human_readable: string | null;
-  } | null;
-  context: Record<string, any>;
-  metadata: Record<string, any> | null;
+  diff: HistoryDiff | null;
+  context: Record<string, unknown>;
+  metadata: unknown | null;
   definition_version: number | null;
   is_snapshot: boolean;
-  full_state_snapshot: Record<string, any> | null;
+  full_state_snapshot: unknown | null;
 }
 
 export interface HistoryQuery {
   event_types?: string;
-  actor_types?: string;
+  actor_type?: string;
 }
 
 export interface DefinitionInfo {

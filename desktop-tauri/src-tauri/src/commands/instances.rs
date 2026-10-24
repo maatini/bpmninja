@@ -72,7 +72,7 @@ pub async fn get_instance_history(
     }
     if let Some(at) = actor_types {
         if !at.is_empty() {
-            query_params.push(format!("actor_types={}", at));
+            query_params.push(format!("actor_type={}", at));
         }
     }
     if !query_params.is_empty() {

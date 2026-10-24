@@ -33,7 +33,7 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
     try {
       const query: HistoryQuery = {};
       if (eventTypes) query.event_types = eventTypes;
-      if (actorTypes) query.actor_types = actorTypes;
+      if (actorTypes) query.actor_type = actorTypes;
 
       const result = await getInstanceHistory(instanceId, query);
       setEntries(result);
@@ -53,9 +53,9 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
     switch (type) {
       case 'InstanceStarted': return <Play className="h-4 w-4 text-blue-500" />;
       case 'InstanceCompleted': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'InstanceFailed': return <XCircle className="h-4 w-4 text-destructive" />;
+      case 'Error': return <XCircle className="h-4 w-4 text-destructive" />;
       case 'TokenAdvanced': return <ArrowRightCircle className="h-4 w-4 text-muted-foreground" />;
-      case 'VariablesChanged': return <SettingsIcon className="h-4 w-4 text-indigo-500" />;
+      case 'VariableUpdated': return <SettingsIcon className="h-4 w-4 text-indigo-500" />;
       default: return <Activity className="h-4 w-4 text-muted-foreground" />;
     }
   };
@@ -98,9 +98,9 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
             className="h-9 rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
          >
            <option value="">All Events</option>
-           <option value="InstanceStarted,InstanceCompleted,InstanceFailed">Lifecycle Only</option>
-           <option value="TokenAdvanced">Token Movements</option>
-           <option value="VariablesChanged">Variable Changes</option>
+           <option value="InstanceStarted,InstanceCompleted,InstanceDeleted,Error">Lifecycle Only</option>
+           <option value="TokenAdvanced,TokenForked,TokenJoined">Token Movements</option>
+           <option value="VariableUpdated">Variable Changes</option>
          </select>
 
          <select 
@@ -109,10 +109,10 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
             className="h-9 rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
          >
            <option value="">All Actors</option>
-           <option value="engine">Engine</option>
-           <option value="serviceworker">Service Worker</option>
-           <option value="user">User</option>
-           <option value="api">API</option>
+           <option value="Engine">Engine</option>
+           <option value="ServiceWorker">Service Worker</option>
+           <option value="User">User</option>
+           <option value="Timer">Timer</option>
          </select>
       </div>
 
@@ -211,11 +211,11 @@ export function HistoryTimeline({ instanceId, refreshTrigger = 0 }: HistoryTimel
                   </div>
                 )}
 
-                {selectedEntry.diff?.changes && Object.keys(selectedEntry.diff.changes).length > 0 && (
+                {selectedEntry.diff && (
                   <div>
                     <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Raw Data Changes</h3>
                     <DataViewer
-                      content={JSON.stringify(selectedEntry.diff.changes, null, 2)}
+                      content={JSON.stringify(selectedEntry.diff, null, 2)}
                       format="json"
                       height="200px"
                     />

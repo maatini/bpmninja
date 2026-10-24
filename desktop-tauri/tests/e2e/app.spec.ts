@@ -251,8 +251,8 @@ async function injectTauriMock(
                   entries = entries.filter(e => allowed.includes(e.event_type));
                 }
                 if (actorTypesFilter && actorTypesFilter.trim() !== '') {
-                  const allowed = actorTypesFilter.split(',');
-                  entries = entries.filter(e => allowed.includes(e.actor_type));
+                  const allowed = actorTypesFilter.split(',').map(v => v.trim().toLowerCase());
+                  entries = entries.filter(e => allowed.includes(String(e.actor_type).toLowerCase()));
                 }
 
                 resolve(entries);
@@ -1566,7 +1566,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
               id: 'h3',
               instance_id: 'inst-history-1',
               timestamp: new Date().toISOString(),
-              event_type: 'VariablesChanged',
+              event_type: 'VariableUpdated',
               node_id: 'Task_1',
               description: 'Variables updated',
               actor_type: 'user',
@@ -1599,7 +1599,7 @@ test.describe('bpmninja Desktop App – E2E', () => {
     // 1. Verify all 3 entries are rendered initially
     await expect(timeline.getByText('Instance Started')).toBeVisible();
     await expect(timeline.getByText('Token Advanced')).toBeVisible();
-    await expect(timeline.getByText('Variables Changed')).toBeVisible();
+    await expect(timeline.getByText('Variable Updated')).toBeVisible();
     
     // 2. Verify snapshot badge is visible for the second entry
     await expect(timeline.locator('svg.lucide-camera')).toBeVisible();
@@ -1609,24 +1609,24 @@ test.describe('bpmninja Desktop App – E2E', () => {
     await expect(timeline.getByText('serviceworker (worker-a)')).toBeVisible();
     await expect(timeline.getByText('user (admin)')).toBeVisible();
     // 5. Test Event Type Filtering
-    // Select 'VariablesChanged' from dropdown
-    await timeline.locator('select').first().selectOption('VariablesChanged');
+    // Select 'VariableUpdated' from dropdown
+    await timeline.locator('select').first().selectOption('VariableUpdated');
     
-    // Verify only 'Variables Changed' is visible, others are hidden
-    await expect(timeline.getByText('Variables Changed')).toBeVisible();
+    // Verify only 'Variable Updated' is visible, others are hidden
+    await expect(timeline.getByText('Variable Updated')).toBeVisible();
     await expect(timeline.getByText('Instance Started')).not.toBeVisible();
     await expect(timeline.getByText('Token Advanced')).not.toBeVisible();
     
     // 6. Test Actor Filtering
     // Reset Event Types
     await timeline.locator('select').first().selectOption('');
-    // Select 'engine'
-    await timeline.locator('select').nth(1).selectOption('engine');
+    // Select 'Engine'
+    await timeline.locator('select').nth(1).selectOption('Engine');
     
     // Verify only 'Instance Started' is visible
     await expect(timeline.getByText('Instance Started')).toBeVisible();
     await expect(timeline.getByText('Token Advanced')).not.toBeVisible();
-    await expect(timeline.getByText('Variables Changed')).not.toBeVisible();
+    await expect(timeline.getByText('Variable Updated')).not.toBeVisible();
   });
 
   // ---- 26. File Attachments -----------------------------------------------

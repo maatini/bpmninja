@@ -71,7 +71,7 @@ export async function getInstanceHistory(instanceId: string, query?: HistoryQuer
   return invoke('get_instance_history', { 
     instanceId,
     eventTypes: query?.event_types || null,
-    actorTypes: query?.actor_types || null
+    actorTypes: query?.actor_type || null
   });
 }
 
