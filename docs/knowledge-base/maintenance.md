@@ -2,6 +2,8 @@
 
 ## Last bulk sync
 
+**2026-10-24 — Docs drift fix:** graphify commands aligned to `graphify update .`, README test metrics re-counted from the actual test listings, stack versions (Rhai 1.26, async-nats 0.50, quick-xml 0.42, Tauri 2.12), new `docs/env.md`, Nx commands, mutation badge moved to the `metrics` branch.
+
 **2026-07-17 — Production hardening (improvements Phase 0 + partial Phase 1):** Rhai memory budget, upload limits, `REQUIRE_NATS` / readiness, bounded retry queue, NATS restore tests, mutation-metrics parser. Updated `overview.md`, engine-core/server/persistence modules, architecture ADRs/data-flows/components, cross-cutting patterns/tags, `docs/architecture.md`, OpenAPI, README.
 
 ## When to Update This Knowledge Base
@@ -26,7 +28,7 @@ Update the relevant file(s) when:
    - `dependencies.md` — Inbound/outbound tables + Mermaid graph if complex
    - `interfaces.md` — Public APIs, events, contracts, data models
    - `gotchas.md` — Known pitfalls, edge cases, "don't forget this"
-4. Run `devbox run graphify` if available to refresh the knowledge graph.
+4. Run `graphify update .` to refresh the knowledge graph (installation: `pipx install graphifyy && graphify install`). A full rebuild (`graphify build .`) only on explicit request.
 5. Commit with a clear message, e.g., `docs(kb): update engine-core for new BPMN element`.
 
 ## Content Quality Rules

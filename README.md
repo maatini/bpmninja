@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-stable-brightgreen.svg?style=flat-square)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-CI_required-blue?style=flat-square)](.github/workflows/ci.yml)
-[![Mutation Score](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmaatini%2Fbpmninja%2Fmain%2Fdocs%2Fquality-badges.json&style=flat-square)](https://github.com/maatini/bpmninja/actions/workflows/mutation-tests.yml)
+[![Mutation Score](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmaatini%2Fbpmninja%2Fmetrics%2Fdocs%2Fquality-badges.json&style=flat-square)](https://github.com/maatini/bpmninja/actions/workflows/mutation-tests.yml)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](#license)
 
 <div align="center">
@@ -252,6 +252,17 @@ devbox shell
 | **Lint** | `devbox run lint` | `cargo clippy --workspace -- -D warnings` |
 | **Format** | `devbox run fmt` | `cargo fmt --all --check` |
 
+### Nx (Task-Orchestrierung)
+
+Nx orchestriert die Cargo-, npm- und API-Spec-Targets; Cargo bleibt die Build-Engine. Das Rust-Projekt `rust` hat `cache: false`, seine Targets werden also nicht gecacht. Verfügbare Projekte zeigt `npx nx show projects`.
+
+```bash
+npx nx run-many -t lint test build   # alle Projekte, parallel
+npx nx affected -t lint test build   # nur betroffene Projekte (Basis: main)
+npx nx run rust:test                 # einzelnes Target
+npx nx graph                         # Projekt-/Task-Graph im Browser
+```
+
 ### Starting the Engine Server
 
 ```bash
@@ -270,12 +281,11 @@ The server runs at `http://localhost:8081`.
 |----------|---------|-------------|
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
 | `REQUIRE_NATS` | `true` | Fail-closed: refuse to start without NATS (no silent in-memory fallback). Set `false` for ephemeral local runs; `/api/ready` requires persistence when enabled |
-| `MAX_UPLOAD_BYTES` | `5242880` | Max multipart file upload size (bytes) for instance files |
+| `BIND_ADDR` | `0.0.0.0` | Listen address (alias `BIND_ADDRESS`) |
 | `PORT` | `8081` | HTTP server port |
-| `TIMER_INTERVAL_MS` | `1000` | Timer scheduler polling interval (ms) |
 | `RUST_LOG` | `info` | Log level filter (e.g. `debug`, `warn`, `engine_server=trace`) |
-| `LOG_FORMAT` | `text` | Log output format: `text` (human-readable) or `json` (structured) |
-| `LOG_FILE` | `engine_logs.jsonl` | Path for the file-based log fallback; set to `off` to disable file persistence |
+
+Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbox, NATS-Retention, Client-Variablen): **[docs/env.md](docs/env.md)**.
 
 
 ---
@@ -468,7 +478,7 @@ process.on("SIGINT", async () => {
 cd bpmn-ninja-external-task-client
 npm install
 npm run lint     # tsc --noEmit
-npm run test     # vitest run  (68 tests)
+npm run test     # vitest run  (77 tests)
 npm run example  # tsx example/simple-worker.ts
 ```
 
@@ -563,7 +573,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 ## Test Metrics
 
-> Snapshot from 2026-04-17. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
+> Snapshot from 2026-10-24. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
 - Letztes Update (UTC): `2026-10-24T05:27:07.168644+00:00`
@@ -575,79 +585,101 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
-| **engine-core** | 217 | 5 | 222 |
-| **bpmn-parser** | 32 | — | 32 |
-| **persistence-nats** | 4 | — | 4 |
-| **engine-server** | 1 | ~56 | ~57 |
-| **desktop-tauri** | — | 48 | 48 |
-| **bpmn-ninja-external-task-client** | 68 | — | 68 |
-| **Total** | **~322** | **~109** | **~431** ✅ |
+| **engine-core** | 267 | 5 | 272 |
+| **bpmn-parser** | 52 | — | 52 |
+| **persistence-nats** | 14 | — | 14 |
+| **persistence-memory** | 2 | — | 2 |
+| **engine-server** | 20 | 92 | 112 |
+| **desktop-tauri** | — | 52 | 52 |
+| **bpmn-ninja-external-task-client** | 77 | — | 77 |
+| **Total** | **432** | **149** | **581** |
 
-> Authoritative: `cargo test --workspace` (last full run green after production-hardening work).
+> Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
 
-### engine-core Breakdown (~222 tests)
+### engine-core Breakdown (272 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| `engine::unit_tests` | 80 | State machine, gateways, user/service tasks, boundary events, call activities, EventBasedGateway, timers, messages, lock ownership, message correlation |
-| `engine::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
-| `domain::tests` | 28 | ProcessDefinition builder, token serialization, validation, timer definitions |
+| `engine::tests::instance_admin` | 33 | Audit log, restore from persistence, definition versioning/cascade delete, large file variables, `Send`/`Sync` |
+| `engine::tests::timers_messages` | 25 | Timers, boundary timer/message, message start/catch, event-based gateway races, failed-timer incidents |
+| `engine::tests::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
+| `engine::tests::call_errors` | 18 | Call activity lifecycle, variable/error propagation, error boundary events, compensation |
+| `engine::tests::gateways` | 18 | XOR/OR/AND forks and joins, defaults, downstream join detection |
+| `engine::tests::start_tasks` | 12 | User/service tasks, conditional routing, lock/retry, BPMN error handling |
+| `engine::tests::topic_index` | 7 | Per-topic lock durations, orphaned entries, restore, incident filtering |
+| `engine::retry_queue::tests` | 7 | Display, shutdown/drain budget, skip missing entities, full-queue drop, persistence incidents |
+| `engine::tests::migration` | 6 | Instance migration: same node ids, node mapping, rejected for completed/suspended instances |
+| `engine::tests::multi_instance` | 6 | Collection and loop-cardinality multi-instance, snapshots, error cases |
+| `engine::tests::scripting` | 6 | Rhai listeners, memory budget, safe failure handling, start/end distinction |
+| `engine::tests::service_incidents` | 4 | Incidents on failed service tasks, `fetch_and_lock` skips incidents, resolve |
+| `engine::boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
+| `engine::tests::call_activity_parallel` | 3 | Parallel call activities, parent completion, missing target |
+| `engine::tests::inclusive_join` | 3 | Inclusive join with partial branches, nested joins |
+| `engine::tests::instance_pagination` | 3 | Offset/limit paging, sort by `started_at` desc, unpaged listing |
+| `engine::tests::timer_due_index` | 3 | Due index on delete/restore, future timers not due |
+| `engine::tests::recurring_and_event_timer` | 2 | `R3` repeating interval, two event timers with equal duration |
+| `engine::tests::xor_merge` | 2 | Exclusive merge with unconditional/default flows |
+| `engine::tests::boundary_restore` | 1 | Boundary timer persists and restores |
 | `history::tests` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
+| `domain::tests` | 21 | ProcessDefinition builder, gateway validation, token serialization, timer definitions |
+| `domain::timer::tests` | 15 | Remaining time per timer type, recurring detection, infinite limits |
+| `runtime::instance::tests` | 14 | Audit log limits, file variables, file references, incident caps |
 | `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
-| `runtime::instance::tests` | 11 | Audit log limits, file variables, file references |
-| `adapter::in_memory::tests` | 8 | Storage info, history query filters, completed instance archival, pagination, date range, business key, state filter |
-| `retry_queue::tests` | 4 | Display, shutdown, skip missing entities, full-queue drop |
-| `boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
-| Integration tests | 5 | BPMN compliance, complex gateways |
+| `adapter::in_memory::tests` | 2 | Storage info, history query filters |
+| Integration tests | 5 | BPMN compliance (3), complex gateways (2) |
 
-### bpmn-parser Tests (32 tests)
+### bpmn-parser Tests (52 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
-| Basic parsing | 6 | Simple BPMN, conditional flows, XOR gateway, timer start, interleaved output, execution listeners |
-| Gateways | 4 | Parallel, inclusive, event-based, complex |
-| Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, BoundaryTimer |
+| Basic parsing | 8 | Simple BPMN, conditional flows, interleaved bpmn-js output, execution listeners, executable-process selection, Camunda attribute precedence |
+| Gateways | 5 | Parallel, exclusive with default, inclusive, event-based, complex |
+| Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, IntermediateMessageThrow |
 | Boundary events | 2 | BoundaryTimer, BoundaryError |
-| ISO 8601 timers | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
-| Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
-| Sub-processes | 2 | EventSubProcess, RegularSubProcess |
-| Advanced | 3 | TerminateEndEvent, CompensationEvents, EscalationEvents |
+| ISO 8601 timers | 8 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, formal expression, timer start, duration/definition rejects |
+| Task types | 8 | ScriptTask, SendTask (incl. `messageRef`), ReceiveTask, BusinessRuleTask, manual task, rejects for empty/generic tasks |
+| Sub-processes | 3 | EventSubProcess, RegularSubProcess, flattening keeps send/inclusive event and catch |
+| Advanced | 4 | TerminateEndEvent, CompensationEvents, EscalationEvents, catch without trigger rejected |
+| Multi-Instance | 7 | Parallel collection/loop cardinality, rejects for sequential, missing/both sources, invalid cardinality |
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (55 tests, 15 files)
+### engine-server E2E Tests (92 tests, 18 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
-| `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, nested processes |
-| `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
+| `e2e_auth_cors.rs` | 19 | Admin/worker API keys, fail-closed on non-loopback bind, escape hatch, CORS allowlist and preflight, auth metrics |
+| `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, parent/child lifecycle |
+| `e2e_deploy.rs` | 5 | Deploy, start, invalid XML → 400, XML retrieval and 404 |
+| `e2e_deploy_persist.rs` | 2 | Deploy with/without persistence, save failure → 5xx |
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
 | `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
 | `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
-| `e2e_history.rs` | 4 | History generation, querying, completed instances listing, business key filter, pagination |
-| `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
-| `e2e_migration.rs` | 5 | Instance migration to a new definition version (compatible, renamed nodes, incompatible, dry-run) |
-| `e2e_monitoring.rs` | 5 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
-| `e2e_service_tasks.rs` | 7 | List service tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN error, lock conflict |
-| `e2e_start_errors.rs` | 4 | Invalid UUID, unknown definition, unknown BPMN ID, timer-start rejection |
+| `e2e_history.rs` | 4 | History generation, querying, business key filter, pagination |
+| `e2e_instances_page.rs` | 2 | `X-Total-Count` header, full-array response without query parameters |
+| `e2e_lifecycle.rs` | 6 | Delete instance, delete definition (409 without cascade), unknown instances, process timers, correlate messages |
+| `e2e_migration.rs` | 5 | Instance migration (same node ids, node mapping, unknown target, orphaned token → 422) |
+| `e2e_monitoring.rs` | 6 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
+| `e2e_service_tasks.rs` | 13 | List, FetchAndLock (limits and lock-duration validation), ExtendLock, Complete, failure/retries, BPMN error, conflicts, incidents |
+| `e2e_start_errors.rs` | 8 | Invalid UUID, unknown definition/BPMN ID, timer-start rejection, malformed JSON, 415/413/422 error objects |
 | `e2e_stress.rs` | 2 | Concurrent deployments, concurrent starts (multi-thread) |
-| `e2e_suspend_resume.rs` | 5 | Suspend/resume lifecycle, task blocking while suspended, token move |
+| `e2e_suspend_resume.rs` | 5 | Suspend/resume lifecycle, token move (204/404) |
 | `e2e_variables.rs` | 1 | Variable updates mid-execution |
 | `e2e_versioning.rs` | 3 | Version increment, start-latest, instance isolation |
 
-### desktop-tauri E2E Tests (48 tests, 1 file)
+### desktop-tauri E2E Tests (52 tests, 1 file)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
-| `app.spec.ts` | 48 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
+| `app.spec.ts` | 52 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
 
-### bpmn-ninja-external-task-client Tests (68 tests, 3 files)
+### bpmn-ninja-external-task-client Tests (77 tests, 3 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
 | `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
-| `TaskService.test.ts` | 20 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
-| `ExternalTaskClient.test.ts` | 35 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
+| `TaskService.test.ts` | 25 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
+| `ExternalTaskClient.test.ts` | 39 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
 
 Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
 
@@ -661,7 +693,7 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 | persistence-nats | 5 | 1,282 |
 | persistence-memory | 2 | ~450 |
 | engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 15 | ~2,700 |
+| engine-server (E2E tests) | 18 | ~2,700 |
 | desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
 | desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
@@ -672,6 +704,8 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 
 ### Mutation Score
 CI workflow **Core Mutation Tests** runs `cargo-mutants` on `engine-core` and publishes metrics via `docs/quality-metrics.json` / the Mutation Score badge. The metrics parser reads `outcomes.json` (`summary: CaughtMutant|MissedMutant|…`), nested summary counters, and `caught.txt`/`missed.txt` fallbacks. Empty mutation artifacts no longer overwrite a previous successful score with 0.0%. A historical full run (2026-04-13) scored **72.4%**; the auto-updated QUALITY_METRICS block above reflects the latest successful CI merge. Artifacts are retained 30 days.
+
+The metrics are published weekly (Mondays) on the `metrics` branch — the badge at the top of this README points there. `continue-on-error` stays in place for the `cargo-mutants` run itself; the separate `Mutation-Trend prüfen` step compares the score against the previous value on the `metrics` branch and fails below the **65 %** threshold or on a trend regression.
 
 ### Continuous Fuzzing
 To safeguard security- and stability-critical parser and execution components, a parallel **fuzzing workflow** based on `cargo-fuzz` (libFuzzer) runs daily in the CI/CD pipeline (and on relevant pull requests).

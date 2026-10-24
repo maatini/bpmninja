@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sicherheitslücke melden
+    url: https://github.com/maatini/bpmninja/security/advisories/new
+    about: Bitte keine Sicherheitslücken als öffentliches Issue melden. Ablauf siehe SECURITY.md.
+  - name: Dokumentation und Knowledge Base
+    url: https://github.com/maatini/bpmninja/blob/main/docs/knowledge-base/index.md
+    about: Architektur, Module, Datenflüsse und bekannte Gotchas.

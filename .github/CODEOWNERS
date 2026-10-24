@@ -1,0 +1,24 @@
+# Standard-Owner für alle Pfade
+* @maatini
+
+# Engine und Parser
+/engine-core/ @maatini
+/bpmn-parser/ @maatini
+
+# Persistenz und Server
+/persistence-nats/ @maatini
+/persistence-memory/ @maatini
+/engine-server/ @maatini
+
+# Oberflächen
+/desktop-tauri/ @maatini
+/bpmn-ninja-external-task-client/ @maatini
+
+# API-Vertrag
+/api-spec/ @maatini
+
+# CI, Release und Repository-Governance
+/.github/workflows/ @maatini
+/.github/ISSUE_TEMPLATE/ @maatini
+/.github/pull_request_template.md @maatini
+/.github/CODEOWNERS @maatini
