@@ -68,6 +68,9 @@ jobs:
       - name: Check documentation links and versions
         run: node tools/check-docs.mjs
 
+      - name: Delivered OpenAPI gegen TypeSpec prüfen
+        run: node tools/check-openapi-parity.mjs
+
   rust:
     name: Rust clippy and tests
     needs: plan
@@ -195,6 +198,9 @@ jobs:
       - name: Compile TypeSpec
         working-directory: api-spec
         run: npm run compile
+
+      - name: Delivered OpenAPI gegen TypeSpec prüfen
+        run: node tools/check-openapi-parity.mjs
 
       - name: Fail on drifted generated spec
         run: git diff --exit-code api-spec/tsp-output

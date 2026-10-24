@@ -166,7 +166,7 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
-- **Multi-Instance:** `multiInstanceLoopCharacteristics` is not supported; deploy fails with `InvalidDefinition`.
+- **Multi-Instance (Service Tasks only):** Parallel `multiInstanceLoopCharacteristics` are supported on `serviceTask` via `collection` + `elementVariable` or `loopCardinality` (items run in parallel, `loopCounter` starts at 1, the instance advances once after all items complete). Sequential multi-instance and multi-instance on any other task type are rejected at deploy time with `InvalidDefinition`.
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
 - **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
@@ -176,7 +176,7 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 
 The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Specific intermediate/boundary events:** `SignalEvent`, `CancelEvent`, `LinkEvent`.
+- **Specific events:** `SignalEvent`, `CancelEvent`, `LinkEvent`, `ConditionalEvent`. The parser has no model for these event definitions: catch and boundary events fail deployment with `InvalidDefinition`, while triggers on start/end events are ignored (the event is treated as a plain start/end event).
 - **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
 - **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
@@ -478,7 +478,7 @@ process.on("SIGINT", async () => {
 cd bpmn-ninja-external-task-client
 npm install
 npm run lint     # tsc --noEmit
-npm run test     # vitest run  (77 tests)
+npm run test     # vitest run  (85 tests)
 npm run example  # tsx example/simple-worker.ts
 ```
 
@@ -585,18 +585,18 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
-| **engine-core** | 267 | 5 | 272 |
-| **bpmn-parser** | 52 | — | 52 |
+| **engine-core** | 269 | 5 | 274 |
+| **bpmn-parser** | 56 | — | 56 |
 | **persistence-nats** | 14 | — | 14 |
 | **persistence-memory** | 2 | — | 2 |
-| **engine-server** | 20 | 92 | 112 |
+| **engine-server** | 30 | 94 | 124 |
 | **desktop-tauri** | — | 52 | 52 |
-| **bpmn-ninja-external-task-client** | 77 | — | 77 |
-| **Total** | **432** | **149** | **581** |
+| **bpmn-ninja-external-task-client** | 85 | — | 85 |
+| **Total** | **456** | **151** | **607** |
 
 > Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
 
-### engine-core Breakdown (272 tests)
+### engine-core Breakdown (274 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -612,6 +612,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `engine::tests::multi_instance` | 6 | Collection and loop-cardinality multi-instance, snapshots, error cases |
 | `engine::tests::scripting` | 6 | Rhai listeners, memory budget, safe failure handling, start/end distinction |
 | `engine::tests::service_incidents` | 4 | Incidents on failed service tasks, `fetch_and_lock` skips incidents, resolve |
+| `engine::tests::sub_process` | 2 | Embedded sub-process start-event pass-through, completion |
 | `engine::boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
 | `engine::tests::call_activity_parallel` | 3 | Parallel call activities, parent completion, missing target |
 | `engine::tests::inclusive_join` | 3 | Inclusive join with partial branches, nested joins |
@@ -628,7 +629,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `adapter::in_memory::tests` | 2 | Storage info, history query filters |
 | Integration tests | 5 | BPMN compliance (3), complex gateways (2) |
 
-### bpmn-parser Tests (52 tests)
+### bpmn-parser Tests (56 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
@@ -638,13 +639,13 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | Boundary events | 2 | BoundaryTimer, BoundaryError |
 | ISO 8601 timers | 8 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, formal expression, timer start, duration/definition rejects |
 | Task types | 8 | ScriptTask, SendTask (incl. `messageRef`), ReceiveTask, BusinessRuleTask, manual task, rejects for empty/generic tasks |
-| Sub-processes | 3 | EventSubProcess, RegularSubProcess, flattening keeps send/inclusive event and catch |
+| Sub-processes | 7 | EventSubProcess, RegularSubProcess, start-event pass-through/implicit split, rejects for missing/multiple start events, flattening keeps send/inclusive event and catch |
 | Advanced | 4 | TerminateEndEvent, CompensationEvents, EscalationEvents, catch without trigger rejected |
 | Multi-Instance | 7 | Parallel collection/loop cardinality, rejects for sequential, missing/both sources, invalid cardinality |
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (92 tests, 18 files)
+### engine-server E2E Tests (94 tests, 18 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -655,7 +656,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
 | `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
 | `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
-| `e2e_history.rs` | 4 | History generation, querying, business key filter, pagination |
+| `e2e_history.rs` | 5 | History generation, querying, business key filter, actor-type filter, pagination |
 | `e2e_instances_page.rs` | 2 | `X-Total-Count` header, full-array response without query parameters |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition (409 without cascade), unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration (same node ids, node mapping, unknown target, orphaned token → 422) |
@@ -673,15 +674,16 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 |-----------|-------|----------|
 | `app.spec.ts` | 52 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
 
-### bpmn-ninja-external-task-client Tests (77 tests, 3 files)
+### bpmn-ninja-external-task-client Tests (85 tests, 4 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
 | `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
-| `TaskService.test.ts` | 25 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
+| `TaskService.test.ts` | 30 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract, timeout/retry, error paths) |
 | `ExternalTaskClient.test.ts` | 39 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
+| `integration.test.ts` | 3 | Real `engine-server` (via `BPMNINJA_SERVER_BIN`): deploy, fetch/lock, complete, incidents |
 
-Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
+The unit tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers. The integration test is skipped unless `BPMNINJA_SERVER_BIN` points to a built server binary.
 
 ### Code Statistics
 

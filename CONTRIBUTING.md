@@ -35,6 +35,7 @@ cargo deny check             # Lizenzen und Advisories (deny.toml)
 # Desktop und Client
 cd desktop-tauri && npm ci && npm run lint && npm run build && npm run test:e2e
 cd bpmn-ninja-external-task-client && npm ci && npm test
+node tools/check-openapi-parity.mjs   # docs/openapi.yaml gegen TypeSpec-Output
 ```
 
 Prüf-Targets laufen zusätzlich über Nx (Cargo bleibt Build-Engine für Rust). Aufruf über
