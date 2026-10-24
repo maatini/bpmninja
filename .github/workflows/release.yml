@@ -3,14 +3,78 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'               # Trigger bei v0.1.0, v1.2.3 etc.
-  workflow_dispatch:       # Für manuelle Tests
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag, der veröffentlicht werden soll (z. B. v0.7.25)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
+  create-release:
+    name: Release vorbereiten
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Versionen prüfen
+        run: node tools/sync-version.mjs --check
+
+      - name: Tag gegen version.json prüfen
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const expected = String(process.env.TAG).replace(/^v/, "");
+          const version = JSON.parse(fs.readFileSync("version.json", "utf8")).version;
+          if (version !== expected) {
+            console.error(`::error::version.json enthält ${version}, Tag ${process.env.TAG} erwartet ${expected}.`);
+            process.exit(1);
+          }
+          console.log(`version.json (${version}) passt zu ${process.env.TAG}.`);
+          '
+
+      - name: Tauri-Plugin-Parität prüfen
+        run: node desktop-tauri/scripts/assert-tauri-parity.mjs
+
+      - name: Release anlegen oder finden
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG existiert bereits."
+          else
+            gh release create "$TAG" --verify-tag --draft --generate-notes --title "BPMNinja $TAG"
+          fi
+          release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+
   build:
+    name: Build (${{ matrix.name }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,11 +99,11 @@ jobs:
             name: macos-intel
             target: x86_64-apple-darwin
 
-    runs-on: ${{ matrix.os }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -70,9 +134,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: desktop-tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: 'bpmninja-desktop ${{ github.ref_name }}'
-          releaseDraft: true          # Draft → du kannst noch prüfen & dann publishen
+          tagName: ${{ env.TAG }}
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
-          
+
+      - name: Prüfsummen erzeugen
+        run: node tools/release-checksums.mjs --target "${{ matrix.target }}" --name "${{ matrix.name }}"
+
+      - name: Prüfsummen hochladen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" "bpmninja-${{ matrix.name }}.sha256" --clobber
+
+  publish:
+    name: Release veröffentlichen
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Draft veröffentlichen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$TAG" --draft=false
