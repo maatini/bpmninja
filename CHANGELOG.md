@@ -7,8 +7,10 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-Arbeitsstand nach 0.7.24 (Zielversion 0.7.25). Die Einträge sind umgesetzt,
-aber noch nicht veröffentlicht.
+## [0.7.25] - 2026-10-24
+
+Release mit Nx-Orchestrierung, dreistufigem Release-Workflow und der
+Incident-Domäne in der Engine.
 
 ### Hinzugefügt
 
@@ -21,6 +23,11 @@ aber noch nicht veröffentlicht.
   `tauri-plugin-dialog` und `tauri-plugin-fs`.
 - Community-Dateien: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
   `CHANGELOG.md`, Issue-Formulare, PR-Template und `CODEOWNERS`.
+- Engine: eigene Incident-Domäne mit Persistenz sowie REST-Endpunkten zum
+  Auflisten und Auflösen von Incidents.
+- External-Task-Client: Timeout und Retry für `completeTask` und
+  `handleFailure`, Integrationstests gegen einen echten `engine-server` und
+  ein vollständiges npm-Paket.
 
 ### Geändert
 
@@ -36,6 +43,13 @@ aber noch nicht veröffentlicht.
 
 - `reports/` ist nicht mehr versioniert (479 Dateien, rund 0,94 MB, davon 442
   `.lance`-Dateien). `reports/README.md` bleibt als Zusammenfassung im Repo.
+
+### Behoben
+
+- Server: Der History-Filter wertet `actor_type` case-insensitiv aus; das
+  Desktop sendet den Filter wieder als Server-Parameter.
+- API: TypeSpec, OpenAPI und Server-Verträge für Deploy, Start und Incidents
+  sind angeglichen.
 
 ## [0.7.24] - 2026-10-10
 
@@ -89,6 +103,7 @@ Production-Bar für LAN, Betrieb/Restore und Hygiene.
 - TypeSpec: `ApiKeyAuth` nutzt `ApiKeyLocation.header`; Clippy
   `collapsible_if` im agent-orchestrator behoben.
 
-[Unreleased]: https://github.com/maatini/bpmninja/compare/v0.7.24...HEAD
+[Unreleased]: https://github.com/maatini/bpmninja/compare/v0.7.25...HEAD
+[0.7.25]: https://github.com/maatini/bpmninja/compare/v0.7.24...v0.7.25
 [0.7.24]: https://github.com/maatini/bpmninja/compare/v0.7.23...v0.7.24
 [0.7.23]: https://github.com/maatini/bpmninja/compare/v0.7.22...v0.7.23
