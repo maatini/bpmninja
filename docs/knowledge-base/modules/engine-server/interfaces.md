@@ -46,7 +46,7 @@ pub struct AppState {
 | `OrphanedToken(node)` | 422 | Migration: node missing in target definition |
 | All other `EngineError` | 500 | Internal server error |
 
-## Route Map (48 endpoints)
+## Route Map (50 operations, 47 paths)
 
 See groups below. Key groups:
 
@@ -57,7 +57,7 @@ See groups below. Key groups:
 | User Tasks | 2 | `GET /api/tasks`, `POST /api/complete/:id` |
 | Service Tasks | 8 | `GET /api/service-tasks`, `fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`, `retry`, `resolve` |
 | Files | 3 | `POST/GET/DELETE /api/instances/:id/files/:var` |
-| Events & Messages | 4 | `POST /api/message`, `GET /api/messages`, `GET /api/timers`, `POST /api/timers/process` |
+| Events & Messages | 6 | `POST /api/message`, `GET /api/messages`, `POST /api/signal`, `GET /api/signals`, `GET /api/timers`, `POST /api/timers/process` |
 | History & Archive | 4 | `GET /api/instances/:id/history`, `GET /api/instances/:id/history/:event_id`, `GET /api/history/instances`, `GET /api/history/instances/:id` |
 | Monitoring & Health | 7 | `GET /api/health`, `/api/ready`, `/api/info`, `/api/monitoring`, bucket entries, `/metrics` |
 | Observability | 2 | `GET /api/logs`, `GET /api/events` (SSE) |

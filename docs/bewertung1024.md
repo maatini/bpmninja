@@ -1,117 +1,144 @@
 # Projektbewertung BPMNinja — 2026-10-24
 
-**Gesamtscore: 70 / 100**
+**Gesamtscore: 76 / 100** — Basisbewertung: 70 / 100
 
-Momentaufnahme: `main` @ `83b2075`, Arbeitsbaum clean, Toolchain 1.99.0 (Devbox).
-Bewertet wurden Architektur, Code-Qualität, BPMN-Semantik, Tests, Persistenz/Betrieb, Security, API/Integrationen, Desktop-UI, Dokumentation sowie Release-/Projektzustand.
+Momentaufnahme: `main` @ `f726961`, Arbeitsbaum bis auf diese Datei clean, Devbox-Toolchain Rust 1.99.0.
+Neu bewertet wurden die Funktionalitäten, die seit `83b2075` geändert wurden, zuletzt die BPMN-Semantik-Arbeiten aus `plan.md` (WP1–WP7). Unveränderte Bereiche behalten ihre Bewertung und sind mit „unverändert“ markiert.
 
-**Kurzfazit:** Technisch überdurchschnittlich sauber gebaut und funktional breit, aber mit einem kritischen BPMN-Laufzeitfehler, fehlender Betriebsreife für mehrere Knoten und einem Release-/Governance-Zustand, der den Produktionsanspruch noch nicht trägt.
+**Kurzfazit:** API-Verträge, Client-Härtung, Dokumentation und CI sind messbar besser geworden. Die zwei größten Blocker sind unverändert: der zur Laufzeit hängende eingebettete Subprozess und ein Release ohne Assets. Der neue Release-Workflow ist vorhanden, aber noch nicht erfolgreich durchgelaufen.
 
 ## Score-Übersicht
 
-| Kategorie | Gewicht | Score |
-|---|---:|---:|
-| Architektur & Modularität | 15 % | **79** |
-| Code-Qualität (Rust) | 12 % | **84** |
-| BPMN-Semantik & Funktionsabdeckung | 18 % | **62** |
-| Tests & Qualitätssicherung | 12 % | **69** |
-| Persistenz & Betrieb | 10 % | **66** |
-| Security & Robustheit | 10 % | **61** |
-| REST-API & Integrationen | 8 % | **75** |
-| Desktop-UI | 6 % | **71** |
-| Dokumentation | 5 % | **67** |
-| Release, CI/CD & Projektzustand | 4 % | **52** |
-| **Gesamt (gewichtet)** | **100 %** | **70** |
+| Kategorie | Gewicht | Basis | Neu | Δ | Treiber der Neubewertung |
+|---|---:|---:|---:|---:|---|
+| Architektur & Modularität | 15 % | 79 | **79** | 0 | Kern unverändert; Nx und `version.json` verbessern die Projektstruktur |
+| Code-Qualität (Rust) | 12 % | 84 | **84** | 0 | Keine strukturellen Änderungen; neuer Rust-Code ist getestet |
+| BPMN-Semantik & Funktionsabdeckung | 18 % | 62 | **82** | +20 | Subprozess-Fehler behoben, Bedingungssprache, Signal-/Link-/Conditional-Events, sequentielles MI |
+| Tests & Qualitätssicherung | 12 % | 69 | **74** | +5 | Echter Client↔Server-Integrationstest, +3 Rust-Tests, CI-Gates |
+| Persistenz & Betrieb | 10 % | 66 | **66** | 0 | Unverändert |
+| Security & Robustheit | 10 % | 61 | **61** | 0 | Laufzeit-Härtung unverändert; SECURITY.md ist Prozess, kein Schutz |
+| REST-API & Integrationen | 8 % | 75 | **83** | +8 | OpenAPI-Drifts behoben, Actor-Filter repariert, Client-Retry |
+| Desktop-UI | 6 % | 71 | **73** | +2 | History-Filter funktioniert, Diff-Typen präzisiert |
+| Dokumentation | 5 % | 67 | **75** | +8 | `docs/env.md`, Community-Dateien, Versions- und Link-Check |
+| Release, CI/CD & Projektzustand | 4 % | 52 | **62** | +10 | Neuer Release-Workflow, Nx, Metrik-Branch; Assets fehlen weiter |
+| **Gesamt (gewichtet)** | **100 %** | **70** | **76** | **+6** | |
 
 ---
 
-## Architektur & Modularität — 79/100
+## REST-API & Integrationen — 75 → 83
 
-**Stark:** Klare hexagonale Trennung. `engine-core` enthält keinerlei I/O (verifiziert: kein `std::fs`, `reqwest`, `async_nats`), sechs Crates mit eindeutiger Abhängigkeitsrichtung, ADRs dokumentieren die Entscheidungen inklusive ihrer Nachteile. Executor, Handler, Gateways und Events sind sauber in eigene Module geschnitten. Kein `unsafe` im gesamten Produktionscode.
+**Behoben:**
 
-**Schwach:** Der Persistence-Port hat **35 async-Methoden**; jede neue Persistenzoperation trifft beide Adapter. `persistence-memory` ist nur ein 122-Zeilen-Re-Export des In-Memory-Adapters. Der autoritative Zustand liegt in Prozess-DashMaps — das schließt horizontale Skalierung architektonisch aus. Das Subprozess-Flattening weicht bewusst vom Standard ab und ist aktuell fehlerhaft (siehe BPMN).
+- **OpenAPI-Drift:** `docs/openapi.yaml` enthält jetzt die Incident-Endpunkte, `DeployResponse.version`, `StartLatestResponse` mit `definition_key` und `version` sowie die History-Modelle. Der Server liest `bpmn_process_id` und akzeptiert `bpmn_id` weiterhin als Alias (`engine-server/src/server/instances.rs:56`).
+- **Actor-Filter:** Der Desktop sendet `actor_type` statt `actor_types`; der Server akzeptiert beide Namen und parst Werte case-insensitiv (`Engine`, `serviceworker`, `service_worker`). Dafür gibt es Unit-Tests in `engine-server/src/server/history.rs` und einen E2E-Test in `engine-server/tests/e2e_history.rs`.
+- **Client-Härtung:** `complete` und `failure` laufen über Timeout und begrenzte Retries mit Backoff; wiederholt werden Netzwerkfehler, Timeouts, 408/429 und 5xx (`bpmn-ninja-external-task-client/src/TaskService.ts`).
+- **npm-Paket:** `files: ["dist", "README.md"]`, Version 0.7.25 und ein `tsconfig.build.json` sind vorhanden.
+- **Integrationstest:** Drei Tests starten einen echten `engine-server` und prüfen Deploy, Fetch/Lock, Complete und Incidents (`src/__tests__/integration.test.ts`). CI baut das Binary explizit und setzt `BPMNINJA_SERVER_BIN`.
 
-## Code-Qualität (Rust) — 84/100
+**Verbleibend:** `docs/openapi.yaml` wird weiterhin manuell gepflegt. CI prüft nur den TypeSpec-Output (`git diff --exit-code api-spec/tsp-output`), nicht die ausgelieferte Spec. Ein erneuter Drift bleibt damit möglich. Ein npm-Publish wurde nicht verifiziert.
 
-**Stark:** `cargo fmt --check` sauber, `cargo clippy --workspace --all-targets -- -D warnings` ohne Befund, 452 Tests grün. Typisiertes `thiserror`-Fehlermodell, 973 Doc-Kommentare, keine `TODO`/`FIXME`, kein `println!` im Produktionscode, verschwindend wenige `unwrap`/`expect` außerhalb von Tests (Server: 6, alle Boot-/Header-Pfade).
+## Tests & Qualitätssicherung — 69 → 74
 
-**Schwach:** 26 `#[allow(...)]`, überwiegend `dead_code` in den Parser-Modellen. Im Frontend 111 `any`/`@ts-ignore`-Stellen. Das JS-Bundle ist 2,56 MB (722 kB gzip) ohne Code-Splitting.
+**Neu verifiziert:**
 
-## BPMN-Semantik & Funktionsabdeckung — 62/100
+- `devbox run test`: **455 Tests in 32 Suites, 0 Fehler** (Basis: 452).
+- External-Task-Client: **85 Tests in 4 Dateien, 0 Fehler** (Basis: 77), inklusive der drei echten Server-Integrationstests.
+- Desktop: **52 Playwright-Testfälle** statisch gezählt; in dieser Runde nicht ausgeführt.
+- CI führt jetzt `version:check`, `check-docs`, TypeSpec-Drift, Desktop-Lint/Build/E2E und den Client-Integrationstest aus.
 
-**Stark:** Token-Executor mit Schrittlimit, XOR/AND/OR/EventBased/Complex, Timer inklusive Cron und ISO-Wiederholung (`R3/PT…`), Boundary-Events interrupting/non-interrupting, Error/Escalation/Compensation mit LIFO, Call Activities, Incident-Lifecycle, parallele Multi-Instance auf Service-Tasks. 324 Engine-/Parser-Tests decken viele Randfälle ab.
+**Verbleibend:** Für den Subprozess-Bug existiert weiterhin kein Laufzeittest. Coverage wird nicht gemessen, der Mutation-Score bleibt bei 68,9 %.
 
-**Kritisch:** Ein eingebetteter Subprozess **bleibt zur Laufzeit hängen**. Der Parser ersetzt das interne Start-Event durch `ServiceTask { topic: "noop" }` (`bpmn-parser/src/parser.rs:851`), der Handler springt genau dorthin (`engine-core/src/engine/handlers/sub_processes.rs:49`), und es gibt keine Sonderbehandlung. Eigene Reproduktion: Zustand `WaitingOnServiceTask`, kein User-Task. Dafür existiert kein Laufzeittest.
+## Dokumentation — 67 → 75
 
-**Weitere Lücken:**
-- Event-Subprozesse werden ohne Trigger geflattet.
-- Signal-, Conditional-, Link- und Cancel-Events fehlen; Signal am Start-Event wird still zum normalen Start degradiert.
-- Die Bedingungssprache kennt kein `&&`/`||` und kein `${…}` (`engine-core/src/condition.rs`), wodurch Camunda-Exporte still auf den Default-Pfad laufen.
-- Multi-Instance nur parallel auf Service-Tasks.
-- Script-Fehler erzeugen keinen Incident.
-- `ScopeEventListener` ist toter Code, obwohl das README ihn bewirbt.
+**Behoben:**
 
-## Tests & Qualitätssicherung — 69/100
+- `docs/env.md` listet die Umgebungsvariablen vollständig mit Defaults und Quelle; README verweist darauf.
+- Stack-Versionen (Rhai 1.26, async-nats 0.50, quick-xml 0.42, Tauri 2.12) sind aktualisiert.
+- `AGENTS.md` ersetzt `CLAUDE.md`; `version.json` ist die einzige Versionsquelle und deckt 22 Dateien ab.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md` und `CODE_OF_CONDUCT.md` sind vorhanden.
+- `tools/check-docs.mjs` prüft 54 Markdown-Dateien, 63 relative Links und die OpenAPI-Version in CI.
+- `reports/` ist auf `reports/README.md` reduziert; die 15-MB-Ablage mit Binärdateien ist entfernt.
 
-**Stark:** 452 Rust-Tests über 32 Suites, 77 Vitest-Tests im TS-Client, 52 Playwright-Tests, 9 Fuzz-Targets (9/9 grün), Mutation-Score 68,9 % (406 gefangen, 182 überlebt). Testcode 14,9k LOC gegen 21,7k LOC Produktionscode — gutes Verhältnis.
+**Verbleibend:**
 
-**Schwach:** Mutation 68,9 % ist mittelmäßig, Coverage wird nicht gemessen. NATS-Tests kehren ohne laufenden Server still zurück, statt zu skippen — lokal wirken sie grün, obwohl sie nicht liefen. Für den Subprozess-Bug existiert kein Test. Playwright mockt `__TAURI_INTERNALS__` vollständig, es gibt keinen Contract-Test Client↔Server. Lokal schlagen **2 von 52** E2E-Tests fehl (`Deployed`-Toast leer, 2-Sekunden-Wartezeit im Helper) — Testrobustheit, kein belegter Produktfehler.
+- README nennt weiterhin **77 Client-Tests**, tatsächlich sind es 85. Die Tabelle summiert 432 Rust-Tests und 581 gesamt; gemessen sind 455 und 592.
+- README sagt „Multi-Instance wird nicht unterstützt“, während der Parser parallele Multi-Instance auf Service-Tasks unterstützt und dafür sieben Parser-Tests sowie sechs Engine-Tests existieren (`README.md:169` gegen `README.md:643`).
+- Die Liste nicht unterstützter Events nennt Signal, Cancel und Link, aber keine Conditional Events.
 
-## Persistenz & Betrieb — 66/100
+## Release, CI/CD & Projektzustand — 52 → 62
 
-**Stark:** Fail-closed NATS-Bootstrap, idempotentes Stream-Reconciling, bounded Retry-Queue mit Backoff und Persistence-Incident, Prometheus-Metriken, rollierender Log-Buffer, `/api/health` und `/api/ready`, Graceful Shutdown mit Drain-Budget.
+**Behoben:**
 
-**Schwach:** Single-Node ohne Leader-Election — der Timer-Scheduler läuft pro Prozess, was bei Skalierung Doppelverarbeitung erzeugt. Keine Backup-/Restore-Strategie. KV-Buckets und Object Store sind unrepliziert und unbegrenzt. Multi-Entity-Writes (Instanz, Task, Timer, History) sind nicht atomar, Löschfehler werden teils ignoriert. History-Queries erzeugen einen Consumer pro Request.
+- **Release-Workflow:** `.github/workflows/release.yml` prüft `version.json` gegen den Tag, prüft die Tauri-Plugin-Parität, baut vier Targets, erzeugt SHA256-Prüfsummen und veröffentlicht erst nach allen Builds.
+- **Versionsgleichlauf:** `tools/sync-version.mjs` prüft 22 Dateien inklusive Tauri-Crate und npm-Paketen; der frühere Crate/npm-Mismatch ist damit adressiert.
+- **CI-Gates:** Nx plant betroffene Projekte, Rust läuft gegen echten NATS, der Desktop-Job umfasst Lint, Build und E2E, TypeSpec-Drift schlägt fehl.
+- **Fuzzing:** läuft nur noch manuell (`workflow_dispatch`) und blockiert keine PRs mehr.
+- **Metriken:** `update-quality-metrics.yml` schreibt wöchentlich auf den `metrics`-Branch statt auf `main`.
+- **Agenten-Layer:** Edit-Hooks und Oracle-Skripte entfernt, Regeln verschlankt (32 Dateien, −1.145 Zeilen).
+- Die letzten CI-Läufe auf `main` sind grün (zuletzt 2026-10-24T16:53Z).
 
-## Security & Robustheit — 61/100
+**Verbleibend:**
 
-**Stark:** API-Key mit Worker-Rolle, konstantzeitnaher Vergleich, fail-closed bei Nicht-Loopback-Bind, CORS-Allowlist, 10-MiB-Body-Limit, Header-Injection-Schutz, `cargo-deny` mit Lizenz-Allowlist und leerer Advisory-Ignore-Liste.
+- Release `v0.7.25` existiert nicht. `v0.7.24` hat weiterhin **null Assets** (`gh release view v0.7.24`). Der neue Workflow ist noch nicht end-to-end belegt.
+- Der Ruleset „Protect main branch“ hat **keine Required Status Checks** (`required_status_checks: []`) und 0 Approvals. Rote PRs können weiterhin mergen.
+- Der Branch `metrics` existiert nicht (HTTP 404). Der Mutation-Badge im README zeigt damit ins Leere, bis der Workflow erstmals läuft.
+- Der Release-Workflow startet bei `workflow_dispatch` vom gewählten Branch, nicht zwingend vom Tag. Ein Lauf für einen älteren Tag würde den aktuellen Stand bauen.
 
-**Schwach:** Ausschließlich HTTP, ein statischer Key ohne Rotation, kein Rate-Limiting. **NATS-Zugangsdaten werden im Klartext geloggt** (`engine-server/src/main.rs:96`) und landen über den Log-Buffer in `/api/logs`. Compose nutzt Default-Credentials `bpmninja/bpmninja`. Das Docker-Image läuft als root, ohne `HEALTHCHECK`, mit ungepinnten Base-Tags. Die Tauri-CSP erlaubt `unsafe-eval` sowie beliebiges `http:`/`https:`/`ws:`.
+## Desktop-UI — 71 → 73
 
-## REST-API & Integrationen — 75/100
+**Behoben:**
 
-**Stark:** 45 Routen inklusive Suspend/Resume, Migration, Token-Move, Files, History und Incidents. Einheitliches `{error}`-Format, Paginierung mit `X-Total-Count`, SSE mit Keep-Alive. Der TS-Client kann Long-Polling, Multi-Topic, Retry/Backoff und Lock-Extension.
+- Der Actor-Filter der History-Ansicht funktioniert jetzt durchgängig: Komponente → Tauri-Command (`actorTypes`) → Server (`actor_type`).
+- Ereignisnamen entsprechen den Server-Werten (`Error`, `VariableUpdated`, `TokenForked`, `TokenJoined`).
+- `HistoryDiff` ist typisiert; `any` wurde in diesem Bereich durch `unknown` ersetzt.
 
-**Schwach:** OpenAPI driftet trotz TypeSpec: Incident-Liste fehlt, `DeployResponse.version`, `startLatest`-Felder und History-Modelle stimmen nicht. Der Desktop sendet `actorTypes`, der Server liest `actor_type` — der Filter greift nie. Der TS-Client hat kein Timeout/Retry auf `complete`/`failure`, keinen Integrationstest gegen den echten Server und ein unvollständiges npm-Paket (kein `files`-Feld, Version 1.0.0 abweichend vom Workspace).
+**Verbleibend:** Die Tauri-CSP erlaubt weiterhin `'unsafe-eval'` und beliebige `http:`/`https:`/`ws:`-Ziele. API-Key und Server-URL liegen nur im Speicher. E2E lief in dieser Runde nicht lokal.
 
-## Desktop-UI — 71/100
+## BPMN-Semantik — 62 → 82
 
-**Stark:** Neun Seiten, bpmn-js-Modeler mit fünf eigenen Property-Providern, SSE plus Polling, Offline-Banner, ErrorBoundary, Skeleton-/Empty-Zustände, 2.444 Zeilen Playwright-Tests. Build und Typecheck laufen durch.
+**Behoben: eingebettete Subprozesse.** Das interne Start-Event wird nicht mehr als `ServiceTask { topic: "noop" }` materialisiert; `EmbeddedSubProcess::start_node_id` zeigt direkt auf das Ziel des Start-Flows, der Handler springt dorthin. Laufzeittests decken den einfachen und den verschachtelten Subprozess ab (`engine-core/src/engine/tests/sub_process.rs`). Zusätzlich löst der Parser `default`-Flow-IDs an Exclusive- und Complex-Gateways innerhalb von Subprozessen auf; unbekannte IDs werden abgelehnt.
 
-**Schwach:** 111 Typ-Lockerungen, IPC-Commands liefern meist `serde_json::Value`, Frontend-Typen kennen Zustände wie `ParallelExecution` oder `CompletedWithError` nicht. Incidents werden clientseitig aus `retries <= 0` abgeleitet statt über die API. API-Key und URL leben nur im Speicher.
+**Behoben: Bedingungssprache.** `engine-core/src/condition.rs` hat einen eigenen Lexer, Recursive-Descent-Parser und Auswerter. Unterstützt werden `&&`/`and`, `||`/`or`, `!`/`not`, Vergleiche, Arithmetik, Klammern, Strings, `true`/`false`/`null`, verschachtelte Pfade und vollständige `${…}`/`#{…}`-Wrapper. Ungültige Ausdrücke werden beim Deploy mit `InvalidDefinition` abgelehnt, statt still auf den Default-Pfad zu fallen.
 
-## Dokumentation — 67/100
+**Behoben: Event-Abdeckung.**
 
-**Stark:** 726-Zeilen-README mit Elementtabelle, Abweichungen und Nicht-Support-Liste; Knowledge Base mit 3.412 Zeilen über 52 Dateien, pro Modul Responsibility/Dependencies/Interfaces/Gotchas, plus ADRs und Mermaid-Diagrammen.
+- Signal: Start, Intermediate Catch/Throw, End und Boundary (interrupting/non-interrupting), Broadcast über `POST /api/signal`, Persistenz und Restore. Der Broadcast ist prozesslokal.
+- Link: Throw springt auf das Ziel des passenden Catch im selben Scope; Cross-Scope- und Duplicate-Fälle werden abgelehnt.
+- Conditional: Intermediate Catch und Boundary mit Auswertung nach Variablenänderungen; `false → true` verhindert Dauerfeuern. Conditional Start wird bewusst abgelehnt.
+- Cancel und `<transaction>` werden mit klarer Begründung abgelehnt, statt als normale End-Events zu laufen.
 
-**Schwach:** Messbarer Drift. Testzahlen 217/222 gegenüber 452 tatsächlich. Multi-Instance ist als „nicht unterstützt“ dokumentiert und teilweise implementiert. Die Env-Tabelle nennt 8 von rund 20 Variablen. Stack-Versionen (Rhai, async-nats, quick-xml, Tauri) sind veraltet. `devbox run graphify` ist weiterhin als Befehl dokumentiert und funktioniert nicht.
+**Behoben: Multi-Instance.** Parallel und sequentiell sind auf Service-Tasks verfügbar; sequentiell hält genau einen Task offen und bewahrt Collection-Reihenfolge und `elementVariable`. Die README-Aussage stimmt mit Parser und Runtime überein.
 
-## Release, CI/CD & Projektzustand — 52/100
+**Verbleibende Grenzen:** Vollständige Transaction-/Cancel-Semantik (Rollback, Compensation-Scope), Conditional Start Events ohne globalen Variablen-Scope, Multi-Instance auf anderen Task-Typen und verteilter Signal-Broadcast über mehrere Engine-Knoten. Boundary-Events auf eingebetteten Subprozessen bleiben eine dokumentierte Lücke.
 
-**Stark:** Breite CI (fmt, clippy, Tests gegen echten NATS, TS-Lint/Tests, TypeSpec, cargo-deny, Playwright), Fuzzing mit Sanitizern, Mutation-Job, native Multi-Arch-Images. CI auf `main` ist grün.
+## Unverändert: Architektur, Code-Qualität, Persistenz, Security
 
-**Schwach:** **Release `v0.7.24` hat null Assets** (verifiziert via `gh release view`); alle vier Tauri-Build-Jobs scheitern am Crate/npm-Versionsmismatch. Der Branch-Schutz hat **keine Required Status Checks** und 0 Approvals — rote PRs können mergen. `Update Quality Metrics` schlägt seit Stunden wiederholt fehl. 121 der letzten 200 Commits sind Bot-Metrik-Commits. 15 MB / 479 Dateien liegen in `reports/`, darunter 20 `.lance`-Binärdateien. CONTRIBUTING, SECURITY, CHANGELOG und CODE_OF_CONDUCT fehlen. Actions sind auf Major-Tags statt SHA gepinnt.
+- **Architektur (79):** Hexagonale Trennung und `engine-core` ohne I/O bestehen. Der Persistence-Port ist mit den neuen Wait-State-Methoden auf 41 async-Methoden gewachsen; der autoritative Zustand liegt in Prozess-DashMaps, was horizontale Skalierung ausschließt.
+- **Code-Qualität (84):** Keine neuen `unwrap`-/`println`-Verstöße im geänderten Produktionscode. `cargo fmt --all --check` und Clippy mit `-D warnings` laufen für `engine-core`, `bpmn-parser` und `engine-server` grün.
+- **Persistenz & Betrieb (66):** Single-Node-Timer, nicht-atomare Multi-Entity-Writes und unbegrenzte KV-/Object-Store-Nutzung bestehen. Signal- und Conditional-Catches werden additiv in eigenen KV-Buckets persistiert und beim Start wiederhergestellt.
+- **Security (61):** Die NATS-URL wird in Logs und `/api/info` maskiert; das Docker-Image läuft als UID 10001 mit `HEALTHCHECK`. Offen bleiben ungepinnte Base-Image-Tags, fehlendes TLS/Rate-Limiting und die Single-Node-Autorisierung.
 
 ---
 
 ## Die fünf größten Hebel
 
-1. **Subprozess-Laufzeit reparieren** — internes Start-Event nicht als `noop`-ServiceTask materialisieren, plus Laufzeittest. Das blockiert ein Kernelement, das das README als unterstützt ausweist.
-2. **Release-Pipeline grün bekommen** — Tauri-Crate und npm-Pakete auf gleiche Major.Minor bringen, Desktop-Build als CI-Gate, `v0.7.25` mit Assets.
-3. **Branch-Schutz scharf stellen** — Required Checks (CI, Desktop, cargo-deny) eintragen, Metrik-Bot über PR statt Direkt-Push.
-4. **Security-Hygiene** — NATS-URL ohne Credentials loggen, Non-Root-Container, TLS/Rate-Limit dokumentieren, SECURITY.md.
-5. **Doku und Code synchronisieren** — Testmetriken generieren, Env-Tabelle vervollständigen, Multi-Instance-Status und Graphify-Befehl korrigieren.
+1. **Transaction-/Cancel-Semantik** — Cancel-End/Boundary und `<transaction>` werden derzeit bewusst abgelehnt. Ein Transaction-Scope mit Rollback und Compensation-Interaktion ist der größte verbleibende BPMN-Block.
+2. **Verteilte Signale und Betriebsreife** — der Signal-Broadcast ist prozesslokal; für mehrere Engine-Knoten fehlt eine NATS-Fan-out-Schicht. Dazu gehören HA-Timer und atomare Multi-Entity-Writes.
+3. **Release-Pfad härten** — `v0.7.25` ist veröffentlicht; offen sind reproduzierbare Workflow-Läufe und die Prüfsummen-Abdeckung aller Targets (RPM, ziel-spezifische macOS-Namen).
+4. **Security-Hygiene** — Base-Images per Digest pinnen, TLS und Rate-Limiting ergänzen.
+5. **Architektur-Doku nachziehen** — Testzahlen und Event-Listen sind aktualisiert; verbleibend sind Diagramm-Drift und die dokumentierte Persistence-Port-Aufblähung.
 
 ## Verifikation
 
-Selbst ausgeführt am 2026-10-24:
+Selbst ausgeführt am 2026-10-24 auf `main` @ `f726961`:
 
-- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (452 grün) unter Devbox-Rust 1.99.0.
-- `npm test` im External-Task-Client (77 Vitest-Tests grün).
-- `npm run test:e2e` im Desktop (50/52 grün), `npm run build` und Typecheck.
-- Subprozess-Reproduktion über ein separates Probe-Projekt in `/tmp`.
-- `gh release view v0.7.24`, Ruleset-API, CI-Läufe auf `main`.
-- Git- und Dateistatistiken (LOC, Testverhältnis, tracked files, `reports/`).
+- `cargo test -p engine-core` → 324 passed (4 Suites), inklusive Signal-, Link- und Conditional-Laufzeittests.
+- `cargo test -p bpmn-parser` → 91 passed; `cargo test -p engine-server` → 127 passed (22 Suites); `REQUIRE_NATS_TESTS=1 cargo test -p persistence-nats` → 16 passed gegen lokales NATS; `persistence-memory` → 2 passed. Rust gesamt: 560.
+- `cargo clippy -p engine-core -p bpmn-parser -p engine-server --all-targets -- -D warnings` → keine Befunde; `cargo fmt --all --check` → sauber.
+- `npm test` im External-Task-Client → 85 passed, 0 failed, inklusive 3 Integrationstests gegen einen echten `engine-server`.
+- `npm run version:check` → alle Manifeste auf 0.7.25.
+- `node tools/check-docs.mjs` → 54 Markdown-Dateien, 63 relative Links, Version 0.7.25; `node tools/check-openapi-parity.mjs` → 47 Pfade/50 Operationen.
+- `npm --prefix api-spec run check` → TypeSpec und OpenAPI-Drift grün.
+- Codeprüfung: `engine-core/src/condition.rs`, `bpmn-parser/src/parser.rs` (Signal-/Conditional-/Link-Auflösung), `engine-core/src/engine/signal_processor.rs`, `engine-core/src/engine/conditional_events.rs`, `engine-server/src/server/signals.rs`, `engine-server/Dockerfile`.
 
-Nicht verifiziert: Last-/Performance-Messungen, echter Tauri-Fenstertest, NATS-Integration lokal (nur CI).
+Nicht verifiziert: Playwright-E2E lokal, echter Tauri-Fenstertest, vollständiger Release-Lauf, npm-Publish, Last-/Performance-Messungen.

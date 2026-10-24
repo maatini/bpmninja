@@ -64,6 +64,26 @@ Deploy must fail. Do not reintroduce a silent single-instance fallback.
 
 Nested sub-processes each get their own map, so equal link names in sibling scopes do not collide.
 
+### ⚠️ Signal events resolve through `<signal>`, never through a fallback
+
+`<signal id="…" name="…"/>` is read from `<definitions>` into a lookup `signalRef → name`. Start, end, intermediate catch/throw and boundary events carry `<signalEventDefinition signalRef="…"/>`:
+
+- A missing or unknown `signalRef` fails deployment with `InvalidDefinition`. There is no generic fallback name.
+- Signal events inside embedded sub-processes are flattened like messages. Signal start events on an embedded sub-process remain unsupported (event sub-processes are outside this scope).
+- Signal end events inside a flattened sub-process become `SubProcessEndEvent` and do **not** broadcast.
+- Event-based gateways accept `SignalCatchEvent` as a target; conditional catches are rejected there.
+
+The runtime broadcast is process-local. `POST /api/signal` wakes every matching wait state and starts instances with a matching `SignalStartEvent`; an internal `SignalThrowEvent`/`SignalEndEvent` only wakes catches and never starts new instances (self-trigger protection).
+
+### ⚠️ Conditional events: catch and boundary only
+
+`<conditionalEventDefinition><conditionExpression>…</conditionExpression></conditionalEventDefinition>` is supported on intermediate catch and boundary events:
+
+- The condition is validated with `validate_condition` at parse time. A missing or invalid expression is `InvalidDefinition` with the event ID.
+- A **conditional start event** is rejected with `InvalidDefinition` (no global variable scope).
+- An event-based gateway cannot target a conditional catch.
+- The runtime fires only on a `false → true` transition. Intermediate catches are removed when they fire; non-interrupting boundary catches stay registered and can fire again after the condition drops to `false` and rises again. A permanently true condition therefore does not busy-loop.
+
 ### ⚠️ Cancel events and transactions are rejected, not ignored
 
 `cancelEventDefinition` is modelled on `endEvent` and `boundaryEvent` only to fail deployment:

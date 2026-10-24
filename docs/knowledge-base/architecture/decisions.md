@@ -45,7 +45,7 @@
 
 ## ADR-004: Lock-Free Concurrency via DashMap
 
-**Decision:** Four wait-state queues (`pending_user_tasks`, `pending_service_tasks`, `pending_timers`, `pending_message_catches`) use `Arc<DashMap>` for lock-free sharding. Instance state uses per-instance `RwLock`.
+**Decision:** Wait-state queues (`pending_user_tasks`, `pending_service_tasks`, `pending_timers`, `pending_message_catches`, `pending_signal_catches`, `pending_conditional_catches`) use `Arc<DashMap>` for lock-free sharding. Instance state uses per-instance `RwLock`.
 
 **Rationale:**
 - High concurrency under load (multiple HTTP handlers + timer scheduler)

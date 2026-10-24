@@ -227,25 +227,51 @@ classDiagram
 
 ```rust
 pub enum BpmnElement {
+    // Start / end
     StartEvent,
-    TimerStartEvent(TimerDefinition),              // Duration | AbsoluteDate | CronCycle | RepeatingInterval
+    TimerStartEvent(TimerDefinition),               // Duration | AbsoluteDate | CronCycle | RepeatingInterval
     MessageStartEvent { message_name: String },
+    SignalStartEvent { signal_name: String },
     EndEvent,
     TerminateEndEvent,
     ErrorEndEvent { error_code: String },
+    EscalationEndEvent { escalation_code: String },
+    CompensationEndEvent { activity_ref: Option<String> },
+    SignalEndEvent { signal_name: String },
+
+    // Tasks
     UserTask(String),                               // assignee
     ServiceTask { topic: String, multi_instance: Option<MultiInstanceDef> },
     ScriptTask { script: String, multi_instance: Option<MultiInstanceDef> },
     SendTask { message_name: String, multi_instance: Option<MultiInstanceDef> },
+
+    // Gateways
     ExclusiveGateway { default: Option<String> },   // XOR
     InclusiveGateway,                               // OR
     ParallelGateway,                                // AND
     EventBasedGateway,                              // waits for first catch event
+    ComplexGateway { join_condition: Option<String>, default: Option<String> },
+
+    // Intermediate events
     TimerCatchEvent(TimerDefinition),
+    MessageCatchEvent { message_name: String },
+    SignalCatchEvent { signal_name: String },
+    SignalThrowEvent { signal_name: String },
+    ConditionalCatchEvent { condition: String },
+    EscalationThrowEvent { escalation_code: String },
+    CompensationThrowEvent { activity_ref: Option<String> },
+    LinkThrowEvent { target: String },              // catch is not materialised
+
+    // Boundary events
     BoundaryTimerEvent { attached_to, timer: TimerDefinition, cancel_activity },
     BoundaryMessageEvent { attached_to, message_name, cancel_activity },
+    BoundarySignalEvent { attached_to, signal_name, cancel_activity },
+    BoundaryConditionalEvent { attached_to, condition, cancel_activity },
     BoundaryErrorEvent { attached_to, error_code: Option<String> },
-    MessageCatchEvent { message_name: String },
+    BoundaryEscalationEvent { attached_to, escalation_code: Option<String>, cancel_activity },
+    BoundaryCompensationEvent { attached_to: String },
+
+    // Scopes
     CallActivity { called_element: String },
     EmbeddedSubProcess { start_node_id: String },   // embedded sub-process (flattened)
     SubProcessEndEvent { sub_process_id: String },  // synthetic end event
