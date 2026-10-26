@@ -45,7 +45,7 @@ jobs:
         run: npm ci
 
       - name: Derive affected base and head SHAs
-        uses: nrwl/nx-set-shas@v4
+        uses: nrwl/nx-set-shas@v5
 
       - name: Determine affected projects
         id: affected
