@@ -36,7 +36,7 @@
 bpmninja is a BPMN 2.0 engine with the following core features:
 
 - **Token-based execution** — each path is tracked as an independent token
-- **29 BPMN elements** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, boundary events (timer, message, error, escalation, compensation), call activities, sub-processes
+- **37 BPMN element variants** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, signals, conditional events, boundary events (timer, message, signal, conditional, error, escalation, compensation), link events, call activities, sub-processes
 - **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
 - **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
@@ -102,11 +102,13 @@ For full local verification, run the root checks plus module-specific checks fro
 | <img src="readme-assets/bpmn-icons/start-event.svg" width="28"> | **StartEvent** | Simple starting point — process starts immediately. |
 | <img src="readme-assets/bpmn-icons/timer-start-event.svg" width="28"> | **TimerStartEvent** | Timer-triggered start — supports ISO 8601 Duration (`PT30S`), AbsoluteDate, cron cycle and repeating intervals. |
 | <img src="readme-assets/bpmn-icons/message-start-event.svg" width="28"> | **MessageStartEvent** | Process is started by an incoming message (via `messageName`). |
+| | **SignalStartEvent** | Process is started by a broadcast signal (via `signalRef`). A signal starts one instance per deployed matching definition. |
 | <img src="readme-assets/bpmn-icons/end-event.svg" width="28"> | **EndEvent** | End point — process instance is marked as completed. |
 | <img src="readme-assets/bpmn-icons/terminate-end-event.svg" width="28"> | **TerminateEndEvent** | End point — immediately aborts all active tokens. |
 | <img src="readme-assets/bpmn-icons/error-end-event.svg" width="28"> | **ErrorEndEvent** | Terminates the process with a BPMN error code (`errorCode`). |
 | | **EscalationEndEvent** | Ends the current path and throws a BPMN escalation (`escalationCode`). Uncaught escalations are non-fatal. |
 | | **CompensationEndEvent** | Runs registered compensation handlers (optional `activityRef`, otherwise LIFO), then completes the token. |
+| | **SignalEndEvent** | Broadcasts a BPMN signal (`signalRef`), then completes the token. |
 | <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. Assignee comes from `data-assignee`, then `camunda:assignee` (fallback `"unassigned"`). |
 | <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). Topic comes from `data-topic`, then `data-handler`, then `camunda:topic`, then the node id. |
 | <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Executes inline scripts via the Rhai engine. |
@@ -119,7 +121,7 @@ For full local verification, run the root checks plus module-specific checks fro
 | <img src="readme-assets/bpmn-icons/exclusive-gateway.svg" width="28"> | **ExclusiveGateway (XOR)** | Exactly one path is chosen (condition evaluation). Optional default flow. |
 | <img src="readme-assets/bpmn-icons/parallel-gateway.svg" width="28"> | **ParallelGateway (AND)** | All paths are followed in parallel (token fork). Join waits for all tokens (JoinBarrier). |
 | <img src="readme-assets/bpmn-icons/inclusive-gateway.svg" width="28"> | **InclusiveGateway (OR)** | Split: all outgoing paths with a `true` condition (unconditional flows always). Join waits for taken split branches (`expected_count` = split branch count). Unstructured joins without `find_downstream_join` fall back to `incoming_flow_count`. |
-| <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pauses until exactly one of the target catch events (timer/message) fires. |
+| <img src="readme-assets/bpmn-icons/event-based-gateway.svg" width="28"> | **EventBasedGateway** | Execution pauses until exactly one of the target catch events (timer/message/signal) fires. Conditional catches are rejected here. |
 | | **ComplexGateway** | Split: all matching conditions, optional default flow. Join waits for all incoming tokens, or fires early when `activationCondition` is true on the merged variables of arrived tokens. |
 
 ### Intermediate Events
@@ -128,13 +130,19 @@ For full local verification, run the root checks plus module-specific checks fro
 |:---:|---|---|
 | <img src="readme-assets/bpmn-icons/timer-catch-event.svg" width="28"> | **TimerCatchEvent** | Pauses the process until a timer expires. Supports Duration, AbsoluteDate, cron and repeating intervals. Automatically processed by the timer scheduler. |
 | <img src="readme-assets/bpmn-icons/message-catch-event.svg" width="28"> | **MessageCatchEvent** | Pauses the process until a matching message is correlated via `POST /api/message`. |
+| | **SignalCatchEvent** | Pauses the process until a matching signal is broadcast via `POST /api/signal` or thrown inside a process. |
+| | **SignalThrowEvent** | Broadcasts a signal to all waiting catches (process-local) and continues immediately. Does not start new instances. |
+| | **ConditionalCatchEvent** | Pauses the process until the `conditionExpression` evaluates to `true` against the instance variables. Evaluated after every batch that changes variables. |
 | <img src="readme-assets/bpmn-icons/boundary-timer-event.svg" width="28"> | **BoundaryTimerEvent** | Timer event attached to a task (interrupting/non-interrupting). Timer is automatically cancelled when the task completes. |
 | <img src="readme-assets/bpmn-icons/boundary-message-event.svg" width="28"> | **BoundaryMessageEvent** | Message event attached to a task (interrupting/non-interrupting). Waits asynchronously for external messages. |
+| | **BoundarySignalEvent** | Signal event attached to a task (interrupting/non-interrupting). The interrupting variant cancels the activity and its wait states. |
+| | **BoundaryConditionalEvent** | Conditional event attached to a task (interrupting/non-interrupting). Fires on a `false → true` transition of its condition; the non-interrupting variant stays registered. |
 | <img src="readme-assets/bpmn-icons/boundary-error-event.svg" width="28"> | **BoundaryErrorEvent** | Catches BPMN errors (`errorCode`) of a ServiceTask and routes onto an alternative path. |
 | | **BoundaryEscalationEvent** | Catches a BPMN escalation on the attached activity (interrupting or non-interrupting). |
 | | **BoundaryCompensationEvent** | Registered when the attached activity completes successfully. Later executed by a compensation throw/end event. |
 | | **EscalationThrowEvent** | Throws a BPMN escalation. A matching `BoundaryEscalationEvent` handles it; uncaught escalations continue the token. |
 | | **CompensationThrowEvent** | Runs registered compensation handlers (`activityRef` or all in LIFO order) and continues. |
+| | **LinkThrowEvent** | Intermediate link throw: jumps to the successor of the matching link catch (`linkEventDefinition name`) in the same scope. The catch node itself is not materialised. |
 
 ### Activities & Sub-Processes
 
@@ -148,16 +156,19 @@ For full local verification, run the root checks plus module-specific checks fro
 
 | Feature | Description |
 |---------|-------------|
-| **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`). Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, truthy checks. |
+| **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`, `${amount > 100 && approved}`). Supports `&&`/`and`, `\|\|`/`or`, `!`/`not`, `==`, `!=`, `>`, `<`, `>=`, `<=`, arithmetic `+ - * / %`, parentheses, numbers, single- and double-quoted strings with escapes, `true`/`false`/`null`, and dotted/array paths (`order.amount`, `items[0].id`). |
 | **Execution Listeners** | Start/end scripts on nodes (Rhai). Can read and mutate variables. |
 | **Scope Event Listeners** | Timer/message/error event sub-processes at scope level (interrupting/non-interrupting). |
 | **File Variables** | Upload/download of files as process variables via NATS Object Store. |
 | **Message Correlation** | Matching via `messageName` + optional `businessKey`. |
+| **Signal Correlation** | Broadcast via `POST /api/signal`; wakes every waiting `SignalCatchEvent` and starts instances with a `SignalStartEvent`. Broadcast is process-local (single engine node). |
 | **BPMN Error Handling** | ServiceTasks report errors via `bpmnError`. Routing to the matching `BoundaryErrorEvent`. |
 | **Detailed History** | Gap-free event log with diffs, snapshots and actors (`User`, `Engine`, `Timer`, `ServiceWorker`). |
 | **Instance Archival** | Completed instances are archived to a dedicated store. Searchable by definition key, business key, date range, status with pagination. |
-| **Persistent Wait States** | Timers, messages, user/service tasks survive server restarts via NATS KV. |
+| **Persistent Wait States** | Timers, messages, signals, conditional catches and user/service tasks survive server restarts via NATS KV. |
 | **Structured JSON Logging** | Configurable via `tracing-subscriber` with the JSON feature and `RUST_LOG` filter. |
+
+**Conditional flow details.** A complete `${…}` or `#{…}` wrapper is stripped before evaluation; a wrapper in the middle of an expression or a missing closing brace is a syntax error. `&&`/`||` short-circuit, missing variables compare as `false`, and a missing value is not the same as `null`. Invalid `conditionExpression` and `complexGateway` `activationCondition` values are rejected at deploy time with `InvalidDefinition` (source/target node plus character position), so a broken model no longer falls through to the default flow silently.
 
 ### Deviations from the BPMN 2.0 Standard
 
@@ -166,7 +177,7 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
-- **Multi-Instance:** `multiInstanceLoopCharacteristics` is not supported; deploy fails with `InvalidDefinition`.
+- **Multi-Instance (Service Tasks only):** Parallel and sequential `multiInstanceLoopCharacteristics` are supported on `serviceTask` via `collection` + `elementVariable` or `loopCardinality`. In both modes `loopCounter` starts at 1 and the instance advances once after all items complete. Parallel MI creates all pending tasks up front; sequential MI (`isSequential="true"`) keeps exactly one task open and creates the next one after each completion, preserving collection order and the `elementVariable` value per iteration. Multi-instance on any other task type is rejected at deploy time with `InvalidDefinition`.
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
 - **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
@@ -176,8 +187,9 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 
 The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Specific intermediate/boundary events:** `SignalEvent`, `CancelEvent`, `LinkEvent`.
-- **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
+- **Event scope:** Signal events are supported for start, intermediate catch/throw, end and boundary (interrupting/non-interrupting); the broadcast is process-local, so multiple engine nodes do not fan out. Conditional events are supported for intermediate catch and boundary only. A **conditional start event** is rejected at deploy time with `InvalidDefinition` because the engine has no global variable scope to trigger it. An event-based gateway cannot target a conditional catch. Link events are supported: a link throw jumps to the target of its link catch within the same scope; cross-scope links are rejected.
+- **Cancel events & transactions:** `cancelEventDefinition` on end and boundary events is recognised but rejected at deploy time with `InvalidDefinition` — cancel events require a BPMN transaction, and transaction sub-processes are not supported. A `<transaction>` element is rejected with the same reasoning.
+- **Extended sub-processes:** `Ad-Hoc Sub-Process`. (`Transaction Sub-Process` is rejected explicitly; see cancel events above.)
 - **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
 ---
@@ -249,6 +261,7 @@ devbox shell
 |--------|--------|-------|
 | **Build** | `devbox run build` | `cargo build --workspace` |
 | **Test** | `devbox run test` | `cargo test --workspace` |
+| **Coverage** | `devbox run coverage` | `cargo llvm-cov --workspace --all-targets --summary-only` |
 | **Lint** | `devbox run lint` | `cargo clippy --workspace -- -D warnings` |
 | **Format** | `devbox run fmt` | `cargo fmt --all --check` |
 
@@ -354,6 +367,8 @@ Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbo
 |--------|------|-------------|
 | `POST` | `/api/message` | Correlate a message |
 | `GET` | `/api/messages` | List all pending message subscriptions |
+| `POST` | `/api/signal` | Broadcast a signal (`{ signalName, variables? }`) → affected instance IDs |
+| `GET` | `/api/signals` | List all pending signal catches |
 | `GET` | `/api/timers` | List all active timers |
 | `POST` | `/api/timers/process` | Manually process expired timers |
 
@@ -478,7 +493,7 @@ process.on("SIGINT", async () => {
 cd bpmn-ninja-external-task-client
 npm install
 npm run lint     # tsc --noEmit
-npm run test     # vitest run  (77 tests)
+npm run test     # vitest run  (85 tests)
 npm run example  # tsx example/simple-worker.ts
 ```
 
@@ -576,7 +591,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 > Snapshot from 2026-10-24. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
-- Letztes Update (UTC): `2026-10-24T17:23:40.940386+00:00`
+- Letztes Update (UTC): `2026-10-26T09:41:46.234457+00:00`
 - Mutation Score: **68.9%** (caught: 406, missed: 182, timeout: 1)
 - Fuzzing: **0/9 targets** (failed)
 <!-- QUALITY_METRICS:END -->
@@ -585,18 +600,35 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 | Package | Unit | E2E | Total |
 |---------|------|-----|-------|
-| **engine-core** | 267 | 5 | 272 |
-| **bpmn-parser** | 52 | — | 52 |
-| **persistence-nats** | 14 | — | 14 |
+| **engine-core** | 319 | 5 | 324 |
+| **bpmn-parser** | 91 | — | 91 |
+| **persistence-nats** | 20 | — | 20 |
 | **persistence-memory** | 2 | — | 2 |
-| **engine-server** | 20 | 92 | 112 |
+| **engine-server** | 40 | 97 | 137 |
 | **desktop-tauri** | — | 52 | 52 |
-| **bpmn-ninja-external-task-client** | 77 | — | 77 |
-| **Total** | **432** | **149** | **581** |
+| **bpmn-ninja-external-task-client** | 85 | — | 85 |
+| **Total** | **557** | **154** | **711** |
 
 > Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
 
-### engine-core Breakdown (272 tests)
+### Line Coverage
+
+Measured with `cargo llvm-cov --workspace --all-targets` (LLVM source-based coverage, test code excluded).
+CI job **Rust line coverage** runs the same measurement, fails below **75 %** lines and uploads `lcov.info`.
+
+| Crate | Lines | Line coverage |
+|-------|-------|---------------|
+| **engine-core** | 9,868 | 86.7 % |
+| **bpmn-parser** | 1,336 | 74.8 % |
+| **engine-server** | 2,728 | 78.6 % |
+| **persistence-nats** | 805 | 54.0 % |
+| **persistence-memory** | 101 | 100.0 % |
+| **agent-orchestrator** | 115 | 0.0 % (demo binary, no tests) |
+| **Total** | **14,953** | **81.8 %** |
+
+Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
+
+### engine-core Breakdown (324 tests)
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -604,15 +636,19 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `engine::tests::timers_messages` | 25 | Timers, boundary timer/message, message start/catch, event-based gateway races, failed-timer incidents |
 | `engine::tests::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, memory, infinite loops |
 | `engine::tests::call_errors` | 18 | Call activity lifecycle, variable/error propagation, error boundary events, compensation |
-| `engine::tests::gateways` | 18 | XOR/OR/AND forks and joins, defaults, downstream join detection |
+| `engine::tests::gateways` | 20 | XOR/OR/AND forks and joins, defaults, downstream join detection, compound conditions |
 | `engine::tests::start_tasks` | 12 | User/service tasks, conditional routing, lock/retry, BPMN error handling |
 | `engine::tests::topic_index` | 7 | Per-topic lock durations, orphaned entries, restore, incident filtering |
 | `engine::retry_queue::tests` | 7 | Display, shutdown/drain budget, skip missing entities, full-queue drop, persistence incidents |
 | `engine::tests::migration` | 6 | Instance migration: same node ids, node mapping, rejected for completed/suspended instances |
-| `engine::tests::multi_instance` | 6 | Collection and loop-cardinality multi-instance, snapshots, error cases |
+| `engine::tests::multi_instance` | 10 | Parallel and sequential collection/loop-cardinality multi-instance, snapshots, error cases |
 | `engine::tests::scripting` | 6 | Rhai listeners, memory budget, safe failure handling, start/end distinction |
 | `engine::tests::service_incidents` | 4 | Incidents on failed service tasks, `fetch_and_lock` skips incidents, resolve |
-| `engine::boundary::tests` | 3 | No-events, timer boundary setup, message boundary setup |
+| `engine::tests::sub_process` | 4 | Embedded sub-process start-event pass-through, nested sub-process, default-flow completion |
+| `engine::tests::signals` | 9 | Signal broadcast to multiple waiters, signal start, throw/end, boundary interrupting/non-interrupting, event-based gateway, restore |
+| `engine::tests::conditional_events` | 10 | Conditional catch/boundary on variable changes, true-on-entry, direct variable updates, no busy loop, restore |
+| `engine::tests::link_events` | 2 | Link throw jumps to catch target, scope-local resolution |
+| `engine::boundary::tests` | 4 | No-events, timer/message/signal/conditional boundary setup |
 | `engine::tests::call_activity_parallel` | 3 | Parallel call activities, parent completion, missing target |
 | `engine::tests::inclusive_join` | 3 | Inclusive join with partial branches, nested joins |
 | `engine::tests::instance_pagination` | 3 | Offset/limit paging, sort by `started_at` desc, unpaged listing |
@@ -621,30 +657,30 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `engine::tests::xor_merge` | 2 | Exclusive merge with unconditional/default flows |
 | `engine::tests::boundary_restore` | 1 | Boundary timer persists and restores |
 | `history::tests` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
-| `domain::tests` | 21 | ProcessDefinition builder, gateway validation, token serialization, timer definitions |
+| `domain::tests` | 24 | ProcessDefinition builder, gateway validation, signal/conditional element rules, token serialization, timer definitions |
 | `domain::timer::tests` | 15 | Remaining time per timer type, recurring detection, infinite limits |
 | `runtime::instance::tests` | 14 | Audit log limits, file variables, file references, incident caps |
-| `condition::tests` | 5 | Condition evaluation, numeric comparisons, truthy checks |
+| `condition::tests` | 22 | Condition parser/evaluator: precedence, short-circuit, wrappers, escapes, paths, validity |
 | `adapter::in_memory::tests` | 2 | Storage info, history query filters |
 | Integration tests | 5 | BPMN compliance (3), complex gateways (2) |
 
-### bpmn-parser Tests (52 tests)
+### bpmn-parser Tests (91 tests)
 
 | Area | Tests | Coverage |
 |------|-------|----------|
-| Basic parsing | 8 | Simple BPMN, conditional flows, interleaved bpmn-js output, execution listeners, executable-process selection, Camunda attribute precedence |
+| Basic parsing | 10 | Simple BPMN, conditional flows, condition validation (flow and join condition), interleaved bpmn-js output, execution listeners, executable-process selection, Camunda attribute precedence |
 | Gateways | 5 | Parallel, exclusive with default, inclusive, event-based, complex |
-| Events | 5 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, IntermediateMessageThrow |
-| Boundary events | 2 | BoundaryTimer, BoundaryError |
+| Events | 24 | MessageStart, MessageCatch, ErrorEnd, TimerCatch, IntermediateMessageThrow; signal start/catch/throw/end plus missing/unknown `signalRef` rejects; link throw→catch and link-scope rejects; conditional intermediate catch and conditional rejects (missing condition, invalid condition, conditional start, event-based gateway) |
+| Boundary events | 4 | BoundaryTimer, BoundaryError, BoundarySignal, BoundaryConditional |
 | ISO 8601 timers | 8 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, formal expression, timer start, duration/definition rejects |
-| Task types | 8 | ScriptTask, SendTask (incl. `messageRef`), ReceiveTask, BusinessRuleTask, manual task, rejects for empty/generic tasks |
-| Sub-processes | 3 | EventSubProcess, RegularSubProcess, flattening keeps send/inclusive event and catch |
-| Advanced | 4 | TerminateEndEvent, CompensationEvents, EscalationEvents, catch without trigger rejected |
-| Multi-Instance | 7 | Parallel collection/loop cardinality, rejects for sequential, missing/both sources, invalid cardinality |
+| Task types | 9 | ScriptTask, SendTask (incl. `messageRef`), ReceiveTask, BusinessRuleTask, manual task, rejects for empty/generic tasks and business rule without topic |
+| Sub-processes | 12 | EventSubProcess, RegularSubProcess, start-event pass-through/implicit split, rejects for missing/multiple start events, flattening keeps send/inclusive/signal events and catch, sub-process default-flow resolution and unknown-default rejects, conditional catch in sub-process |
+| Advanced | 8 | TerminateEndEvent, CompensationEvents, EscalationEvents, catch without trigger rejected; cancel end/boundary and `<transaction>` rejected; BPMN without cancel events stays valid |
+| Multi-Instance | 9 | Parallel and sequential collection/loop cardinality, rejects for sequential on user tasks, missing/both sources, invalid cardinality |
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (92 tests, 18 files)
+### engine-server E2E Tests (97 tests, 19 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -655,11 +691,12 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
 | `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
 | `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
-| `e2e_history.rs` | 4 | History generation, querying, business key filter, pagination |
+| `e2e_history.rs` | 5 | History generation, querying, business key filter, actor-type filter, pagination |
 | `e2e_instances_page.rs` | 2 | `X-Total-Count` header, full-array response without query parameters |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition (409 without cascade), unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration (same node ids, node mapping, unknown target, orphaned token → 422) |
-| `e2e_monitoring.rs` | 6 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
+| `e2e_monitoring.rs` | 7 | Health, ready (dev / REQUIRE_NATS), info, credential redaction, monitoring stats |
+| `e2e_signals.rs` | 3 | Signal broadcast to waiters, signal start, `GET /api/signals` |
 | `e2e_service_tasks.rs` | 13 | List, FetchAndLock (limits and lock-duration validation), ExtendLock, Complete, failure/retries, BPMN error, conflicts, incidents |
 | `e2e_start_errors.rs` | 8 | Invalid UUID, unknown definition/BPMN ID, timer-start rejection, malformed JSON, 415/413/422 error objects |
 | `e2e_stress.rs` | 2 | Concurrent deployments, concurrent starts (multi-thread) |
@@ -673,15 +710,16 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 |-----------|-------|----------|
 | `app.spec.ts` | 52 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
 
-### bpmn-ninja-external-task-client Tests (77 tests, 3 files)
+### bpmn-ninja-external-task-client Tests (85 tests, 4 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
 | `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
-| `TaskService.test.ts` | 25 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
+| `TaskService.test.ts` | 30 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract, timeout/retry, error paths) |
 | `ExternalTaskClient.test.ts` | 39 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
+| `integration.test.ts` | 3 | Real `engine-server` (via `BPMNINJA_SERVER_BIN`): deploy, fetch/lock, complete, incidents |
 
-Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
+The unit tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers. The integration test is skipped unless `BPMNINJA_SERVER_BIN` points to a built server binary.
 
 ### Code Statistics
 
@@ -693,7 +731,7 @@ Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTT
 | persistence-nats | 5 | 1,282 |
 | persistence-memory | 2 | ~450 |
 | engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 18 | ~2,700 |
+| engine-server (E2E tests) | 19 | ~4,600 |
 | desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
 | desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
