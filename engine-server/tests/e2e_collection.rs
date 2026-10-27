@@ -80,7 +80,7 @@ async fn collection_preserves_order_versions_xml_and_metadata() {
     assert_eq!(commits[0].collaborations[0]["id"], "c");
     let restored = WorkflowEngine::new();
     for commit in &commits {
-        restored.restore_definition_collection(commit);
+        restored.restore_definition_collection(commit).unwrap();
     }
     assert_eq!(restored.list_definitions().await.len(), 4);
     for (_, id, version, _) in engine.list_definitions().await {
@@ -331,5 +331,64 @@ async fn jetstream_rejects_oversized_commit_without_partial_publication() {
             .unwrap()
             .is_empty()
     );
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn jetstream_restores_routes_pinned_to_the_original_pool_versions() {
+    let (mut server, persistence) = nats().await;
+    let engine = Arc::new(WorkflowEngine::new().with_persistence(persistence.clone()));
+    let base = serve(
+        engine.clone(),
+        Some(persistence.clone()),
+        ModelCheckMode::Off,
+    )
+    .await;
+    let input = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" id="d"><message id="m" name="order"/>
+    <process id="sender" isExecutable="true"><startEvent id="ss"/><sendTask id="send" messageRef="m"/><endEvent id="se"/><sequenceFlow id="sf1" sourceRef="ss" targetRef="send"/><sequenceFlow id="sf2" sourceRef="send" targetRef="se"/></process>
+    <process id="target" isExecutable="true"><startEvent id="receive"><messageEventDefinition messageRef="m"/></startEvent><userTask id="work"/><endEvent id="te"/><sequenceFlow id="tf1" sourceRef="receive" targetRef="work"/><sequenceFlow id="tf2" sourceRef="work" targetRef="te"/></process>
+    <collaboration id="c"><participant id="ps" processRef="sender"/><participant id="pt" processRef="target"/><messageFlow id="flow" sourceRef="send" targetRef="receive"/></collaboration></definitions>"#;
+    let (status, first) = deploy(&base, input).await;
+    assert_eq!(status, 200, "{first}");
+    let (status, second) = deploy(&base, input).await;
+    assert_eq!(status, 200, "{second}");
+    let source = first["processes"][0]["definition_key"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let target: uuid::Uuid = first["processes"][1]["definition_key"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_ne!(
+        first["processes"][1]["definition_key"],
+        second["processes"][1]["definition_key"]
+    );
+    let persistence = server.restart().await;
+    let mut restored = WorkflowEngine::new();
+    engine_server::StartupCoordinator::new(persistence)
+        .restore(&mut restored, &mut HashMap::new())
+        .await
+        .unwrap();
+    let plans = restored
+        .plan_internal_messages(
+            source,
+            "send",
+            "order-1",
+            HashMap::from([("payload".into(), json!({"total":5}))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].route.target.definition_key, target);
+    assert_eq!(plans[0].route.target.version, 1);
+    assert_eq!(plans[0].route.message_id, "m");
+    assert_eq!(
+        plans[0].receiver,
+        engine_core::PlannedMessageReceiver::Start
+    );
+    assert!(restored.list_instances().await.is_empty());
     engine.shutdown().await;
 }

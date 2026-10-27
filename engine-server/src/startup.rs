@@ -35,7 +35,7 @@ impl StartupCoordinator {
         let collections = self.nats.list_definition_collections().await?;
         let mut definitions = self.restore_definitions(engine, deployed_xml).await;
         for collection in collections {
-            engine.restore_definition_collection(&collection);
+            engine.restore_definition_collection(&collection)?;
             for definition in &collection.definitions {
                 if !collection.deleted.contains(&definition.key) {
                     deployed_xml.insert(definition.key.to_string(), collection.xml.clone());

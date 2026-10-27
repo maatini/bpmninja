@@ -126,9 +126,11 @@ impl WorkflowEngine {
             collaborations,
             deleted: Vec::new(),
         };
+        let routes = super::message_routing::compile_routes(&collection)?;
         if let Some(persistence) = &self.persistence {
             persistence.save_definition_collection(&collection).await?;
         }
+        self.install_routes(routes);
         // No await between durable commit and publication, including cancellation.
         self.definitions
             .insert_collection(collection.definitions.clone());
@@ -146,7 +148,12 @@ impl WorkflowEngine {
     }
 
     /// Startup installs persisted identities and versions without redeploying them.
-    pub fn restore_definition_collection(&self, collection: &crate::DefinitionCollection) {
+    pub fn restore_definition_collection(
+        &self,
+        collection: &crate::DefinitionCollection,
+    ) -> EngineResult<()> {
+        let routes = super::message_routing::compile_routes(collection)?;
+        self.install_routes(routes);
         self.definitions.insert_collection(
             collection
                 .definitions
@@ -155,6 +162,7 @@ impl WorkflowEngine {
                 .cloned()
                 .collect(),
         );
+        Ok(())
     }
 
     /// Assigns version and key to a definition without side effects (pure, testable).

@@ -21,3 +21,8 @@ pub use scripting::*;
 pub use domain as model;
 pub use domain::timer as timer_definition;
 pub use port as persistence;
+
+pub use engine::{
+    DeployedMessageEndpoint, InternalMessagePlan, PinnedMessageRoute, PlannedMessageReceiver,
+    ReceiverUnavailable,
+};

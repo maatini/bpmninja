@@ -1,7 +1,7 @@
 # Graph Report - bpmninja  (2026-10-27)
 
 ## Corpus Check
-- 418 files · ~549,215 words
+- 418 files · ~549,332 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 8, .toml 2, .xml 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f887b2e9`
+- Built from commit: `9f5fbc9f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -288,16 +288,16 @@
 10. `ProcessDefinitionBuilder` - 57 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Invariants` --references--> `TaskService`  [INFERRED]
-  docs/knowledge-base/modules/external-task-client/responsibility.md → bpmn-ninja-external-task-client/src/TaskService.ts
-- `In-Process-Task-Handler (`engine/task_handler.rs`)` --references--> `TaskHandler`  [INFERRED]
-  docs/knowledge-base/modules/engine-core/interfaces.md → bpmn-ninja-external-task-client/src/types.ts
-- `⚠️ Playwright tests use specific selectors` --references--> `InstancesPage()`  [INFERRED]
-  docs/knowledge-base/modules/desktop-tauri/gotchas.md → desktop-tauri/src/features/instances/InstancesPage.tsx
-- `persistence-nats (Production)` --references--> `definitions()`  [INFERRED]
-  docs/knowledge-base/modules/persistence/responsibility.md → desktop-tauri/src/features/modeler/properties/EventSubprocessPropertiesProvider.ts
-- `Grenzen und Authentifizierung` --references--> `ProcessInstance`  [INFERRED]
-  docs/camunda7-workers.md → desktop-tauri/src/shared/types/engine.ts
+- `Core Structs (re-exported via `engine-core::*`)` --references--> `FileReference`  [INFERRED]
+  docs/knowledge-base/modules/engine-core/interfaces.md → desktop-tauri/src/shared/types/engine.ts
+- `9. History & Audit Trail` --references--> `HistoryEntry`  [INFERRED]
+  docs/architecture.md → desktop-tauri/src/shared/types/engine.ts
+- `History Types` --references--> `HistoryEntry`  [INFERRED]
+  docs/knowledge-base/modules/engine-core/interfaces.md → desktop-tauri/src/shared/types/engine.ts
+- `Signale (`engine/signal.rs`, X1)` --references--> `PendingMessageCatch`  [INFERRED]
+  docs/knowledge-base/modules/engine-core/interfaces.md → desktop-tauri/src/shared/types/engine.ts
+- `4f — BPMN-2.0.2-Vollabdeckung (Vorschlag, 2026-10-12)` --references--> `PendingMessageCatch`  [INFERRED]
+  improvements.md → desktop-tauri/src/shared/types/engine.ts
 
 ## Import Cycles
 - 2-file cycle: `engine-server/src/server/camunda.rs -> engine-server/src/server/camunda/variables.rs -> engine-server/src/server/camunda.rs`
@@ -1173,7 +1173,7 @@ Cohesion: 0.50
 Nodes (4): Aufruf, Explizite Conditional-Starts (X2c), Speicherung und Wiederanlauf, Wiederholung und Versionsbindung
 
 ## Knowledge Gaps
-- **231 isolated node(s):** `agent-orchestrator`, `@typespec/compiler`, `@typespec/http`, `@typespec/rest`, `@typespec/openapi3` (+226 more)
+- **231 isolated node(s):** `Enforce`, `Off`, `Warn`, `Inconclusive`, `Passed` (+226 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1728 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **64 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1181,16 +1181,16 @@ Nodes (4): Aufruf, Explizite Conditional-Starts (X2c), Speicherung und Wiederanl
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `X9 — Event subprocesses` connect `X9 — Event subprocesses` to `README.md`, `ExternalTaskClient`?**
-  _High betweenness centrality (0.295) - this node is a cross-community bridge._
+  _High betweenness centrality (0.287) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `cn()` (e.g. with `CSS & Theming Conventions` and `Key Files`) actually correct?**
   _`cn()` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `agent-orchestrator`, `@typespec/compiler`, `@typespec/http` to the rest of the system?**
+- **What connects `Enforce`, `Off`, `Warn` to the rest of the system?**
   _231 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `NatsPersistence` be split into smaller, more focused modules?**
   _Cohesion score 0.14982578397212543 - nodes in this community are weakly interconnected._
 - **Why does `reject_unsupported_elements()` connect `ProcessDefinitionBuilder` to `src/data.rs`, `X9 — Event subprocesses`?**
-  _High betweenness centrality (0.293) - this node is a cross-community bridge._
+  _High betweenness centrality (0.285) - this node is a cross-community bridge._
 - **Should `InMemoryPersistence` be split into smaller, more focused modules?**
   _Cohesion score 0.10404040404040404 - nodes in this community are weakly interconnected._
 - **Why does `Starting point before X9a` connect `X9 — Event subprocesses` to `ProcessDefinitionBuilder`?**
-  _High betweenness centrality (0.293) - this node is a cross-community bridge._
+  _High betweenness centrality (0.285) - this node is a cross-community bridge._

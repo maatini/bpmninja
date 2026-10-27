@@ -38,6 +38,11 @@ mod instance_ops;
 pub(crate) mod instance_store;
 mod loops;
 mod message_processor;
+mod message_routing;
+pub use message_routing::{
+    DeployedMessageEndpoint, InternalMessagePlan, PinnedMessageRoute, PlannedMessageReceiver,
+    ReceiverUnavailable,
+};
 mod persistence_ops;
 mod process_start;
 pub(crate) mod registry;
@@ -55,6 +60,8 @@ pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
+    pub(crate) internal_routes:
+        std::sync::RwLock<std::collections::HashMap<Uuid, Vec<PinnedMessageRoute>>>,
     pub(crate) deployment_lock: tokio::sync::Mutex<()>,
     pub(crate) definitions: registry::DefinitionRegistry,
     pub(crate) instances: crate::engine::instance_store::InstanceStore,
@@ -105,6 +112,7 @@ impl WorkflowEngine {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
 
         Self {
+            internal_routes: std::sync::RwLock::new(std::collections::HashMap::new()),
             deployment_lock: tokio::sync::Mutex::new(()),
             definitions: registry::DefinitionRegistry::new(),
             instances: crate::engine::instance_store::InstanceStore::new(),

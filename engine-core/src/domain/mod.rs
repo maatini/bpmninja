@@ -1,3 +1,5 @@
+pub mod collaboration;
+pub use collaboration::{Collaboration, MessageEndpoint, MessageFlow, Participant};
 pub mod data;
 pub use data::{ActivityMappings, DataMapping, DataScope, MappingValue};
 pub mod definition;
