@@ -580,7 +580,7 @@ pub struct AppState {
 The server spawns a Tokio background task that sleeps until the next timer is due and then calls `engine.process_timers()`:
 
 ```rust
-// main.rs — event-driven timer scheduler (lock-free via Arc<WorkflowEngine>)
+// main.rs — event-driven timer scheduler (shared Arc<WorkflowEngine>)
 let max_idle = Duration::from_millis(timer_interval_ms); // TIMER_INTERVAL_MS, default 1000
 loop {
     tokio::select! {

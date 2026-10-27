@@ -1,7 +1,7 @@
 # Graph Report - bpmninja  (2026-10-27)
 
 ## Corpus Check
-- 421 files · ~551,709 words
+- 421 files · ~551,780 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 8, .toml 2, .xml 2)
 
