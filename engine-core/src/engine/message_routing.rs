@@ -181,8 +181,15 @@ pub(super) fn compile_routes(
     Ok(routes)
 }
 impl WorkflowEngine {
-    pub(super) fn install_routes(&self, routes: Vec<PinnedMessageRoute>) {
+    pub(super) fn install_routes(
+        &self,
+        collection: &DefinitionCollection,
+        routes: Vec<PinnedMessageRoute>,
+    ) {
         let mut index = self.internal_routes.write().unwrap();
+        for definition in &collection.definitions {
+            index.remove(&definition.key);
+        }
         let sources: HashSet<_> = routes.iter().map(|r| r.source.definition_key).collect();
         for source in sources {
             index.insert(
@@ -206,7 +213,6 @@ impl WorkflowEngine {
         business_key: &str,
         variables: HashMap<String, Value>,
     ) -> EngineResult<Vec<InternalMessagePlan>> {
-        let _guard = self.deployment_lock.lock().await;
         if business_key.trim().is_empty() {
             return Err(invalid("a nonempty business key is required"));
         }
@@ -306,6 +312,14 @@ impl WorkflowEngine {
                 .and_then(|state| state.gateway_waits.get(&catch.token_id));
             let gateway_matches = gateway.is_some_and(|group| {
                 group.gateway == token.current_node
+                    && matches!(
+                        target.nodes.get(&group.gateway),
+                        Some(BpmnElement::EventBasedGateway)
+                    )
+                    && target
+                        .next_nodes(&group.gateway)
+                        .iter()
+                        .any(|flow| flow.target == catch.node_id)
                     && group.winner.is_none()
                     && !group.cleaned
                     && group.jobs.get(&catch.id) == Some(&catch.node_id)

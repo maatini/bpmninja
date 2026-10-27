@@ -12,8 +12,8 @@ because process-based lookup would otherwise be ambiguous.
 
 `parse_bpmn_xml` retains its executable-first, first-process fallback behavior.
 The collection API requires `isExecutable="true"`; absent or false execution
-flags do not opt a pool into deployment. Current deployment endpoints still
-select one process.
+flags do not opt a pool into deployment. The legacy deployment endpoint selects
+one process; the collection endpoint deploys all explicitly executable pools.
 
 ## Participant and route validation (2026-10-17)
 
@@ -105,15 +105,55 @@ corrupt-record startup failure. Strict Clippy passed for `engine-core`,
 warnings`. TypeSpec compilation, formatting, diff checks and AST-only
 `graphify update .` also passed.
 
+## Version-pinned routing preflight (2026-10-27)
+
+Collaboration types now live in `engine-core` and remain re-exported from
+`bpmn-parser`, preserving the parser API and serialized metadata. Collection
+commit and restoration compile that metadata into `PinnedMessageRoute` values.
+Both endpoints retain the collection, collaboration, flow and message identities
+plus exact definition key/version, participant, process and element IDs. Invalid
+stored routes fail restoration before the affected collection is published;
+invalid routes supplied directly to the engine fail before persistence.
+
+`WorkflowEngine::plan_internal_messages(source_definition, source_element,
+business_key, variables)` performs read-only receiver preflight. This engine API
+is deliberately separate from public `correlate_message` broadcasts. Its contract:
+
+- The source must be a deployed send element. Only its own collection's explicit
+  flows participate. Routes stay pinned when newer pool versions are deployed;
+  an unrouted/legacy send produces an empty plan, never a name broadcast.
+- A nonempty business key is mandatory and matched exactly against instance
+  metadata. Variables are an explicit sender output snapshot, copied independently
+  per flow. They are payload, not a substitute for correlation metadata. Target
+  input mappings belong to the later delivery step.
+- Each explicit outgoing flow yields one plan in document order. Multiple flows
+  are explicit fan-out; multiple matching catches for one flow are ambiguous.
+  The planner never selects an arbitrary receiver or broadcasts to all matches.
+- Message starts select the exact pinned start element without creating an
+  instance. Existing catches require the exact target definition, element,
+  message name, business key and live token occurrence. Event-gateway alternatives
+  and message boundaries are recognized; signal catches, suspended/completed,
+  missing/archived and stale receivers are excluded.
+- Each plan contains `Start`, one exact `Catch` identity (instance/catch/token),
+  or an explicit unavailable reason: deleted definition, no matching catch, or
+  ambiguous catches with their count. A deleted pool never falls back to a newer
+  definition or another pool sharing the message name.
+
+Plans are observations, not reservations or durable deliveries. Receiver state
+can change after preflight. No subscriptions are consumed, instances started,
+sender variables mutated, or messages automatically sent. The next increment
+must persist the sender outbox and claim/revalidate exact receiver occurrences
+with durable deduplication. It must retain unavailable deliveries and avoid
+partially dispatching a fan-out solely on a preflight result.
+
 ## Remaining implementation
 
 1. Participant/message-flow parsing and collection deployment are implemented
    within the contracts above. Expand batch size/idempotency and multi-writer
    support separately if required.
-2. Use the persisted version-pinned metadata for internal routing. Internal sends
-   must target the intended pool and catch/start element; public message-name
-   broadcast is insufficient. Specify correlation, payload mapping, multiple
-   receivers, unavailable receivers, and version selection explicitly.
+2. Route compilation and receiver preflight are implemented above. Connect these
+   version-pinned plans to durable delivery; actual targeted catch/start execution
+   remains gated on the delivery records and receiver claims below.
 3. Use durable delivery records and receiver deduplication before enabling
    automatic sends. Recovery must cover sender commit before delivery, receiver
    commit before acknowledgment, repeated recovery, and archived receivers.

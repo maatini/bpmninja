@@ -130,7 +130,7 @@ impl WorkflowEngine {
         if let Some(persistence) = &self.persistence {
             persistence.save_definition_collection(&collection).await?;
         }
-        self.install_routes(routes);
+        self.install_routes(&collection, routes);
         // No await between durable commit and publication, including cancellation.
         self.definitions
             .insert_collection(collection.definitions.clone());
@@ -153,7 +153,7 @@ impl WorkflowEngine {
         collection: &crate::DefinitionCollection,
     ) -> EngineResult<()> {
         let routes = super::message_routing::compile_routes(collection)?;
-        self.install_routes(routes);
+        self.install_routes(collection, routes);
         self.definitions.insert_collection(
             collection
                 .definitions
