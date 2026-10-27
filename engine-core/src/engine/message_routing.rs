@@ -190,16 +190,11 @@ impl WorkflowEngine {
         for definition in &collection.definitions {
             index.remove(&definition.key);
         }
-        let sources: HashSet<_> = routes.iter().map(|r| r.source.definition_key).collect();
-        for source in sources {
-            index.insert(
-                source,
-                routes
-                    .iter()
-                    .filter(|r| r.source.definition_key == source)
-                    .cloned()
-                    .collect(),
-            );
+        for route in routes {
+            index
+                .entry(route.source.definition_key)
+                .or_default()
+                .push(route);
         }
     }
     /// Side-effect-free preflight for explicit outgoing flows. A nonempty exact
@@ -293,6 +288,13 @@ impl WorkflowEngine {
                         | InstanceState::Completed
                         | InstanceState::CompletedWithError { .. }
                 )
+            {
+                continue;
+            }
+            // A recovered old job may refer to the same token and node after
+            // a loop revisit. The single-token wait stores the current catch ID.
+            if instance.tokens.len() == 1
+                && matches!(instance.state, InstanceState::WaitingOnMessage { message_id } if message_id != catch.id)
             {
                 continue;
             }

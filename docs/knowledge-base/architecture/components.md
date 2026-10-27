@@ -11,7 +11,7 @@ flowchart TD
     end
 
     subgraph "engine-server (Axum)"
-        REST["REST Routes<br>46 endpoints"]
+        REST["REST Routes<br>single + collection deployment"]
         SSE["SSE Handler<br>/api/events"]
         Logs["Log API<br>/api/logs"]
         Metrics["Prometheus<br>/metrics"]
@@ -20,7 +20,8 @@ flowchart TD
 
     subgraph "engine-core"
         Engine["WorkflowEngine<br>orchestrates everything"]
-        DefReg["DefinitionRegistry<br>Arc<DashMap>"]
+        Routing["message_routing<br>version-pinned receiver preflight"]
+        DefReg["DefinitionRegistry<br>Arc&lt;std RwLock&lt;HashMap&gt;&gt;"]
         InstStore["InstanceStore<br>DashMap + per-instance RwLock"]
         Executor["Executor<br>run_instance_batch + execute_step"]
         Gateways["Gateway Routing<br>XOR/AND/OR/EventBased/Complex"]
@@ -34,12 +35,12 @@ flowchart TD
 
     subgraph Persistence
         WP["WorkflowPersistence trait<br>port/persistence.rs"]
-        NATS["persistence-nats<br>8 KV buckets + 2 Object Stores + Streams"]
+        NATS["persistence-nats<br>KV + Object Stores + Streams"]
         Mem["persistence-memory<br>HashMap + Vec"]
     end
 
     subgraph Parser
-        BpmnParser["bpmn-parser<br>quick-xml → ProcessDefinition"]
+        BpmnParser["bpmn-parser<br>processes + validated collaboration metadata"]
     end
 
     Desktop -- HTTP + SSE --> REST
@@ -47,6 +48,7 @@ flowchart TD
     Message -- POST /api/message --> REST
     REST --> State
     State --> Engine
+    Engine --> Routing
     Engine --> DefReg
     Engine --> InstStore
     Engine --> Executor
@@ -72,6 +74,25 @@ flowchart TD
 - Tokens exist in exactly one place: `ProcessInstance.tokens: HashMap<Uuid, Token>`
 - Pending tasks hold only `token_id: Uuid`, never copies of tokens
 - All mutations go through `&self` (no `&mut self`) — interior mutability via Arc + DashMap/RwLock
+
+### Definition Publication and Collection Recovery
+
+**Owns:** Serialized version allocation and deploy/delete operations; atomic
+publication of collection definitions under a short registry write lock.
+**Key files:** `engine/definition_ops.rs`, `engine/registry.rs`, `port/persistence.rs`.
+**Contract:** Compile all routes and durably commit one complete collection before
+publishing any pool. Restore exact identities/versions, preserve tombstones and
+reject invalid collection metadata. Collection commits bypass background retries.
+
+### Internal Message Routing Preflight
+
+**Owns:** Typed `PinnedMessageRoute` values and read-only receiver selection by
+source collection, target definition/version/element and exact business key.
+**Key files:** `domain/collaboration.rs`, `engine/message_routing.rs`.
+**Contract:** Explicit outgoing flows fan out in document order; each has a start,
+exact catch identity or explicit unavailable/ambiguous result. Planning reserves
+and consumes nothing. Automatic sends require durable outbox and receiver claims.
+See the [X12 contract](../../x12-collaboration-plan.md).
 
 ### Executor (engine-core/src/engine/executor/)
 **Owns:** Token execution loop, `NextAction` dispatch, instance completion logic.

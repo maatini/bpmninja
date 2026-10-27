@@ -143,8 +143,24 @@ Plans are observations, not reservations or durable deliveries. Receiver state
 can change after preflight. No subscriptions are consumed, instances started,
 sender variables mutated, or messages automatically sent. The next increment
 must persist the sender outbox and claim/revalidate exact receiver occurrences
-with durable deduplication. It must retain unavailable deliveries and avoid
-partially dispatching a fan-out solely on a preflight result.
+with durable deduplication. Every sender execution needs a distinct durable
+occurrence identity, including sequence-flow revisits of the same send node.
+It must retain unavailable deliveries and avoid partially dispatching a fan-out
+solely on a preflight result.
+
+Routing verification (2026-10-27): **545 tests passed**: 410 engine-core,
+99 parser, 29 server library and seven collection integration tests. The eight
+new routing unit tests cover version pinning, exact business key/pool/element
+selection, payload snapshots and serialization, explicit fan-out, unavailable
+and ambiguous receivers, deleted definitions, stale recovered jobs, event-gateway
+and boundary occurrences, and invalid-metadata failure before commit/restore.
+A new isolated real JetStream test redeploys both pools, restarts the broker from
+disk and confirms that the original sender still selects its original receiver
+version. The final focused routing rerun also passed all eight tests. Strict
+Clippy (`--all-targets -- -D warnings`) passed for engine-core, bpmn-parser,
+persistence-nats and engine-server. TypeSpec compilation, formatting, diff checks
+and AST-only graphify update passed. No REST schema change was needed for this
+engine-only preflight API.
 
 ## Remaining implementation
 

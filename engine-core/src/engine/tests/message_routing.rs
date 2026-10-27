@@ -157,11 +157,21 @@ async fn exact_catch_key_business_key_and_element_are_required() {
     other.id = "unrelated".into();
     let (other, _) = engine.deploy_definition(other).await;
     wait(&engine, other, "order-1").await;
+    let mut stale = engine
+        .pending_message_catches
+        .iter()
+        .find(|c| c.instance_id == intended)
+        .unwrap()
+        .value()
+        .clone();
+    stale.id = Uuid::new_v4();
+    let stale_id = stale.id;
+    engine.pending_message_catches.insert(stale.id, stale);
     let plans = plan(&engine, &old).await;
     assert!(
-        matches!(plans[0].receiver, Receiver::Catch { instance_id, .. } if instance_id == intended)
+        matches!(plans[0].receiver, Receiver::Catch { instance_id, catch_id, .. } if instance_id == intended && catch_id != stale_id)
     );
-    assert_eq!(engine.pending_message_catches.len(), 4); // planning consumes nothing
+    assert_eq!(engine.pending_message_catches.len(), 5); // planning consumes nothing
     assert!(
         engine
             .plan_internal_messages(key(&old, "sender"), "send", " ", HashMap::new())

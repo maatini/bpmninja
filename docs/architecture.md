@@ -1,7 +1,7 @@
 # bpmninja — Architecture Documentation
 
 > BPMN 2.0 workflow engine in Rust, token-based execution
-> As of: 2026-10-12 (synced with code; v0.7.24)
+> As of: 2026-10-27 (collection deployment and routing preflight; v0.7.24)
 
 ---
 
@@ -9,16 +9,16 @@
 
 The project is a Cargo workspace with 6 crates, plus a Tauri desktop app, a TypeScript worker client, an API spec and a fuzz workspace:
 
-| Crate | LoC (incl. tests) | Purpose |
-|---|---|---|
-| **engine-core** | ~19,100 | Pure state machine, token execution, gateways, scripting, history |
-| **bpmn-parser** | ~3,040 | BPMN 2.0 XML → `ProcessDefinition` (quick-xml + serde) |
-| **persistence-nats** | ~1,440 | `WorkflowPersistence` via NATS JetStream KV / Object Store / Streams |
-| **persistence-memory** | ~120 | Re-export of `engine_core::adapter::InMemoryPersistence` |
-| **engine-server** | ~6,740 | Axum REST API, SSE, timer scheduler, auth/CORS, startup restore |
-| **agent-orchestrator** | ~130 | One-shot demo worker (not a production loop) |
-| **desktop-tauri** | ~9,250 TS + ~1,130 Rust | Tauri + React + Tailwind + bpmn-js (thin client) |
-| **external-task-client** | ~1,070 (+ tests) | TypeScript Camunda-style worker SDK |
+| Component | Purpose |
+|---|---|
+| **engine-core** | Token execution, shared collaboration types, atomic definition publication, receiver preflight, scripting and history |
+| **bpmn-parser** | BPMN XML → single process, executable process collection and validated collaboration metadata |
+| **persistence-nats** | `WorkflowPersistence` adapter using JetStream KV, Object Stores and Streams |
+| **persistence-memory** | Re-export of `engine_core::adapter::InMemoryPersistence` for tests/local development |
+| **engine-server** | Axum REST, per-pool model checking, SSE, timers, auth/CORS and startup restoration |
+| **agent-orchestrator** | One-shot demo external worker |
+| **desktop-tauri** | Tauri + React + bpmn-js thin client; current deploy workflow uses the single-process endpoint |
+| **bpmn-ninja-external-task-client** | TypeScript external service-task worker SDK |
 
 ### Workspace Dependency Graph
 
@@ -59,9 +59,9 @@ graph TD
 graph TB
     subgraph "engine-core/src"
         LIB["lib.rs<br/><i>public exports + legacy aliases</i>"]
-        DOMAIN["domain/<br/>definition, element (29 variants),<br/>token, flow, timer, listener, error"]
+        DOMAIN["domain/<br/>definition, element, collaboration,<br/>token, flow, timer, listener, error"]
         RUNTIME["runtime/<br/>ProcessInstance, InstanceState,<br/>NextAction, Pending*, stats"]
-        PORT["port/persistence.rs<br/>WorkflowPersistence (35 async fns)"]
+        PORT["port/persistence.rs<br/>WorkflowPersistence + DefinitionCollection"]
         ADAPTER["adapter/in_memory.rs<br/>InMemoryPersistence"]
         HIST["history/<br/>HistoryEntry, DiffSnapshot, diffs"]
         SCRIPT["scripting/runner.rs<br/>Rhai sandbox"]
@@ -75,6 +75,7 @@ graph TB
             BOUND["boundary.rs"]
             OPS["definition_ops / instance_ops /<br/>process_start / user_task / service_task"]
             PROC["timer_processor / message_processor"]
+            ROUTES["message_routing.rs<br/>pinned routes + read-only receiver plans"]
             IDX["topic_index / timer_index<br/>(secondary indexes)"]
             STORE["registry.rs / instance_store.rs"]
             PERSIST["persistence_ops.rs + retry_queue.rs"]
@@ -92,6 +93,8 @@ graph TB
     GW --> COND
     MOD --> OPS
     MOD --> PROC
+    MOD --> ROUTES
+    ROUTES --> DOMAIN
     MOD --> IDX
     MOD --> STORE
     MOD --> PERSIST
@@ -104,11 +107,13 @@ graph TB
 
 ### 2.2 WorkflowEngine — Component Breakdown (K2)
 
-The engine is split into focused components:
+The engine is split into focused components. This excerpt shows selected fields; the complete struct is in [engine/mod.rs](../engine-core/src/engine/mod.rs):
 
 ```rust
 pub struct WorkflowEngine {
-    pub(crate) definitions:              DefinitionRegistry,          // Arc<DashMap<Uuid, Arc<ProcessDefinition>>>
+    pub(crate) deployment_lock:          tokio::sync::Mutex<()>,
+    pub(crate) internal_routes:          std::sync::RwLock<HashMap<Uuid, Vec<PinnedMessageRoute>>>,
+    pub(crate) definitions:              DefinitionRegistry,          // Arc<std::sync::RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>
     pub(crate) instances:                InstanceStore,               // Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>
     pub(crate) pending_user_tasks:       Arc<DashMap<Uuid, PendingUserTask>>,
     pub(crate) pending_service_tasks:    Arc<DashMap<Uuid, PendingServiceTask>>,
@@ -120,14 +125,16 @@ pub struct WorkflowEngine {
     pub(crate) persistence_error_count:  Arc<AtomicU64>,
     pub(crate) retry_tx:                 Option<RetryQueueTx>,        // bounded mpsc
     pub(crate) retry_worker_handle:      Mutex<Option<JoinHandle<()>>>,
-    pub(crate) script_config:            ScriptConfig,
+    pub(crate) scripts:                  ScriptRunner,
     pub(crate) event_tx:                 broadcast::Sender<EngineEvent>,
 }
 ```
 
 | Component | Struct | Locking Strategy |
 |---|---|---|
-| **DefinitionRegistry** | `Arc<DashMap<Uuid, Arc<ProcessDefinition>>>` | Sharded map, definitions immutable after deploy |
+| **DefinitionRegistry** | `Arc<std::sync::RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>` | Short synchronous read/write guards; all definitions in a collection become visible in one write |
+| **Deployment serialization** | `tokio::sync::Mutex<()>` | Serializes single/collection version allocation and deletion |
+| **Internal route index** | `std::sync::RwLock<HashMap<Uuid, Vec<PinnedMessageRoute>>>` | Routes indexed by immutable source definition key; cloned before async receiver inspection |
 | **InstanceStore** | `Arc<DashMap<Uuid, Arc<RwLock<ProcessInstance>>>>` | Sharded map + per-instance `RwLock` (K1) |
 | **PendingTask queues** | `Arc<DashMap<Uuid, Pending*>>` | Sharded, concurrent O(1) ops |
 | **Secondary indexes** | `TopicIndex`, `TimerDueIndex` | Derived from the queues (SSOT stays in the DashMaps) |
@@ -206,46 +213,31 @@ classDiagram
 
 ### 3.2 BPMN Element Types
 
-29 variants in `engine-core/src/domain/element.rs` (closed enum, exhaustive matching):
+The closed `BpmnElement` enum is defined in
+[domain/element.rs](../engine-core/src/domain/element.rs). It includes plain,
+message, timer, signal and conditional starts; task and gateway execution;
+message, signal and conditional catches; boundary events; and subprocess nodes.
+The parser's [element matrix](knowledge-base/modules/bpmn-parser/element-matrix.md)
+is the source for supported XML forms and explicit rejection rules.
 
-```rust
-pub enum BpmnElement {
-    // Start / end
-    StartEvent,
-    TimerStartEvent(TimerDefinition),             // Duration | AbsoluteDate | CronCycle | RepeatingInterval
-    MessageStartEvent { message_name: String },
-    EndEvent,
-    TerminateEndEvent,
-    ErrorEndEvent { error_code: String },
-    EscalationEndEvent { escalation_code: String },
-    CompensationEndEvent { activity_ref: Option<String> },
-    // Tasks (multi_instance is always None — MI is rejected at parse time)
-    ServiceTask { topic: String, multi_instance: Option<MultiInstanceDef> },
-    UserTask(String),                             // assignee
-    ScriptTask { script: String, multi_instance: Option<MultiInstanceDef> },
-    SendTask { message_name: String, multi_instance: Option<MultiInstanceDef> },
-    // Gateways
-    ExclusiveGateway { default: Option<String> },
-    InclusiveGateway,
-    ParallelGateway,
-    EventBasedGateway,
-    ComplexGateway { join_condition: Option<String>, default: Option<String> },
-    // Intermediate / boundary events
-    TimerCatchEvent(TimerDefinition),
-    MessageCatchEvent { message_name: String },
-    EscalationThrowEvent { escalation_code: String },
-    CompensationThrowEvent { activity_ref: Option<String> },
-    BoundaryTimerEvent { attached_to: String, timer: TimerDefinition, cancel_activity: bool },
-    BoundaryMessageEvent { attached_to: String, message_name: String, cancel_activity: bool },
-    BoundaryErrorEvent { attached_to: String, error_code: Option<String> },
-    BoundaryEscalationEvent { attached_to: String, escalation_code: Option<String>, cancel_activity: bool },
-    BoundaryCompensationEvent { attached_to: String },
-    // Sub-processes
-    CallActivity { called_element: String },
-    EmbeddedSubProcess { start_node_id: String },  // flattened at parse time
-    SubProcessEndEvent { sub_process_id: String }, // synthetic end event
-}
-```
+Multi-instance and standard-loop characteristics are runtime-supported on task
+and call-activity nodes. Event-subprocess subscriptions, activation generations
+and conditional waits are stored with instance state; see [event subprocesses](event-subprocesses.md),
+[conditional catches](conditional-catches.md), [boundaries](boundary-conditional-catches.md)
+and [starts](conditional-starts.md).
+
+### 3.3 Collaboration and Routing Model
+
+`domain/collaboration.rs` owns `Collaboration`, `Participant`, `MessageFlow` and
+`MessageEndpoint`; `bpmn-parser` re-exports the same types. `CollaborationDocument`
+contains executable definitions plus validated metadata. `DefinitionCollection`
+is the persistence commit record: collection UUID, flattened definitions with
+exact keys/versions, original XML, collaboration metadata and deleted-member IDs.
+
+`compile_routes` resolves metadata only against its committed collection, producing
+`PinnedMessageRoute` values with deployed source/target endpoints. Each endpoint
+retains participant, process, element, definition key and version. Compilation
+runs before persistence and again before publishing a restored collection.
 
 ---
 
@@ -367,12 +359,14 @@ Inclusive join is a taken-path barrier: after a matching split (`find_downstream
 
 ### 5.1 WorkflowPersistence Trait
 
-`engine-core/src/port/persistence.rs` defines **35 async methods**, grouped as:
+`engine-core/src/port/persistence.rs` defines the persistence port, grouped as:
 
 | Group | Methods |
 |---|---|
 | Tokens | `save_token`, `load_tokens`, `delete_token` |
 | Instances / Definitions | `save_instance`, `list_instances`, `delete_instance`, `save_definition`, `list_definitions`, `delete_definition` |
+| Collections | `save_definition_collection`, `list_definition_collections`; atomic commit support is opt-in and fails closed by default |
+| Conditional starts | Durable reservation, lookup and completion of explicit start receipts |
 | Wait states | save / delete / list for user tasks, service tasks, timers, message catches |
 | Files | `save_file`, `load_file`, `delete_file` |
 | BPMN XML | `save_bpmn_xml`, `load_bpmn_xml`, `list_bpmn_xml_ids` |
@@ -380,7 +374,7 @@ Inclusive join is a taken-path barrier: after a matching split (`find_downstream
 | Archive | `save_completed_instance`, `query_completed_instances`, `get_completed_instance` |
 | Monitoring | `get_storage_info`, `get_bucket_entries`, `get_bucket_entry_detail` |
 
-The full signature list lives in [knowledge-base/modules/engine-core/interfaces.md](knowledge-base/modules/engine-core/interfaces.md).
+The authoritative signatures are in [port/persistence.rs](../engine-core/src/port/persistence.rs); the [interface overview](knowledge-base/modules/engine-core/interfaces.md) provides additional context.
 
 ### 5.2 Implementations
 
@@ -393,7 +387,10 @@ The full signature list lives in [knowledge-base/modules/engine-core/interfaces.
 
 | Bucket / Store | Type | Contents | Key |
 |---|---|---|---|
-| `definitions` | KV | `ProcessDefinition` (JSON) | `{definition_uuid}` |
+| `definitions` | KV | Individually persisted legacy process definitions | `{definition_uuid}` |
+| `definition_collections` | KV | Complete batch commit: definitions, XML, metadata and deletion tombstones | `{collection_uuid}` |
+| `conditional_starts` | KV | Durable explicit conditional-start receipts | `{request_uuid}` |
+| `instance_audit` / `instance_states` | KV | Detached audit snapshots and checkpoint/delta records when configured | Content-addressed / instance state keys |
 | `instances` | KV | Active `ProcessInstance` (JSON) | `{instance_uuid}` |
 | `user_tasks` / `service_tasks` / `timers` / `messages` | KV | Pending wait states (JSON) | `{uuid}` |
 | `tokens` | KV | `Token` (JSON) | `token-{instance_uuid}-{token_uuid}` |
@@ -413,16 +410,88 @@ This prevents unbounded memory growth while still recovering from transient netw
 
 ---
 
+### 5.4 Collection Commit and Recovery
+
+`POST /api/deploy/collection` parses all explicitly executable top-level pools
+with `parse_bpmn_collaboration`. Every selected process must validate; model
+checking runs on each isolated pool with shared declarations. Enforce-mode
+violations reject the batch before any definition is published. Skipped and
+inconclusive reports retain the existing model-check policy.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server as engine-server
+    participant Parser as bpmn-parser
+    participant Engine as WorkflowEngine
+    participant Store as WorkflowPersistence
+    Client->>Server: POST /api/deploy/collection
+    Server->>Parser: parse_bpmn_collaboration(xml)
+    Parser-->>Server: executable processes + collaborations
+    loop Each executable pool
+        Server->>Server: isolated model check
+    end
+    Server->>Engine: deploy_collection(processes, xml, metadata)
+    Engine->>Engine: serialize versions; flatten definitions; compile pinned routes
+    opt Persistence configured
+        Engine->>Store: save_definition_collection(one complete record)
+        Store-->>Engine: durable commit acknowledgment
+    end
+    Engine->>Engine: install routes; publish definitions under one registry write
+    Engine-->>Server: committed collection
+    Server-->>Client: collection_id + ordered process results + collaborations
+```
+
+NATS commits one KV record in `definition_collections`; the memory adapter stores
+one record under its collection lock. A definitive validation/commit failure
+publishes no pools and queues no background deployment retry. The original
+single-process endpoint retains its response and legacy persistence behavior.
+Collection records must fit the broker message payload limit. Deployment version
+allocation assumes one engine writer per store. A lost acknowledgment can leave a
+committed batch to be recovered at restart; deployments have no client idempotency
+key, so recover and inspect definitions before retrying.
+
+Startup reads collection records, restores individual JSON definitions without
+renumbering, and validates/reconstructs each collection's routes and active members
+before restoring instances and wait states. XML reparsing is a legacy fallback,
+not collection recovery. Invalid/unreadable collection records abort restoration.
+Deleted members stay tombstoned in the original record and cannot resurrect;
+collection XML is resolved from that record.
+
+### 5.5 Version-Pinned Receiver Preflight
+
+`plan_internal_messages(source_definition, source_element, business_key, variables)`
+is an engine-only, read-only API. It uses only explicit flows from the source's
+collection, retaining exact target key/version and catch/start element. The
+business key must be nonempty and match instance metadata exactly; the explicit
+payload snapshot is copied independently for each outgoing flow.
+
+Each flow, in document order, returns `Start`, an exact `Catch` identity
+(instance/catch/token), or `Unavailable` (deleted definition, no matching catch,
+or ambiguous matches). Candidate filtering excludes other pools/versions,
+signals, suspended/completed/missing receivers and stale wait occurrences.
+Gateway alternatives and boundary subscriptions must match their live occurrence.
+There is no latest-version or name-based fallback.
+
+Preflight creates no instances, consumes no catches and reserves no receivers.
+Public `correlate_message` retains its separate broadcast behavior. Automatic
+internal sends await durable sender outbox records, occurrence identities,
+receiver claims/deduplication and crash-point recovery. See the
+[X12 contract](x12-collaboration-plan.md) for current limits and remaining gates.
+
+---
+
 ## 6. REST API (engine-server)
 
 > Complete OpenAPI 3.0 specification: **[docs/openapi.yaml](openapi.yaml)**
 
-### 6.1 Route Overview (46 endpoints)
+### 6.1 Selected Routes (see OpenAPI for the full contract)
 
 ```mermaid
 graph LR
     subgraph "Process Definitions"
         D1["POST /api/deploy"]
+        D1c["POST /api/deploy/collection"]
         D2["GET /api/definitions"]
         D3["GET /api/definitions/:id/xml"]
         D4["DELETE /api/definitions/:id"]
@@ -504,7 +573,7 @@ pub struct AppState {
 }
 ```
 
-> The server shares the engine only via `Arc<WorkflowEngine>`. Because all inner collections (`DashMap`, per-instance `RwLock`) are thread-safe and mutations go through `&self`, there is no longer a monolithic read/write lock over the entire engine. This eliminates contention under heavy HTTP traffic. Instances are isolated via **K1 (per-instance locking)** through `InstanceStore`.
+> The server shares the engine only via `Arc<WorkflowEngine>`. Because all inner collections (`DashMap`, per-instance `RwLock`) are thread-safe and mutations go through `&self`, there is no longer a monolithic read/write lock over the entire engine. Collection publication uses a short registry write lock; version allocation uses the deployment mutex. Instances are isolated via **K1 (per-instance locking)** through `InstanceStore`.
 
 ### 6.3 Background Timer Scheduler
 
@@ -591,19 +660,26 @@ graph TD
 
 ```
 WorkflowEngine (Arc)
-├── DefinitionRegistry       → Arc<DashMap>                  (sharded)
+├── deployment_lock         → tokio::sync::Mutex<()>         (deploy/delete/version allocation)
+├── DefinitionRegistry       → Arc<std::sync::RwLock<HashMap>> (atomic collection publication)
+├── internal_routes          → std::sync::RwLock<HashMap>      (source-key route index)
 ├── InstanceStore             → Arc<DashMap>                  (sharded map)
 │   └── ProcessInstance[i]   → Arc<RwLock<ProcessInstance>>  (per-instance lock!)
-├── pending_user_tasks       → Arc<DashMap>                  (lock-free / sharded)
-├── pending_service_tasks    → Arc<DashMap>                  (lock-free / sharded)
-├── pending_timers           → Arc<DashMap>                  (lock-free / sharded)
-└── pending_message_catches  → Arc<DashMap>                  (lock-free / sharded)
+├── pending_user_tasks       → Arc<DashMap>                  (sharded locking)
+├── pending_service_tasks    → Arc<DashMap>                  (sharded locking)
+├── pending_timers           → Arc<DashMap>                  (sharded locking)
+└── pending_message_catches  → Arc<DashMap>                  (sharded locking)
 ```
 
 ### 8.2 Deadlock Prevention Pattern
 
+Snapshot values and drop `DashMap`, registry and route-index guards before awaiting.
+Release per-instance guards before calling async methods that may reacquire the
+same instance lock. The deployment mutex intentionally spans the durable commit;
+ordinary receiver preflight does not hold it while inspecting instances.
+
 ```rust
-// ❌ FORBIDDEN: hold a lock across .await
+// ❌ Unsafe if the awaited method reacquires this instance lock
 let inst = instance_arc.write().await;
 self.some_async_method().await;  // DEADLOCK!
 
@@ -636,32 +712,28 @@ Every state transition is stored as a `HistoryEntry`:
 
 ---
 
-## 10. Code Statistics
+## 10. Verification Snapshot
 
-> As of: 2026-10-12 — measured via `wc -l` (Rust totals include inline/test modules) and by counting test attributes
+As of 2026-10-27, the X12 verification run passed the following **subset**, not a
+complete workspace or frontend suite:
 
-| Area | Files | LOC |
-|---|---|---|
-| engine-core | 74 | ~19,100 |
-| bpmn-parser | 4 | ~3,040 |
-| persistence-nats | 5 | ~1,440 |
-| persistence-memory | 1 | ~120 |
-| engine-server (lib + E2E tests) | 37 | ~6,740 |
-| agent-orchestrator | 1 | ~130 |
-| desktop-tauri (TypeScript) | 63 | ~9,250 |
-| desktop-tauri (Rust backend) | — | ~1,130 |
-| external-task-client (lib) | — | ~1,070 |
-| fuzz targets | 9 | ~710 |
+| Suite | Passed |
+|---|---:|
+| engine-core library | 410 |
+| bpmn-parser library | 99 |
+| engine-server library | 29 |
+| Collection deployment/routing integration | 7 |
+| **Verified subset** | **545** |
 
-### Test Overview (approximate)
+The eight routing unit tests were rerun on the final implementation. Tests cover
+correlation, exact versions/elements, ambiguity, stale jobs, gateway and boundary
+occurrences, and side-effect-free planning. Isolated real JetStream tests cover
+commit failure, disk restart, tombstones, malformed records and route pinning
+after redeployment. Collection recovery tests require `nats-server` on PATH.
 
-| Crate | Unit | E2E / Integration | Total |
-|---|---|---|---|
-| engine-core | 259 | 5 | 264 |
-| bpmn-parser | 46 | — | 46 |
-| persistence-nats | 5 | — | 5 |
-| engine-server | 17 | 74 | 91 |
-| desktop-tauri (Playwright) | — | 52 | 52 |
-| external-task-client (Vitest) | 76 | — | 76 |
-
-Source of truth: `cargo test --workspace`.
+Strict Clippy passed for engine-core, bpmn-parser, persistence-nats and
+engine-server with `--all-targets -- -D warnings`. TypeSpec compilation,
+formatting, whitespace checks and AST-only graphify update passed. Full-suite
+results remain in CI; use `cargo test --workspace` for Rust and the package scripts
+for frontend/worker checks. Source paths and contracts take precedence over
+historical line counts or copied enum/method totals.

@@ -1,26 +1,78 @@
 # Data Flows
 
-## 1. Deployment Flow
+## 1. Deployment and Routing Flows
+
+### Single-process deployment
 
 ```mermaid
 sequenceDiagram
-    participant Client as Client (UI/API)
+    participant Client
     participant Server as engine-server
     participant Parser as bpmn-parser
-    participant Engine as engine-core
-    participant NATS as persistence-nats
-    participant Events as EngineEvent broadcast
-
-    Client->>Server: POST /api/deploy (BPMN XML)
+    participant Engine as WorkflowEngine
+    participant Store as WorkflowPersistence
+    Client->>Server: POST /api/deploy
     Server->>Parser: parse_bpmn_xml(xml)
-    Parser-->>Server: ProcessDefinition
+    Parser-->>Server: one ProcessDefinition
+    Server->>Server: model check
     Server->>Engine: deploy_definition(def)
-    Engine-->>Engine: Register in DefinitionRegistry
-    Engine->>NATS: save_definition + save_bpmn_xml
-    NATS-->>Engine: OK
-    Engine->>Events: DefinitionChanged
-    Server-->>Client: { definition_key, version }
+    Engine->>Engine: register immutable definition/version
+    Engine->>Store: save_definition (legacy retry policy)
+    Engine-->>Server: definition key + version
+    Server->>Store: save_bpmn_xml(key, xml)
+    alt XML save fails
+        Server->>Engine: delete_definition(key, cascade=true)
+        Server-->>Client: persistence error
+    else XML saved or no persistence
+        Server->>Server: cache XML
+        Server-->>Client: definition_key + version + optional model_check
+    end
 ```
+
+### Collection deployment
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server as engine-server
+    participant Parser as bpmn-parser
+    participant Engine as WorkflowEngine
+    participant Store as WorkflowPersistence
+    Client->>Server: POST /api/deploy/collection
+    Server->>Parser: parse_bpmn_collaboration(xml)
+    Parser-->>Server: executable processes + validated collaborations
+    loop Each selected pool
+        Server->>Server: isolated model check
+    end
+    Server->>Engine: deploy_collection(processes, xml, metadata)
+    Engine->>Engine: assign keys/versions + compile routes
+    opt Persistence configured
+        Engine->>Store: save_definition_collection(one atomic record)
+        Store-->>Engine: commit acknowledgment
+    end
+    Engine->>Engine: install routes + publish all definitions in one registry write
+    Engine-->>Server: complete collection
+    Server->>Server: cache collection XML for every definition
+    Server-->>Client: collection_id + ordered processes + collaborations
+```
+
+Validation and definitive commit failures publish no pools. Collection persistence
+uses `definition_collections`, does not enqueue background retries, and must fit
+the broker payload limit. A lost acknowledgment may require restart recovery
+before retrying. Version allocation assumes one engine writer per store.
+
+### Read-only receiver preflight
+
+`plan_internal_messages` reads routes indexed by the source definition key,
+then selects only the pinned target definition, element and business key.
+Message starts yield a start plan; catches yield exact instance/catch/token IDs.
+Missing, deleted or ambiguous receivers produce explicit unavailable results.
+Other pools/versions, signals and stale/inactive occurrences are excluded.
+
+The supplied payload is a snapshot per flow; planning changes no sender or
+receiver state. Plans are not reservations. Public message-name correlation
+remains separate; durable delivery and automatic internal sends are pending.
+See [the X12 contract](../../x12-collaboration-plan.md).
 
 ## 2. Instance Execution Flow
 
@@ -139,34 +191,37 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Main as main()
-    participant NATS as persistence-nats
+    participant Store as NatsPersistence
     participant SC as StartupCoordinator
     participant Engine as WorkflowEngine
-    participant Parser as bpmn-parser
-
-    Main->>NATS: NatsPersistence::connect(nats_url)
-    alt Connect OK
-        NATS-->>Main: NatsPersistence instance
-        Main->>SC: StartupCoordinator::new(nats)
-        SC->>SC: restore_definitions(engine, xml_cache)
-        loop Each definition key
-            SC->>NATS: load_bpmn_xml(key)
-            SC->>Parser: parse_bpmn_xml(xml)
-            Parser-->>SC: ProcessDefinition
-            SC->>Engine: deploy_definition(def)
+    Main->>Store: connect(nats_url)
+    alt Persistence available
+        Main->>SC: restore(engine, xml_cache)
+        SC->>Store: list_definition_collections()
+        Store-->>SC: complete committed records (or fatal error)
+        SC->>Store: list_definitions()
+        SC->>Engine: restore individual JSON definitions without renumbering
+        Note over SC,Engine: XML parsing is a legacy fallback only
+        loop Each committed collection
+            SC->>Engine: restore_definition_collection(record)
+            Engine->>Engine: validate/compile pinned routes
+            Engine->>Engine: publish active definitions, skipping tombstones
+            SC->>SC: populate XML cache from the collection record
         end
-        SC->>SC: restore_instances(engine)
-        SC->>SC: restore_user_tasks(engine)
-        SC->>SC: restore_service_tasks(engine)
-        SC->>SC: restore_timers(engine)
-        SC->>SC: restore_message_catches(engine)
-        SC-->>Main: RestoreStats (counts)
-    else Connect fail + REQUIRE_NATS=true
-        Main-->>Main: exit (fail-fast)
-    else Connect fail + REQUIRE_NATS=false
-        Main-->>Main: in-memory engine (dev only)
+        SC->>SC: restore instances, tasks, timers and message catches
+        SC->>Engine: reconcile_conditional_starts()
+        SC-->>Main: RestoreStats
+    else Connection failure and REQUIRE_NATS=true
+        Main->>Main: exit
+    else Connection failure and REQUIRE_NATS=false
+        Main->>Main: ephemeral in-memory engine
     end
 ```
+
+Collection read/validation errors abort restoration. A collection is never
+restored by reparsing only its first process. Keys and version gaps survive
+restarts, including batches interleaved with individual deployments. Deleted
+members remain tombstoned; pinned routes never fall back to newer versions.
 
 ## 7. Health vs Readiness
 

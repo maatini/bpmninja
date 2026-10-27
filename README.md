@@ -37,13 +37,15 @@
 bpmninja is a BPMN 2.0 engine with the following core features:
 
 - **Token-based execution** — each path is tracked as an independent token
-- **29 BPMN elements** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, boundary events (timer, message, error, escalation, compensation), call activities, sub-processes
+- **BPMN execution primitives** — start/end events, user/service/script tasks, gateways (XOR, AND, OR, complex, event-based), timers, messages, boundary events (timer, message, error, escalation, compensation), call activities, sub-processes
 - **Full ISO 8601 timers** — Duration (`PT30S`), AbsoluteDate (`2026-04-06T14:30:00Z`), Cron (`0 9 * * MON-FRI`), Repeating Interval (`R3/PT10M`)
-- **Lock-free concurrency** — multi-threaded scaling via `DashMap` wait-state queues with atomic `remove_if` for race-condition-free task operations
+- **Concurrent execution** — sharded `DashMap` wait-state queues, per-instance locks, and atomic definition collection publication
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
 - **Deploy-time model checking** — every deployed model is checked for deadlocks, livelocks, unsafe parallelism and dead activities with [rust_bpmn_analyzer](https://github.com/timKraeuter/rust_bpmn_analyzer) (partial order reduction); `MODEL_CHECK=warn` reports findings in the deploy response, `enforce` rejects the deploy
+- **Collection deployment** — validate and model-check every executable pool, then persist and publish the complete batch; restore exact definition keys and versions after restart
+- **Version-pinned routing preflight** — read-only engine API selects the exact pool, element and business key; reports unavailable or ambiguous receivers. Durable delivery and automatic internal sends are still pending
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Event-driven timer scheduler** — sleeps until the next timer is due (or a new timer is added) instead of polling; `TIMER_INTERVAL_MS` caps the idle wait
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling; waiting workers are woken the moment a task becomes available
@@ -64,8 +66,8 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 
 | Crate | Purpose |
 |-------|---------|
-| **`engine-core`** | Core library — state machine, token registry, gateway routing, condition evaluator, script engine |
-| **`bpmn-parser`** | Parses BPMN 2.0 XML (`quick-xml` + `serde`) into internal `ProcessDefinition` structs |
+| **`engine-core`** | Core library — token execution, shared collaboration models, atomic definition registry, routing preflight, conditions and scripting |
+| **`bpmn-parser`** | Parses BPMN XML into individual processes, executable process collections and validated collaboration metadata |
 | **`persistence-nats`** | NATS JetStream-based `WorkflowPersistence` implementation (KV, Object Store, Streams) |
 | **`persistence-memory`** | In-Memory `WorkflowPersistence` implementation for testing and development |
 | **`engine-server`** | Axum HTTP REST API with type-safe error handling (`AppError` → HTTP status codes) |
@@ -114,7 +116,7 @@ See the [element matrix](docs/knowledge-base/modules/bpmn-parser/element-matrix.
 | <img src="readme-assets/bpmn-icons/user-task.svg" width="34"> | **UserTask** | Creates a pending task that must be completed externally. Assignee comes from `data-assignee`, then `camunda:assignee` (fallback `"unassigned"`). |
 | <img src="readme-assets/bpmn-icons/service-task.svg" width="34"> | **ServiceTask** | External processing via fetch-and-lock pattern (Camunda-compatible). Topic comes from `data-topic`, then `data-handler`, then `camunda:topic`, then the node id. |
 | <img src="readme-assets/bpmn-icons/script-task.svg" width="34"> | **ScriptTask** | Executes inline scripts via the Rhai engine. |
-| <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Sends a message via throw event and continues immediately. |
+| <img src="readme-assets/bpmn-icons/send-task.svg" width="34"> | **SendTask** | Records the send and continues; automatic internal delivery is pending durable outbox and receiver deduplication. |
 
 ### Gateways
 
@@ -178,22 +180,22 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Multi-Instance & loops:** `multiInstanceLoopCharacteristics` (parallel / sequential; `loopCardinality` or `camunda:collection` + `elementVariable`, `completionCondition`, optional `outputCollection`/`outputElement`) and `standardLoopCharacteristics` (`loopCondition`, `testBefore`, `loopMaximum`) run on all task types and call activities. Loop variables (`loopCounter`, `nrOfInstances`, element/output element …) stay local. Not supported on sub-processes yet; non-interrupting boundary events on loop activities are rejected.
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
-- **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
+- **Task type mapping:** Message-backed `receiveTask` elements compile to message catches, or message starts when instantiating. `manualTask` maps to a user task; a `businessRuleTask` requires an explicit service topic. Generic tasks, empty scripts and catches without a supported trigger are rejected. There is no DMN engine for business-rule tasks.
 - **Process selection:** `/api/deploy` deploys the first explicitly executable process, with a first-process fallback. `/api/deploy/collection` atomically deploys all explicitly executable pools and returns a result per pool. It stores collaboration metadata; automatic internal message routing is not enabled. Collection persistence requires a record that fits the NATS message payload limit. See [X12 deployment and recovery](docs/x12-collaboration-plan.md).
 
 ### Currently Unsupported BPMN Elements
 
 The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
 
-- **Specific intermediate/boundary events:** `SignalEvent`, `CancelEvent`, `LinkEvent`.
+- **Cancel events and transaction semantics:** Cancel events and transaction sub-processes are unsupported. Signal events and link events are supported; see the [element matrix](docs/knowledge-base/modules/bpmn-parser/element-matrix.md) for accepted forms.
 - **Extended sub-processes:** `Transaction Sub-Process`, `Ad-Hoc Sub-Process`.
-- **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
+- **Data Stores:** Persistent BPMN data-store semantics are unsupported. Explicit data associations, task input/output mappings and variable defaults are supported over JSON variables; see [data mappings](docs/data-mappings.md).
 
 ---
 
 ## Architecture
 
-> Detailed documentation with 8 Mermaid diagrams: **[docs/architecture.md](docs/architecture.md)**
+> Detailed component, deployment, recovery and routing diagrams: **[docs/architecture.md](docs/architecture.md)**
 
 ```mermaid
 flowchart TD
@@ -215,8 +217,9 @@ flowchart TD
     end
 
     subgraph "Core Engine"
-        Parser["bpmn-parser<br>(XML → ProcessDefinition)"]:::core
-        Engine["engine-core<br>(State Machine / Tokens)"]:::core
+        Parser["bpmn-parser<br>(processes + collaboration validation)"]:::core
+        Engine["engine-core<br>(tokens / atomic definition registry)"]
+        Routing["Routing preflight<br>(pinned pool + exact receiver)"]:::core
         Trait["WorkflowPersistence<br>(Trait)"]:::core
     end
 
@@ -230,10 +233,39 @@ flowchart TD
     ExtMsg -- "POST /api/message" --> Axum
     Axum --> Parser
     Axum --> Engine
+    Engine --> Routing
     Engine -. "uses" .-> Trait
     Trait -. "implemented by" .-> NatsImpl
     NatsImpl --> Nats
 ```
+
+### Collection Deployment and Routing Status
+
+| Capability | Current behavior |
+|---|---|
+| `POST /api/deploy` | Deploys the first executable process, with a first-process fallback; retains the single-process response |
+| `POST /api/deploy/collection` | Validates all explicitly executable pools, checks each model, commits once and returns an ordered result per pool |
+| Durable collection record | `definition_collections` KV stores definitions, original XML, collaboration metadata and deletion tombstones |
+| Startup recovery | Restores exact keys/versions and reconstructs pinned routes before restoring instances and wait states; invalid collection records fail startup |
+| Internal routing preflight | Engine-only `plan_internal_messages` API; exact business key, pool version and catch/start element; no receiver mutation |
+| Automatic internal sends | Pending durable sender outbox, receiver claims and deduplication; preflight is an observation, not a reservation |
+
+Collection commits must fit the NATS message payload limit, even when XML fits
+the HTTP limit. Deployments assume one engine writer per store. After a lost
+commit acknowledgment, recover and inspect definitions before retrying; collection
+deployment has no client idempotency key. Desktop deployment currently uses the
+single-process endpoint.
+
+Try the [collection request example](docs/examples/x12-collection.json) with:
+
+```sh
+curl -X POST http://localhost:8081/api/deploy/collection \
+  -H 'Content-Type: application/json' \
+  --data @docs/examples/x12-collection.json
+```
+
+See the [X12 implementation contract](docs/x12-collaboration-plan.md) for routing,
+correlation, recovery semantics and remaining work.
 
 ---
 
@@ -603,7 +635,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 
 ## Test Metrics
 
-> Snapshot from 2026-10-12 (counted test functions). The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
+> Verification snapshot: 2026-10-27. The subset below passed during X12 work; it is not a complete workspace or frontend test total. CI remains the source for full-suite results.
 
 <!-- QUALITY_METRICS:START -->
 - Letztes Update (UTC): `2026-10-11T11:32:24.831196+00:00`
@@ -611,118 +643,28 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 - Fuzzing: **9/9 targets** (ok)
 <!-- QUALITY_METRICS:END -->
 
-### Workspace Overview
+### Latest Verified Rust Suites
 
-| Package | Unit | E2E / Integration | Total |
-|---------|------|-----|-------|
-| **engine-core** | 259 | 5 | 264 |
-| **bpmn-parser** | 46 | — | 46 |
-| **persistence-nats** | 5 | — | 5 |
-| **engine-server** | 17 | 74 | 91 |
-| **desktop-tauri** | — | 52 | 52 |
-| **bpmn-ninja-external-task-client** | 76 | — | 76 |
-| **Total** | **403** | **131** | **534** ✅ |
+| Suite | Passed |
+|---|---:|
+| engine-core library | 410 |
+| bpmn-parser library | 99 |
+| engine-server library | 29 |
+| `e2e_collection` integration tests | 7 |
+| **Verified subset** | **545** |
 
-> Authoritative: `cargo test --workspace` (NATS integration tests need a JetStream server; they skip locally without one and fail in CI).
+Coverage includes collection validation and persistence failures, concurrent
+versions, restart recovery against isolated real JetStream, version-pinned route
+restoration, exact receiver selection, ambiguity, stale jobs, event gateways and
+message boundaries. The final routing rerun passed all eight routing unit tests.
+Strict Clippy for all affected crates/targets, TypeSpec compilation, formatting
+and whitespace checks also passed. Details are in the [X12 plan](docs/x12-collaboration-plan.md).
 
-### engine-core Breakdown (264 tests)
-
-| Module | Tests | Coverage |
-|--------|-------|----------|
-| `engine::tests::instance_admin` | 33 | Suspend/resume, delete, variables, token move, admin operations |
-| `engine::tests::stress_tests` | 24 | Throughput, gateway correctness, crash recovery, concurrency, race conditions, infinite loops |
-| `engine::tests::timers_messages` | 22 | Timers, messages, boundary events, correlation races |
-| `engine::tests::gateways` | 18 | XOR / AND / OR / event-based / complex gateways |
-| `engine::tests::call_errors` | 17 | Call activities, BPMN errors, escalation, compensation |
-| `engine::tests::start_tasks` | 12 | Start variants, user and service tasks |
-| `engine::tests::topic_index` | 8 | Topic index for fetch-and-lock, long-poll wake-up |
-| `engine::tests::migration` | 6 | Instance migration and node mapping |
-| `engine::tests::scripting` | 8 | Rhai scripts and listeners, sandbox limits, shared engine + compiled-script cache |
-| `engine::tests::timer_due_index` | 5 | Timer due index, event-driven scheduler |
-| other `engine::tests::*` | 21 | Inclusive joins, XOR merge, parallel call activities, pagination, incidents, recurring timers, boundary restore, persistence locking, batched history |
-| `history` | 24 | Diff calculation, human-readable text, truncation, snapshots, UTF-8 safety |
-| `domain` (`tests.rs` + `timer.rs`) | 36 | ProcessDefinition builder, token serialization, validation, ISO 8601 timers |
-| `runtime::instance` | 11 | Audit log limits, file variables, file references |
-| `condition` | 5 | Condition evaluation, numeric comparisons, truthy checks |
-| `retry_queue` | 4 | Display, shutdown, skip missing entities, full-queue drop |
-| `boundary` | 3 | No-events, timer and message boundary setup |
-| `adapter::in_memory` | 2 | Storage info, history query filters |
-| Integration tests (`tests/`) | 5 | BPMN compliance, complex gateways |
-
-### bpmn-parser Tests (46 tests)
-
-| Area | Tests | Coverage |
-|------|-------|----------|
-| Basic parsing | 6 | Simple BPMN, conditional flows, XOR gateway, timer start, interleaved output, execution listeners |
-| Gateways | 4 | Parallel, inclusive, event-based, complex |
-| Events | 4 | MessageStart, MessageCatch, ErrorEnd, TimerCatch |
-| Boundary events | 2 | BoundaryTimer, BoundaryError |
-| ISO 8601 timers | 5 | TimeDate, CronCycle, RepeatingInterval, RepeatingInterval-Compact, Duration-Reject |
-| Task types | 3 | ScriptTask, SendTask, IntermediateMessageThrow |
-| Sub-processes | 2 | EventSubProcess, RegularSubProcess |
-| Advanced | 3 | TerminateEndEvent, CompensationEvents, EscalationEvents |
-| Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
-| Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
-| Task mapping & attributes | 7 | Camunda assignee/topic, `data-*` precedence, sendTask `messageRef`, receiveTask, manualTask, businessRuleTask with topic, timer FormalExpression |
-| Rejected definitions | 6 | Empty timer, generic task, empty script, catch without trigger, businessRuleTask without topic, loops on sub-processes |
-| Process selection & flattening | 2 | Executable-process selection, sub-process flattening of send/inclusive/event nodes |
-
-### engine-server E2E Tests (74 tests, 19 files)
-
-| Test file | Tests | Coverage |
-|-----------|-------|----------|
-| `e2e_auth_cors.rs` | 10 | API-key auth (Bearer / `X-API-Key`), public health/ready, CORS allowlist |
-| `e2e_call_activity.rs` | 5 | Call activity spawn, variable propagation, error boundaries, nested processes |
-| `e2e_deploy.rs` | 3 | Deploy, start, parallel gateway |
-| `e2e_deploy_persist.rs` | 2 | Deploy fails closed when the XML save fails |
-| `e2e_file_variables.rs` | 3 | File upload, task completion with files, multi-file + delete |
-| `e2e_files.rs` | 2 | Upload/download/delete lifecycle; oversized upload → 413 |
-| `e2e_gateways.rs` | 1 | Parallel gateway over HTTP |
-| `e2e_history.rs` | 4 | History generation, querying, completed instances listing, business key filter, pagination |
-| `e2e_instances_page.rs` | 2 | Paginated instance listing (`limit`/`offset`, `X-Total-Count`) |
-| `e2e_lifecycle.rs` | 6 | Delete instance, delete definition, unknown instances, process timers, correlate messages |
-| `e2e_model_check.rs` | 4 | Deploy-time model checking: passed, deadlock reported (warn), rejected (enforce), off |
-| `e2e_migration.rs` | 5 | Instance migration to a new definition version (compatible, renamed nodes, incompatible, dry-run) |
-| `e2e_monitoring.rs` | 5 | Health, ready (dev / REQUIRE_NATS), info, monitoring stats |
-| `e2e_service_tasks.rs` | 7 | List service tasks, FetchAndLock, ExtendLock, Complete, Complete with Failure, BPMN error, lock conflict |
-| `e2e_start_errors.rs` | 4 | Invalid UUID, unknown definition, unknown BPMN ID, timer-start rejection |
-| `e2e_stress.rs` | 2 | Concurrent deployments, concurrent starts (multi-thread) |
-| `e2e_suspend_resume.rs` | 5 | Suspend/resume lifecycle, task blocking while suspended, token move |
-| `e2e_variables.rs` | 1 | Variable updates mid-execution |
-| `e2e_versioning.rs` | 3 | Version increment, start-latest, instance isolation |
-
-### desktop-tauri E2E Tests (52 tests, 1 file)
-
-| Test file | Tests | Coverage |
-|-----------|-------|----------|
-| `app.spec.ts` | 52 | Modeler expressions/conditions, gateway configurations, instance lifecycle (suspend/resume), migration dialog, base64 payload monitoring |
-
-### bpmn-ninja-external-task-client Tests (76 tests, 3 files)
-
-| Test file | Tests | Coverage |
-|-----------|-------|----------|
-| `retry.test.ts` | 13 | `sleep`, `calculateBackoff`, `withRetry` (exponential backoff, retry exhaustion) |
-| `TaskService.test.ts` | 25 | `complete`, `failure`, `extendLock`, `bpmnError` (HTTP contract & error paths) |
-| `ExternalTaskClient.test.ts` | 38 | Constructor, lifecycle, poll loop, subscriptions, handler dispatch, retry, lock extension, graceful shutdown |
-
-Tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no real HTTP calls, no real timers.
-
-### Code Statistics
-
-> Measured 2026-10-12 with `wc -l`; Rust figures include inline test modules.
-
-| Area | Files | LoC |
-|------|-------|-----|
-| engine-core | 74 | ~19,100 |
-| bpmn-parser | 4 | ~3,040 |
-| persistence-nats | 5 | ~1,440 |
-| persistence-memory | 1 | ~120 |
-| engine-server (lib + E2E tests) | 37 | ~6,740 |
-| agent-orchestrator | 1 | ~130 |
-| desktop-tauri (TypeScript) | 63 | ~9,250 |
-| desktop-tauri (Rust backend) | — | ~1,130 |
-| external-task-client (lib) | — | ~1,070 |
-| fuzz targets | 9 | ~710 |
+For the full Rust suite, run `cargo test --workspace`. Collection recovery tests
+require `nats-server` on PATH and launch isolated temporary JetStream stores;
+CI installs it from the NATS image. Other NATS tests use `NATS_URL` and require a
+reachable JetStream server in CI. Run frontend and worker-client suites through
+their package scripts; their totals are not included above.
 
 ### Benchmarks
 
@@ -776,6 +718,10 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Push-based UI updates via SSE (`GET /api/events`) | ✅ Implemented |
 | In-memory log stream with filters (`GET /api/logs`) | ✅ Implemented |
 | Multi-arch Docker images (amd64 + arm64) | ✅ Implemented |
+| Executable pool collection deployment and atomic persistence | ✅ Implemented |
+| Version-pinned internal route compilation and receiver preflight | ✅ Implemented (engine API) |
+| Durable internal delivery, receiver deduplication and automatic sends | 🔲 Pending — see [X12](docs/x12-collaboration-plan.md) |
+| Collection deployment in desktop/modeler clients | 🔲 Pending |
 | Batch operations on instances | 🔲 Planned |
 | Process instance migration (`POST /api/instances/:id/migrate`) | ✅ Implemented |
 | NATS JetStream log persistence (`ENGINE_LOGS` stream + file fallback) | ✅ Implemented |

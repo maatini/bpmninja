@@ -11,7 +11,7 @@
 - Clear boundaries between pure logic and I/O
 
 **Consequences:**
-- `WorkflowPersistence` trait is large (35 async methods) — any new persistence operation requires trait changes
+- `WorkflowPersistence` trait includes state, collection and receipt operations — any new persistence operation requires trait changes
 - Two backends must be kept in sync (NATS + in-memory)
 - The in-memory adapter is a HashMap implementation in `engine-core::adapter` (no I/O). `persistence-memory` re-exports that type so unit tests and the same crate identity stay aligned (a `[dev-dependency]` on `persistence-memory` would duplicate `engine-core` under `cfg(test)`).
 
@@ -43,17 +43,18 @@
 - Sub-process boundaries are simulated via `SubProcessEndEvent` nodes
 - Cannot support "ad-hoc" or "transaction" sub-processes
 
-## ADR-004: Lock-Free Concurrency via DashMap
+## ADR-004: Sharded Runtime State and Atomic Definition Publication
 
-**Decision:** Four wait-state queues (`pending_user_tasks`, `pending_service_tasks`, `pending_timers`, `pending_message_catches`) use `Arc<DashMap>` for lock-free sharding. Instance state uses per-instance `RwLock`.
+**Decision:** Four wait-state queues (`pending_user_tasks`, `pending_service_tasks`, `pending_timers`, `pending_message_catches`) use `Arc<DashMap>` with sharded locking. Instance state uses per-instance `RwLock`.
 
 **Rationale:**
 - High concurrency under load (multiple HTTP handlers + timer scheduler)
-- No global lock contention
-- `DashMap` provides lock-free read/write for wait-state operations
+- Runtime instance updates are isolated; deployment version allocation is serialized
+- `DashMap` uses sharded locks for wait-state operations
+- Definition collections publish under one short synchronous registry write lock; the route index is also protected by a synchronous read/write lock
 
 **Consequences:**
-- Cannot hold a DashMap reference across `.await` (same for RwLock)
+- Drop DashMap and synchronous registry/route guards before `.await`; avoid recursively acquiring per-instance locks
 - Instance migration/modification requires care with concurrent access
 
 ## ADR-005: Camunda-Compatible Service Task API
@@ -130,3 +131,30 @@
 **Consequences:**
 - Extreme backlog can lose retry jobs (metrics: `bpmn_persistence_retry_dropped_total`)
 - Operators must monitor drop/exhausted counters and NATS health
+
+## ADR-011: Atomic Collection Commit and Version-Pinned Routing Preflight
+
+**Decision:** Persist each collection as one `DefinitionCollection` record before
+publishing any pool. Store definitions, original XML, collaboration metadata and
+deleted-member tombstones together. Compile routes against that record's exact
+keys/versions during deployment and startup recovery.
+
+**Rationale:**
+- Validation or definitive persistence failure cannot publish a partial batch.
+- Independent per-process writes cannot provide one collection commit boundary.
+- Public message-name broadcasts cannot identify an intended pool/version/element.
+- Receiver selection needs explicit business-key, fan-out and ambiguity rules.
+
+**Consequences:**
+- Backends must opt into atomic collection persistence; the default fails closed.
+- Collection records must fit the broker payload limit; no background commit retry.
+- Deploy/delete/version allocation is serialized within one engine writer.
+- A lost acknowledgment can require recovery before retrying; no deployment
+  idempotency key or cross-replica version coordinator is provided.
+- Restore validates metadata, preserves identities/version gaps and skips tombstones.
+- `plan_internal_messages` returns observations, not receiver reservations.
+- Automatic sends remain gated on durable sender occurrences/outbox records,
+  receiver claims/deduplication and crash recovery.
+
+See [X12](../../x12-collaboration-plan.md) and the
+[architecture deployment/recovery sections](../../architecture.md#54-collection-commit-and-recovery).
