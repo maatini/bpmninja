@@ -1,0 +1,4 @@
+{
+  "name": "x12-collection.bpmn",
+  "xml": "<definitions xmlns=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" id=\"defs\">\n    <process id=\"first\" isExecutable=\"true\"><startEvent id=\"s1\"/><userTask id=\"t1\"/><endEvent id=\"e1\"/><sequenceFlow id=\"f1\" sourceRef=\"s1\" targetRef=\"t1\"/><sequenceFlow id=\"f2\" sourceRef=\"t1\" targetRef=\"e1\"/></process>\n    <process id=\"second\" isExecutable=\"true\"><startEvent id=\"s2\"/><endEvent id=\"e2\"/><sequenceFlow id=\"f3\" sourceRef=\"s2\" targetRef=\"e2\"/></process>\n    <collaboration id=\"c\"><participant id=\"p1\" processRef=\"first\"/><participant id=\"p2\" processRef=\"second\"/></collaboration>\n    </definitions>"
+}

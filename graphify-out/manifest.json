@@ -780,9 +780,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/adapter/in_memory.rs": {
-    "mtime": 1792146868.8109715,
-    "seen": 1792147370.1028888,
-    "ast_hash": "af7809a3efb05cb7ae55d9d36a064aab",
+    "mtime": 1793113826.7191017,
+    "seen": 1793114080.6511064,
+    "ast_hash": "2edfa216f5ed9bcfa16095064029e1c5",
     "semantic_hash": ""
   },
   "engine-core/src/adapter/mod.rs": {
@@ -870,9 +870,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/definition_ops.rs": {
-    "mtime": 1792039380.9894118,
-    "seen": 1792039566.8851364,
-    "ast_hash": "1285b42d6b5a0e9a0f7e4cdce560a1ff",
+    "mtime": 1793113548.5175118,
+    "seen": 1793114080.6511064,
+    "ast_hash": "7de59d4f236c010f818ed9e8f649afa3",
     "semantic_hash": ""
   },
   "engine-core/src/engine/events.rs": {
@@ -966,9 +966,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/mod.rs": {
-    "mtime": 1792145761.864057,
-    "seen": 1792145919.8362849,
-    "ast_hash": "48b61c8cdb16a9e73f71fce122874b4c",
+    "mtime": 1793113362.765059,
+    "seen": 1793114080.6511064,
+    "ast_hash": "8b2e76835d0ea56dd7f7dc3c137c35ce",
     "semantic_hash": ""
   },
   "engine-core/src/engine/persistence_ops.rs": {
@@ -984,9 +984,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/engine/registry.rs": {
-    "mtime": 1791828458.9815426,
-    "seen": 1791828614.37499,
-    "ast_hash": "0ee2ccb49f3427b1c1bffb4cfa8e6eb5",
+    "mtime": 1793113516.2001352,
+    "seen": 1793114080.6511064,
+    "ast_hash": "74d966015e929646878d974fd0f525af",
     "semantic_hash": ""
   },
   "engine-core/src/engine/retry_queue.rs": {
@@ -1170,9 +1170,9 @@
     "semantic_hash": ""
   },
   "engine-core/src/port/persistence.rs": {
-    "mtime": 1792147155.921218,
-    "seen": 1792147370.1028888,
-    "ast_hash": "eeef9e904a93de2035700036d7e34038",
+    "mtime": 1793113334.788463,
+    "seen": 1793114080.6511064,
+    "ast_hash": "e5335b06adf7ca3b19d545ad2b4e2c8a",
     "semantic_hash": ""
   },
   "engine-core/src/runtime/constants.rs": {
@@ -1272,9 +1272,9 @@
     "semantic_hash": ""
   },
   "engine-server/src/server/deploy.rs": {
-    "mtime": 1791796248.0715537,
-    "seen": 1791806103.481633,
-    "ast_hash": "a38f2f97c5dd3bfc19fc2240682a6233",
+    "mtime": 1793113828.3350635,
+    "seen": 1793114080.6511064,
+    "ast_hash": "0eabc4fbe3fa4573ffd6c8a862bf7e1d",
     "semantic_hash": ""
   },
   "engine-server/src/server/events.rs": {
@@ -1314,9 +1314,9 @@
     "semantic_hash": ""
   },
   "engine-server/src/server/mod.rs": {
-    "mtime": 1792145763.233134,
-    "seen": 1792145919.837286,
-    "ast_hash": "49c5f9e373c86f2e4fc80f1ce4f3128e",
+    "mtime": 1793113413.2441528,
+    "seen": 1793114080.6511064,
+    "ast_hash": "aaa23c82104c192a2c5841ba304c3704",
     "semantic_hash": ""
   },
   "engine-server/src/server/model_check.rs": {
@@ -1350,9 +1350,9 @@
     "semantic_hash": ""
   },
   "engine-server/src/startup.rs": {
-    "mtime": 1792145763.3321693,
-    "seen": 1792145919.837286,
-    "ast_hash": "6bde3756472e964cbd5cf94efc561362",
+    "mtime": 1793113548.5185113,
+    "seen": 1793114080.6511064,
+    "ast_hash": "d47be5999754a151ac8218e562f25368",
     "semantic_hash": ""
   },
   "engine-server/tests/e2e_auth_cors.rs": {
@@ -1554,9 +1554,9 @@
     "semantic_hash": ""
   },
   "persistence-nats/src/client.rs": {
-    "mtime": 1792146099.4459383,
-    "seen": 1792147370.1028888,
-    "ast_hash": "cb0cf8a2dc2d06f9061e9e84f2b2904c",
+    "mtime": 1793113673.0389068,
+    "seen": 1793114080.6511064,
+    "ast_hash": "8ef20e3928511860da92aa9a1c1a8ab2",
     "semantic_hash": ""
   },
   "persistence-nats/src/lib.rs": {
@@ -1578,9 +1578,9 @@
     "semantic_hash": ""
   },
   "persistence-nats/src/trait_impl.rs": {
-    "mtime": 1792147158.6341944,
-    "seen": 1792147370.1028888,
-    "ast_hash": "0be96ca6c8bdadece055aee3737ae228",
+    "mtime": 1793113518.102197,
+    "seen": 1793114080.6511064,
+    "ast_hash": "584d271555f3a6693351a3988ea63d1e",
     "semantic_hash": ""
   },
   ".agent/rules/01_GLOBAL_DIRECTIVES.md": {
@@ -1794,9 +1794,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1791881113.9711876,
-    "seen": 1791882188.189868,
-    "ast_hash": "6ade980c9f59fdd5a10519971e7afbf0",
+    "mtime": 1793113921.3554585,
+    "seen": 1793114080.6511064,
+    "ast_hash": "55e24fa2a5087f694be37aaa32e5ad91",
     "semantic_hash": ""
   },
   ".github/workflows/dependabot-auto-merge.yml": {
@@ -1848,15 +1848,15 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792146418.0509305,
-    "seen": 1792147370.1038878,
-    "ast_hash": "4bfd06e32e707da32312f834f41ed5b7",
+    "mtime": 1793114024.848617,
+    "seen": 1793114080.6511064,
+    "ast_hash": "5d0b9e38f556ff27bb50af8003fc5a20",
     "semantic_hash": ""
   },
   "api-spec/tsp-output/@typespec/openapi3/openapi.yaml": {
-    "mtime": 1792146472.6972425,
-    "seen": 1792147370.1038878,
-    "ast_hash": "69b4aed849c0dacf60d9c90d7e619cad",
+    "mtime": 1793113690.849005,
+    "seen": 1793114080.6511064,
+    "ast_hash": "4f5575c7d6bd8c3888b3f7b3b2ba10c2",
     "semantic_hash": ""
   },
   "api-spec/tspconfig.yaml": {
@@ -2202,9 +2202,9 @@
     "semantic_hash": ""
   },
   "docs/openapi.yaml": {
-    "mtime": 1792146472.6972425,
-    "seen": 1792147370.1038878,
-    "ast_hash": "69b4aed849c0dacf60d9c90d7e619cad",
+    "mtime": 1793113758.511307,
+    "seen": 1793114080.6511064,
+    "ast_hash": "4f5575c7d6bd8c3888b3f7b3b2ba10c2",
     "semantic_hash": ""
   },
   "improvements.md": {
@@ -3096,15 +3096,27 @@
     "semantic_hash": ""
   },
   "docs/x12-collaboration-plan.md": {
-    "mtime": 1792181666.8088028,
-    "seen": 1792181688.8316972,
-    "ast_hash": "6ddd44c3cce7a3d0dd92e2fabee60062",
+    "mtime": 1793114024.850618,
+    "seen": 1793114080.6511064,
+    "ast_hash": "b4ee9b1a906d6c375377ee8132a68fb4",
     "semantic_hash": ""
   },
   "bpmn-parser/src/collaboration.rs": {
     "mtime": 1792181606.5600042,
     "seen": 1792181688.8316972,
     "ast_hash": "c0faed2aa92011009d30b7ec528e98e0",
+    "semantic_hash": ""
+  },
+  "docs/examples/x12-collection.json": {
+    "mtime": 1793114024.8496184,
+    "seen": 1793114080.6511064,
+    "ast_hash": "e2e40ebe78822861f74cc0f1342d5226",
+    "semantic_hash": ""
+  },
+  "engine-server/tests/e2e_collection.rs": {
+    "mtime": 1793113724.2702844,
+    "seen": 1793114080.6511064,
+    "ast_hash": "575017a68b9bbb1725aac5562702d6ef",
     "semantic_hash": ""
   }
 }

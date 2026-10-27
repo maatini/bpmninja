@@ -179,7 +179,7 @@ For performance and architectural reasons (keep it simple), bpmninja deviates fr
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
 - **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
-- **One process per file:** Only the first `<process isExecutable="true">` is deployed; if none is marked executable, the first `<process>` is used. Further processes in the same file are ignored.
+- **Process selection:** `/api/deploy` deploys the first explicitly executable process, with a first-process fallback. `/api/deploy/collection` atomically deploys all explicitly executable pools and returns a result per pool. It stores collaboration metadata; automatic internal message routing is not enabled. Collection persistence requires a record that fits the NATS message payload limit. See [X12 deployment and recovery](docs/x12-collaboration-plan.md).
 
 ### Currently Unsupported BPMN Elements
 
@@ -308,6 +308,7 @@ The server runs at `http://localhost:8081`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB); response includes a `model_check` report unless `MODEL_CHECK=off` |
+| `POST` | `/api/deploy/collection` | Atomically deploy all explicitly executable pools; per-pool model checks and version-pinned metadata |
 | `GET` | `/api/definitions` | List all definitions |
 | `GET` | `/api/definitions/:id/xml` | Retrieve the BPMN XML of a definition |
 | `DELETE` | `/api/definitions/:id` | Delete a definition (`?cascade=true` to also delete instances) |

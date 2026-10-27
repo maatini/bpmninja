@@ -83,28 +83,43 @@ the running engine until restart; inspect definitions after recovery before
 retrying. Collection deployment has no client idempotency key. Automatic internal
 message delivery is still disabled; routing and durable delivery remain below.
 
+The recovery tests require `nats-server` on PATH and use isolated temporary
+JetStream stores; CI installs the executable from its running NATS image.
+
 Example (the XML must explicitly mark each deployed process executable):
 
 ```sh
 curl -X POST http://localhost:8081/api/deploy/collection \
   -H 'Content-Type: application/json' \
-  --data @collection-request.json
+  --data @docs/examples/x12-collection.json
 ```
+
+Collection verification (2026-10-27): **549 tests passed** across the engine,
+parser, server and in-memory persistence library suites plus `e2e_collection`,
+`e2e_deploy`, `e2e_deploy_persist` and `e2e_model_check`. The six collection tests
+cover order, XML/metadata, concurrent versions, later-pool validation and model
+check rejection, oversized commit failure without publication, real JetStream
+restart with interleaved legacy versions, repeated restoration, deletion and
+corrupt-record startup failure. Strict Clippy passed for `engine-core`,
+`bpmn-parser`, `persistence-nats` and `engine-server` with `--all-targets -- -D
+warnings`. TypeSpec compilation, formatting, diff checks and AST-only
+`graphify update .` also passed.
 
 ## Remaining implementation
 
 1. Participant/message-flow parsing and collection deployment are implemented
    within the contracts above. Expand batch size/idempotency and multi-writer
    support separately if required.
-3. Persist routing metadata with its deployed definition version. Internal sends
+2. Use the persisted version-pinned metadata for internal routing. Internal sends
    must target the intended pool and catch/start element; public message-name
    broadcast is insufficient. Specify correlation, payload mapping, multiple
    receivers, unavailable receivers, and version selection explicitly.
-4. Use durable delivery records and receiver deduplication before enabling
+3. Use durable delivery records and receiver deduplication before enabling
    automatic sends. Recovery must cover sender commit before delivery, receiver
    commit before acknowledgment, repeated recovery, and archived receivers.
-5. Update deployment clients, TypeSpec/OpenAPI, modeler workflows, examples,
-   history/SSE, and user-facing limitations together.
+4. Update deployment clients, modeler workflows, examples,
+   history/SSE, and user-facing limitations for automatic routing together.
+   Collection REST types, OpenAPI and a request example are already updated.
 
 ## Acceptance
 
