@@ -30,7 +30,19 @@ impl StartupCoordinator {
         engine: &mut WorkflowEngine,
         deployed_xml: &mut HashMap<String, String>,
     ) -> engine_core::EngineResult<RestoreStats> {
-        let definitions = self.restore_definitions(engine, deployed_xml).await;
+        // A corrupt/unavailable collection bucket aborts startup; falling back to
+        // first-process XML parsing would silently restore an incomplete batch.
+        let collections = self.nats.list_definition_collections().await?;
+        let mut definitions = self.restore_definitions(engine, deployed_xml).await;
+        for collection in collections {
+            engine.restore_definition_collection(&collection);
+            for definition in &collection.definitions {
+                if !collection.deleted.contains(&definition.key) {
+                    deployed_xml.insert(definition.key.to_string(), collection.xml.clone());
+                    definitions += 1;
+                }
+            }
+        }
         let instances = self.restore_instances(engine).await?;
         let user_tasks = self.restore_user_tasks(engine).await?;
         let service_tasks = self.restore_service_tasks(engine).await?;
@@ -84,7 +96,8 @@ impl StartupCoordinator {
         let mut count = 0;
         for def in defs {
             let xml_key = def.key.to_string();
-            let (key, _) = engine.deploy_definition(def).await;
+            let key = def.key;
+            engine.restore_definitions(vec![def]);
             match self.nats.load_bpmn_xml(&xml_key).await {
                 Ok(xml) => {
                     deployed_xml.insert(key.to_string(), xml);

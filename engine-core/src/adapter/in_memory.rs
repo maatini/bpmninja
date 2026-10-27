@@ -19,6 +19,7 @@ use crate::runtime::{
 
 #[derive(Default, Clone)]
 pub struct InMemoryPersistence {
+    collections: Arc<RwLock<HashMap<uuid::Uuid, crate::DefinitionCollection>>>,
     conditional_starts: Arc<RwLock<HashMap<uuid::Uuid, crate::ConditionalStartReceipt>>>,
     tokens: Arc<RwLock<HashMap<String, Vec<Token>>>>,
     instances: Arc<RwLock<HashMap<uuid::Uuid, ProcessInstance>>>,
@@ -140,6 +141,19 @@ impl WorkflowPersistence for InMemoryPersistence {
         Ok(())
     }
 
+    async fn save_definition_collection(
+        &self,
+        collection: &crate::DefinitionCollection,
+    ) -> EngineResult<()> {
+        self.collections
+            .write()
+            .await
+            .insert(collection.id, collection.clone());
+        Ok(())
+    }
+    async fn list_definition_collections(&self) -> EngineResult<Vec<crate::DefinitionCollection>> {
+        Ok(self.collections.read().await.values().cloned().collect())
+    }
     async fn save_definition(&self, definition: &ProcessDefinition) -> EngineResult<()> {
         let mut d = self.definitions.write().await;
         d.insert(definition.key, definition.clone());
@@ -152,6 +166,17 @@ impl WorkflowPersistence for InMemoryPersistence {
     }
 
     async fn delete_definition(&self, key: &str) -> EngineResult<()> {
+        for collection in self.collections.write().await.values_mut() {
+            if let Some(d) = collection
+                .definitions
+                .iter()
+                .find(|d| d.key.to_string() == key)
+                && !collection.deleted.contains(&d.key)
+            {
+                collection.deleted.push(d.key);
+            }
+        }
+
         if let Ok(uid) = uuid::Uuid::parse_str(key) {
             let mut d = self.definitions.write().await;
             d.remove(&uid);
@@ -253,6 +278,14 @@ impl WorkflowPersistence for InMemoryPersistence {
     }
 
     async fn load_bpmn_xml(&self, definition_key: &str) -> EngineResult<String> {
+        for collection in self.collections.read().await.values() {
+            if collection.definitions.iter().any(|d| {
+                d.key.to_string() == definition_key && !collection.deleted.contains(&d.key)
+            }) {
+                return Ok(collection.xml.clone());
+            }
+        }
+
         let b = self.bpmn_xmls.read().await;
         b.get(definition_key).cloned().ok_or_else(|| {
             crate::domain::EngineError::NoSuchDefinition(

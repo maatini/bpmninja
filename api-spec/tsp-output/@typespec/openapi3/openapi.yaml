@@ -194,6 +194,30 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DeployRequest'
+  /api/deploy/collection:
+    post:
+      operationId: Api_deployCollection
+      description: Deploy all explicitly executable top-level processes atomically. Validates every pool and checks each model before publishing. Persists version-pinned metadata; automatic internal message delivery is not enabled. Persisted record size is subject to the NATS maximum payload. A lost response may have committed; inspect definitions before retrying.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionDeployResponse'
+        default:
+          description: An unexpected error response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
   /api/events:
     get:
       operationId: Api_engineEvents
@@ -1739,6 +1763,102 @@ components:
           additionalProperties: {}
           nullable: true
           description: Null/empty metadata, transient=false, and Json serializationDataFormat=application/json are supported.
+    Collaboration:
+      type: object
+      required:
+        - id
+        - participants
+        - message_flows
+      properties:
+        id:
+          type: string
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollaborationParticipant'
+        message_flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollaborationMessageFlow'
+    CollaborationEndpoint:
+      type: object
+      required:
+        - participant_id
+        - process_id
+        - element_id
+      properties:
+        participant_id:
+          type: string
+        process_id:
+          type: string
+        element_id:
+          type: string
+    CollaborationMessageFlow:
+      type: object
+      required:
+        - id
+        - message_id
+        - message_name
+        - source
+        - target
+      properties:
+        id:
+          type: string
+        message_id:
+          type: string
+        message_name:
+          type: string
+        source:
+          $ref: '#/components/schemas/CollaborationEndpoint'
+        target:
+          $ref: '#/components/schemas/CollaborationEndpoint'
+    CollaborationParticipant:
+      type: object
+      required:
+        - id
+        - process_id
+        - executable
+      properties:
+        id:
+          type: string
+        process_id:
+          type: string
+          nullable: true
+        executable:
+          type: boolean
+    CollectionDeployResponse:
+      type: object
+      required:
+        - collection_id
+        - processes
+        - collaborations
+      properties:
+        collection_id:
+          type: string
+        processes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionProcessResult'
+        collaborations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Collaboration'
+    CollectionProcessResult:
+      type: object
+      required:
+        - process_id
+        - definition_key
+        - version
+      properties:
+        process_id:
+          type: string
+        definition_key:
+          type: string
+        version:
+          type: integer
+          format: int32
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
     CompleteRequest:
       type: object
       properties:

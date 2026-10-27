@@ -248,6 +248,27 @@ impl WorkflowPersistence for NatsPersistence {
         Ok(())
     }
 
+    async fn save_definition_collection(
+        &self,
+        collection: &engine_core::DefinitionCollection,
+    ) -> EngineResult<()> {
+        let store = self.kv("definition_collections").await?;
+        let data = serde_json::to_vec(collection)
+            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+        // One KV message is the commit boundary. Oversized batches fail before
+        // any definition becomes visible (subject to the broker payload limit).
+        store
+            .create(collection.id.to_string(), data.into())
+            .await
+            .map_err(|e| EngineError::PersistenceError(format!("Collection commit failed: {e}")))?;
+        Ok(())
+    }
+    async fn list_definition_collections(
+        &self,
+    ) -> EngineResult<Vec<engine_core::DefinitionCollection>> {
+        self.list_kv_entries("definition_collections", "definition collection")
+            .await
+    }
     async fn save_definition(&self, definition: &ProcessDefinition) -> EngineResult<()> {
         let store = self.kv("definitions").await?;
 
@@ -270,6 +291,42 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn delete_definition(&self, key: &str) -> EngineResult<()> {
+        let collections = self.kv("definition_collections").await?;
+        for collection in self.list_definition_collections().await? {
+            if collection
+                .definitions
+                .iter()
+                .any(|d| d.key.to_string() == key)
+            {
+                // CAS retains concurrent deletions of other members.
+                loop {
+                    let entry = collections
+                        .entry(collection.id.to_string())
+                        .await
+                        .map_err(|e| EngineError::PersistenceError(e.to_string()))?
+                        .ok_or_else(|| {
+                            EngineError::PersistenceError("Missing collection commit".into())
+                        })?;
+                    let mut current: engine_core::DefinitionCollection =
+                        serde_json::from_slice(&entry.value)
+                            .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+                    let id = uuid::Uuid::parse_str(key)
+                        .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+                    if current.deleted.contains(&id) {
+                        return Ok(());
+                    }
+                    current.deleted.push(id);
+                    let data = serde_json::to_vec(&current)
+                        .map_err(|e| EngineError::PersistenceError(e.to_string()))?;
+                    match collections.update(collection.id.to_string(), data.into(), entry.revision).await {
+                        Ok(_) => return Ok(()),
+                        Err(e) if e.kind() == async_nats::jetstream::kv::UpdateErrorKind::WrongLastRevision => continue,
+                        Err(e) => return Err(EngineError::PersistenceError(e.to_string())),
+                    }
+                }
+            }
+        }
+
         let store = self.kv("definitions").await?;
 
         store.delete(key).await.map_err(|e| {
@@ -460,6 +517,16 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn load_bpmn_xml(&self, definition_id: &str) -> EngineResult<String> {
+        for collection in self.list_definition_collections().await? {
+            if collection
+                .definitions
+                .iter()
+                .any(|d| d.key.to_string() == definition_id && !collection.deleted.contains(&d.key))
+            {
+                return Ok(collection.xml);
+            }
+        }
+
         use tokio::io::AsyncReadExt;
 
         let store = self.object_store("bpmn_xml").await?;

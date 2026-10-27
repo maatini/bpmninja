@@ -1,146 +1,95 @@
-use dashmap::DashMap;
+use crate::domain::ProcessDefinition;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use crate::domain::ProcessDefinition;
-
-/// Thread-safe registry for process definitions.
+/// One lock makes collection publication visible as a single registry change.
 #[derive(Clone, Default)]
 pub struct DefinitionRegistry {
-    inner: Arc<DashMap<Uuid, Arc<ProcessDefinition>>>,
+    inner: Arc<RwLock<HashMap<Uuid, Arc<ProcessDefinition>>>>,
 }
-
 impl DefinitionRegistry {
     pub fn new() -> Self {
         Self::default()
     }
-
     pub fn insert(&self, key: Uuid, mut def: Arc<ProcessDefinition>) {
         Arc::make_mut(&mut def).compile_conditions();
-        self.inner.insert(key, def);
+        self.inner.write().unwrap().insert(key, def);
     }
-
+    pub fn insert_collection(&self, definitions: Vec<ProcessDefinition>) {
+        let definitions = definitions
+            .into_iter()
+            .map(|mut d| {
+                d.compile_conditions();
+                (d.key, Arc::new(d))
+            })
+            .collect::<Vec<_>>();
+        self.inner.write().unwrap().extend(definitions);
+    }
     pub fn get(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.inner
-            .get(key)
-            .map(|r: dashmap::mapref::one::Ref<'_, Uuid, Arc<ProcessDefinition>>| r.value().clone())
+        self.inner.read().unwrap().get(key).cloned()
     }
-
     pub fn remove(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
-        self.inner.remove(key).map(|(_, v)| v)
+        self.inner.write().unwrap().remove(key)
     }
-
     pub fn contains_key(&self, key: &Uuid) -> bool {
-        self.inner.contains_key(key)
+        self.inner.read().unwrap().contains_key(key)
     }
-
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.inner.read().unwrap().len()
     }
-
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.inner.read().unwrap().is_empty()
     }
-
     pub fn list(&self) -> Vec<(Uuid, String, i32, usize)> {
         self.inner
+            .read()
+            .unwrap()
             .iter()
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    (
-                        *r.key(),
-                        r.value().id.clone(),
-                        r.value().version,
-                        r.value().nodes.len(),
-                    )
-                },
-            )
+            .map(|(k, d)| (*k, d.id.clone(), d.version, d.nodes.len()))
             .collect()
     }
-
     #[allow(dead_code)]
-    pub fn find_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
+    pub fn find_by_bpmn_id(&self, id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
+            .read()
+            .unwrap()
             .iter()
-            .find(
-                |r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().id == bpmn_id
-                },
-            )
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    (*r.key(), Arc::clone(r.value()))
-                },
-            )
+            .find(|(_, d)| d.id == id)
+            .map(|(k, d)| (*k, d.clone()))
     }
-
-    pub fn highest_version(&self, bpmn_id: &str) -> Option<i32> {
+    pub fn highest_version(&self, id: &str) -> Option<i32> {
         self.inner
-            .iter()
-            .filter(
-                |r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().id == bpmn_id
-                },
-            )
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().version
-                },
-            )
+            .read()
+            .unwrap()
+            .values()
+            .filter(|d| d.id == id)
+            .map(|d| d.version)
             .max()
     }
-
-    /// Returns the definition with the highest version for a given BPMN process ID.
-    pub fn find_latest_by_bpmn_id(&self, bpmn_id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
+    pub fn find_latest_by_bpmn_id(&self, id: &str) -> Option<(Uuid, Arc<ProcessDefinition>)> {
         self.inner
+            .read()
+            .unwrap()
             .iter()
-            .filter(
-                |r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().id == bpmn_id
-                },
-            )
-            .max_by_key(
-                |r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().version
-                },
-            )
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    (*r.key(), Arc::clone(r.value()))
-                },
-            )
+            .filter(|(_, d)| d.id == id)
+            .max_by_key(|(_, d)| d.version)
+            .map(|(k, d)| (*k, d.clone()))
     }
-
-    /// Returns all versions of a given BPMN process ID, sorted by version ascending.
-    pub fn all_versions_of(&self, bpmn_id: &str) -> Vec<(Uuid, Arc<ProcessDefinition>)> {
-        let mut versions: Vec<_> = self
+    pub fn all_versions_of(&self, id: &str) -> Vec<(Uuid, Arc<ProcessDefinition>)> {
+        let mut found: Vec<_> = self
             .inner
+            .read()
+            .unwrap()
             .iter()
-            .filter(
-                |r: &dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    r.value().id == bpmn_id
-                },
-            )
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    (*r.key(), Arc::clone(r.value()))
-                },
-            )
+            .filter(|(_, d)| d.id == id)
+            .map(|(k, d)| (*k, d.clone()))
             .collect();
-        versions.sort_by_key(|(_, def)| def.version);
-        versions
+        found.sort_by_key(|(_, d)| d.version);
+        found
     }
-
     pub fn all(&self) -> HashMap<Uuid, Arc<ProcessDefinition>> {
-        self.inner
-            .iter()
-            .map(
-                |r: dashmap::mapref::multiple::RefMulti<'_, Uuid, Arc<ProcessDefinition>>| {
-                    (*r.key(), r.value().clone())
-                },
-            )
-            .collect()
+        self.inner.read().unwrap().clone()
     }
 }

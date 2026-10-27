@@ -55,6 +55,7 @@ pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
+    pub(crate) deployment_lock: tokio::sync::Mutex<()>,
     pub(crate) definitions: registry::DefinitionRegistry,
     pub(crate) instances: crate::engine::instance_store::InstanceStore,
     pub(crate) pending_user_tasks: Arc<DashMap<Uuid, PendingUserTask>>,
@@ -104,6 +105,7 @@ impl WorkflowEngine {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
 
         Self {
+            deployment_lock: tokio::sync::Mutex::new(()),
             definitions: registry::DefinitionRegistry::new(),
             instances: crate::engine::instance_store::InstanceStore::new(),
             pending_user_tasks: Arc::new(DashMap::new()),

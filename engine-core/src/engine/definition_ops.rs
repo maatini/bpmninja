@@ -32,6 +32,11 @@ impl WorkflowEngine {
     /// Existing running instances continue on their original definition untouched.
     /// Returns (definition_key, version).
     pub async fn deploy_definition(&self, definition: ProcessDefinition) -> (Uuid, i32) {
+        let _guard = self.deployment_lock.lock().await;
+        self.deploy_definition_inner(definition).await
+    }
+
+    async fn deploy_definition_inner(&self, definition: ProcessDefinition) -> (Uuid, i32) {
         let highest = self.definitions.highest_version(&definition.id);
         let mut def = Self::normalize_definition(definition, highest);
         // Cloning a deployed definition also clones its key. Preserve the
@@ -52,7 +57,7 @@ impl WorkflowEngine {
 
         for mut sub in sub_processes {
             sub.version = version;
-            Box::pin(self.deploy_definition(sub)).await;
+            Box::pin(self.deploy_definition_inner(sub)).await;
         }
 
         tracing::info!(
@@ -71,6 +76,87 @@ impl WorkflowEngine {
         (key, version)
     }
 
+    /// Persist once before atomically publishing all executable pools. A failed
+    /// commit is never queued for retry: callers must explicitly retry deployment.
+    pub async fn deploy_collection(
+        &self,
+        processes: Vec<ProcessDefinition>,
+        xml: String,
+        collaborations: serde_json::Value,
+    ) -> EngineResult<crate::DefinitionCollection> {
+        let _guard = self.deployment_lock.lock().await;
+        if processes.is_empty() {
+            return Err(EngineError::InvalidDefinition(
+                "Collection has no executable processes".into(),
+            ));
+        }
+        fn flatten(
+            engine: &WorkflowEngine,
+            mut d: ProcessDefinition,
+            out: &mut Vec<ProcessDefinition>,
+        ) -> EngineResult<()> {
+            if out.iter().any(|previous| previous.id == d.id) {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "Duplicate deployed process ID '{}'",
+                    d.id
+                )));
+            }
+            d.version = engine
+                .definitions
+                .highest_version(&d.id)
+                .map_or(d.version, |v| v + 1);
+            d.key = Uuid::new_v4();
+            let subs = std::mem::take(&mut d.sub_processes);
+            let version = d.version;
+            out.push(d);
+            for mut sub in subs {
+                sub.version = version;
+                flatten(engine, sub, out)?;
+            }
+            Ok(())
+        }
+        let mut definitions = Vec::new();
+        for process in processes {
+            flatten(self, process, &mut definitions)?;
+        }
+        let collection = crate::DefinitionCollection {
+            id: Uuid::new_v4(),
+            definitions,
+            xml,
+            collaborations,
+            deleted: Vec::new(),
+        };
+        if let Some(persistence) = &self.persistence {
+            persistence.save_definition_collection(&collection).await?;
+        }
+        // No await between durable commit and publication, including cancellation.
+        self.definitions
+            .insert_collection(collection.definitions.clone());
+        for definition in &collection.definitions {
+            self.emit_event(crate::engine::EngineEvent::DefinitionChanged {
+                definition_key: definition.key,
+            });
+        }
+        Ok(collection)
+    }
+
+    /// Restore already committed definitions without renumbering or writing them.
+    pub fn restore_definitions(&self, definitions: Vec<ProcessDefinition>) {
+        self.definitions.insert_collection(definitions);
+    }
+
+    /// Startup installs persisted identities and versions without redeploying them.
+    pub fn restore_definition_collection(&self, collection: &crate::DefinitionCollection) {
+        self.definitions.insert_collection(
+            collection
+                .definitions
+                .iter()
+                .filter(|d| !collection.deleted.contains(&d.key))
+                .cloned()
+                .collect(),
+        );
+    }
+
     /// Assigns version and key to a definition without side effects (pure, testable).
     pub(crate) fn normalize_definition(
         mut definition: ProcessDefinition,
@@ -83,6 +169,7 @@ impl WorkflowEngine {
     /// Deletes a process definition.
     /// If cascade is true, deletes all associated process instances first.
     pub async fn delete_definition(&self, definition_key: Uuid, cascade: bool) -> EngineResult<()> {
+        let _guard = self.deployment_lock.lock().await;
         if !self.definitions.contains_key(&definition_key) {
             return Err(EngineError::NoSuchDefinition(definition_key));
         }
@@ -108,14 +195,13 @@ impl WorkflowEngine {
             }
         }
 
-        self.definitions.remove(&definition_key);
-
         if let Some(ref persistence) = self.persistence {
             persistence
                 .delete_definition(&definition_key.to_string())
                 .await?;
         }
 
+        self.definitions.remove(&definition_key);
         self.emit_event(crate::engine::events::EngineEvent::DefinitionChanged { definition_key });
         Ok(())
     }

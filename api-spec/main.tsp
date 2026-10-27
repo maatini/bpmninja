@@ -73,6 +73,40 @@ model DeployResponse {
   model_check?: ModelCheckReport;
 }
 
+model CollectionProcessResult {
+  process_id: string;
+  definition_key: string;
+  version: int32;
+  model_check?: ModelCheckReport;
+}
+model CollaborationEndpoint {
+  participant_id: string;
+  process_id: string;
+  element_id: string;
+}
+model CollaborationParticipant {
+  id: string;
+  process_id: string | null;
+  executable: boolean;
+}
+model CollaborationMessageFlow {
+  id: string;
+  message_id: string;
+  message_name: string;
+  source: CollaborationEndpoint;
+  target: CollaborationEndpoint;
+}
+model Collaboration {
+  id: string;
+  participants: CollaborationParticipant[];
+  message_flows: CollaborationMessageFlow[];
+}
+model CollectionDeployResponse {
+  collection_id: string;
+  processes: CollectionProcessResult[];
+  collaborations: Collaboration[];
+}
+
 @doc("Exactly one selector is required. UUID request_id is global to the store. Retries retain the pinned definition and true/false result indefinitely; changed input returns 409. variables.business_key is rejected; use the metadata field.")
 model ConditionalStartRequest {
   @format("uuid") request_id: string;
@@ -307,6 +341,10 @@ namespace Api {
 
   @post @route("/deploy")
   op deploy(@body request: DeployRequest): DeployResponse | AppError;
+
+  @doc("Deploy all explicitly executable top-level processes atomically. Validates every pool and checks each model before publishing. Persists version-pinned metadata; automatic internal message delivery is not enabled. Persisted record size is subject to the NATS maximum payload. A lost response may have committed; inspect definitions before retrying.")
+  @post @route("/deploy/collection")
+  op deployCollection(@body request: DeployRequest): CollectionDeployResponse | AppError;
 
   @post @route("/conditional-starts/evaluate")
   op evaluateConditionalStart(@body request: ConditionalStartRequest): ConditionalStartResult | { @statusCode statusCode: 409; @body body: AppError } | AppError;

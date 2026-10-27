@@ -47,14 +47,55 @@ Validation: all **99 parser tests** pass, including eight new collaboration
 tests and a serialization roundtrip. Strict parser Clippy (`--all-targets --
 -D warnings`), formatting, and diff checks pass.
 
+## Collection deployment (2026-10-27)
+
+`POST /api/deploy/collection` accepts the existing `{xml, name}` request and
+returns `collection_id`, ordered `processes` (`process_id`, `definition_key`,
+`version`, optional `model_check`) and validated `collaborations`. The legacy
+`POST /api/deploy` response and selection behavior remain unchanged.
+
+All explicitly executable pools are parsed before deployment. Each model check
+uses an isolated process with shared declarations and namespace bindings;
+non-executable pools and collaboration diagrams do not affect its findings.
+Enforce mode rejects the whole batch if any pool has violations. Existing
+skipped/inconclusive model-check policy is retained. Empty collections fail.
+
+The engine serializes collection and single deployments/version allocation and
+publishes every top-level/embedded definition under one registry write lock.
+With persistence configured, a single `definition_collections` JetStream KV
+record containing definitions, original XML and collaboration metadata is the
+commit boundary. No per-pool persistence jobs or background retries are queued.
+Validation or definitive commit failure publishes nothing. Original metadata
+resolves process IDs against immutable definition keys/versions in that record.
+The backend must support atomic collection commits; other backends fail closed.
+
+Startup loads collections before restoring instances, preserving exact keys and
+versions, including gaps and batches mixed with legacy deployments. Collection
+read/corruption errors abort startup. It never reparses a batch as the first
+process. Deleted members remain tombstoned inside the record, preserving audit
+metadata and preventing resurrection. XML retrieval supports collection keys.
+
+Limits: the serialized record must fit the broker's maximum message payload
+(often 1 MiB), even when XML fits the HTTP 10 MiB limit. There is one engine
+writer per store; version allocation is not coordinated across server replicas.
+A lost request/commit acknowledgment can leave a committed batch absent from
+the running engine until restart; inspect definitions after recovery before
+retrying. Collection deployment has no client idempotency key. Automatic internal
+message delivery is still disabled; routing and durable delivery remain below.
+
+Example (the XML must explicitly mark each deployed process executable):
+
+```sh
+curl -X POST http://localhost:8081/api/deploy/collection \
+  -H 'Content-Type: application/json' \
+  --data @collection-request.json
+```
+
 ## Remaining implementation
 
-1. Participant and message-flow parsing is complete within the contract above.
-   Wire this metadata into the collection deployment path below.
-2. Add collection deployment with a result for every process. Validate all pools
-   and perform per-process model checking before publishing definitions. Define
-   persistence failure/rollback and startup restoration semantics for a batch;
-   preserve the existing single-process response contract.
+1. Participant/message-flow parsing and collection deployment are implemented
+   within the contracts above. Expand batch size/idempotency and multi-writer
+   support separately if required.
 3. Persist routing metadata with its deployed definition version. Internal sends
    must target the intended pool and catch/start element; public message-name
    broadcast is insufficient. Specify correlation, payload mapping, multiple

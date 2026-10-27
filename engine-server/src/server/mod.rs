@@ -165,6 +165,7 @@ pub fn build_app_with_config(
 
     let mut router = Router::new()
         .route("/api/deploy", post(deploy::deploy_definition))
+        .route("/api/deploy/collection", post(deploy::deploy_collection))
         .route(
             "/api/conditional-starts/evaluate",
             post(instances::evaluate_conditional_start),

@@ -192,9 +192,9 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/lib.rs": {
-    "mtime": 1792180966.8167577,
-    "seen": 1792181086.7730913,
-    "ast_hash": "7543ad96e9a101bb2359f46902e37193",
+    "mtime": 1792181576.5084784,
+    "seen": 1792181688.8316972,
+    "ast_hash": "3b4cc8b4a8afbfcee02849db9d6b2ada",
     "semantic_hash": ""
   },
   "bpmn-parser/src/models.rs": {
@@ -3090,15 +3090,21 @@
     "semantic_hash": ""
   },
   "bpmn-parser/src/collaboration_tests.rs": {
-    "mtime": 1792180971.6287677,
-    "seen": 1792181086.7730913,
-    "ast_hash": "8029c6ad8f832fccd8e583c65b5ba626",
+    "mtime": 1792181620.1328282,
+    "seen": 1792181688.8316972,
+    "ast_hash": "4d314ae4ab8564a4e9c3920566e2dce6",
     "semantic_hash": ""
   },
   "docs/x12-collaboration-plan.md": {
-    "mtime": 1792181291.6951916,
-    "seen": 1792181458.270869,
-    "ast_hash": "f308e7643e7e487f71982934c82f8d80",
+    "mtime": 1792181666.8088028,
+    "seen": 1792181688.8316972,
+    "ast_hash": "6ddd44c3cce7a3d0dd92e2fabee60062",
+    "semantic_hash": ""
+  },
+  "bpmn-parser/src/collaboration.rs": {
+    "mtime": 1792181606.5600042,
+    "seen": 1792181688.8316972,
+    "ast_hash": "c0faed2aa92011009d30b7ec528e98e0",
     "semantic_hash": ""
   }
 }

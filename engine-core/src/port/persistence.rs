@@ -5,6 +5,19 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::EngineResult;
 use crate::domain::{ProcessDefinition, Token};
+
+/// One atomic deployment commit. Definitions include embedded subprocesses;
+/// collaboration metadata references the immutable keys in this record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefinitionCollection {
+    pub id: uuid::Uuid,
+    pub definitions: Vec<ProcessDefinition>,
+    pub xml: String,
+    pub collaborations: serde_json::Value,
+    /// Deletion keeps the original version-pinned metadata for audit/recovery.
+    #[serde(default)]
+    pub deleted: Vec<uuid::Uuid>,
+}
 use crate::runtime::{PendingServiceTask, PendingUserTask, ProcessInstance};
 
 /// Query filter for searching archived (completed) process instances.
@@ -175,6 +188,16 @@ pub trait WorkflowPersistence: Send + Sync {
 
     /// Persist a process definition metadata (JSON).
     async fn save_definition(&self, definition: &ProcessDefinition) -> EngineResult<()>;
+    /// Commit the entire collection atomically, or fail without publishing pools.
+    /// Backends must opt in; sequential save_definition calls are insufficient.
+    async fn save_definition_collection(&self, _: &DefinitionCollection) -> EngineResult<()> {
+        Err(crate::EngineError::PersistenceError(
+            "Atomic collection deployment is unsupported by this persistence backend".into(),
+        ))
+    }
+    async fn list_definition_collections(&self) -> EngineResult<Vec<DefinitionCollection>> {
+        Ok(Vec::new())
+    }
     /// Load all persisted process definitions.
     async fn list_definitions(&self) -> EngineResult<Vec<ProcessDefinition>>;
 

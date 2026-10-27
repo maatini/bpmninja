@@ -63,6 +63,12 @@ jobs:
           docker logs bpmninja-nats
           exit 1
 
+      - name: Install isolated JetStream test server
+        run: |
+          docker cp "bpmninja-nats:$(docker inspect --format '{{.Path}}' bpmninja-nats)" "$RUNNER_TEMP/nats-server"
+          chmod +x "$RUNNER_TEMP/nats-server"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
       - name: Run tests
         env:
           NATS_URL: nats://127.0.0.1:4222

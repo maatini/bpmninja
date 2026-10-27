@@ -9,7 +9,8 @@ use futures::StreamExt;
 use tokio::sync::OnceCell;
 
 /// KV buckets created on connect; their handles are cached after first use.
-const KV_BUCKETS: [&str; 11] = [
+const KV_BUCKETS: [&str; 12] = [
+    "definition_collections",
     "conditional_starts",
     "tokens",
     "instances",
@@ -221,6 +222,20 @@ impl NatsPersistence {
                     "Failed to initialize conditional starts: {error}"
                 ))
             })?;
+        }
+
+        if js.get_key_value("definition_collections").await.is_err()
+            && let Err(error) = js
+                .create_key_value(kv::Config {
+                    bucket: "definition_collections".into(),
+                    description: "Atomic version-pinned collection deployment commits".into(),
+                    ..Default::default()
+                })
+                .await
+        {
+            js.get_key_value("definition_collections")
+                .await
+                .map_err(|_| EngineError::PersistenceError(error.to_string()))?;
         }
 
         Ok(Self {

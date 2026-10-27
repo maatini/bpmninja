@@ -85,6 +85,147 @@ pub(crate) async fn deploy_definition(
 }
 
 #[derive(Serialize)]
+pub(crate) struct CollectionProcessResult {
+    pub process_id: String,
+    pub definition_key: String,
+    pub version: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_check: Option<crate::server::model_check::ModelCheckReport>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct CollectionDeployResponse {
+    pub collection_id: String,
+    pub processes: Vec<CollectionProcessResult>,
+    /// Metadata is stored; automatic internal message delivery is not enabled.
+    pub collaborations: Vec<bpmn_parser::Collaboration>,
+}
+
+pub(crate) async fn deploy_collection(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeployRequest>,
+) -> Result<Json<CollectionDeployResponse>, AppError> {
+    if payload.xml.len() > state.max_xml_bytes {
+        return Err(AppError::BadRequest(format!(
+            "XML too large (max {})",
+            state.max_xml_bytes
+        )));
+    }
+    let document = bpmn_parser::parse_bpmn_collaboration(&payload.xml)
+        .map_err(|e| AppError::BadRequest(format!("Invalid BPMN XML: {e:?}")))?;
+    if document.processes.is_empty() {
+        return Err(AppError::BadRequest(
+            "Collection has no executable processes".into(),
+        ));
+    }
+    // Validate every selected pool before calling the publishing path.
+    let mut reports = Vec::new();
+    for process in &document.processes {
+        let isolated = isolate_process(&payload.xml, &process.id).map_err(AppError::BadRequest)?;
+        let report = state.model_checker.check(&isolated).await;
+        if let Some(report) = &report
+            && report.status == ModelCheckStatus::Violations
+            && state.model_checker.mode == ModelCheckMode::Enforce
+        {
+            return Err(AppError::BadRequest(format!(
+                "Model check failed for '{}': {}",
+                process.id,
+                report.summary()
+            )));
+        }
+        reports.push((process.id.clone(), report));
+    }
+    let metadata = serde_json::to_value(&document.collaborations)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let mut xml_cache = state.deployed_xml.write().await;
+    let collection = state
+        .engine
+        .deploy_collection(document.processes, payload.xml.clone(), metadata)
+        .await?;
+    for definition in &collection.definitions {
+        xml_cache.insert(definition.key.to_string(), payload.xml.clone());
+    }
+    let processes = reports
+        .into_iter()
+        .map(|(id, model_check)| {
+            let definition = collection
+                .definitions
+                .iter()
+                .find(|d| d.id == id)
+                .expect("selected process was deployed");
+            CollectionProcessResult {
+                process_id: id,
+                definition_key: definition.key.to_string(),
+                version: definition.version,
+                model_check,
+            }
+        })
+        .collect();
+    Ok(Json(CollectionDeployResponse {
+        collection_id: collection.id.to_string(),
+        processes,
+        collaborations: document.collaborations,
+    }))
+}
+
+/// Retain shared declarations and namespace bindings, but remove other pools,
+/// collaboration diagrams, and DI so analyzer findings belong to this pool.
+fn isolate_process(xml: &str, process_id: &str) -> Result<String, String> {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut writer = quick_xml::Writer::new(Vec::new());
+    let mut depth = 0usize;
+    let mut skip = None;
+    loop {
+        let event = reader.read_event().map_err(|e| e.to_string())?;
+        if matches!(event, Event::Eof) {
+            break;
+        }
+        let mut omit = skip.is_some();
+        if let Event::Start(e) | Event::Empty(e) = &event
+            && depth == 1
+        {
+            let local = e.local_name();
+            let name = local.as_ref();
+            let remove = if name == "process" {
+                let mut selected = false;
+                for attribute in e.attributes() {
+                    let attribute = attribute.map_err(|e| e.to_string())?;
+                    if attribute.key.as_ref() == "id" {
+                        selected = attribute
+                            .normalized_value(quick_xml::XmlVersion::default())
+                            .map_err(|e| e.to_string())?
+                            == process_id;
+                    }
+                }
+                !selected
+            } else {
+                name == "collaboration" || name == "BPMNDiagram"
+            };
+            if remove {
+                omit = true;
+                if matches!(event, Event::Start(_)) {
+                    skip = Some(depth);
+                }
+            }
+        }
+        if matches!(event, Event::Start(_)) {
+            depth += 1;
+        }
+        if matches!(event, Event::End(_)) {
+            depth -= 1;
+            if skip == Some(depth) {
+                skip = None;
+            }
+        }
+        if !omit {
+            writer.write_event(event).map_err(|e| e.to_string())?;
+        }
+    }
+    String::from_utf8(writer.into_inner()).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
 pub(crate) struct DefinitionInfo {
     pub key: String,
     pub bpmn_id: String,
