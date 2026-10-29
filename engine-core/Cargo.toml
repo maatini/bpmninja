@@ -20,7 +20,7 @@ croner = "4"
 metrics = "0.24"
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 
 [[bench]]
 name = "engine_bench"

@@ -43,7 +43,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
-- **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
+- **Automatic timer scheduler** — background task sleeps until the next timer is due (`TIMER_INTERVAL_MS` is the maximum idle wait)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
 - **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout)
 - **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported

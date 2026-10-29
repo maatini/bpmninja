@@ -103,9 +103,11 @@ sequenceDiagram
     participant Engine as WorkflowEngine
     participant NATS as persistence-nats
 
-    loop Every TIMER_INTERVAL_MS (default 1000ms)
+    loop Until next due timer, a schedule change, or TIMER_INTERVAL_MS (max idle, default 1000ms)
+        Scheduler->>Engine: wait_for_timer_work(max_idle)
+        Engine-->>Scheduler: due, or Notify on insert/move/remove
         Scheduler->>Engine: process_timers()
-        Engine-->>Engine: Scan pending_timers DashMap for expired
+        Engine-->>Engine: Walk timer due-index for expired ids
         alt Found expired timers
             Engine-->>Engine: Resume instance with stored token
             Engine->>NATS: Delete timer from KV

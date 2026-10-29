@@ -553,25 +553,25 @@ struct AppState {
 
 ### 6.3 Background Timer Scheduler
 
-The server spawns a Tokio background task that periodically calls `engine.process_timers()`:
+The server spawns a Tokio task that sleeps until the next timer is due, or until a timer is added, moved, or removed (`Notify`). `process_timers()` then runs once. Overdue timers that cannot fire (suspended instances) do not spin the loop.
 
 ```rust
-// main.rs — automatic timer polling (lock-free via Arc<WorkflowEngine>)
-let timer_interval_ms: u64 = env::var("TIMER_INTERVAL_MS")
-    .ok().and_then(|v| v.parse().ok()).unwrap_or(1000);
-
+// main.rs — event-driven timer scheduling (lock-free via Arc<WorkflowEngine>)
+let max_idle = Duration::from_millis(timer_interval_ms); // TIMER_INTERVAL_MS, default 1000
 tokio::spawn(async move {
     loop {
-        tokio::time::sleep(Duration::from_millis(timer_interval_ms)).await;
-        match timer_engine.process_timers().await {
-            Ok(n) => tracing::info!("Timer scheduler: processed {} expired timer(s)", n),
-            Err(e) => tracing::warn!("Timer scheduler error: {}", e),
+        tokio::select! {
+            biased;
+            _ = shutdown.changed() => break,
+            _ = timer_engine.wait_for_timer_work(max_idle) => {
+                let _ = timer_engine.process_timers().await;
+            }
         }
     }
 });
 ```
 
-> **Configuration**: `TIMER_INTERVAL_MS` (default: 1000ms). No external cron required.
+> **Configuration**: `TIMER_INTERVAL_MS` (default: 1000ms) is the **maximum idle wait**, not a fixed poll period. A timer due sooner wakes the scheduler on time. Shutdown cancels the wait immediately. No external cron required.
 
 ### 6.4 Health & Readiness
 

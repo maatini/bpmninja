@@ -287,8 +287,23 @@ impl WorkflowEngine {
         let _ = self.task_handler_shutdown.send(false);
     }
 
+    /// Wakes the in-process dispatcher and every long-polling `fetchAndLock`.
+    ///
+    /// `notify_waiters` does not store a permit. Both loops enable the waiter
+    /// before they fetch, so a task that arrives between the fetch and the
+    /// sleep is not missed, and one that arrived earlier is still in the index.
+    /// `notify_one` would leave every other waiter asleep.
     pub(crate) fn notify_service_tasks_available(&self) {
-        self.service_task_notify.notify_one();
+        self.service_task_notify.notify_waiters();
+    }
+
+    /// Completes when service tasks may have become fetchable.
+    ///
+    /// Create the future and call [`tokio::sync::futures::Notified::enable`]
+    /// before fetching. Lock expiry and retry delays are time-based and are
+    /// not signalled here.
+    pub(crate) fn service_tasks_changed(&self) -> tokio::sync::futures::Notified<'_> {
+        self.service_task_notify.notified()
     }
 
     async fn run_task_handler_dispatcher(self: Arc<Self>) {

@@ -1,6 +1,8 @@
 //! Topic-Index tests (R2): fetch_and_lock uses the secondary topic index.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 use super::super::*;
 use crate::domain::ProcessDefinitionBuilder;
@@ -240,4 +242,169 @@ async fn fetch_and_lock_clamps_extreme_lock_durations() {
         "clamped to 1h, got {a_secs}s"
     );
     assert_eq!(b_secs, 1, "negative duration clamped to 1s");
+}
+
+async fn yield_n(n: usize) {
+    for _ in 0..n {
+        tokio::task::yield_now().await;
+    }
+}
+
+async fn deploy_single_task(engine: &WorkflowEngine, topic: &str) -> uuid::Uuid {
+    let def = ProcessDefinitionBuilder::new(format!("long_poll_{topic}"))
+        .node("start", BpmnElement::StartEvent)
+        .node(
+            "svc",
+            BpmnElement::ServiceTask {
+                topic: topic.into(),
+                multi_instance: None,
+            },
+        )
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "svc")
+        .flow("svc", "end")
+        .build()
+        .unwrap();
+    engine.deploy_definition(def).await.0
+}
+
+fn topic_pair(topic: &str) -> (String, i64) {
+    (topic.to_string(), 30)
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_returns_immediately_when_work_exists() {
+    let engine = WorkflowEngine::new();
+    let key = deploy_single_task(&engine, "ready").await;
+    engine.start_instance(key).await.unwrap();
+
+    let start = tokio::time::Instant::now();
+    let tasks = engine
+        .fetch_and_lock_service_tasks_long_poll(
+            "w",
+            1,
+            &[topic_pair("ready")],
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .await;
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].worker_id.as_deref(), Some("w"));
+    assert_eq!(start.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_returns_when_a_task_arrives() {
+    let engine = Arc::new(WorkflowEngine::new());
+    let key = deploy_single_task(&engine, "arrive").await;
+    let waiting = engine.clone();
+    let start = tokio::time::Instant::now();
+    let waiter = tokio::spawn(async move {
+        waiting
+            .fetch_and_lock_service_tasks_long_poll(
+                "w",
+                1,
+                &[topic_pair("arrive")],
+                Duration::from_secs(30),
+                Duration::from_secs(60),
+            )
+            .await
+    });
+
+    yield_n(8).await;
+    assert!(!waiter.is_finished());
+    assert_eq!(start.elapsed(), Duration::ZERO);
+
+    engine.start_instance(key).await.unwrap();
+    let tasks = waiter.await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].topic, "arrive");
+    assert_eq!(start.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_wakes_when_a_failed_task_is_unlocked() {
+    let engine = Arc::new(WorkflowEngine::new());
+    let key = deploy_single_task(&engine, "retry").await;
+    engine.start_instance(key).await.unwrap();
+    let locked = engine
+        .fetch_and_lock_service_tasks("w1", 1, &["retry".to_string()], 30)
+        .await;
+    assert_eq!(locked.len(), 1);
+
+    let waiting = engine.clone();
+    let start = tokio::time::Instant::now();
+    let waiter = tokio::spawn(async move {
+        waiting
+            .fetch_and_lock_service_tasks_long_poll(
+                "w2",
+                1,
+                &[topic_pair("retry")],
+                Duration::from_secs(30),
+                Duration::from_secs(60),
+            )
+            .await
+    });
+    yield_n(8).await;
+    assert!(!waiter.is_finished());
+
+    engine
+        .fail_service_task(locked[0].id, "w1", Some(2), Some("boom".into()), None)
+        .await
+        .unwrap();
+    let tasks = waiter.await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].worker_id.as_deref(), Some("w2"));
+    assert_eq!(start.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_times_out_when_empty() {
+    let engine = WorkflowEngine::new();
+    let start = tokio::time::Instant::now();
+    let tasks = engine
+        .fetch_and_lock_service_tasks_long_poll(
+            "w",
+            1,
+            &[topic_pair("nothing")],
+            Duration::from_millis(250),
+            Duration::from_secs(30),
+        )
+        .await;
+    assert!(tasks.is_empty());
+    assert_eq!(start.elapsed(), Duration::from_millis(250));
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_clamps_timeout_to_thirty_seconds() {
+    let engine = WorkflowEngine::new();
+    let start = tokio::time::Instant::now();
+    let tasks = engine
+        .fetch_and_lock_service_tasks_long_poll(
+            "w",
+            1,
+            &[topic_pair("nothing")],
+            Duration::from_secs(120),
+            Duration::from_secs(120),
+        )
+        .await;
+    assert!(tasks.is_empty());
+    assert_eq!(start.elapsed(), MAX_SERVICE_TASK_LONG_POLL);
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_poll_with_zero_timeout_returns_without_waiting() {
+    let engine = WorkflowEngine::new();
+    let start = tokio::time::Instant::now();
+    let tasks = engine
+        .fetch_and_lock_service_tasks_long_poll(
+            "w",
+            1,
+            &[topic_pair("nothing")],
+            Duration::ZERO,
+            Duration::from_secs(30),
+        )
+        .await;
+    assert!(tasks.is_empty());
+    assert_eq!(start.elapsed(), Duration::ZERO);
 }
