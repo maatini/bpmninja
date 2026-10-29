@@ -12,6 +12,10 @@ targets = [
     "x86_64-apple-darwin",
 ]
 all-features = false
+# The feature lives on engine-server and is off for normal builds. Deny still
+# resolves it so the git source and its license are checked in the existing
+# `cargo deny check` job. `cargo test` / `cargo clippy` do not pass this flag.
+features = ["model-check"]
 
 [advisories]
 yanked = "warn"
@@ -41,6 +45,14 @@ allow = [
     "MPL-2.0",
 ]
 
+# rust_bpmn_analyzer (feature model-check) is MIT via the repository LICENSE,
+# but core/Cargo.toml does not set `license`. The file is the repo-root LICENSE
+# (standard MIT). Hash is cargo-deny's XxHash32 of that file at rev 3d3eede.
+[[licenses.clarify]]
+crate = "rust_bpmn_analyzer"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0xe409fd0e }]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "warn"
@@ -50,3 +62,8 @@ deny = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Only the optional engine-server feature `model-check`. The crate is not on
+# crates.io; Cargo.toml pins rev 3d3eede32409d70e6818d8344d480de8d76a6d8b (MIT).
+# cargo-deny matches the git URL exactly and cannot pin a rev, so the exception
+# is this one repository and nothing else.
+allow-git = ["https://github.com/timKraeuter/rust_bpmn_analyzer"]

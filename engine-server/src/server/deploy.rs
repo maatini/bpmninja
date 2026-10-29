@@ -1,3 +1,4 @@
+use crate::server::model_check::log_report;
 use crate::server::state::{ApiJson, AppError, AppState, MAX_XML_BYTES, parse_uuid};
 use axum::{
     Json,
@@ -21,6 +22,9 @@ pub(crate) struct DeployRequest {
 pub(crate) struct DeployResponse {
     pub definition_key: String,
     pub version: i32,
+    /// Present unless `MODEL_CHECK=off` (the default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_check: Option<crate::server::model_check::ModelCheckReport>,
 }
 
 pub(crate) async fn deploy_definition(
@@ -38,6 +42,18 @@ pub(crate) async fn deploy_definition(
     let engine = &state.engine;
     let def = bpmn_parser::parse_bpmn_xml(&payload.xml)
         .map_err(|e| AppError::BadRequest(format!("Invalid BPMN XML: {e:?}")))?;
+
+    // Invalid XML never occupies the single analysis slot.
+    let model_check = if let Some(report) = state.model_checker.check(&payload.xml).await {
+        log_report(&payload.name, &report);
+        if state.model_checker.rejects_deploy(&report) {
+            return Err(AppError::ModelCheckRejected(report));
+        }
+        Some(report)
+    } else {
+        None
+    };
+
     let (key, version) = engine.deploy_definition(def).await;
     let key_str = key.to_string();
 
@@ -63,6 +79,7 @@ pub(crate) async fn deploy_definition(
     Ok(Json(DeployResponse {
         definition_key: key_str,
         version,
+        model_check,
     }))
 }
 

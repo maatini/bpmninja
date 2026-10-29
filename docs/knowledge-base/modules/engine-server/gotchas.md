@@ -33,7 +33,21 @@ Rollen: Admin-Key darf alles, Worker-Key nur `fetchAndLock`, `complete`, `failur
 
 `DefaultBodyLimit` and the deploy-path cap share `MAX_XML_BYTES` (**10 MiB** = `10 * 1024 * 1024`, OpenAPI contract). Override with env `MAX_XML_BYTES`. Multipart instance-file uploads stay at `MAX_UPLOAD_BYTES` (default **5 MiB**) in `files.rs` — oversized uploads return **413 Payload Too Large**.
 
+### ⚠️ Deploy-Model-Checking ist opt-in (Feature und Env)
+
+`MODEL_CHECK` steht standardmäßig auf `off`. Wirksam wird die Prüfung nur, wenn das Binary zusätzlich mit `--features model-check` gebaut wurde (`rust_bpmn_analyzer`, MIT, Git-Rev `3d3eede32409d70e6818d8344d480de8d76a6d8b`, nicht auf crates.io).
+
+| Modus | Deploy | Antwort |
+|---|---|---|
+| `off` | immer 200 | kein Feld `model_check` |
+| `warn` | immer 200, auch bei Befund, Timeout, Panic, belegter Analyse oder fehlendem Feature | `model_check` plus Log bei Befunden |
+| `enforce` | 400 bei bestätigtem Verstoß oder wenn das Feature fehlt | `{ "error", "model_check" }` mit den Befunden |
+
+Timeout (`inconclusive`), Panic (`failed`) und „eine Analyse gleichzeitig“ (`skipped`) lehnen auch in `enforce` nicht ab — sonst würde ein hängender oder abstürzender Analyzer Deploys blockieren. Die Analyse läuft in `spawn_blocking`, das Budget ist `MODEL_CHECK_TIMEOUT_MS` (Default 2000). `build_app()` erzwingt `off`, damit parallele Tests nicht von der Prozess-Env abhängen.
+
 ### ⚠️ Alle Fehlerantworten sind `{ "error": ... }`
+
+Ausnahme: `MODEL_CHECK=enforce` ergänzt bei Ablehnung das Feld `model_check` (Status, Befunde, Grund). `error` bleibt ein String und enthält die Befunde im Klartext.
 
 JSON-Handler nutzen `ApiJson<T>` statt `axum::Json<T>` (definiert in `state.rs`). Dessen `FromRequest`/`OptionalFromRequest` mappen `JsonRejection` auf `AppError::Rejected` und rendern damit dieselbe Fehlerform wie alle anderen Fehler:
 

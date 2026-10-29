@@ -42,6 +42,7 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
+- **Optional deploy-time model checking** — Cargo feature `model-check` (off by default) runs [rust_bpmn_analyzer](https://github.com/timKraeuter/rust_bpmn_analyzer) (MIT, pinned git revision) for deadlocks, livelocks, unsafe parallelism and dead activities. Runtime `MODEL_CHECK` defaults to `off`; `warn` returns findings with the deploy, `enforce` rejects confirmed violations. See [Environment variables](docs/env.md#engine-server)
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
 - **Automatic timer scheduler** — background task sleeps until the next timer is due (`TIMER_INTERVAL_MS` is the maximum idle wait)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
@@ -297,8 +298,18 @@ The server runs at `http://localhost:8081`.
 | `BIND_ADDR` | `0.0.0.0` | Listen address (alias `BIND_ADDRESS`) |
 | `PORT` | `8081` | HTTP server port |
 | `RUST_LOG` | `info` | Log level filter (e.g. `debug`, `warn`, `engine_server=trace`) |
+| `MODEL_CHECK` | `off` | Deploy-time check: `off`, `warn` (findings in the response and the log), `enforce` (reject confirmed violations). Requires `--features model-check` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | How long a deploy waits for that check |
 
-Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbox, NATS-Retention, Client-Variablen): **[docs/env.md](docs/env.md)**.
+Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbox, NATS-Retention, Model-Checking, Client-Variablen): **[docs/env.md](docs/env.md)**.
+
+Model checking is not in the default binary or the published image. Build it explicitly:
+
+```bash
+cargo run -p engine-server --features model-check
+```
+
+`warn` still deploys when the analyzer finds a problem, times out, or panics; the response field `model_check` explains which. `enforce` returns HTTP 400 with `error` and `model_check` for a confirmed violation. A timeout, a panic, or a second deploy while one analysis is running does not fail the deploy in either mode (the single in-flight analysis runs on a blocking thread and is capped by `MODEL_CHECK_TIMEOUT_MS`). Setting `enforce` on a binary built without the feature rejects every deploy, so the switch cannot fail open.
 
 
 ---
@@ -311,7 +322,7 @@ Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbo
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB) |
+| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB). With `MODEL_CHECK=warn` or `enforce` the response includes `model_check` |
 | `GET` | `/api/definitions` | List all definitions |
 | `GET` | `/api/definitions/:id/xml` | Retrieve the BPMN XML of a definition |
 | `DELETE` | `/api/definitions/:id` | Delete a definition (`?cascade=true` to also delete instances) |
@@ -604,12 +615,12 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | **bpmn-parser** | 91 | — | 91 |
 | **persistence-nats** | 20 | — | 20 |
 | **persistence-memory** | 2 | — | 2 |
-| **engine-server** | 40 | 97 | 137 |
+| **engine-server** | 50 | 100 | 150 |
 | **desktop-tauri** | — | 52 | 52 |
 | **bpmn-ninja-external-task-client** | 85 | — | 85 |
-| **Total** | **557** | **154** | **711** |
+| **Total** | **567** | **157** | **724** |
 
-> Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
+> Authoritative (2026-10-29 for engine-server test counts; 2026-10-24 for the other packages and for coverage below): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases. The three `e2e_model_check` cases and the ten `model_check` unit tests are the default feature set; `--features model-check` adds the analyzer cases.
 
 ### Line Coverage
 
@@ -680,7 +691,7 @@ Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (97 tests, 19 files)
+### engine-server E2E Tests (100 tests, 20 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -695,6 +706,7 @@ Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
 | `e2e_instances_page.rs` | 2 | `X-Total-Count` header, full-array response without query parameters |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition (409 without cascade), unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration (same node ids, node mapping, unknown target, orphaned token → 422) |
+| `e2e_model_check.rs` | 3 | `MODEL_CHECK=off` omits the report; without feature `model-check`, warn still deploys (`unavailable`) and enforce returns 400. Feature build: sound model, deadlock finding, structured rejection |
 | `e2e_monitoring.rs` | 7 | Health, ready (dev / REQUIRE_NATS), info, credential redaction, monitoring stats |
 | `e2e_signals.rs` | 3 | Signal broadcast to waiters, signal start, `GET /api/signals` |
 | `e2e_service_tasks.rs` | 13 | List, FetchAndLock (limits and lock-duration validation), ExtendLock, Complete, failure/retries, BPMN error, conflicts, incidents |
@@ -730,8 +742,8 @@ The unit tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no
 | bpmn-parser | 4 | ~2,500 |
 | persistence-nats | 5 | 1,282 |
 | persistence-memory | 2 | ~450 |
-| engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 19 | ~4,600 |
+| engine-server (lib) | 19 | ~2,400 |
+| engine-server (E2E tests) | 20 | ~4,600 |
 | desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
 | desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
@@ -787,6 +799,7 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Token move (modify process instance) | ✅ Implemented |
 | Multi-node cluster (NATS-based token locking) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
+| Optional deploy-time model checking (`model-check`, `MODEL_CHECK`) | ✅ Implemented |
 
 ---
 
