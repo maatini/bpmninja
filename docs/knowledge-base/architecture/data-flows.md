@@ -211,7 +211,7 @@ sequenceDiagram
             Inline->>Queue: PersistJob::SaveInstance(instance_id)
             Queue->>Worker: Dequeue job
             Worker->>Worker: Wait (exponential backoff: 1s → 2s → ... → 60s)
-            Worker->>Engine: Re-read instance from InstanceStore
+            Worker->>Worker: Acquire per-instance persist lock, then re-read InstanceStore
             Worker->>NATS: save_instance (retry up to 50 times)
         end
     end

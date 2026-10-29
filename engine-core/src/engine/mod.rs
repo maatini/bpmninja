@@ -68,6 +68,8 @@ pub struct WorkflowEngine {
     pub(crate) timer_processing_errors: std::sync::atomic::AtomicU64,
     pub(crate) retry_tx: Option<retry_queue::RetryQueueTx>,
     pub(crate) retry_worker_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Serialisiert `save_instance` pro Instanz, ohne den Instanz-Lock über I/O zu halten.
+    pub(crate) persist_locks: persistence_ops::PersistLocks,
     /// Hardened Rhai script execution configuration.
     pub(crate) script_config: crate::scripting::ScriptConfig,
     /// Broadcast channel — feuert bei jeder relevanten Zustandsänderung.
@@ -103,6 +105,7 @@ impl WorkflowEngine {
             timer_processing_errors: std::sync::atomic::AtomicU64::new(0),
             retry_tx: None,
             retry_worker_handle: tokio::sync::Mutex::new(None),
+            persist_locks: persistence_ops::PersistLocks::new(),
             script_config,
             event_tx,
         }
@@ -141,6 +144,7 @@ impl WorkflowEngine {
             Arc::clone(&self.pending_signal_catches),
             Arc::clone(&self.pending_conditional_catches),
             Arc::clone(&self.persistence_error_count),
+            self.persist_locks.clone(),
         );
 
         self.persistence = Some(persistence);

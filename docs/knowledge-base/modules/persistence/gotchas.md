@@ -71,6 +71,15 @@ upgraded start, or raise the limits after inspecting the stream. If the account 
 `STREAM.UPDATE`, startup fails with the server-side cause instead of silently keeping the old
 limits.
 
+### ⚠️ KV and object-store handles are cached after bootstrap
+
+`NatsPersistence::kv` / `object_store` cache the JetStream handle for every
+bucket created in `connect` (`OnceCell` per name, shared across clones). A
+failed lookup is not cached, so the next call tries again. Names outside that
+list are fetched on every call. Bootstrap itself still calls `get_key_value` /
+`get_object_store` on the raw context to validate buckets before the cache
+exists.
+
 ### ⚠️ KV bucket names cannot change after creation
 
 NATS KV bucket names are hardcoded in `client.rs`/`trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`.

@@ -764,3 +764,64 @@ async fn test_bpmn_xml_history_filters_and_storage_info() {
     assert!(info.buckets.iter().any(|b| b.name == "instances"));
     assert!(info.buckets.iter().any(|b| b.name == "bpmn_xml"));
 }
+
+/// KV- und Object-Store-Handles überleben den ersten Lookup und schreiben danach
+/// weiter den aktuellen Wert.
+#[tokio::test]
+async fn test_handles_are_cached_and_still_write() {
+    use engine_core::runtime::{InstanceState, ProcessInstance};
+    use std::collections::HashMap;
+
+    let persistence = match setup_nats_test().await {
+        Some(p) => p,
+        None => return,
+    };
+
+    assert!(!persistence.kv_handle_cached("instances"));
+    assert!(!persistence.object_store_handle_cached("bpmn_xml"));
+
+    let instance_id = Uuid::new_v4();
+    let mut instance = ProcessInstance {
+        id: instance_id,
+        definition_key: Uuid::new_v4(),
+        business_key: "cache".into(),
+        parent_instance_id: None,
+        state: InstanceState::Running,
+        current_node: "start".into(),
+        audit_log: Vec::new(),
+        variables: HashMap::from([("n".into(), serde_json::json!(1))]),
+        tokens: HashMap::new(),
+        active_tokens: vec![],
+        join_barriers: HashMap::new(),
+        multi_instance_state: HashMap::new(),
+        compensation_log: vec![],
+        outstanding_calls: HashMap::new(),
+        incidents: Vec::new(),
+        started_at: Some(chrono::Utc::now()),
+        completed_at: None,
+    };
+
+    persistence.save_instance(&instance).await.unwrap();
+    assert!(persistence.kv_handle_cached("instances"));
+
+    instance.variables.insert("n".into(), serde_json::json!(2));
+    persistence.save_instance(&instance).await.unwrap();
+
+    let stored = persistence
+        .list_instances()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == instance_id)
+        .expect("cached handle must read the instance");
+    assert_eq!(stored.variables.get("n"), Some(&serde_json::json!(2)));
+
+    let definition_id = Uuid::new_v4().to_string();
+    persistence
+        .save_bpmn_xml(&definition_id, "<definitions/>")
+        .await
+        .unwrap();
+    assert!(persistence.object_store_handle_cached("bpmn_xml"));
+    let xml = persistence.load_bpmn_xml(&definition_id).await.unwrap();
+    assert_eq!(xml, "<definitions/>");
+}
