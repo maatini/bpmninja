@@ -18,6 +18,7 @@ pub mod signals;
 pub mod start_tasks;
 pub mod stress_tests;
 pub mod sub_process;
+pub mod task_handler;
 pub mod timer_due_index;
 pub mod timers_messages;
 pub mod topic_index;

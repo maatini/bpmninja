@@ -51,6 +51,7 @@ impl WorkflowEngine {
         let topic = task.topic.clone();
         self.pending_service_tasks.insert(id, task);
         insert(&self.service_task_topic_index, &topic, id);
+        self.notify_service_tasks_available();
     }
 
     pub(crate) fn remove_pending_service_task(

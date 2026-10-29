@@ -121,6 +121,10 @@ XOR split: first true condition wins; then an unconditional flow whose target is
 
 Parallel Call-Activities keep `InstanceState::ParallelExecution`. Resume looks up the child in `ProcessInstance.outstanding_calls` (keyed by child instance id). Spawn failure or missing called element marks the parent `CompletedWithError` (`CALL_ACTIVITY_SPAWN_FAILED` / `CALL_ACTIVITY_TARGET_NOT_FOUND`) instead of hanging.
 
+### ⚠️ In-process handlers reserve their topic
+
+A topic with a registered `TaskHandler` is locked only by the in-process dispatcher (`IN_PROCESS_WORKER_ID`, `bpmninja-in-process`). External `fetch_and_lock` skips that topic until `unregister_task_handler`, even if the caller passes the reserved worker id. Locks, retries, incidents and BPMN errors still go through the service-task API. `retry_after` is stored in `lock_expiration` with no worker id, so fetch skips the task until the deadline. `shutdown` waits for in-flight handlers (`TASK_HANDLER_SHUTDOWN_DRAIN_MS`, default 30s) before the persistence retry worker drains. Handlers must not call `shutdown` or `spawn_task_handler_dispatcher`.
+
 ### ⚠️ Service-task topic index is secondary
 
 `pending_service_tasks` is SSOT. `service_task_topic_index` maps topic → task ids for `fetch_and_lock`. Insert into the map first, then the index. Orphan index entries are dropped at fetch. Incidents (`retries <= 0`) stay in the index but are not locked.

@@ -37,7 +37,9 @@
 | `.start_instance_latest(bpmn_id, vars, biz_key)` | `ProcessInstance` | Start latest version by BPMN process ID |
 | `.start_timer_instance(key, vars, biz_key)` | `ProcessInstance` | Start a timer-triggered instance |
 | `.complete_user_task(task_id, variables)` | `()` | Complete a user task → resume instance |
-| `.fetch_and_lock_service_tasks(req)` | `Vec<PendingServiceTask>` | Fetch and lock service tasks (long polling) |
+| `.fetch_and_lock_service_tasks(req)` | `Vec<PendingServiceTask>` | Fetch and lock service tasks; skips topics with an in-process handler |
+| `.register_task_handler(topic, handler)` | `bool` | Register an in-process handler; `true` when a previous handler was replaced |
+| `.spawn_task_handler_dispatcher()` | `()` | Run registered handlers inside the process |
 | `.complete_service_task(id, vars)` | `()` | Complete a service task → resume instance |
 | `.fail_service_task(id, msg, details, retries)` | `()` | Mark a task as failed / create incident |
 | `.bpmn_error(task_id, error_code)` | `()` | Route to BoundaryErrorEvent |
@@ -50,7 +52,7 @@
 | `.update_variables(id, vars)` | `()` | Update instance variables at runtime and fire newly satisfied conditional catches |
 | `.get_instance_incidents(id)` | `Vec<Incident>` | Listet offene und aufgelöste Incidents einer Instanz |
 | `.resolve_instance_incident(id, incident_id, resolved_by)` | `Incident` | Löst einen Incident auf und persistiert die Instanz |
-| `.shutdown()` | `()` | Gracefully shut down retry worker |
+| `.shutdown()` | `()` | Stop in-process handlers, then drain the retry worker |
 | `.subscribe_events()` | `broadcast::Receiver` | Subscribe to engine event stream |
 | `.get_engine_stats()` | `EngineStats` | Monitoring stats (instances, tasks, timers, etc.) |
 
@@ -66,6 +68,7 @@
 | `boundary.rs` | `src/engine/boundary.rs` | Boundary event setup and registration |
 | `user_task.rs` | `src/engine/user_task.rs` | User task creation, completion, listing |
 | `service_task.rs` | `src/engine/service_task.rs` | Service task fetch-and-lock, complete, failure, bpmnError, lock extension |
+| `task_handler.rs` | `src/engine/task_handler.rs` | In-process `TaskHandler` registration and dispatcher |
 | `timer_processor.rs` | `src/engine/timer_processor.rs` | Timer scanning, expiry processing, repeating timer setup |
 | `message_processor.rs` | `src/engine/message_processor.rs` | Message correlation logic |
 | `signal_processor.rs` | `src/engine/signal_processor.rs` | Signal correlation/broadcast, catch resume, activity cancellation for interrupting boundary signals |
