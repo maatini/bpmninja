@@ -81,3 +81,5 @@ The parser maps these XML tags to `BpmnElement` variants:
 | `intermediateThrowEvent > compensateEventDefinition` | `CompensationThrowEvent { activity_ref }` |
 | `callActivity` | `CallActivity { called_element }` |
 | `subProcess` (embedded) | `EmbeddedSubProcess { start_node_id }` (flattened) |
+
+Elements the engine does not execute are rejected at deploy (`InvalidDefinition`, every hit, with type, id and line). The authoritative list is [element-matrix.md](element-matrix.md).

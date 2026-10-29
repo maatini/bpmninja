@@ -84,6 +84,22 @@ The runtime broadcast is process-local. `POST /api/signal` wakes every matching 
 - An event-based gateway cannot target a conditional catch.
 - The runtime fires only on a `false → true` transition. Intermediate catches are removed when they fire; non-interrupting boundary catches stay registered and can fire again after the condition drops to `false` and rises again. A permanently true condition therefore does not busy-loop.
 
+### ⚠️ Unsupported elements fail the deploy, they are not dropped
+
+`reject_unsupported_elements` walks the deployed process (first `isExecutable="true"`, otherwise the first process) **before** serde mapping and returns every hit in one `InvalidDefinition`. Each hit names the element type, its id (or the nearest ancestor id) and the source line. There is no escape hatch.
+
+Rejected today, because the engine does not execute them:
+
+- `transaction`, `adHocSubProcess`, `standardLoopCharacteristics`, generic `task`
+- event sub-processes (`subProcess triggeredByEvent="true"`)
+- `receiveTask` / `eventBasedGateway` with `instantiate="true"` (also `1`), and `eventGatewayType="Parallel"`
+- event definitions outside [`element-matrix.md`](element-matrix.md), including message end events, multiple/parallel-multiple events, and more than one event definition on the same event
+- a start event **inside** an embedded sub-process that carries a trigger (the internal start is a pass-through)
+
+Signal, link, conditional catch/boundary, and sequential multi-instance on service tasks deploy. Lanes, groups, annotations, associations and data objects stay accepted. The matrix index is checked against the parser lists by `element_matrix_matches_parser_support_lists`.
+
+Cancel, conditional start, transactions and generic tasks still have their original explanations; the scanner is what reports them together with every other hit. See [element-matrix.md](element-matrix.md).
+
 ### ⚠️ Cancel events and transactions are rejected, not ignored
 
 `cancelEventDefinition` is modelled on `endEvent` and `boundaryEvent` only to fail deployment:

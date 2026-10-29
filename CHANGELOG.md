@@ -7,6 +7,20 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Geändert
+
+- **Breaking:** Der Deploy lehnt BPMN-Elemente ab, deren Ausführung die Engine nicht
+  kennt, statt sie still zu verwerfen oder auf ein schwächeres Element abzubilden.
+  `InvalidDefinition` nennt Typ, Id und Zeile **aller** Treffer im deployten Prozess.
+  Neu abgelehnt werden unter anderem `adHocSubProcess`, `standardLoopCharacteristics`,
+  Event-Subprozesse (`triggeredByEvent`), instanziierende Receive-Tasks, instanziierende
+  oder parallele Event-Based-Gateways, Message-End-Events, mehrere Event-Definitionen
+  am selben Ereignis und Trigger an Start-Events eingebetteter Sub-Prozesse.
+  Signal-, Link- und Conditional-Events (Catch/Boundary) sowie sequentielles
+  Multi-Instance auf Service-Tasks bleiben gültig. Lanes, Annotationen und
+  Datenobjekte bleiben erlaubt. Kein Umschalter. Matrix:
+  `docs/knowledge-base/modules/bpmn-parser/element-matrix.md`.
+
 ## [0.7.25] - 2026-10-24
 
 Release mit Nx-Orchestrierung, dreistufigem Release-Workflow und der

@@ -145,6 +145,52 @@ async fn deploy_invalid_xml_returns_400() {
 }
 
 #[tokio::test]
+async fn deploy_unsupported_elements_returns_400_listing_every_hit() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="Definitions_1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <process id="UnsupportedProcess" isExecutable="true">
+    <startEvent id="Start_1" />
+    <adHocSubProcess id="AdHoc_1" />
+    <userTask id="User_1">
+      <standardLoopCharacteristics />
+    </userTask>
+    <endEvent id="End_1" />
+    <sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="End_1" />
+  </process>
+</definitions>"#;
+
+    let res = client
+        .post(format!("{base}/api/deploy"))
+        .json(&serde_json::json!({
+            "xml": xml,
+            "name": "UnsupportedProcess"
+        }))
+        .send()
+        .await
+        .expect("deploy request failed");
+
+    assert_eq!(res.status(), 400, "unsupported BPMN must be a 400");
+    let body: Value = res.json().await.expect("deploy error should be JSON");
+    let message = body["error"]
+        .as_str()
+        .expect("error field should be a string");
+    assert!(
+        message.contains("adHocSubProcess") && message.contains("AdHoc_1"),
+        "response should name the ad-hoc sub-process: {message}"
+    );
+    assert!(
+        message.contains("standardLoopCharacteristics") && message.contains("User_1"),
+        "response should name the standard loop: {message}"
+    );
+    assert!(
+        message.contains("UnsupportedProcess"),
+        "response should name the process: {message}"
+    );
+}
+
+#[tokio::test]
 async fn definition_xml_is_plain_text() {
     let base = start_server().await;
     let client = reqwest::Client::new();

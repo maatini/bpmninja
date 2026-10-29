@@ -369,6 +369,10 @@ pub(crate) struct BpmnReceiveTask {
     pub name: Option<String>,
     #[serde(rename = "@messageRef", default)]
     pub message_ref: Option<String>,
+    /// `instantiate="true"` würde eine Prozessinstanz starten. Als String, damit
+    /// `true` und `1` nicht an der Bool-Deserialisierung scheitern.
+    #[serde(rename = "@instantiate", default)]
+    pub instantiate: Option<String>,
     #[serde(rename = "messageEventDefinition")]
     pub message_event_definition: Option<BpmnMessageEventDefinition>,
     #[serde(rename = "multiInstanceLoopCharacteristics")]
@@ -494,6 +498,12 @@ pub(crate) struct BpmnGateway {
     pub id: String,
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,
+    /// Nur an `eventBasedGateway` bedeutsam. `true`/`1` ist das instanziierende Gateway.
+    #[serde(rename = "@instantiate", default)]
+    pub instantiate: Option<String>,
+    /// `Parallel` ist das parallele Event-Gateway; `Exclusive` ist der unterstützte Normalfall.
+    #[serde(rename = "@eventGatewayType", default)]
+    pub event_gateway_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

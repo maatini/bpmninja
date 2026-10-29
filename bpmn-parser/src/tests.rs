@@ -639,7 +639,7 @@ fn parse_event_based_gateway() {
 }
 
 #[test]
-fn parse_event_subprocess_accepted() {
+fn reject_event_subprocess() {
     let xml = r#"
         <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <error id="err1" errorCode="VALIDATION_FAILED" />
@@ -658,12 +658,14 @@ fn parse_event_subprocess_accepted() {
         </definitions>
     "#;
 
-    // Event sub-processes (triggeredByEvent="true") must NOT cause a parse error
-    let result = parse_bpmn_xml(xml);
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
     assert!(
-        result.is_ok(),
-        "Event sub-process should be accepted: {:?}",
-        result.err()
+        err.contains("event sub-process 'sub1'") && err.contains("triggeredByEvent"),
+        "event sub-process must be rejected: {err}"
+    );
+    assert!(
+        err.contains("errorEventDefinition on startEvent 'sub_s1'"),
+        "error start inside the event sub-process is also unsupported: {err}"
     );
 }
 
@@ -2775,5 +2777,628 @@ fn parse_conditional_catch_in_subprocess() {
             assert_eq!(condition, "x > 0");
         }
         other => panic!("Expected ConditionalCatchEvent, got {other:?}"),
+    }
+}
+
+// --- Deploy lehnt ununterstützte Elemente gesammelt ab -------------------------
+
+fn process_with(body: &str) -> String {
+    format!(
+        r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+             <signal id="sig" name="go" />
+             <message id="msg" name="m" />
+             <process id="p" isExecutable="true">
+               <startEvent id="s" />
+               <endEvent id="e" />
+               <sequenceFlow id="f" sourceRef="s" targetRef="e" />
+               {body}
+             </process>
+           </definitions>"#
+    )
+}
+
+fn rejection_of(body: &str) -> String {
+    parse_bpmn_xml(&process_with(body))
+        .expect_err("definition must be rejected")
+        .to_string()
+}
+
+fn assert_rejected(body: &str, needles: &[&str]) {
+    let err = rejection_of(body);
+    for needle in needles {
+        assert!(err.contains(needle), "missing {needle:?} in {err}");
+    }
+}
+
+#[test]
+fn reject_ad_hoc_sub_process() {
+    assert_rejected(
+        r#"<bpmn:adHocSubProcess id="adhoc" />"#,
+        &["adHocSubProcess", "adhoc", "is not supported"],
+    );
+}
+
+#[test]
+fn reject_standard_loop_characteristics() {
+    assert_rejected(
+        r#"<userTask id="ut"><standardLoopCharacteristics /></userTask>"#,
+        &["standardLoopCharacteristics", "'ut'", "is not supported"],
+    );
+}
+
+#[test]
+fn reject_transaction_names_id() {
+    assert_rejected(
+        r#"<transaction id="tx1"><startEvent id="ts"/><endEvent id="te"/><sequenceFlow id="tf" sourceRef="ts" targetRef="te"/></transaction>"#,
+        &[
+            "transaction sub-processes are not supported",
+            "cancel events cannot be deployed",
+            "tx1",
+        ],
+    );
+}
+
+#[test]
+fn reject_instantiating_receive_task() {
+    assert_rejected(
+        r#"<receiveTask id="recv" instantiate="true" messageRef="msg" />"#,
+        &["instantiating receiveTask", "'recv'"],
+    );
+}
+
+#[test]
+fn reject_instantiating_receive_task_numeric_flag() {
+    assert_rejected(
+        r#"<receiveTask id="recv" instantiate="1" messageRef="msg" />"#,
+        &["instantiating receiveTask", "'recv'"],
+    );
+}
+
+#[test]
+fn reject_instantiating_event_based_gateway() {
+    assert_rejected(
+        r#"<eventBasedGateway id="gw" instantiate="true" />"#,
+        &["instantiating or parallel eventBasedGateway", "'gw'"],
+    );
+}
+
+#[test]
+fn reject_parallel_event_based_gateway() {
+    assert_rejected(
+        r#"<eventBasedGateway id="gw" eventGatewayType="Parallel" />"#,
+        &["instantiating or parallel eventBasedGateway", "'gw'"],
+    );
+}
+
+#[test]
+fn reject_message_end_event() {
+    let err = rejection_of(
+        r#"<endEvent id="msgEnd"><messageEventDefinition messageRef="msg" /></endEvent>"#,
+    );
+    assert!(
+        err.contains("messageEventDefinition on endEvent 'msgEnd'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn reject_multiple_event_definitions() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="c">
+             <messageEventDefinition messageRef="msg" />
+             <timerEventDefinition><timeDuration>PT1M</timeDuration></timerEventDefinition>
+           </intermediateCatchEvent>"#,
+        &["multiple event definitions on intermediateCatchEvent 'c'"],
+    );
+}
+
+#[test]
+fn reject_error_start_event() {
+    assert_rejected(
+        r#"<startEvent id="errStart"><errorEventDefinition /></startEvent>"#,
+        &["errorEventDefinition on startEvent 'errStart'"],
+    );
+}
+
+#[test]
+fn reject_escalation_start_event() {
+    assert_rejected(
+        r#"<startEvent id="escStart"><escalationEventDefinition /></startEvent>"#,
+        &["escalationEventDefinition on startEvent 'escStart'"],
+    );
+}
+
+#[test]
+fn reject_compensation_start_event() {
+    assert_rejected(
+        r#"<startEvent id="compStart"><compensateEventDefinition /></startEvent>"#,
+        &["compensateEventDefinition on startEvent 'compStart'"],
+    );
+}
+
+#[test]
+fn reject_link_start_event() {
+    assert_rejected(
+        r#"<startEvent id="linkStart"><linkEventDefinition name="L" /></startEvent>"#,
+        &["linkEventDefinition on startEvent 'linkStart'"],
+    );
+}
+
+#[test]
+fn reject_multiple_event_definition_on_start() {
+    assert_rejected(
+        r#"<startEvent id="multi"><multipleEventDefinition /></startEvent>"#,
+        &["multipleEventDefinition on startEvent 'multi'"],
+    );
+}
+
+#[test]
+fn reject_parallel_multiple_event_definition_on_start() {
+    assert_rejected(
+        r#"<startEvent id="pm"><parallelMultipleEventDefinition /></startEvent>"#,
+        &["parallelMultipleEventDefinition on startEvent 'pm'"],
+    );
+}
+
+#[test]
+fn reject_cancel_start_event() {
+    assert_rejected(
+        r#"<startEvent id="cStart"><cancelEventDefinition /></startEvent>"#,
+        &["cancelEventDefinition on startEvent 'cStart'"],
+    );
+}
+
+#[test]
+fn reject_timer_on_end_event() {
+    assert_rejected(
+        r#"<endEvent id="timerEnd"><timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></endEvent>"#,
+        &["timerEventDefinition on endEvent 'timerEnd'"],
+    );
+}
+
+#[test]
+fn reject_conditional_on_end_event() {
+    assert_rejected(
+        r#"<endEvent id="condEnd"><conditionalEventDefinition><conditionExpression>x &gt; 0</conditionExpression></conditionalEventDefinition></endEvent>"#,
+        &["conditionalEventDefinition on endEvent 'condEnd'"],
+    );
+}
+
+#[test]
+fn reject_link_on_end_event() {
+    assert_rejected(
+        r#"<endEvent id="linkEnd"><linkEventDefinition name="L" /></endEvent>"#,
+        &["linkEventDefinition on endEvent 'linkEnd'"],
+    );
+}
+
+#[test]
+fn reject_error_on_intermediate_catch() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="badCatch"><errorEventDefinition /></intermediateCatchEvent>"#,
+        &["errorEventDefinition on intermediateCatchEvent 'badCatch'"],
+    );
+}
+
+#[test]
+fn reject_terminate_on_intermediate_catch() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="badCatch"><terminateEventDefinition /></intermediateCatchEvent>"#,
+        &["terminateEventDefinition on intermediateCatchEvent 'badCatch'"],
+    );
+}
+
+#[test]
+fn reject_compensation_on_intermediate_catch() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="badCatch"><compensateEventDefinition /></intermediateCatchEvent>"#,
+        &["compensateEventDefinition on intermediateCatchEvent 'badCatch'"],
+    );
+}
+
+#[test]
+fn reject_escalation_on_intermediate_catch() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="badCatch"><escalationEventDefinition /></intermediateCatchEvent>"#,
+        &["escalationEventDefinition on intermediateCatchEvent 'badCatch'"],
+    );
+}
+
+#[test]
+fn reject_cancel_on_intermediate_catch() {
+    assert_rejected(
+        r#"<intermediateCatchEvent id="badCatch"><cancelEventDefinition /></intermediateCatchEvent>"#,
+        &["cancelEventDefinition on intermediateCatchEvent 'badCatch'"],
+    );
+}
+
+#[test]
+fn reject_timer_on_intermediate_throw() {
+    assert_rejected(
+        r#"<intermediateThrowEvent id="badThrow"><timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></intermediateThrowEvent>"#,
+        &["timerEventDefinition on intermediateThrowEvent 'badThrow'"],
+    );
+}
+
+#[test]
+fn reject_error_on_intermediate_throw() {
+    assert_rejected(
+        r#"<intermediateThrowEvent id="badThrow"><errorEventDefinition /></intermediateThrowEvent>"#,
+        &["errorEventDefinition on intermediateThrowEvent 'badThrow'"],
+    );
+}
+
+#[test]
+fn reject_terminate_on_intermediate_throw() {
+    assert_rejected(
+        r#"<intermediateThrowEvent id="badThrow"><terminateEventDefinition /></intermediateThrowEvent>"#,
+        &["terminateEventDefinition on intermediateThrowEvent 'badThrow'"],
+    );
+}
+
+#[test]
+fn reject_conditional_on_intermediate_throw() {
+    assert_rejected(
+        r#"<intermediateThrowEvent id="badThrow"><conditionalEventDefinition><conditionExpression>x &gt; 1</conditionExpression></conditionalEventDefinition></intermediateThrowEvent>"#,
+        &["conditionalEventDefinition on intermediateThrowEvent 'badThrow'"],
+    );
+}
+
+#[test]
+fn reject_link_on_boundary_event() {
+    assert_rejected(
+        r#"<boundaryEvent id="b1" attachedToRef="s"><linkEventDefinition name="L" /></boundaryEvent>"#,
+        &["linkEventDefinition on boundaryEvent 'b1'"],
+    );
+}
+
+#[test]
+fn reject_terminate_on_boundary_event() {
+    assert_rejected(
+        r#"<boundaryEvent id="b1" attachedToRef="s"><terminateEventDefinition /></boundaryEvent>"#,
+        &["terminateEventDefinition on boundaryEvent 'b1'"],
+    );
+}
+
+#[test]
+fn reject_timer_start_inside_embedded_subprocess() {
+    assert_rejected(
+        r#"<subProcess id="sp">
+             <startEvent id="ss"><timerEventDefinition><timeDuration>PT1S</timeDuration></timerEventDefinition></startEvent>
+             <endEvent id="se" />
+             <sequenceFlow id="sf" sourceRef="ss" targetRef="se" />
+           </subProcess>"#,
+        &[
+            "timerEventDefinition on startEvent 'ss'",
+            "subProcess 'sp'",
+            "pass-through",
+        ],
+    );
+}
+
+#[test]
+fn reject_signal_start_inside_embedded_subprocess() {
+    assert_rejected(
+        r#"<subProcess id="sp">
+             <startEvent id="ss"><signalEventDefinition signalRef="sig" /></startEvent>
+             <endEvent id="se" />
+             <sequenceFlow id="sf" sourceRef="ss" targetRef="se" />
+           </subProcess>"#,
+        &[
+            "signalEventDefinition on startEvent 'ss'",
+            "subProcess 'sp'",
+        ],
+    );
+}
+
+#[test]
+fn reject_message_start_inside_embedded_subprocess() {
+    assert_rejected(
+        r#"<subProcess id="sp">
+             <startEvent id="ss"><messageEventDefinition messageRef="msg" /></startEvent>
+             <endEvent id="se" />
+             <sequenceFlow id="sf" sourceRef="ss" targetRef="se" />
+           </subProcess>"#,
+        &[
+            "messageEventDefinition on startEvent 'ss'",
+            "subProcess 'sp'",
+        ],
+    );
+}
+
+#[test]
+fn unsupported_elements_are_all_reported() {
+    let err = rejection_of(
+        r#"<adHocSubProcess id="adhoc" />
+           <userTask id="ut"><standardLoopCharacteristics /></userTask>
+           <transaction id="tx1" />
+           <endEvent id="msgEnd"><messageEventDefinition messageRef="msg" /></endEvent>
+           <receiveTask id="recv" instantiate="true" messageRef="msg" />"#,
+    );
+    for needle in [
+        "adHocSubProcess 'adhoc'",
+        "standardLoopCharacteristics 'ut'",
+        "transaction 'tx1'",
+        "messageEventDefinition on endEvent 'msgEnd'",
+        "instantiating receiveTask 'recv'",
+    ] {
+        assert!(err.contains(needle), "missing {needle} in {err}");
+    }
+    assert!(
+        err.contains("Unsupported BPMN element(s) in process 'p'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn unsupported_element_error_includes_source_line() {
+    let xml = process_with(r#"<adHocSubProcess id="adhoc" />"#);
+    let marker = xml
+        .find("<adHocSubProcess")
+        .expect("fixture contains the element");
+    let expected = xml[..marker].bytes().filter(|&byte| byte == b'\n').count() + 1;
+    let err = parse_bpmn_xml(&xml).unwrap_err().to_string();
+    assert!(
+        err.contains(&format!("line {expected}")),
+        "expected line {expected} in {err}"
+    );
+}
+
+#[test]
+fn visual_and_data_elements_still_deploy() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+         <collaboration id="c"><participant id="pool" processRef="p" /></collaboration>
+         <process id="p" isExecutable="true">
+           <laneSet id="ls"><lane id="lane1"><flowNodeRef>s</flowNodeRef></lane></laneSet>
+           <startEvent id="s" />
+           <endEvent id="e" />
+           <sequenceFlow id="f" sourceRef="s" targetRef="e" />
+           <dataObject id="do1" />
+           <dataObjectReference id="dor1" dataObjectRef="do1" />
+           <dataStoreReference id="ds1" />
+           <textAnnotation id="ta"><text>note</text></textAnnotation>
+           <association id="as" sourceRef="s" targetRef="ta" />
+           <group id="g" />
+         </process>
+       </definitions>"#;
+    let def = parse_bpmn_xml(xml).expect("visual and data elements stay valid");
+    assert!(matches!(def.nodes.get("s"), Some(BpmnElement::StartEvent)));
+}
+
+#[test]
+fn unsupported_elements_outside_the_deployed_process_are_ignored() {
+    let xml = r#"<definitions id="d" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+        <process id="p" isExecutable="true">
+          <startEvent id="s" />
+          <endEvent id="e" />
+          <sequenceFlow id="f" sourceRef="s" targetRef="e" />
+        </process>
+        <process id="other" isExecutable="false">
+          <adHocSubProcess id="adhoc" />
+          <startEvent id="os"><errorEventDefinition /></startEvent>
+        </process>
+      </definitions>"#;
+    let def = parse_bpmn_xml(xml).expect("only the executable process is checked");
+    assert_eq!(def.id, "p");
+}
+
+#[test]
+fn non_executable_process_is_still_checked_when_it_is_the_only_one() {
+    let err = parse_bpmn_xml(
+        r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="only" isExecutable="false">
+              <adHocSubProcess id="adhoc" />
+              <startEvent id="s" /><endEvent id="e" />
+              <sequenceFlow id="f" sourceRef="s" targetRef="e" />
+            </process>
+          </definitions>"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("process 'only'") && err.contains("adhoc"),
+        "{err}"
+    );
+}
+
+#[test]
+fn supported_constructs_still_deploy() {
+    let samples = [
+        (
+            "signal start",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <signal id="sig1" name="Go" />
+                <process id="p" isExecutable="true">
+                  <startEvent id="s"><signalEventDefinition signalRef="sig1" /></startEvent>
+                  <endEvent id="e" />
+                  <sequenceFlow id="f" sourceRef="s" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "s",
+        ),
+        (
+            "conditional catch",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <intermediateCatchEvent id="c">
+                    <conditionalEventDefinition><conditionExpression>x &gt; 0</conditionExpression></conditionalEventDefinition>
+                  </intermediateCatchEvent>
+                  <endEvent id="e" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="c" />
+                  <sequenceFlow id="f2" sourceRef="c" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "c",
+        ),
+        (
+            "link throw",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <intermediateThrowEvent id="throw1"><linkEventDefinition name="Jump" /></intermediateThrowEvent>
+                  <intermediateCatchEvent id="catch1"><linkEventDefinition name="Jump" /></intermediateCatchEvent>
+                  <endEvent id="e" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="throw1" />
+                  <sequenceFlow id="f2" sourceRef="catch1" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "throw1",
+        ),
+        (
+            "sequential multi-instance service task",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <serviceTask id="svc" data-topic="work">
+                    <multiInstanceLoopCharacteristics isSequential="true">
+                      <loopCardinality>2</loopCardinality>
+                    </multiInstanceLoopCharacteristics>
+                  </serviceTask>
+                  <endEvent id="e" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="svc" />
+                  <sequenceFlow id="f2" sourceRef="svc" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "svc",
+        ),
+        (
+            "receive task",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <message id="Message_1" name="OrderReceived" />
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <receiveTask id="recv" messageRef="Message_1" />
+                  <endEvent id="e" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="recv" />
+                  <sequenceFlow id="f2" sourceRef="recv" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "recv",
+        ),
+        (
+            "exclusive event-based gateway",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <message id="Message_1" name="M" />
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <eventBasedGateway id="gw" eventGatewayType="Exclusive" />
+                  <intermediateCatchEvent id="wait_msg"><messageEventDefinition messageRef="Message_1" /></intermediateCatchEvent>
+                  <intermediateCatchEvent id="wait_timer"><timerEventDefinition><timeDuration>PT10S</timeDuration></timerEventDefinition></intermediateCatchEvent>
+                  <endEvent id="e1" />
+                  <endEvent id="e2" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="gw" />
+                  <sequenceFlow id="f2" sourceRef="gw" targetRef="wait_msg" />
+                  <sequenceFlow id="f3" sourceRef="gw" targetRef="wait_timer" />
+                  <sequenceFlow id="f4" sourceRef="wait_msg" targetRef="e1" />
+                  <sequenceFlow id="f5" sourceRef="wait_timer" targetRef="e2" />
+                </process>
+              </definitions>"#,
+            "gw",
+        ),
+        (
+            "embedded subprocess",
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <process id="p" isExecutable="true">
+                  <startEvent id="s" />
+                  <subProcess id="sp">
+                    <startEvent id="ss" />
+                    <endEvent id="se" />
+                    <sequenceFlow id="sf" sourceRef="ss" targetRef="se" />
+                  </subProcess>
+                  <endEvent id="e" />
+                  <sequenceFlow id="f1" sourceRef="s" targetRef="sp" />
+                  <sequenceFlow id="f2" sourceRef="sp" targetRef="e" />
+                </process>
+              </definitions>"#,
+            "sp",
+        ),
+    ];
+
+    for (label, xml, node) in samples {
+        let def = parse_bpmn_xml(xml).unwrap_or_else(|err| panic!("{label} should deploy: {err}"));
+        assert!(def.nodes.contains_key(node), "{label}: missing node {node}");
+    }
+}
+
+#[test]
+fn element_matrix_matches_parser_support_lists() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::parser::{
+        REJECTED_ATTRIBUTES, REJECTED_EVENT_DEFINITIONS, SUPPORTED_EVENT_DEFINITIONS,
+        UNSUPPORTED_ELEMENTS,
+    };
+
+    let doc = include_str!("../../docs/knowledge-base/modules/bpmn-parser/element-matrix.md");
+    let fence = "```support-index\n";
+    let start = doc.find(fence).expect("support-index fence") + fence.len();
+    let rest = &doc[start..];
+    let end = rest.find("\n```").expect("closing fence");
+    let index = &rest[..end];
+
+    let words =
+        |raw: &str| -> BTreeSet<String> { raw.split_whitespace().map(str::to_string).collect() };
+
+    let mut supported = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut unsupported = BTreeSet::new();
+    let mut rejected_attributes = BTreeSet::new();
+    let mut rejected_events = BTreeSet::new();
+
+    for line in index.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (key, value) = line
+            .split_once(':')
+            .unwrap_or_else(|| panic!("index line needs a colon: {line}"));
+        match key.trim() {
+            "unsupported-elements" => unsupported = words(value),
+            "rejected-attributes" => rejected_attributes = words(value),
+            "rejected-events" => rejected_events = words(value),
+            kind => {
+                supported.insert(kind.to_string(), words(value));
+            }
+        }
+    }
+
+    let code_unsupported: BTreeSet<String> = UNSUPPORTED_ELEMENTS
+        .iter()
+        .map(|item| (*item).to_string())
+        .collect();
+    assert_eq!(unsupported, code_unsupported);
+
+    let code_attributes: BTreeSet<String> = REJECTED_ATTRIBUTES
+        .iter()
+        .map(|item| (*item).to_string())
+        .collect();
+    assert_eq!(rejected_attributes, code_attributes);
+
+    let code_rejected: BTreeSet<String> = REJECTED_EVENT_DEFINITIONS
+        .iter()
+        .map(|(kind, definition)| format!("{kind}/{definition}"))
+        .collect();
+    assert_eq!(rejected_events, code_rejected);
+
+    assert_eq!(
+        supported.len(),
+        SUPPORTED_EVENT_DEFINITIONS.len(),
+        "event kinds in the matrix index and the parser diverged"
+    );
+    for (kind, definitions) in SUPPORTED_EVENT_DEFINITIONS {
+        let documented = supported
+            .get(*kind)
+            .unwrap_or_else(|| panic!("matrix index is missing {kind}"));
+        let code: BTreeSet<String> = definitions.iter().map(|item| (*item).to_string()).collect();
+        assert_eq!(documented, &code, "{kind}");
+        for (rejected_kind, rejected_def) in REJECTED_EVENT_DEFINITIONS {
+            if rejected_kind == kind {
+                assert!(
+                    !code.contains(*rejected_def),
+                    "{rejected_def} is both supported and rejected on {kind}"
+                );
+            }
+        }
     }
 }
