@@ -15,7 +15,10 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `ProcessDefinition` | `domain/definition.rs` | Immutable BPMN definition with nodes, edges, listeners |
 | `ProcessDefinitionBuilder` | `domain/definition.rs` | Builder pattern for constructing definitions (used in tests) |
 | `BpmnElement` | `domain/element.rs` | Enum: 37 BPMN element variants (inkl. Signal- und Conditional-Events, LinkThrowEvent) |
-| `Token` | `domain/token.rs` | Execution token with id, current_node, variables |
+| `Token` | `domain/token.rs` | Execution token with id, current_node, variables, optional `data_scope` |
+| `ActivityMappings` | `domain/data.rs` | Per-activity inputs, outputs, and optional call-activity transfers |
+| `MappingValue` | `domain/data.rs` | Literal, variable reference, list, or map |
+| `DataScope` | `domain/data.rs` | Persisted activation: original variables and local input names |
 | `SequenceFlow` | `domain/flow.rs` | Edge between nodes with optional condition |
 | `TimerDefinition` | `domain/timer.rs` | ISO 8601 timer: Duration, AbsoluteDate, CronCycle, RepeatingInterval |
 | `ExecutionListener` | `domain/listener.rs` | Script attached to a node (start/end event) |

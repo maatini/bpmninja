@@ -437,8 +437,29 @@ impl WorkflowEngine {
 
             token
         };
-        for (k, v) in variables {
-            token.variables.insert(k, v);
+        let token_for_rollback = token.clone();
+        let task_for_rollback = task.clone();
+        if is_multi_instance {
+            if let Err(error) = crate::engine::data_mappings::publish_multi_instance_outputs(
+                &mut token,
+                &def,
+                &task.node_id,
+                &task.variables_snapshot,
+                &variables,
+            ) {
+                self.restore_mapped_service_task(
+                    instance_id,
+                    token_for_rollback,
+                    task_for_rollback,
+                    old_state.as_ref(),
+                )
+                .await;
+                return Err(error);
+            }
+        } else {
+            for (k, v) in variables {
+                token.variables.insert(k, v);
+            }
         }
 
         // Sequentielles MI: nach jedem Item genau einen Nachfolge-Task
@@ -457,6 +478,23 @@ impl WorkflowEngine {
             if let (Some(element_variable), Some(value)) = (&mi_element_variable, next_item) {
                 variables_snapshot.insert(element_variable.clone(), value);
             }
+            variables_snapshot = match crate::engine::data_mappings::apply_inputs(
+                &def,
+                &task.node_id,
+                variables_snapshot,
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    self.restore_mapped_service_task(
+                        instance_id,
+                        token_for_rollback,
+                        task_for_rollback,
+                        old_state.as_ref(),
+                    )
+                    .await;
+                    return Err(error);
+                }
+            };
             let business_key = old_state.as_ref().and_then(|inst| {
                 (!inst.business_key.is_empty()).then(|| inst.business_key.clone())
             });
@@ -484,7 +522,7 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.variables = token.variables.clone();
+                inst.variables = token.process_variables();
                 inst.tokens.insert(token.id, token);
                 if let Some(progress) = inst.multi_instance_state.get_mut(&task.node_id) {
                     progress.completed = progress.completed.saturating_add(1);
@@ -552,7 +590,7 @@ impl WorkflowEngine {
                     .await
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
-                inst.variables = token.variables.clone();
+                inst.variables = token.process_variables();
                 inst.tokens.insert(token.id, token);
                 if let Some(progress) = inst.multi_instance_state.get_mut(&task.node_id) {
                     progress.completed = progress.completed.saturating_add(1);
@@ -619,10 +657,10 @@ impl WorkflowEngine {
             if !matches!(inst.state, InstanceState::ParallelExecution { .. }) {
                 inst.state = InstanceState::Running;
             }
-            inst.variables = token.variables.clone();
+            inst.variables = token.process_variables();
         }
 
-        // Run end scripts
+        // Run end scripts. Mapping- und Scriptfehler lassen den Task stehen.
         {
             let inst_arc = self
                 .instances
@@ -635,7 +673,7 @@ impl WorkflowEngine {
                 variables,
                 ..
             } = &mut *inst;
-            crate::scripting::run_end_scripts(
+            if let Err(error) = crate::scripting::run_end_scripts(
                 &self.script_config,
                 instance_id,
                 &mut token,
@@ -644,7 +682,18 @@ impl WorkflowEngine {
                 audit_log,
                 variables,
             )
-            .await?;
+            .await
+            {
+                drop(inst);
+                self.restore_mapped_service_task(
+                    instance_id,
+                    token_for_rollback,
+                    task_for_rollback,
+                    old_state.as_ref(),
+                )
+                .await;
+                return Err(error);
+            }
         }
 
         let next =
@@ -677,6 +726,28 @@ impl WorkflowEngine {
         .await;
 
         self.run_instance_batch(instance_id, token).await
+    }
+
+    /// Legt Task und Token nach einem fehlgeschlagenen Abschluss wieder zurück.
+    ///
+    /// Die Aktivierung (`data_scope`) bleibt die des Stands vor diesem Versuch,
+    /// damit Inputs nicht erneut angewendet werden.
+    async fn restore_mapped_service_task(
+        &self,
+        instance_id: Uuid,
+        token: crate::domain::Token,
+        task: PendingServiceTask,
+        previous: Option<&crate::runtime::ProcessInstance>,
+    ) {
+        if let Some(inst_arc) = self.instances.get(&instance_id).await {
+            let mut inst = inst_arc.write().await;
+            if let Some(previous) = previous {
+                inst.variables = previous.variables.clone();
+                inst.state = previous.state.clone();
+            }
+            inst.tokens.insert(token.id, token);
+        }
+        self.insert_pending_service_task(task);
     }
 
     /// Reports a failure for an service task.
@@ -1138,6 +1209,10 @@ impl WorkflowEngine {
                     ))
                 })?
             };
+            token.discard_data_scope();
+            for (key, value) in &variables {
+                token.variables.insert(key.clone(), value.clone());
+            }
             let def = self
                 .definitions
                 .get(&def_key)
@@ -1154,6 +1229,7 @@ impl WorkflowEngine {
                     .ok_or(EngineError::NoSuchInstance(instance_id))?;
                 let mut inst = inst_arc.write().await;
                 inst.current_node = next;
+                inst.variables = token.process_variables();
             }
 
             self.remove_persisted_service_task(task_id).await;

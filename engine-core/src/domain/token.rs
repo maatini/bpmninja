@@ -10,9 +10,34 @@ pub struct Token {
     pub variables: HashMap<String, Value>,
     #[serde(default)]
     pub is_merged: bool,
+    /// Lokale Aktivierung. Fehlt bei Token, die vor X11 persistiert wurden.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_scope: Option<super::DataScope>,
 }
 
 impl Token {
+    /// Variablen, die außerhalb der aktuellen Aktivität sichtbar sind.
+    pub fn process_variables(&self) -> HashMap<String, Value> {
+        let mut variables = self.variables.clone();
+        if let Some(scope) = &self.data_scope {
+            for name in &scope.local_names {
+                if let Some(value) = scope.original_variables.get(name) {
+                    variables.insert(name.clone(), value.clone());
+                } else {
+                    variables.remove(name);
+                }
+            }
+        }
+        variables
+    }
+
+    /// Abbruch verwirft die Aktivierung, ohne Output-Mappings anzuwenden.
+    pub fn discard_data_scope(&mut self) {
+        if let Some(scope) = self.data_scope.take() {
+            self.variables = scope.original_variables;
+        }
+    }
+
     /// Creates a new token positioned at the given node with empty variables.
     pub fn new(start_node: &str) -> Self {
         Self {
@@ -20,6 +45,7 @@ impl Token {
             current_node: start_node.to_string(),
             variables: HashMap::new(),
             is_merged: false,
+            data_scope: None,
         }
     }
 
@@ -30,6 +56,7 @@ impl Token {
             current_node: start_node.to_string(),
             variables,
             is_merged: false,
+            data_scope: None,
         }
     }
 }

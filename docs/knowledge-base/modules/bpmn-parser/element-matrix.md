@@ -56,7 +56,7 @@ Prozessebene unbekannten Elements.
 | Manual Task | ✅ | Wie User Task |
 | Business Rule Task | ✅ / ❌ | Mit Topic → External Task; ohne Topic ❌ (kein DMN) |
 | Task (abstrakt) | ❌ | Konkreten Task-Typ verwenden |
-| Call Activity | ✅ | Variablen in beide Richtungen, Error-Boundaries |
+| Call Activity | ✅ | Ohne Mapping alle Variablen in beide Richtungen. Mit `camunda:in`/`camunda:out` nur die genannten Ziele; eine Richtung macht beide Seiten explizit. Error-Boundaries |
 | Embedded Sub-Process | ✅ | Beim Parsen geflacht (ADR-003). Boundary-Events am Sub-Prozess sind nicht spezifikationsgenau |
 | Event-Sub-Process | ❌ | `triggeredByEvent="true"` wird nicht ausgelöst |
 | Transaction | ❌ | |
@@ -83,7 +83,7 @@ Prozessebene unbekannten Elements.
 | Sequence Flow | ✅ | Bedingte und Default-Flows |
 | Message Flow | 🟡 | Zwischen Pools; nur ein Prozess wird deployed |
 | Association | 🟡 | Compensation-Associations werden noch nicht ausgewertet |
-| Data Association (Input / Output) | 🟡 | Datenaustausch nur über Prozessvariablen |
+| Data Association (Input / Output) | ⚠️ | An User, Service, Script, Send Task und Call Activity ausgeführt (`sourceRef`/`targetRef` oder Camunda `inputOutput`). Transformation, Skript, Interpolation und Collection werden abgelehnt |
 
 ## Swimlanes und Artefakte
 
@@ -98,10 +98,10 @@ Prozessebene unbekannten Elements.
 
 | Element | Status | Anmerkung |
 |---|---|---|
-| Data Object / Data Object Reference | 🟡 | |
+| Data Object / Data Object Reference | ⚠️ | Deklaration. `bpmninja:default` ist JSON und gilt nur beim Start; ohne Default entsteht kein Wert |
 | Data Store Reference | 🟡 | |
-| Data Input / Data Output / `ioSpecification` | 🟡 | |
-| Property | 🟡 | |
+| Data Input / Data Output / `ioSpecification` | ⚠️ | An unterstützten Aktivitäten Endpunkte von Assoziationen. Collection sowie Prozess- und Subprozess-IO werden abgelehnt |
+| Property | ⚠️ | Prozess-Property wie ein Data Object. Task-Property nur als Assoziations-Endpunkt, kein eigener Default |
 | Message, Error, Escalation, Signal (Wurzelelemente) | ✅ | Werden von Event-Definitionen referenziert |
 
 ## Pflege

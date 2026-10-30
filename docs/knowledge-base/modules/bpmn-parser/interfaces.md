@@ -15,7 +15,7 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition>
 | Direction | Type | Notes |
 |-----------|------|-------|
 | **Input** | `&str` | Raw BPMN 2.0 XML (UTF-8) |
-| **Output (Ok)** | `ProcessDefinition` | Fully parsed definition with nodes, edges, listeners |
+| **Output (Ok)** | `ProcessDefinition` | Fully parsed definition with nodes, edges, listeners, and data mappings when the XML declares them |
 | **Output (Err)** | `EngineError::InvalidDefinition(String)` | Descriptive error message for invalid XML |
 
 ## Internal Models (private)

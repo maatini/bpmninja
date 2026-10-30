@@ -1,5 +1,9 @@
 # persistence — Gotchas
 
+### ⚠️ Definitions and tokens round-trip mapping state
+
+`ProcessDefinition.data_variables`, `variable_defaults` and `data_mappings`, and `Token.data_scope`, are part of the JSON documents in the definition and instance buckets. Missing fields on older documents deserialize as empty (`#[serde(default)]`). A mapped external task therefore keeps its activation across a new `NatsPersistence::connect` to the same stream.
+
 ### ⚠️ NATS requires JetStream enabled
 
 The NATS server must be started with `--js` flag: `nats-server --js` (docker-compose uses `nats:alpine` with `--js --sd /data` plus user/pass). Without JetStream, KV stores and Object Stores are unavailable.

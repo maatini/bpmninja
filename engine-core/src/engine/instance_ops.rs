@@ -244,7 +244,8 @@ impl WorkflowEngine {
             None
         };
 
-        let updated_vars = {
+        let updates = variables;
+        {
             let instance_arc = self
                 .instances
                 .get(&instance_id)
@@ -256,22 +257,22 @@ impl WorkflowEngine {
             let mut modified: usize = 0;
             let mut deleted: usize = 0;
 
-            for (key, value) in variables {
+            for (key, value) in &updates {
                 if value.is_null() {
                     // Delete
-                    if instance.variables.remove(&key).is_some() {
+                    if instance.variables.remove(key).is_some() {
                         deleted += 1;
                     }
                 } else {
-                    match instance.variables.entry(key) {
+                    match instance.variables.entry(key.clone()) {
                         std::collections::hash_map::Entry::Occupied(mut e) => {
                             // Update existing
-                            e.insert(value);
+                            e.insert(value.clone());
                             modified += 1;
                         }
                         std::collections::hash_map::Entry::Vacant(e) => {
                             // Create new
-                            e.insert(value);
+                            e.insert(value.clone());
                             added += 1;
                         }
                     }
@@ -286,9 +287,7 @@ impl WorkflowEngine {
                 "Instance {}: variables updated (+{added} ~{modified} -{deleted})",
                 instance_id
             );
-
-            instance.variables.clone()
-        };
+        }
 
         // With centralized tokens, we also update instance.tokens so that
         // when a pending task is completed, it picks up the latest variables.
@@ -300,7 +299,17 @@ impl WorkflowEngine {
                 .ok_or(EngineError::NoSuchInstance(instance_id))?;
             let mut instance = instance_arc.write().await;
             for token in instance.tokens.values_mut() {
-                for (key, value) in &updated_vars {
+                for (key, value) in &updates {
+                    if let Some(scope) = &mut token.data_scope {
+                        if value.is_null() {
+                            scope.original_variables.remove(key);
+                        } else {
+                            scope.original_variables.insert(key.clone(), value.clone());
+                        }
+                        if scope.local_names.contains(key) {
+                            continue;
+                        }
+                    }
                     if value.is_null() {
                         token.variables.remove(key);
                     } else {
@@ -609,6 +618,7 @@ impl WorkflowEngine {
             current_node: target_node_id.to_string(),
             variables: token_vars.clone(),
             is_merged: false,
+            data_scope: None,
         };
 
         // --- 5. Reset instance state ---

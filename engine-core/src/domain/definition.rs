@@ -23,6 +23,15 @@ pub struct ProcessDefinition {
     pub event_listeners: Vec<ScopeEventListener>,
     #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
+    /// Deklarierte Daten, ohne dadurch einen Wert zu erfinden.
+    #[serde(default)]
+    pub data_variables: Vec<String>,
+    /// Explizite Start-Defaults (`bpmninja:default`). Aufrufer überschreiben sie.
+    #[serde(default)]
+    pub variable_defaults: HashMap<String, serde_json::Value>,
+    /// Input-/Output-Mappings pro Aktivität.
+    #[serde(default)]
+    pub data_mappings: HashMap<String, crate::domain::ActivityMappings>,
 }
 
 impl ProcessDefinition {
@@ -204,6 +213,9 @@ impl ProcessDefinition {
             listeners,
             event_listeners,
             sub_processes,
+            data_variables: Vec::new(),
+            variable_defaults: HashMap::new(),
+            data_mappings: HashMap::new(),
         })
     }
 

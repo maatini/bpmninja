@@ -104,7 +104,9 @@ impl IntoResponse for AppError {
             Self::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
             Self::Rejected { status, message } => (status, message),
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            Self::Engine(EngineError::InvalidDefinition(msg)) => (StatusCode::BAD_REQUEST, msg),
+            Self::Engine(
+                EngineError::InvalidDefinition(msg) | EngineError::DataMappingError(msg),
+            ) => (StatusCode::BAD_REQUEST, msg),
             Self::Engine(EngineError::NoMatchingCondition(msg)) => (
                 StatusCode::BAD_REQUEST,
                 format!("No matching condition at gateway '{msg}'"),

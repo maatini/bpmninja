@@ -12,6 +12,10 @@ pub enum EngineError {
     #[error("Invalid definition: {0}")]
     InvalidDefinition(String),
 
+    /// Eine Input- oder Output-Zuordnung konnte nicht ausgewertet werden.
+    #[error("Data mapping failed: {0}")]
+    DataMappingError(String),
+
     /// A referenced node does not exist in the definition.
     #[error("No such node: {0}")]
     NoSuchNode(String),
