@@ -134,7 +134,8 @@ jobs:
         run: |
           cid=$(docker ps -qf ancestor=nats:alpine | head -n 1)
           test -n "$cid"
-          bin=$(docker inspect --format '{{.Path}}' "$cid")
+          bin=$(docker exec "$cid" sh -c 'command -v nats-server')
+          test -n "$bin"
           docker cp "$cid:$bin" "$RUNNER_TEMP/nats-server"
           chmod +x "$RUNNER_TEMP/nats-server"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
@@ -196,7 +197,8 @@ jobs:
         run: |
           cid=$(docker ps -qf ancestor=nats:alpine | head -n 1)
           test -n "$cid"
-          bin=$(docker inspect --format '{{.Path}}' "$cid")
+          bin=$(docker exec "$cid" sh -c 'command -v nats-server')
+          test -n "$bin"
           docker cp "$cid:$bin" "$RUNNER_TEMP/nats-server"
           chmod +x "$RUNNER_TEMP/nats-server"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
