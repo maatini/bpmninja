@@ -10,3 +10,4 @@ Parses BPMN 2.0 XML into `ProcessDefinition` structs used by engine-core. Handle
 - [dependencies.md](dependencies.md)
 - [interfaces.md](interfaces.md)
 - [gotchas.md](gotchas.md)
+- [element-matrix.md](element-matrix.md) — unterstützte, abgelehnte und nur visuelle BPMN-Elemente

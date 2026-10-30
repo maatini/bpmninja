@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use quick_xml::Reader;
 use quick_xml::de::from_str;
+use quick_xml::events::{BytesStart, Event};
 
 use engine_core::error::{EngineError, EngineResult};
 use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessDefinitionBuilder};
@@ -496,11 +498,471 @@ fn resolve_link_throw(
     })
 }
 
+/// Event-Arten, an denen eine Event-Definition hängen kann.
+pub(crate) const EVENT_KINDS: [&str; 5] = [
+    "boundaryEvent",
+    "endEvent",
+    "intermediateCatchEvent",
+    "intermediateThrowEvent",
+    "startEvent",
+];
+
+/// Event-Definitionen, die die Engine für die jeweilige Event-Art ausführt.
+///
+/// Alphabetisch. `docs/knowledge-base/modules/bpmn-parser/element-matrix.md`
+/// (Fence `support-index`) muss dieselben Listen führen.
+pub(crate) const SUPPORTED_EVENT_DEFINITIONS: &[(&str, &[&str])] = &[
+    (
+        "boundaryEvent",
+        &[
+            "compensateEventDefinition",
+            "conditionalEventDefinition",
+            "errorEventDefinition",
+            "escalationEventDefinition",
+            "messageEventDefinition",
+            "signalEventDefinition",
+            "timerEventDefinition",
+        ],
+    ),
+    (
+        "endEvent",
+        &[
+            "compensateEventDefinition",
+            "errorEventDefinition",
+            "escalationEventDefinition",
+            "signalEventDefinition",
+            "terminateEventDefinition",
+        ],
+    ),
+    (
+        "intermediateCatchEvent",
+        &[
+            "conditionalEventDefinition",
+            "linkEventDefinition",
+            "messageEventDefinition",
+            "signalEventDefinition",
+            "timerEventDefinition",
+        ],
+    ),
+    (
+        "intermediateThrowEvent",
+        &[
+            "compensateEventDefinition",
+            "escalationEventDefinition",
+            "linkEventDefinition",
+            "messageEventDefinition",
+            "signalEventDefinition",
+        ],
+    ),
+    (
+        "startEvent",
+        &[
+            "messageEventDefinition",
+            "signalEventDefinition",
+            "timerEventDefinition",
+        ],
+    ),
+];
+
+/// Elemente, deren Ausführungssemantik fehlt und die der Deploy deshalb ablehnt.
+/// `task` und `transaction` haben eine eigene Fehlermeldung; die übrigen
+/// nutzen „is not supported“.
+pub(crate) const UNSUPPORTED_ELEMENTS: &[&str] = &[
+    "adHocSubProcess",
+    "standardLoopCharacteristics",
+    "task",
+    "transaction",
+];
+
+/// Erkannte, aber abgelehnte Event-Definitionen (nicht in
+/// [`SUPPORTED_EVENT_DEFINITIONS`]). Der Scanner formuliert dafür die
+/// bestehende Begründung (Cancel braucht eine Transaction, Conditional-Start
+/// hat keinen globalen Variablenraum).
+pub(crate) const REJECTED_EVENT_DEFINITIONS: &[(&str, &str)] = &[
+    ("boundaryEvent", "cancelEventDefinition"),
+    ("endEvent", "cancelEventDefinition"),
+    ("startEvent", "conditionalEventDefinition"),
+];
+
+/// Attribute, die eine sonst unterstützte Elementart ununterstützt machen.
+/// Muss mit `collect_for_element` übereinstimmen.
+pub(crate) const REJECTED_ATTRIBUTES: &[&str] = &[
+    "eventBasedGateway@eventGatewayType=Parallel",
+    "eventBasedGateway@instantiate",
+    "receiveTask@instantiate",
+    "subProcess@triggeredByEvent",
+];
+
+struct XmlFrame {
+    name: String,
+    id: Option<String>,
+    event_defs: usize,
+    triggered_by_event: bool,
+}
+
+struct XmlScan {
+    stack: Vec<XmlFrame>,
+    processes: Vec<(String, bool)>,
+    violations: Vec<Vec<String>>,
+    current: Option<usize>,
+}
+
+fn flag_is_true(value: &str) -> bool {
+    let value = value.trim();
+    value.eq_ignore_ascii_case("true") || value == "1"
+}
+
+fn is_parallel_gateway_type(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("parallel")
+}
+
+fn line_of(xml: &str, pos: u64) -> usize {
+    let end = usize::try_from(pos).unwrap_or(usize::MAX).min(xml.len());
+    xml[..end].bytes().filter(|&byte| byte == b'\n').count() + 1
+}
+
+fn element_local_name(element: &BytesStart<'_>) -> String {
+    element.local_name().as_ref().to_string()
+}
+
+fn xml_attr(element: &BytesStart<'_>, name: &str) -> Option<String> {
+    element
+        .attributes()
+        .flatten()
+        .find(|attr| attr.key.local_name().as_ref() == name)
+        .and_then(|attr| {
+            attr.normalized_value(quick_xml::XmlVersion::default())
+                .ok()
+                .map(|value| value.into_owned())
+        })
+}
+
+fn nearest_id(own: Option<String>, stack: &[XmlFrame]) -> String {
+    if let Some(id) = own.filter(|id| !id.is_empty()) {
+        return id;
+    }
+    stack
+        .iter()
+        .rev()
+        .find_map(|frame| frame.id.clone().filter(|id| !id.is_empty()))
+        .unwrap_or_else(|| "?".to_string())
+}
+
+fn paren(label: &str, id: &str, line: Option<usize>) -> String {
+    match line {
+        Some(line) => format!("({label} '{id}', line {line})"),
+        None => format!("({label} '{id}')"),
+    }
+}
+
+fn transaction_violation(id: &str, line: Option<usize>) -> String {
+    format!(
+        "transaction sub-processes are not supported; cancel events cannot be deployed {}",
+        paren("transaction", id, line)
+    )
+}
+
+fn cancel_violation(kind_label: &str, id: &str, line: Option<usize>) -> String {
+    format!(
+        "cancel end events require a transaction sub-process; transactions are not supported {}",
+        paren(kind_label, id, line)
+    )
+}
+
+fn conditional_start_violation(id: &str, sub_process: Option<&str>, line: Option<usize>) -> String {
+    let location = match sub_process {
+        Some(sub_process) => format!("start event '{id}' in subProcess '{sub_process}'"),
+        None => format!("start event '{id}'"),
+    };
+    let where_ = match line {
+        Some(line) => format!("({location}, line {line})"),
+        None => format!("({location})"),
+    };
+    format!("conditional start events are not supported; no global variable scope {where_}")
+}
+
+fn generic_task_violation(id: &str, line: Option<usize>) -> String {
+    let base = format!(
+        "unsupported element <task id='{id}'>: convert to userTask, serviceTask, scriptTask, or sendTask"
+    );
+    match line {
+        Some(line) => format!("{base} (line {line})"),
+        None => base,
+    }
+}
+
+fn event_subprocess_violation(id: &str, line: Option<usize>) -> String {
+    match line {
+        Some(line) => {
+            format!("event sub-process '{id}' is not supported (triggeredByEvent, line {line})")
+        }
+        None => format!("event sub-process '{id}' is not supported (triggeredByEvent)"),
+    }
+}
+
+fn instantiating_receive_violation(id: &str, line: Option<usize>) -> String {
+    match line {
+        Some(line) => format!("instantiating receiveTask '{id}' is not supported (line {line})"),
+        None => format!("instantiating receiveTask '{id}' is not supported"),
+    }
+}
+
+fn instantiating_gateway_violation(id: &str, line: Option<usize>) -> String {
+    match line {
+        Some(line) => format!(
+            "instantiating or parallel eventBasedGateway '{id}' is not supported (line {line})"
+        ),
+        None => format!("instantiating or parallel eventBasedGateway '{id}' is not supported"),
+    }
+}
+
+fn supported_definitions(kind: &str) -> &'static [&'static str] {
+    SUPPORTED_EVENT_DEFINITIONS
+        .iter()
+        .find(|(name, _)| *name == kind)
+        .map(|(_, definitions)| *definitions)
+        .unwrap_or(&[])
+}
+
+/// Nächster umschließender `subProcess`, der kein Event-Subprozess ist.
+fn plain_subprocess_id(stack: &[XmlFrame]) -> Option<String> {
+    let frame = stack
+        .iter()
+        .rev()
+        .find(|frame| frame.name == "subProcess")?;
+    if frame.triggered_by_event {
+        None
+    } else {
+        Some(frame.id.clone().unwrap_or_else(|| "?".to_string()))
+    }
+}
+
+fn classify_event_definition(name: &str, line: usize, stack: &mut [XmlFrame]) -> Vec<String> {
+    let Some(idx) = stack
+        .iter()
+        .rposition(|frame| EVENT_KINDS.contains(&frame.name.as_str()))
+    else {
+        // `messageEventDefinition` an sendTask/receiveTask ist kein Event-Knoten.
+        return Vec::new();
+    };
+    stack[idx].event_defs += 1;
+    let count = stack[idx].event_defs;
+    let kind = stack[idx].name.clone();
+    let event_id = stack[idx].id.clone().unwrap_or_else(|| "?".to_string());
+    if count == 2 {
+        return vec![format!(
+            "multiple event definitions on {kind} '{event_id}' (line {line})"
+        )];
+    }
+    if count > 2 {
+        return Vec::new();
+    }
+    if REJECTED_EVENT_DEFINITIONS
+        .iter()
+        .any(|(event_kind, definition)| *event_kind == kind && *definition == name)
+    {
+        if name == "conditionalEventDefinition" {
+            let sub_process = plain_subprocess_id(stack);
+            return vec![conditional_start_violation(
+                &event_id,
+                sub_process.as_deref(),
+                Some(line),
+            )];
+        }
+        let label = if kind == "endEvent" {
+            "end event"
+        } else {
+            "boundary event"
+        };
+        return vec![cancel_violation(label, &event_id, Some(line))];
+    }
+    if supported_definitions(&kind).contains(&name) {
+        if kind == "startEvent"
+            && let Some(sub_process) = plain_subprocess_id(stack)
+        {
+            return vec![format!(
+                "{name} on startEvent '{event_id}' inside subProcess '{sub_process}' is not executed (embedded sub-process start events are pass-through) (line {line})"
+            )];
+        }
+        return Vec::new();
+    }
+    vec![format!(
+        "{name} on {kind} '{event_id}' is not supported (line {line})"
+    )]
+}
+
+fn matched_rejected_attribute(name: &str, element: &BytesStart<'_>) -> Option<&'static str> {
+    if name == "subProcess"
+        && xml_attr(element, "triggeredByEvent").is_some_and(|value| flag_is_true(&value))
+    {
+        return Some("subProcess@triggeredByEvent");
+    }
+    if name == "receiveTask"
+        && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
+    {
+        return Some("receiveTask@instantiate");
+    }
+    if name == "eventBasedGateway"
+        && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
+    {
+        return Some("eventBasedGateway@instantiate");
+    }
+    if name == "eventBasedGateway"
+        && xml_attr(element, "eventGatewayType")
+            .is_some_and(|value| is_parallel_gateway_type(&value))
+    {
+        return Some("eventBasedGateway@eventGatewayType=Parallel");
+    }
+    None
+}
+
+fn collect_for_element(
+    name: &str,
+    element: &BytesStart<'_>,
+    line: usize,
+    stack: &mut [XmlFrame],
+) -> Vec<String> {
+    let id = nearest_id(xml_attr(element, "id"), stack);
+    if let Some(code) = matched_rejected_attribute(name, element)
+        && REJECTED_ATTRIBUTES.contains(&code)
+    {
+        return vec![match code {
+            "subProcess@triggeredByEvent" => event_subprocess_violation(&id, Some(line)),
+            "receiveTask@instantiate" => instantiating_receive_violation(&id, Some(line)),
+            _ => instantiating_gateway_violation(&id, Some(line)),
+        }];
+    }
+    if UNSUPPORTED_ELEMENTS.contains(&name) {
+        return vec![match name {
+            "transaction" => transaction_violation(&id, Some(line)),
+            "task" => generic_task_violation(&id, Some(line)),
+            _ => format!("{name} '{id}' is not supported (line {line})"),
+        }];
+    }
+    if name.ends_with("EventDefinition") {
+        return classify_event_definition(name, line, stack);
+    }
+    Vec::new()
+}
+
+fn select_process_index(processes: &[(String, bool)]) -> Option<usize> {
+    if processes.is_empty() {
+        None
+    } else {
+        Some(
+            processes
+                .iter()
+                .position(|(_, executable)| *executable)
+                .unwrap_or(0),
+        )
+    }
+}
+
+fn on_xml_tag(scan: &mut XmlScan, element: &BytesStart<'_>, line: usize, open: bool) {
+    let name = element_local_name(element);
+    if name == "process" && scan.current.is_none() {
+        let id = xml_attr(element, "id").unwrap_or_default();
+        let executable = xml_attr(element, "isExecutable").as_deref() == Some("true");
+        scan.processes.push((id.clone(), executable));
+        scan.violations.push(Vec::new());
+        if open {
+            scan.current = Some(scan.processes.len() - 1);
+            scan.stack.push(XmlFrame {
+                name,
+                id: Some(id).filter(|value| !value.is_empty()),
+                event_defs: 0,
+                triggered_by_event: false,
+            });
+        }
+        return;
+    }
+    if let Some(idx) = scan.current {
+        let found = collect_for_element(&name, element, line, &mut scan.stack);
+        scan.violations[idx].extend(found);
+    }
+    if open {
+        let triggered_by_event = name == "subProcess"
+            && xml_attr(element, "triggeredByEvent").is_some_and(|v| flag_is_true(&v));
+        let id = xml_attr(element, "id");
+        scan.stack.push(XmlFrame {
+            name,
+            id,
+            event_defs: 0,
+            triggered_by_event,
+        });
+    }
+}
+
+fn on_xml_end(scan: &mut XmlScan, name: &str) {
+    let frame = scan.stack.pop();
+    if name == "process" && frame.is_some_and(|frame| frame.name == "process") {
+        scan.current = None;
+    }
+}
+
+/// Lehnt im deployten Prozess alle Elemente ab, deren Ausführungssemantik fehlt.
+///
+/// Der Scan läuft vor `serde`, damit unbekannte Tags nicht erst als generischer
+/// Parsefehler oder — schlimmer — gar nicht auffallen. Es werden alle Treffer
+/// gemeldet, nicht nur der erste. Dieselbe Prozessauswahl wie danach im
+/// Deserializer: erster `isExecutable="true"`, sonst der erste Prozess.
+/// Visuelle und Datenelemente bleiben erlaubt.
+fn reject_unsupported_elements(xml: &str) -> EngineResult<()> {
+    let mut reader = Reader::from_str(xml);
+    let mut scan = XmlScan {
+        stack: Vec::new(),
+        processes: Vec::new(),
+        violations: Vec::new(),
+        current: None,
+    };
+    loop {
+        let event = reader.read_event().map_err(|err| {
+            EngineError::InvalidDefinition(format!("BPMN XML parsing failed: {err}"))
+        })?;
+        let line = line_of(xml, reader.buffer_position());
+        match event {
+            Event::Start(element) => on_xml_tag(&mut scan, &element, line, true),
+            Event::Empty(element) => on_xml_tag(&mut scan, &element, line, false),
+            Event::End(element) => {
+                let name = element.local_name().as_ref().to_string();
+                on_xml_end(&mut scan, &name);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    let Some(selected) = select_process_index(&scan.processes) else {
+        return Ok(());
+    };
+    let found = &scan.violations[selected];
+    if found.is_empty() {
+        Ok(())
+    } else {
+        Err(EngineError::InvalidDefinition(format!(
+            "Unsupported BPMN element(s) in process '{}': {}",
+            scan.processes[selected].0,
+            found.join("; ")
+        )))
+    }
+}
+
+fn gateway_is_instantiating_or_parallel(gw: &crate::models::BpmnGateway) -> bool {
+    gw.instantiate.as_deref().is_some_and(flag_is_true)
+        || gw
+            .event_gateway_type
+            .as_deref()
+            .is_some_and(is_parallel_gateway_type)
+}
+
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
 ///
 /// Note: Since `quick-xml` expects exact structure, the parsed XML must match
 /// the structs above (elements rather than attributes where specified, etc.).
 pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
+    // Sammelablehnung vor serde, damit ununterstützte Tags nicht still fallen.
+    reject_unsupported_elements(xml)?;
+
     let mut defs: BpmnDefinitions = from_str(xml).map_err(|e| {
         EngineError::InvalidDefinition(format!(
             "BPMN XML parsing failed (hint: ensure the XML contains a valid <process> element and supported entities): {}",
@@ -525,9 +987,9 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     let process_id = process.id.clone();
 
     if let Some(tx) = &process.transaction {
-        return Err(EngineError::InvalidDefinition(format!(
-            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
-            tx.id.as_deref().unwrap_or(&process_id)
+        return Err(EngineError::InvalidDefinition(transaction_violation(
+            tx.id.as_deref().unwrap_or(&process_id),
+            None,
         )));
     }
 
@@ -585,8 +1047,8 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for start in process.start_events {
         let node_id = start.id.clone();
         if start.conditional_event_definition.is_some() {
-            return Err(EngineError::InvalidDefinition(format!(
-                "conditional start events are not supported; no global variable scope (start event '{node_id}')"
+            return Err(EngineError::InvalidDefinition(conditional_start_violation(
+                &node_id, None, None,
             )));
         }
         if let Some(timer) = start.timer_event_definition {
@@ -612,8 +1074,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     for end in process.end_events {
         let node_id = end.id.clone();
         if end.cancel_event_definition.is_some() {
-            return Err(EngineError::InvalidDefinition(format!(
-                "cancel end events require a transaction sub-process; transactions are not supported (end event '{node_id}')"
+            return Err(EngineError::InvalidDefinition(cancel_violation(
+                "end event",
+                &node_id,
+                None,
             )));
         }
         if end.terminate_event_definition.is_some() {
@@ -718,6 +1182,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 5c. receiveTask waits for a message (same runtime as MessageCatchEvent)
     for task in process.receive_tasks {
         let node_id = task.id.clone();
+        if task.instantiate.as_deref().is_some_and(flag_is_true) {
+            return Err(EngineError::InvalidDefinition(
+                instantiating_receive_violation(&node_id, None),
+            ));
+        }
         reject_multi_instance(task.multi_instance, &node_id, "receiveTask")?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
@@ -772,9 +1241,8 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
 
     // 5f. Generic <task> from bpmn-js must be converted to a concrete type
     if let Some(task) = process.generic_tasks.first() {
-        return Err(EngineError::InvalidDefinition(format!(
-            "unsupported element <task id='{}'>: convert to userTask, serviceTask, scriptTask, or sendTask",
-            task.id
+        return Err(EngineError::InvalidDefinition(generic_task_violation(
+            &task.id, None,
         )));
     }
 
@@ -826,6 +1294,11 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // 6d. Event-based gateways
     for gw in process.event_based_gateways {
         let node_id = gw.id.clone();
+        if gateway_is_instantiating_or_parallel(&gw) {
+            return Err(EngineError::InvalidDefinition(
+                instantiating_gateway_violation(&node_id, None),
+            ));
+        }
         builder = builder.node(gw.id, BpmnElement::EventBasedGateway);
         builder = add_listeners(builder, &node_id, gw.extension_elements);
     }
@@ -963,8 +1436,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
         if bd.cancel_event_definition.is_some() {
-            return Err(EngineError::InvalidDefinition(format!(
-                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{node_id}')"
+            return Err(EngineError::InvalidDefinition(cancel_violation(
+                "boundary event",
+                &node_id,
+                None,
             )));
         }
         if let Some(timer) = bd.timer_event_definition {
@@ -1106,10 +1581,17 @@ fn flatten_subprocess(
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
 
+    if sp.triggered_by_event == Some(true) {
+        return Err(EngineError::InvalidDefinition(event_subprocess_violation(
+            &sub_process_id,
+            None,
+        )));
+    }
+
     if let Some(tx) = &sp.transaction {
-        return Err(EngineError::InvalidDefinition(format!(
-            "transaction sub-processes are not supported; cancel events cannot be deployed (transaction '{}')",
-            tx.id.as_deref().unwrap_or(&sub_process_id)
+        return Err(EngineError::InvalidDefinition(transaction_violation(
+            tx.id.as_deref().unwrap_or(&sub_process_id),
+            None,
         )));
     }
 
@@ -1129,8 +1611,10 @@ fn flatten_subprocess(
     }
     let start_event_id = start_event.id.clone();
     if start_event.conditional_event_definition.is_some() {
-        return Err(EngineError::InvalidDefinition(format!(
-            "conditional start events are not supported; no global variable scope (start event '{start_event_id}' in subProcess '{sub_process_id}')"
+        return Err(EngineError::InvalidDefinition(conditional_start_violation(
+            &start_event_id,
+            Some(&sub_process_id),
+            None,
         )));
     }
     let mut start_targets: Vec<String> = sp
@@ -1143,8 +1627,7 @@ fn flatten_subprocess(
     // Internal start events are pass-throughs: the EmbeddedSubProcess node continues at
     // the start event's target, so no node is materialised for it. Several outgoing
     // flows are all taken (BPMN implicit split) and stay in the graph as a parallel gateway.
-    // Signal-Start-Events in eingebetteten Sub-Prozessen (Event-Subprozesse) werden wie
-    // bisher ignoriert; sie sind nicht Teil dieser Ausbaustufe.
+    // Event-Definitionen am internen Start lehnt `reject_unsupported_elements` ab.
     let (start_node_id, start_forks) = match start_targets.len() {
         0 => {
             return Err(EngineError::InvalidDefinition(format!(
@@ -1167,9 +1650,10 @@ fn flatten_subprocess(
         // End-Events beenden den eingebetteten Scope. Signal-End-Events werden wie die
         // uebrigen End-Event-Definitionen geflattet und senden kein Signal.
         if end.cancel_event_definition.is_some() {
-            return Err(EngineError::InvalidDefinition(format!(
-                "cancel end events require a transaction sub-process; transactions are not supported (end event '{}')",
-                end.id
+            return Err(EngineError::InvalidDefinition(cancel_violation(
+                "end event",
+                &end.id,
+                None,
             )));
         }
         builder = builder.node(
@@ -1233,6 +1717,11 @@ fn flatten_subprocess(
     }
 
     for task in sp.receive_tasks {
+        if task.instantiate.as_deref().is_some_and(flag_is_true) {
+            return Err(EngineError::InvalidDefinition(
+                instantiating_receive_violation(&task.id, None),
+            ));
+        }
         reject_multi_instance(task.multi_instance, &task.id, "receiveTask")?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
@@ -1279,9 +1768,8 @@ fn flatten_subprocess(
     }
 
     if let Some(task) = sp.generic_tasks.first() {
-        return Err(EngineError::InvalidDefinition(format!(
-            "unsupported element <task id='{}'>: convert to userTask, serviceTask, scriptTask, or sendTask",
-            task.id
+        return Err(EngineError::InvalidDefinition(generic_task_violation(
+            &task.id, None,
         )));
     }
 
@@ -1314,6 +1802,11 @@ fn flatten_subprocess(
         builder = builder.node(gw.id, BpmnElement::InclusiveGateway);
     }
     for gw in sp.event_based_gateways {
+        if gateway_is_instantiating_or_parallel(&gw) {
+            return Err(EngineError::InvalidDefinition(
+                instantiating_gateway_violation(&gw.id, None),
+            ));
+        }
         builder = builder.node(gw.id, BpmnElement::EventBasedGateway);
     }
 
@@ -1435,9 +1928,10 @@ fn flatten_subprocess(
         let cancel_activity = bd.cancel_activity.unwrap_or(true);
 
         if bd.cancel_event_definition.is_some() {
-            return Err(EngineError::InvalidDefinition(format!(
-                "cancel end events require a transaction sub-process; transactions are not supported (boundary event '{}')",
-                bd.id
+            return Err(EngineError::InvalidDefinition(cancel_violation(
+                "boundary event",
+                &bd.id,
+                None,
             )));
         }
         if let Some(timer) = bd.timer_event_definition {
