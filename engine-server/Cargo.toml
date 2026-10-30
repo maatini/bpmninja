@@ -5,7 +5,19 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version.workspace = true
 
+[features]
+default = []
+# Deploy-time model checking. Off by default so a normal build does not fetch
+# or link `rust_bpmn_analyzer` (git-only, see the comment on that dependency).
+model-check = ["dep:rust_bpmn_analyzer", "dep:quick-xml"]
+
 [dependencies]
+# Optional analyzer. Not on crates.io (checked 2026-10-29). License: MIT,
+# compatible with this crate's MIT OR Apache-2.0. Pinned rev; the package
+# lives in `core/` and Cargo resolves it by name.
+rust_bpmn_analyzer = { git = "https://github.com/timKraeuter/rust_bpmn_analyzer", rev = "3d3eede32409d70e6818d8344d480de8d76a6d8b", optional = true }
+# Same major as bpmn-parser. Expands self-closing tags the analyzer drops.
+quick-xml = { version = "0.42", optional = true }
 axum = { version = "0.8", features = ["multipart", "tokio"] }
 tokio = { workspace = true }
 serde = { workspace = true }

@@ -15,7 +15,8 @@ Optional API-key auth when env BPMNINJA_API_KEY is set.
 Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
 JSON bodies are limited to 10 MiB (413). Malformed JSON returns 400, schema mismatches 422,
-and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`.
+and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`,
+except a deploy rejected by `MODEL_CHECK=enforce`, which also includes `model_check`.
 """)
 @useAuth(BearerAuth | ApiKeyAuth<ApiKeyLocation.header, "X-API-Key"> | NoAuth)
 namespace MiniBpm;
@@ -58,9 +59,30 @@ model DeployRequest {
   name: string;
 }
 
+@doc("One violated soundness property from rust_bpmn_analyzer.")
+model ModelCheckViolation {
+  property: "safeness" | "option_to_complete" | "proper_completion" | "no_dead_activities";
+  elements: string[];
+}
+
+@doc("Deploy-time model check. Absent when MODEL_CHECK=off (the default).")
+model ModelCheckReport {
+  status: "passed" | "violations" | "skipped" | "inconclusive" | "failed" | "unavailable";
+  violations?: ModelCheckViolation[];
+  reason?: string;
+}
+
+@error
+@doc("MODEL_CHECK=enforce rejected the deploy. error repeats the findings as text.")
+model ModelCheckRejected {
+  error: string;
+  model_check: ModelCheckReport;
+}
+
 model DeployResponse {
   definition_key: string;
   version: int32;
+  model_check?: ModelCheckReport;
 }
 
 model StartRequest {
@@ -406,7 +428,8 @@ namespace Api {
   // ---- Deployment & lifecycle ----
 
   @post @route("/deploy")
-  op deploy(@body request: DeployRequest): DeployResponse | AppError;
+  @doc("Deploy BPMN XML. model_check is set when MODEL_CHECK is warn or enforce. enforce returns ModelCheckRejected for a confirmed violation or when the model-check feature was not compiled.")
+  op deploy(@body request: DeployRequest): DeployResponse | AppError | ModelCheckRejected;
 
   @post @route("/start")
   op start(@body request: StartRequest): StartResponse | AppError;

@@ -59,6 +59,10 @@ paths:
         Parses and deploys a BPMN 2.0 XML definition. If a definition with the same 
         BPMN process ID already exists, a new version is created automatically.
         Maximum XML size: 10 MB.
+        When `MODEL_CHECK` is `warn` or `enforce`, the success body includes
+        `model_check`. That requires the `model-check` Cargo feature; the
+        runtime default is `off` (field omitted). `enforce` returns 400 with
+        `model_check` findings for a confirmed violation.
       requestBody:
         required: true
         content:
@@ -73,11 +77,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeployResponse'
         '400':
-          description: Invalid BPMN XML
+          description: |
+            Invalid BPMN XML, or a model-check rejection (`MODEL_CHECK=enforce`).
+            A rejection body is `ModelCheckError`: `error` lists the findings and
+            `model_check` is the structured report. Timeout, panic, and a busy
+            checker do not use this response; those deploys succeed.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - $ref: '#/components/schemas/ModelCheckError'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -1370,6 +1380,57 @@ components:
         version:
           type: integer
           description: Newly created definition version (starts at 1).
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+
+    ModelCheckError:
+      type: object
+      description: |
+        `MODEL_CHECK=enforce` rejected the deploy. `error` repeats the findings
+        as text; `model_check` is the structured report.
+      required: [error, model_check]
+      properties:
+        error:
+          type: string
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+
+    ModelCheckReport:
+      type: object
+      description: |
+        Deploy-time model checking (`rust_bpmn_analyzer`). Omitted when
+        `MODEL_CHECK=off` (the default).
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum:
+            - passed
+            - violations
+            - skipped
+            - inconclusive
+            - failed
+            - unavailable
+        violations:
+          type: array
+          items:
+            type: object
+            required: [property, elements]
+            properties:
+              property:
+                type: string
+                enum:
+                  - safeness
+                  - option_to_complete
+                  - proper_completion
+                  - no_dead_activities
+              elements:
+                type: array
+                items:
+                  type: string
+        reason:
+          type: string
+          description: Why the check was skipped, inconclusive, failed, or unavailable.
 
     StartRequest:
       type: object

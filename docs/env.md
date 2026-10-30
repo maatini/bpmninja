@@ -3,9 +3,9 @@
 Complete list of environment variables read by Rust code in this repository
 (`std::env::var` / `env::var`). Defaults are taken from the source, not guessed.
 
-Snapshot: 2026-10-24.
+Snapshot: 2026-10-29.
 
-Sources: `engine-server/src/{main.rs,server/state.rs,server/mod.rs}`,
+Sources: `engine-server/src/{main.rs,server/state.rs,server/mod.rs,server/model_check.rs}`,
 `engine-core/src/{scripting/runner.rs,engine/retry_queue.rs}`,
 `persistence-nats/src/{client.rs,tests.rs}`,
 `agent-orchestrator/src/main.rs`, `desktop-tauri/src-tauri/src/main.rs`.
@@ -28,6 +28,10 @@ Sources: `engine-server/src/{main.rs,server/state.rs,server/mod.rs}`,
 | `RUST_LOG` | `info` | Log filter, read via `tracing_subscriber::EnvFilter::try_from_default_env()` | `main.rs` |
 | `LOG_FORMAT` | `text` | `text` (human-readable) or `json` (structured) | `main.rs` |
 | `LOG_FILE` | `engine_logs.jsonl` | Path of the file-backed log buffer; `off` keeps logs in memory only | `main.rs` |
+| `MODEL_CHECK` | `off` | Deploy-time model checking: `off` / `false` / `0` (no report), `warn` / `true` / `on` / `1` (deploy succeeds; findings are logged and returned), `enforce` (HTTP 400 for a confirmed violation). Unknown values log a warning and behave as `off`. The analyzer is only linked with Cargo feature `model-check`; without it, `warn` deploys with status `unavailable` and `enforce` rejects the deploy | `server/model_check.rs`, `server/deploy.rs` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | Wall-clock budget for one analysis. `0`, negative, or non-numeric values fall back to 2000. On expiry the deploy continues and `model_check.status` is `inconclusive` | `server/model_check.rs` |
+
+`model-check` pulls `rust_bpmn_analyzer` (MIT, git rev `3d3eede32409d70e6818d8344d480de8d76a6d8b`). It is not published on crates.io. One analysis runs at a time (`spawn_blocking`); a second deploy does not wait and is reported as `skipped`. A panic in the analyzer is caught and reported as `failed`. Neither timeout nor panic fails the deploy.
 
 Auth gating (`server/state.rs`): the gate is active when any key is set. Without
 keys it stays active unless the server binds to loopback, auth was disabled via

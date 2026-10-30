@@ -16,6 +16,7 @@ pub struct AppState {
     pub worker_api_key: Option<String>, // BPMNINJA_WORKER_API_KEY; None = nur Admin
     pub auth_required: bool,          // Gate aktiv (Key konfiguriert ODER fail-closed)
     pub cors_origins: Vec<String>,    // CORS_ORIGINS; `*` = Allow Any
+    pub model_checker: ModelChecker,  // MODEL_CHECK, default off; analyzer only with feature model-check
 }
 ```
 
@@ -28,6 +29,7 @@ pub struct AppState {
 | `AppError::Unauthorized` | 401 | Fehlender/falscher API-Key, Gate aktiv (Key gesetzt oder fail-closed) |
 | `AppError::Forbidden` | 403 | Gültiger Worker-Key auf einer Admin-Route |
 | `AppError::BadRequest(msg)` | 400 | Invalid UUID, invalid BPMN XML |
+| `AppError::ModelCheckRejected(report)` | 400 | `MODEL_CHECK=enforce`: body is `{ "error", "model_check" }` with the findings |
 | `AppError::PayloadTooLarge(msg)` | 413 | Multipart upload or XML/JSON body exceeds the configured limit |
 | `AppError::Rejected { status, message }` | 400/413/415/422 | Axum-Extractor-Ablehnung (JSON-Syntax, Typfehler, Content-Type, Body-Limit) |
 | `AppError::NotFound(msg)` | 404 | Fehlende Ressource, z. B. kein gespeichertes BPMN-XML |

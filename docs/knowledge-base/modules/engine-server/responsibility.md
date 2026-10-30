@@ -14,11 +14,12 @@
 10. **@tag:request-size-limit** — JSON/XML body limit via `DefaultBodyLimit` = `MAX_XML_BYTES` (10 MiB, OpenAPI). Multipart instance files remain `MAX_UPLOAD_BYTES` (5 MiB).
 11. **@tag:api-auth** — API-Key-Gate mit Rollen: `BPMNINJA_API_KEY` (Admin, alles) und optional `BPMNINJA_WORKER_API_KEY` (nur Service-Task-Routen, sonst 403). Fail-closed ohne Key bei Nicht-Loopback-Bind (401). Öffentlich: `GET /api/health`, `GET /api/ready`.
 12. **@tag:lock-duration-ms** — HTTP `lockDuration`/`newDuration` sind Millisekunden; Validierung (1_000..=3_600_000 ms, `maxTasks` 1..=100, 1..=32 Topics) und Umrechnung in Sekunden an der Server-Grenze. Jedes Topic behält seine eigene Lock-Dauer.
+13. **@tag:model-check** — Optionales Deploy-Model-Checking (`MODEL_CHECK`, Feature `model-check`, Default aus). `warn` liefert Befunde im Deploy-Response, `enforce` lehnt bestätigte Verstöße mit strukturiertem Fehler ab. Eine Analyse gleichzeitig, `spawn_blocking`, Timeout 2 s.
 
 ## Invariants
 
 1. **Never hold engine lock across `.await`**: Route handlers must scope all lock access before any async call.
-2. **All errors return JSON**: `{ "error": "Human-readable message" }` — no HTML error pages.
+2. **All errors return JSON**: `{ "error": "Human-readable message" }` — no HTML error pages. `MODEL_CHECK=enforce` adds `model_check` next to `error` when a deploy is rejected.
 3. **UUID validation at boundary**: Path parameters are parsed to `Uuid` immediately, returning 400 on failure.
 4. **SSE events are fire-and-forget**: Server doesn't care if SSE clients miss events (channel capacity 256).
 5. **Graceful shutdown**: `Ctrl+C` / `SIGTERM` shuts down timer scheduler, flushes persistence queue, and stops Axum.
@@ -41,6 +42,7 @@
 | `server/auth.rs` | `src/server/auth.rs` | API-Key-Gate (fail-closed), Rollen (Admin/Worker), 401/403, `bpmn_auth_failures_total` |
 | `server/mod.rs` | `src/server/mod.rs` | Route registration, CORS layer, `DefaultBodyLimit`, `build_app*` |
 | `server/deploy.rs` | `src/server/deploy.rs` | Deploy, list, get XML, delete definitions |
+| `server/model_check.rs` | `src/server/model_check.rs` | Optional deploy-time model checking (`MODEL_CHECK`) |
 | `server/instances.rs` | `src/server/instances.rs` | Start, list, get, delete, suspend, resume, move token, migrate, update variables |
 | `server/tasks.rs` | `src/server/tasks.rs` | User tasks + service tasks (fetchAndLock, complete, failure, retry, resolve, bpmnError, extendLock) |
 | `server/files.rs` | `src/server/files.rs` | File upload, download, delete for instance variables |

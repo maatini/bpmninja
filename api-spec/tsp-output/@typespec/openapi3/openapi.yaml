@@ -6,7 +6,8 @@ info:
     Send `Authorization: Bearer <key>` or `X-API-Key: <key>`.
     GET /api/health and GET /api/ready remain public. lockDuration/newDuration are milliseconds.
     JSON bodies are limited to 10 MiB (413). Malformed JSON returns 400, schema mismatches 422,
-    and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`.
+    and a missing/unsupported Content-Type 415. Every error body is `{ "error": string }`,
+    except a deploy rejected by `MODEL_CHECK=enforce`, which also includes `model_check`.
   version: 0.0.0
 tags: []
 paths:
@@ -127,6 +128,7 @@ paths:
   /api/deploy:
     post:
       operationId: Api_deploy
+      description: Deploy BPMN XML. model_check is set when MODEL_CHECK is warn or enforce. enforce returns ModelCheckRejected for a confirmed violation or when the model-check feature was not compiled.
       parameters: []
       responses:
         '200':
@@ -140,7 +142,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AppError'
+                anyOf:
+                  - $ref: '#/components/schemas/AppError'
+                  - $ref: '#/components/schemas/ModelCheckRejected'
       requestBody:
         required: true
         content:
@@ -1423,6 +1427,8 @@ components:
         version:
           type: integer
           format: int32
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
     ExtendLockRequest:
       type: object
       required:
@@ -1635,6 +1641,56 @@ components:
           additionalProperties:
             type: string
           description: Optional mapping of old BPMN node IDs to new BPMN node IDs. Required for nodes that were renamed between versions.
+    ModelCheckRejected:
+      type: object
+      required:
+        - error
+        - model_check
+      properties:
+        error:
+          type: string
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+      description: MODEL_CHECK=enforce rejected the deploy. error repeats the findings as text.
+    ModelCheckReport:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - passed
+            - violations
+            - skipped
+            - inconclusive
+            - failed
+            - unavailable
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelCheckViolation'
+        reason:
+          type: string
+      description: Deploy-time model check. Absent when MODEL_CHECK=off (the default).
+    ModelCheckViolation:
+      type: object
+      required:
+        - property
+        - elements
+      properties:
+        property:
+          type: string
+          enum:
+            - safeness
+            - option_to_complete
+            - proper_completion
+            - no_dead_activities
+        elements:
+          type: array
+          items:
+            type: string
+      description: One violated soundness property from rust_bpmn_analyzer.
     MonitoringData:
       type: object
       required:

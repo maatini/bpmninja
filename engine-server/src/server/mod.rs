@@ -7,6 +7,7 @@ pub(crate) mod history;
 pub(crate) mod instances;
 pub(crate) mod logs;
 pub(crate) mod messages;
+pub(crate) mod model_check;
 pub(crate) mod monitoring;
 pub(crate) mod signals;
 pub(crate) mod state;
@@ -57,6 +58,11 @@ pub struct AppBuildConfig {
     /// Anzeige-URL für `/api/info`; `None` = aus `NATS_URL`. Wird vor der
     /// Ausgabe über [`crate::redact::redact_nats_url`] maskiert.
     pub nats_url: Option<String>,
+    /// `None` liest `MODEL_CHECK` (Default `off`).
+    pub model_check: Option<model_check::ModelCheckMode>,
+    /// `None` liest `MODEL_CHECK_TIMEOUT_MS` (Default 2000). Kein positiver
+    /// Integer fällt auf den Default zurück.
+    pub model_check_timeout_ms: Option<u64>,
 }
 
 /// Builds the Axum router with all routes and middleware.
@@ -83,6 +89,9 @@ pub fn build_app() -> Router {
             cors_origins: Some(default_cors_origins()),
             storage_status: None,
             nats_url: None,
+            // Tests must not follow a process-wide `MODEL_CHECK` setting.
+            model_check: Some(model_check::ModelCheckMode::Off),
+            model_check_timeout_ms: None,
         },
     )
 }
@@ -181,6 +190,14 @@ pub fn build_app_with_config(
         worker_api_key,
         auth_required,
         cors_origins: cors_origins.clone(),
+        model_checker: model_check::ModelChecker::new(
+            config
+                .model_check
+                .unwrap_or_else(model_check::ModelCheckMode::from_env),
+            config
+                .model_check_timeout_ms
+                .unwrap_or_else(model_check::timeout_ms_from_env),
+        ),
     });
 
     tracing::info!(
@@ -191,8 +208,19 @@ pub fn build_app_with_config(
         allow_unauthenticated,
         cors_origins = ?state.cors_origins,
         max_xml_bytes,
+        model_check = ?state.model_checker.mode,
+        model_check_timeout_ms = state.model_checker.timeout_ms(),
+        model_check_compiled = cfg!(feature = "model-check"),
         "HTTP security config"
     );
+
+    #[cfg(not(feature = "model-check"))]
+    if state.model_checker.mode != model_check::ModelCheckMode::Off {
+        tracing::warn!(
+            mode = ?state.model_checker.mode,
+            "MODEL_CHECK is set, but this binary was built without the model-check feature"
+        );
+    }
 
     if !state.auth_required && !state::is_loopback_bind(&bind_addr) {
         tracing::warn!(

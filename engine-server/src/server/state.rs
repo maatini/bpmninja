@@ -31,6 +31,9 @@ pub(crate) enum AppError {
     Rejected { status: StatusCode, message: String },
     /// Requested resource does not exist (e.g. no stored BPMN XML).
     NotFound(String),
+    /// `MODEL_CHECK=enforce` rejected the deploy. The body is
+    /// `{ "error", "model_check" }` so the findings stay structured.
+    ModelCheckRejected(crate::server::model_check::ModelCheckReport),
 }
 
 impl From<JsonRejection> for AppError {
@@ -87,6 +90,14 @@ impl From<EngineError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
+            Self::ModelCheckRejected(report) => {
+                let message = format!("Model check failed: {}", report.error_detail());
+                let body = serde_json::json!({
+                    "error": message,
+                    "model_check": report,
+                });
+                return (StatusCode::BAD_REQUEST, Json(body)).into_response();
+            }
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             Self::Forbidden => (StatusCode::FORBIDDEN, "Forbidden".to_string()),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
@@ -246,6 +257,8 @@ pub struct AppState {
     pub(crate) auth_required: bool,
     /// Configured CORS origins (`*` means allow any — dev escape hatch only).
     pub(crate) cors_origins: Vec<String>,
+    /// Deploy-time model checking (`MODEL_CHECK`, `MODEL_CHECK_TIMEOUT_MS`).
+    pub(crate) model_checker: crate::server::model_check::ModelChecker,
 }
 
 /// `REQUIRE_NATS` is fail-closed: unset defaults to **true**.
