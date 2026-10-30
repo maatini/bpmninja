@@ -9,7 +9,7 @@
 The `AppState.engine` is `Arc<WorkflowEngine>`. All engine methods take `&self`. However, if a route handler acquires a lock from engine internals (e.g., `instances.get(&id).await`), it must drop that lock before any other `.await` point.
 
 This is especially relevant in:
-- `tasks.rs` — fetchAndLock via long polling loops
+- `tasks.rs` — `fetchAndLock` awaits one long-poll; the engine wakes it when a task becomes fetchable (no lock held across that wait)
 - `instances.rs` — multi-step operations (suspend + persist)
 - `history.rs` — querying multiple persistence operations
 

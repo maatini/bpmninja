@@ -424,6 +424,9 @@ impl WorkflowEngine {
             inst.push_audit_log("▶ Instance resumed".to_string());
         }
 
+        // Overdue timers of this instance can fire now; don't wait out max-idle.
+        self.notify_timer_schedule_changed();
+
         self.record_history_event(
             instance_id,
             crate::history::HistoryEventType::InstanceResumed,

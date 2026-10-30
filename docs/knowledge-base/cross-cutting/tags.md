@@ -50,7 +50,7 @@ All `@tag:xxx` references used across the knowledge base. Tags identify cross-cu
 | `@tag:startup-restore` | State restoration from NATS on server start |
 | `@tag:subprocess-flattening` | Flattening embedded sub-processes at parse time |
 | `@tag:tauri-commands` | Tauri Rust backend — HTTP proxy layer |
-| `@tag:timer-scheduler` | Background task: process_timers() every N ms |
+| `@tag:timer-scheduler` | Background task: process_timers() at the next due time (max idle `TIMER_INTERVAL_MS`) |
 | `@tag:token-execution` | Token-based execution model: NextAction drive loop |
 | `@tag:ui-components` | shadcn/ui + Tailwind CSS for desktop app |
 | `@tag:ui-shell` | Tauri app shell with 7 tabs |

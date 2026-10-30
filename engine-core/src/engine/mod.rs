@@ -36,6 +36,8 @@ mod process_start;
 pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
+
+pub use service_task::MAX_SERVICE_TASK_LONG_POLL;
 mod signal_processor;
 mod task_handler;
 mod timer_index;
@@ -58,7 +60,7 @@ pub struct WorkflowEngine {
     pub(crate) task_handlers: Arc<DashMap<String, Arc<dyn TaskHandler>>>,
     /// Service tasks whose handler invocation is still running.
     pub(crate) in_process_inflight: Arc<dashmap::DashSet<Uuid>>,
-    /// Wakes the in-process dispatcher when a service task may be fetchable.
+    /// Wakes the in-process dispatcher and long-polling `fetchAndLock` callers.
     pub(crate) service_task_notify: tokio::sync::Notify,
     /// `true` asks the in-process dispatcher to stop fetching and drain.
     pub(crate) task_handler_shutdown: tokio::sync::watch::Sender<bool>,
@@ -66,6 +68,11 @@ pub struct WorkflowEngine {
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
+    /// Wakes the timer scheduler when a timer is added, moved, or removed.
+    pub(crate) timer_notify: tokio::sync::Notify,
+    /// UTC anchor plus monotonic elapsed time. Production reads wall time;
+    /// tests can switch to the monotonic clock so `tokio::time::pause` drives due checks.
+    pub(crate) clock: timer_index::EngineClock,
     pub(crate) pending_message_catches: Arc<DashMap<Uuid, PendingMessageCatch>>,
     /// Wartende Signal-Catches. Signale sind Broadcast: alle Einträge mit
     /// passendem Namen werden von `correlate_signal` bedient.
@@ -114,6 +121,8 @@ impl WorkflowEngine {
             task_handler_handle: tokio::sync::Mutex::new(None),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
+            timer_notify: tokio::sync::Notify::new(),
+            clock: timer_index::EngineClock::new(),
             pending_message_catches: Arc::new(DashMap::new()),
             pending_signal_catches: Arc::new(DashMap::new()),
             pending_conditional_catches: Arc::new(DashMap::new()),

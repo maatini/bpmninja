@@ -49,6 +49,12 @@ fn retry_lock_expiration(retry_after: Duration) -> Option<chrono::DateTime<Utc>>
     Utc::now().checked_add_signed(delta)
 }
 
+/// Upper bound for long-polling fetch-and-lock (`asyncResponseTimeout`).
+///
+/// Callers that ask for longer are clamped. Zero still performs a single fetch
+/// and returns, which keeps the previous non-blocking default.
+pub const MAX_SERVICE_TASK_LONG_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Converts a requested lock duration (seconds) into a safe `TimeDelta`.
 ///
 /// Values are clamped to [`MIN_LOCK_SECONDS`]..=[`MAX_LOCK_SECONDS`] because
@@ -231,6 +237,55 @@ impl WorkflowEngine {
         }
 
         result
+    }
+
+    /// Long-polling variant of [`Self::fetch_and_lock_service_tasks_with_durations`].
+    ///
+    /// Returns as soon as at least one task is locked, or an empty vec once
+    /// `timeout` elapses. `timeout` is clamped to [`MAX_SERVICE_TASK_LONG_POLL`].
+    /// Waiters are woken when a matching task is inserted or unlocked.
+    /// `fallback_tick` covers lock expiries, which are time-based and not signalled.
+    /// A zero timeout performs one fetch and returns (backwards compatible).
+    ///
+    /// The notification is enabled before each fetch so a task that arrives
+    /// between the fetch and the sleep is not missed.
+    pub async fn fetch_and_lock_service_tasks_long_poll(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[(String, i64)],
+        timeout: std::time::Duration,
+        fallback_tick: std::time::Duration,
+    ) -> Vec<PendingServiceTask> {
+        let timeout = timeout.min(MAX_SERVICE_TASK_LONG_POLL);
+        let deadline = tokio::time::Instant::now() + timeout;
+        // A zero tick would busy-loop until the deadline. Lock expiry is
+        // coarse (whole seconds), so a short positive tick is enough.
+        let fallback = if fallback_tick.is_zero() {
+            std::time::Duration::from_millis(500)
+        } else {
+            fallback_tick
+        };
+
+        loop {
+            let notified = self.service_tasks_changed();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let tasks = self
+                .fetch_and_lock_service_tasks_with_durations(worker_id, max_tasks, topics)
+                .await;
+            let now = tokio::time::Instant::now();
+            if !tasks.is_empty() || now >= deadline {
+                return tasks;
+            }
+
+            let wake_at = now + (deadline - now).min(fallback);
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = tokio::time::sleep_until(wake_at) => {}
+            }
+        }
     }
 
     /// ID des nächsten noch offenen Tasks derselben Multi-Instance-Gruppe.

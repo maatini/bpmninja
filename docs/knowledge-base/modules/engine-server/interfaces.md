@@ -144,8 +144,9 @@ fetchAndLock-Validierung (sonst `400 Bad Request`, kein Long-Poll):
 | `topics[].topicName` | nicht leer (getrimmt) |
 | `topics[].lockDuration` | 1_000..=3_600_000 ms |
 | `maxTasks` | 1..=100 |
+| `asyncResponseTimeout` | optional, Millisekunden. `0` oder weggelassen: eine Abfrage, sofortige Antwort. Sonst wartet der Server, bis ein passender Task abrufbar wird, ein Lock abläuft oder das Timeout erreicht ist. Werte über **30_000** werden auf 30_000 gekürzt (kein 400) |
 
-Jedes Topic behält seine eigene Lock-Dauer: `WorkflowEngine::fetch_and_lock_service_tasks_with_durations(worker_id, max_tasks, &[(topic, secs)])`. engine-core clampt Sekunden defensiv auf `1..=3600` (`TimeDelta::try_seconds`), auch bei `extend_lock` — Werte außerhalb führen also nie zu einer Panic. Die alte Signatur `fetch_and_lock_service_tasks(..., lock_duration)` bleibt als Wrapper erhalten.
+Jedes Topic behält seine eigene Lock-Dauer: `WorkflowEngine::fetch_and_lock_service_tasks_with_durations(worker_id, max_tasks, &[(topic, secs)])`. Der HTTP-Handler ruft `fetch_and_lock_service_tasks_long_poll` mit denselben Paaren auf; der Engine-Cap ist `MAX_SERVICE_TASK_LONG_POLL` (30s). engine-core clampt Sekunden defensiv auf `1..=3600` (`TimeDelta::try_seconds`), auch bei `extend_lock` — Werte außerhalb führen also nie zu einer Panic. Die alte Signatur `fetch_and_lock_service_tasks(..., lock_duration)` bleibt als Wrapper erhalten.
 
 ## Auth-Modi & Rollenmatrix
 

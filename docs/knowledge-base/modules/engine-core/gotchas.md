@@ -131,7 +131,9 @@ A topic with a registered `TaskHandler` is locked only by the in-process dispatc
 
 ### ⚠️ Timer due-index is secondary
 
-`pending_timers` is SSOT. `timer_due_index` is a `BTreeMap<(expires_at, id)>` so `process_timers` only walks due IDs. Insert/remove/retain go through `insert_pending_timer` / `remove_pending_timer` / `retain_pending_timers`. Changing `expires_at` in place without `set_timer_expiry` leaves the index stale and the timer will not fire.
+`pending_timers` is SSOT. `timer_due_index` is a `BTreeMap<(expires_at, id)>` so `process_timers` only walks due IDs. Insert/remove/retain go through `insert_pending_timer` / `remove_pending_timer` / `retain_pending_timers` and wake the scheduler (`Notify`). Changing `expires_at` in place without `set_timer_expiry` leaves the index stale and the timer will not fire.
+
+The scheduler sleeps until the next **future** due time (or `TIMER_INTERVAL_MS`, the max idle). It registers for the notification **before** reading the index, so an earlier timer inserted during the wait is not missed. Suspended instances keep overdue timers; those do not produce a zero wait (no busy loop). Resume notifies the scheduler so an already-overdue timer fires without waiting out the idle cap. Dropping `wait_for_timer_work` cancels the sleep; the server uses that for shutdown. Due checks use wall time. Tests can switch that clock to tokio's monotonic time so `pause` / `advance` are deterministic.
 
 ### ⚠️ `list_instances_page` clones only the page
 

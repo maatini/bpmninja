@@ -4,9 +4,8 @@ use crate::domain::{EngineError, EngineResult, IncidentKind};
 
 /// Delay before a timer that failed processing becomes due again.
 ///
-/// Prevents a hot loop when a timer cannot be processed (e.g. missing instance):
-/// the scheduler runs every second by default, so a due timer would otherwise be
-/// retried immediately on every tick.
+/// A failed timer stays pending. Without this delay the event-driven scheduler
+/// would see it as actionable and retry it in a tight loop.
 const FAILED_TIMER_RETRY_DELAY_MS: i64 = 2_000;
 
 impl WorkflowEngine {
@@ -17,7 +16,7 @@ impl WorkflowEngine {
     /// the same round are still processed. The returned count is the number of
     /// due timers found at the start of the round.
     pub async fn process_timers(&self) -> EngineResult<usize> {
-        let now = chrono::Utc::now();
+        let now = self.now();
         let mut expired = Vec::new();
 
         for tid in self.timer_due_index.due_ids(now) {
@@ -299,7 +298,7 @@ impl WorkflowEngine {
             // None = infinite; Some(1) = this fire was the last; Some(0) = already done.
             let should_repeat = !matches!(timer.remaining_repetitions, Some(0 | 1));
             if should_repeat {
-                let now = chrono::Utc::now();
+                let now = self.now();
                 if let Some(next_expiry) = def.next_expiry(now) {
                     let new_remaining = timer.remaining_repetitions.map(|r| r.saturating_sub(1));
                     let new_pending = crate::runtime::PendingTimer {
@@ -325,8 +324,7 @@ impl WorkflowEngine {
     /// persists it. The new expiry is pushed into the future to avoid a hot loop.
     async fn reschedule_failed_timer(&self, mut timer: crate::runtime::PendingTimer) {
         let timer_id = timer.id;
-        timer.expires_at =
-            chrono::Utc::now() + chrono::Duration::milliseconds(FAILED_TIMER_RETRY_DELAY_MS);
+        timer.expires_at = self.now() + chrono::Duration::milliseconds(FAILED_TIMER_RETRY_DELAY_MS);
         self.insert_pending_timer(timer);
         self.persist_timer(timer_id).await;
     }

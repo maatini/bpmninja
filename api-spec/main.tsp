@@ -141,6 +141,7 @@ model FetchAndLockRequest {
   workerId: string;
   maxTasks: int32;
   topics: TopicRequest[];
+  /** Long-poll timeout in milliseconds. Omitted or 0 returns after a single fetch. Otherwise the server waits until a matching task is fetchable, a lock expires, or this timeout elapses. Values above 30000 are clamped to 30000. */
   asyncResponseTimeout?: int64;
 }
 

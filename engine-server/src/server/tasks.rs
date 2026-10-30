@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use engine_core::{PendingServiceTask, PendingUserTask};
+use engine_core::{MAX_SERVICE_TASK_LONG_POLL, PendingServiceTask, PendingUserTask};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -66,6 +66,8 @@ const MAX_LOCK_DURATION_MS: i64 = 3_600_000;
 /// Accepted bounds for `maxTasks` and `topics` in a fetch-and-lock request.
 const MAX_FETCH_TASKS: usize = 100;
 const MAX_FETCH_TOPICS: usize = 32;
+/// Re-check interval while long-polling, for locks that expire by time.
+const LONG_POLL_FALLBACK_TICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Validates a fetch-and-lock request and returns `(topic, lock seconds)` pairs.
 ///
@@ -121,34 +123,29 @@ pub(crate) async fn fetch_and_lock_service_tasks(
     ApiJson(payload): ApiJson<FetchAndLockRequest>,
 ) -> Result<Json<Vec<PendingServiceTask>>, AppError> {
     let topics = validated_topics(&payload)?;
-    let timeout_ms = payload.async_response_timeout.unwrap_or(0);
+    // Clamp before `Duration::from_millis`: an unclamped `u64::MAX` would panic.
+    // Values above the engine cap are shortened, not rejected, so existing
+    // workers that send a larger `asyncResponseTimeout` keep working.
+    let max_timeout_ms = u64::try_from(MAX_SERVICE_TASK_LONG_POLL.as_millis()).unwrap_or(30_000);
+    let timeout_ms = payload
+        .async_response_timeout
+        .unwrap_or(0)
+        .min(max_timeout_ms);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
 
-    let poll_interval = tokio::time::Duration::from_millis(500);
-    let max_timeout = tokio::time::Duration::from_millis(timeout_ms.min(30_000));
-
-    let start = tokio::time::Instant::now();
-    loop {
-        let tasks = {
-            let engine = &state.engine;
-            engine
-                .fetch_and_lock_service_tasks_with_durations(
-                    &payload.worker_id,
-                    payload.max_tasks,
-                    &topics,
-                )
-                .await
-        };
-
-        if !tasks.is_empty() || timeout_ms == 0 {
-            return Ok(Json(tasks));
-        }
-
-        if start.elapsed() >= max_timeout {
-            return Ok(Json(vec![]));
-        }
-
-        tokio::time::sleep(poll_interval).await;
-    }
+    // Woken when a task is inserted or unlocked. The tick only covers lock
+    // expiries (time-based, not signalled). A zero timeout returns after one fetch.
+    let tasks = state
+        .engine
+        .fetch_and_lock_service_tasks_long_poll(
+            &payload.worker_id,
+            payload.max_tasks,
+            &topics,
+            timeout,
+            LONG_POLL_FALLBACK_TICK,
+        )
+        .await;
+    Ok(Json(tasks))
 }
 
 #[derive(Serialize, Deserialize)]

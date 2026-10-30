@@ -24,7 +24,7 @@ Sources: `engine-server/src/{main.rs,server/state.rs,server/mod.rs}`,
 | `BPMNINJA_API_KEY` | unset (auth off) | Admin API key, accepted as `Authorization: Bearer …` or `X-Api-Key`; grants full access. Empty string counts as unset | `server/state.rs` |
 | `BPMNINJA_WORKER_API_KEY` | unset | Worker key, limited to service-task routes (fetch/lock/complete/failure/extend) | `server/state.rs` |
 | `BPMNINJA_ALLOW_UNAUTHENTICATED` | `false` | Explicit escape hatch: keeps the API-key gate off even on a non-loopback bind. Only `1`/`true`/`yes`/`on` enable it | `server/state.rs` |
-| `TIMER_INTERVAL_MS` | `1000` | Polling interval of the background timer scheduler (ms) | `main.rs` |
+| `TIMER_INTERVAL_MS` | `1000` | Maximum idle wait of the timer scheduler (ms). The scheduler sleeps until the next due timer or a schedule change, and at most this long | `main.rs` |
 | `RUST_LOG` | `info` | Log filter, read via `tracing_subscriber::EnvFilter::try_from_default_env()` | `main.rs` |
 | `LOG_FORMAT` | `text` | `text` (human-readable) or `json` (structured) | `main.rs` |
 | `LOG_FILE` | `engine_logs.jsonl` | Path of the file-backed log buffer; `off` keeps logs in memory only | `main.rs` |

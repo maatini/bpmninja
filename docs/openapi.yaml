@@ -545,8 +545,10 @@ paths:
         Camunda-compatible fetch-and-lock endpoint. Workers request tasks by topic,
         lock them for processing, and receive variable snapshots.
         
-        Supports **long-polling** via `asyncResponseTimeout` — the server holds the 
-        connection open until tasks become available or the timeout expires.
+        Supports **long-polling** via `asyncResponseTimeout`. The server holds the
+        connection open until a matching task becomes fetchable (created or unlocked),
+        a lock expires, or the timeout elapses. `0` or omitted returns immediately.
+        Values above 30000 milliseconds are clamped to 30000.
       requestBody:
         required: true
         content:
@@ -1687,7 +1689,11 @@ components:
                 description: Lock duration in milliseconds
         asyncResponseTimeout:
           type: integer
-          description: Long-polling timeout in milliseconds
+          minimum: 0
+          description: |
+            Long-poll timeout in milliseconds. Omitted or 0 returns after a single fetch.
+            Otherwise the server waits until a matching task is fetchable, a lock expires,
+            or this timeout elapses. Values above 30000 are clamped to 30000.
 
     CompleteServiceTaskRequest:
       type: object
