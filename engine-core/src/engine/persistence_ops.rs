@@ -1,7 +1,56 @@
 use super::WorkflowEngine;
 use super::retry_queue::{INLINE_BACKOFF_MS, INLINE_RETRIES, PersistJob};
 use crate::ProcessInstance;
+use std::sync::Arc;
 use uuid::Uuid;
+
+const PERSIST_LOCK_STRIPES: usize = 256;
+
+/// Gestreifte Async-Locks, die `save_instance` pro Prozessinstanz serialisieren.
+///
+/// `persist_instance` hält den Instanz-Lock nur für den Snapshot. Ohne diese
+/// Sperre können zwei Speicherungen derselben Instanz sich überholen: der
+/// ältere Snapshot wird zuletzt geschrieben. Striping begrenzt den Speicher
+/// auf eine feste Zahl von Locks — es gibt keine Einträge pro Instanz, die
+/// aufgeräumt werden müssten. Kollisionen serialisieren nur fremde Instanzen,
+/// sie ändern die Reihenfolge einer einzelnen Instanz nicht.
+#[derive(Clone)]
+pub(crate) struct PersistLocks {
+    stripes: Arc<[tokio::sync::Mutex<()>]>,
+}
+
+impl PersistLocks {
+    pub(crate) fn new() -> Self {
+        let stripes: Vec<tokio::sync::Mutex<()>> = (0..PERSIST_LOCK_STRIPES)
+            .map(|_| tokio::sync::Mutex::new(()))
+            .collect();
+        Self {
+            stripes: stripes.into(),
+        }
+    }
+
+    pub(crate) fn stripe_index(instance_id: Uuid) -> usize {
+        (instance_id.as_u128() % PERSIST_LOCK_STRIPES as u128) as usize
+    }
+
+    pub(crate) async fn lock(&self, instance_id: Uuid) -> tokio::sync::MutexGuard<'_, ()> {
+        self.stripes[Self::stripe_index(instance_id)].lock().await
+    }
+}
+
+/// `io::Write`-Senke, die nur Bytes zählt (Größenprüfung ohne Payload-Puffer).
+struct ByteCounter(usize);
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 macro_rules! inline_retry {
     (
@@ -222,10 +271,24 @@ impl WorkflowEngine {
     }
 
     /// Persists the current state of a process instance.
+    ///
+    /// The instance write lock covers only the audit-log trim and the snapshot.
+    /// Network I/O runs afterwards, so readers stay unblocked. [`PersistLocks`]
+    /// is acquired *before* the snapshot and held through the inline retries,
+    /// which all write that same snapshot. A newer save of this instance waits,
+    /// then snapshots the live state. The background retry worker takes the
+    /// same lock and re-reads after acquiring it.
     pub(crate) async fn persist_instance(&self, instance_id: Uuid) {
-        if let (Some(p), Some(inst_arc)) =
-            (&self.persistence, self.instances.get(&instance_id).await)
-        {
+        let Some(persistence) = self.persistence.clone() else {
+            return;
+        };
+        let Some(inst_arc) = self.instances.get(&instance_id).await else {
+            return;
+        };
+
+        let _persist_guard = self.persist_locks.lock(instance_id).await;
+
+        let inst = {
             let mut inst = inst_arc.write().await;
             if inst.audit_log.len() > crate::runtime::MAX_AUDIT_LOG_ENTRIES {
                 let overflow = inst.audit_log.len() - crate::runtime::MAX_AUDIT_LOG_ENTRIES;
@@ -235,34 +298,37 @@ impl WorkflowEngine {
                     format!("... ({} older entries trimmed, see History API)", overflow),
                 );
             }
+            inst.clone()
+        };
 
-            // Size guard: check serialized payload before NATS write
-            let estimated_size = serde_json::to_vec(&*inst).map(|v| v.len()).unwrap_or(0);
-            if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
-                tracing::error!(
-                    "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",
-                    instance_id,
+        let mut counter = ByteCounter(0);
+        let estimated_size = serde_json::to_writer(&mut counter, &inst)
+            .map(|()| counter.0)
+            .unwrap_or(0);
+        if estimated_size > crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES {
+            tracing::error!(
+                "Instance {} payload too large ({} bytes, limit {} bytes) — skipping persist",
+                instance_id,
+                estimated_size,
+                crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
+            );
+            self.log_persistence_error(
+                &format!("save_instance({})", instance_id),
+                format!(
+                    "Payload size {} exceeds limit {}",
                     estimated_size,
                     crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                );
-                self.log_persistence_error(
-                    &format!("save_instance({})", instance_id),
-                    format!(
-                        "Payload size {} exceeds limit {}",
-                        estimated_size,
-                        crate::runtime::MAX_INSTANCE_PAYLOAD_BYTES
-                    ),
-                );
-                return;
-            }
-
-            inline_retry!(
-                self,
-                p.save_instance(&inst),
-                format!("save_instance({})", instance_id),
-                PersistJob::SaveInstance(instance_id)
+                ),
             );
+            return;
         }
+
+        inline_retry!(
+            self,
+            persistence.save_instance(&inst),
+            format!("save_instance({})", instance_id),
+            PersistJob::SaveInstance(instance_id)
+        );
     }
 
     /// Persists a process definition to the KV store.

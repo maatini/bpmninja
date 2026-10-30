@@ -15,6 +15,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use super::persistence_ops::PersistLocks;
 use crate::domain::IncidentKind;
 use crate::history::HistoryEntry;
 use crate::persistence::WorkflowPersistence;
@@ -160,6 +161,7 @@ pub(crate) fn spawn_retry_worker(
     pending_signal_catches: Arc<DashMap<Uuid, PendingSignalCatch>>,
     pending_conditional_catches: Arc<DashMap<Uuid, PendingConditionalCatch>>,
     error_counter: Arc<std::sync::atomic::AtomicU64>,
+    persist_locks: PersistLocks,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!("Persistence retry worker started");
@@ -182,6 +184,7 @@ pub(crate) fn spawn_retry_worker(
                     pending_signal_catches: &pending_signal_catches,
                     pending_conditional_catches: &pending_conditional_catches,
                     error_counter: &error_counter,
+                    persist_locks: &persist_locks,
                 };
                 let drained = drain_retry_queue(&mut rx, budget, &ctx).await;
 
@@ -226,6 +229,7 @@ pub(crate) fn spawn_retry_worker(
                     &pending_message_catches,
                     &pending_signal_catches,
                     &pending_conditional_catches,
+                    &persist_locks,
                 )
                 .await;
 
@@ -300,6 +304,7 @@ struct DrainContext<'a> {
     pending_signal_catches: &'a Arc<DashMap<Uuid, PendingSignalCatch>>,
     pending_conditional_catches: &'a Arc<DashMap<Uuid, PendingConditionalCatch>>,
     error_counter: &'a Arc<std::sync::atomic::AtomicU64>,
+    persist_locks: &'a PersistLocks,
 }
 
 impl DrainContext<'_> {
@@ -315,6 +320,7 @@ impl DrainContext<'_> {
             self.pending_message_catches,
             self.pending_signal_catches,
             self.pending_conditional_catches,
+            self.persist_locks,
         )
         .await
     }
@@ -383,11 +389,15 @@ async fn execute_job(
     pending_message_catches: &Arc<DashMap<Uuid, PendingMessageCatch>>,
     pending_signal_catches: &Arc<DashMap<Uuid, PendingSignalCatch>>,
     pending_conditional_catches: &Arc<DashMap<Uuid, PendingConditionalCatch>>,
+    persist_locks: &PersistLocks,
 ) -> Result<(), String> {
     match job {
         PersistJob::SaveInstance(id) => {
+            // Same stripe as `persist_instance`. Re-read only after the lock so
+            // an older in-flight snapshot cannot commit after this retry.
+            let _persist_guard = persist_locks.lock(*id).await;
             if let Some(inst_arc) = instances.get(id).await {
-                let inst = inst_arc.read().await;
+                let inst = inst_arc.read().await.clone();
                 persistence
                     .save_instance(&inst)
                     .await
@@ -625,6 +635,7 @@ mod tests {
             Arc::clone(&pending_signal_catches),
             Arc::clone(&pending_conditional_catches),
             error_counter,
+            PersistLocks::new(),
         );
 
         tx.send(PersistJob::Shutdown).await.unwrap();
@@ -661,6 +672,7 @@ mod tests {
             pending_signal_catches,
             pending_conditional_catches,
             error_counter.clone(),
+            PersistLocks::new(),
         );
 
         // Send a SaveInstance for a non-existent ID — should succeed silently
@@ -739,6 +751,7 @@ mod tests {
             pending_signal_catches,
             pending_conditional_catches,
             Arc::clone(&error_counter),
+            PersistLocks::new(),
         );
 
         tokio::time::timeout(std::time::Duration::from_secs(5), handle)
@@ -859,6 +872,7 @@ mod tests {
         let pending_signal_catches = Arc::new(DashMap::new());
         let pending_conditional_catches = Arc::new(DashMap::new());
         let error_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let persist_locks = PersistLocks::new();
 
         let ctx = DrainContext {
             persistence: &persistence,
@@ -871,6 +885,7 @@ mod tests {
             pending_signal_catches: &pending_signal_catches,
             pending_conditional_catches: &pending_conditional_catches,
             error_counter: &error_counter,
+            persist_locks: &persist_locks,
         };
         let drained = drain_retry_queue(&mut rx, Duration::ZERO, &ctx).await;
 

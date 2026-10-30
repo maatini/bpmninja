@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::Client;
@@ -5,11 +7,12 @@ use async_nats::jetstream::context::{
     CreateKeyValueError, CreateStreamError, CreateStreamErrorKind, GetStreamError,
     GetStreamErrorKind,
 };
-use async_nats::jetstream::object_store::Config as ObjectStoreConfig;
+use async_nats::jetstream::object_store::{Config as ObjectStoreConfig, ObjectStore};
 use async_nats::jetstream::stream::Stream;
-use async_nats::jetstream::{self, Context, ErrorCode, stream::Config as StreamConfig};
+use async_nats::jetstream::{self, Context, ErrorCode, kv, stream::Config as StreamConfig};
 use engine_core::error::{EngineError, EngineResult};
 use futures::StreamExt;
+use tokio::sync::OnceCell;
 
 /// Stream für `history.instance.*` (Event-Sourcing der Instanz-Historie).
 const HISTORY_STREAM: &str = "WORKFLOW_HISTORY";
@@ -241,11 +244,66 @@ impl BootstrapReport {
     }
 }
 
+/// Cached JetStream handles for the buckets created at connect.
+///
+/// Without the cache every operation paid an extra JetStream API round trip
+/// (`get_key_value` / `get_object_store`) before the actual read or write.
+/// A failed lookup is not stored, so the next call retries. Names that are not
+/// in the bootstrap list are fetched every time and never cached.
+struct BucketHandles<T> {
+    cells: HashMap<&'static str, OnceCell<Arc<T>>>,
+}
+
+impl<T> BucketHandles<T> {
+    fn new(names: impl IntoIterator<Item = &'static str>) -> Self {
+        Self {
+            cells: names
+                .into_iter()
+                .map(|name| (name, OnceCell::new()))
+                .collect(),
+        }
+    }
+
+    async fn get_or_fetch<E, F, Fut>(&self, bucket: &str, fetch: F) -> Result<Arc<T>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, E>>,
+    {
+        match self.cells.get(bucket) {
+            Some(cell) => cell
+                .get_or_try_init(|| async { fetch().await.map(Arc::new) })
+                .await
+                .cloned(),
+            None => fetch().await.map(Arc::new),
+        }
+    }
+
+    #[cfg(test)]
+    fn is_cached(&self, bucket: &str) -> bool {
+        self.cells.get(bucket).and_then(OnceCell::get).is_some()
+    }
+}
+
+struct HandleCache {
+    kv: BucketHandles<kv::Store>,
+    object_stores: BucketHandles<ObjectStore>,
+}
+
+impl HandleCache {
+    fn new() -> Self {
+        Self {
+            kv: BucketHandles::new(KV_BUCKETS.iter().map(|(name, _)| *name)),
+            object_stores: BucketHandles::new(OBJECT_STORES.iter().map(|(name, _)| *name)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct NatsPersistence {
     pub(crate) client: Client,
     pub(crate) js: Context,
     bootstrap: BootstrapReport,
+    handles: Arc<HandleCache>,
 }
 
 impl NatsPersistence {
@@ -301,7 +359,44 @@ impl NatsPersistence {
             client,
             js,
             bootstrap: report,
+            handles: Arc::new(HandleCache::new()),
         })
+    }
+
+    /// KV-Handle für `bucket`. Bekannte Buckets werden nach dem ersten Treffer gecacht.
+    pub(crate) async fn kv(&self, bucket: &str) -> EngineResult<Arc<kv::Store>> {
+        self.handles
+            .kv
+            .get_or_fetch(bucket, || async {
+                self.js.get_key_value(bucket).await.map_err(|e| {
+                    EngineError::PersistenceError(format!("Failed to get {bucket} KV: {e}"))
+                })
+            })
+            .await
+    }
+
+    /// Object-Store-Handle für `bucket`. Bekannte Stores werden nach dem ersten Treffer gecacht.
+    pub(crate) async fn object_store(&self, bucket: &str) -> EngineResult<Arc<ObjectStore>> {
+        self.handles
+            .object_stores
+            .get_or_fetch(bucket, || async {
+                self.js.get_object_store(bucket).await.map_err(|e| {
+                    EngineError::PersistenceError(format!(
+                        "Failed to get {bucket} Object Store: {e}"
+                    ))
+                })
+            })
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kv_handle_cached(&self, bucket: &str) -> bool {
+        self.handles.kv.is_cached(bucket)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn object_store_handle_cached(&self, bucket: &str) -> bool {
+        self.handles.object_stores.is_cached(bucket)
     }
 
     /// Ergebnis des Bootstraps (angelegte, vorhandene, aktualisierte Ressourcen).
@@ -319,9 +414,7 @@ impl NatsPersistence {
         bucket: &str,
         entity_name: &str,
     ) -> EngineResult<Vec<T>> {
-        let store = self.js.get_key_value(bucket).await.map_err(|e| {
-            EngineError::PersistenceError(format!("Failed to get {bucket} KV: {}", e))
-        })?;
+        let store = self.kv(bucket).await?;
 
         // keys() Err is a persistence failure, not an empty bucket — must propagate.
         let mut keys = store.keys().await.map_err(|e| {
@@ -632,5 +725,127 @@ mod retention_tests {
 
         // Zweiter Lauf ist idempotent.
         assert!(!apply_retention(&mut existing, &desired));
+    }
+}
+
+#[cfg(test)]
+mod handle_cache_tests {
+    use super::BucketHandles;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn known_bucket_is_fetched_once() {
+        let cache = BucketHandles::<u32>::new(["instances"]);
+        let calls = AtomicUsize::new(0);
+
+        let first = cache
+            .get_or_fetch("instances", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, ()>(7)
+            })
+            .await
+            .unwrap();
+        let second = cache
+            .get_or_fetch("instances", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, ()>(9)
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(*first, 7);
+        assert_eq!(*second, 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(cache.is_cached("instances"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_lookup_is_not_cached() {
+        let cache = BucketHandles::<u32>::new(["instances"]);
+        let calls = AtomicUsize::new(0);
+
+        let err = cache
+            .get_or_fetch("instances", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err::<u32, &str>("down")
+            })
+            .await;
+        assert_eq!(err, Err("down"));
+        assert!(!cache.is_cached("instances"));
+
+        let ok = cache
+            .get_or_fetch("instances", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, &str>(1)
+            })
+            .await
+            .unwrap();
+        assert_eq!(*ok, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(cache.is_cached("instances"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn unknown_bucket_is_fetched_every_time() {
+        let cache = BucketHandles::<u32>::new(["instances"]);
+        let calls = AtomicUsize::new(0);
+
+        for expected in [1u32, 2] {
+            let value = cache
+                .get_or_fetch("other", || async {
+                    let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                    Ok::<u32, ()>(n as u32)
+                })
+                .await
+                .unwrap();
+            assert_eq!(*value, expected);
+        }
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!cache.is_cached("other"));
+        assert!(!cache.is_cached("instances"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_waiters_share_one_fetch() {
+        let cache = Arc::new(BucketHandles::<u32>::new(["instances"]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+
+        let spawn = |cache: Arc<BucketHandles<u32>>, calls: Arc<AtomicUsize>| {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            tokio::spawn(async move {
+                cache
+                    .get_or_fetch("instances", || {
+                        let calls = Arc::clone(&calls);
+                        let started = Arc::clone(&started);
+                        let release = Arc::clone(&release);
+                        async move {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            started.notify_one();
+                            release.notified().await;
+                            Ok::<_, ()>(4)
+                        }
+                    })
+                    .await
+                    .unwrap()
+            })
+        };
+
+        let first = spawn(Arc::clone(&cache), Arc::clone(&calls));
+        started.notified().await;
+        let second = spawn(Arc::clone(&cache), Arc::clone(&calls));
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        release.notify_waiters();
+        assert_eq!(*first.await.unwrap(), 4);
+        assert_eq!(*second.await.unwrap(), 4);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

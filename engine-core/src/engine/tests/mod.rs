@@ -10,6 +10,7 @@ pub mod instance_pagination;
 pub mod link_events;
 pub mod migration;
 pub mod multi_instance;
+pub mod persist_lock;
 pub mod recurring_and_event_timer;
 pub mod scripting;
 pub mod service_incidents;

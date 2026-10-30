@@ -2,27 +2,37 @@
 
 ## Critical Rules
 
-### ⚠️ Never hold a lock across `.await`
+### ⚠️ Never hold the instance lock across persistence I/O
 
 ```rust
-// ❌ FORBIDDEN — will deadlock
+// ❌ FORBIDDEN — blocks every reader for the whole network call
 let inst = instance_arc.write().await;
-self.some_async_persistence_call().await; // DEADLOCK!
+self.persistence.save_instance(&inst).await;
 
-// ✅ CORRECT
-let persistence_call;
-{
-    let mut inst = instance_arc.write().await;
-    persistence_call = self.persistence.save_instance(&inst).await; // ALSO WRONG — still inside lock
-}
-// MUST drop lock first, THEN await:
-let persistence_call;
+// ✅ CORRECT — mutate, drop the guard, then await
 {
     let mut inst = instance_arc.write().await;
     inst.state = InstanceState::Running;
-} // Lock dropped here
-self.persistence.save_instance(&updated_inst).await; // SAFE
+}
+self.persistence.save_instance(&updated_inst).await;
 ```
+
+Dropping the instance lock before `save_instance` is required, and it is also
+what makes two saves of the same instance able to finish out of order. An
+older snapshot that is still in flight can be written last and hide a newer
+one. `persist_instance` therefore:
+
+1. Takes the per-instance stripe in `PersistLocks` (256 `tokio` mutexes, keyed
+   by the instance UUID).
+2. Trims the audit log and clones the snapshot under the instance write lock,
+   then drops that lock.
+3. Holds the stripe through the size check and the inline retries, which all
+   write that same snapshot.
+
+The retry worker's `SaveInstance` job takes the same stripe and re-reads the
+live instance only after acquiring it, then saves without holding the instance
+lock. Callers must not invoke `save_instance` for an active instance on any
+other path. Distinct instances on different stripes proceed in parallel.
 
 ### ⚠️ Tokens live in ONE place
 
