@@ -135,6 +135,20 @@ A topic with a registered `TaskHandler` is locked only by the in-process dispatc
 
 The scheduler sleeps until the next **future** due time (or `TIMER_INTERVAL_MS`, the max idle). It registers for the notification **before** reading the index, so an earlier timer inserted during the wait is not missed. Suspended instances keep overdue timers; those do not produce a zero wait (no busy loop). Resume notifies the scheduler so an already-overdue timer fires without waiting out the idle cap. Dropping `wait_for_timer_work` cancels the sleep; the server uses that for shutdown. Due checks use wall time. Tests can switch that clock to tokio's monotonic time so `pause` / `advance` are deterministic.
 
+### ⚠️ Activity data mappings stay local until success
+
+`ProcessDefinition.variable_defaults` apply only when an instance is created. Caller variables override them. Restore does not apply them again.
+
+`data_mappings` on a user, service, script, send task or call activity:
+
+- Inputs are applied once, before start listeners, into `Token.data_scope`. `process_variables()` hides those names from the instance and from gateway conditions outside the activity. External workers see them in `variables_snapshot`.
+- Outputs are evaluated against one snapshot and published together, before end listeners. A missing source is `DataMappingError`: the task stays locked and the scope is kept, so a retry does not apply inputs again. Direct variable updates of a local name land in `original_variables` and do not replace the activation value.
+- An input that fails while entering the activity marks the instance `CompletedWithError { error_code: "DATA_MAPPING_ERROR" }`.
+- An interrupting error boundary discards the scope and does not publish outputs.
+- Call activity `call_inputs` / `call_outputs`, when present, replace the full variable copy in that direction. `None` keeps the previous copy-all behavior.
+- Multi-instance service tasks share one token. Each item gets its own input snapshot. Outputs are written onto that token; local input names are not. There is no `outputCollection`.
+- Old definitions and tokens deserialize without the new fields (`#[serde(default)]`).
+
 ### ⚠️ `list_instances_page` clones only the page
 
 Live listing sorts by `started_at` desc, then instance id. `GET /api/instances` without query still returns the full JSON array. With `limit`/`offset`, the body is the page and `X-Total-Count` is set (`limit` clamped 1..=1000).

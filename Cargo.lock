@@ -312,6 +312,7 @@ dependencies = [
  "engine-core",
  "quick-xml",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -54,11 +54,12 @@ JSON-Handler nutzen `ApiJson<T>` statt `axum::Json<T>` (definiert in `state.rs`)
 | Ursache | Status |
 |---|---|
 | JSON-Syntaxfehler | 400 |
+| `EngineError::DataMappingError` | 400 |
 | Body über `DefaultBodyLimit` | 413 |
 | fehlender/falscher `Content-Type` | 415 |
 | gültiges JSON, aber Schema-Mismatch | 422 |
 
-Der Deploy-Handler prüft `payload.xml.len() > max_xml_bytes` zusätzlich und liefert 413. Neue JSON-Handler müssen `ApiJson` verwenden, sonst antwortet Axum wieder mit Plain-Text.
+Der Deploy-Handler prüft `payload.xml.len() > max_xml_bytes` zusätzlich und liefert 413. `DataMappingError` (fehlende Output-Variable beim Abschluss, Fehler beim Betreten einer gemappten Aktivität) nutzt dieselbe 400-Form wie `InvalidDefinition`. Neue JSON-Handler müssen `ApiJson` verwenden, sonst antwortet Axum wieder mit Plain-Text.
 
 ### ⚠️ `GET /api/definitions/{id}/xml` liefert `text/plain`
 

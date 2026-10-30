@@ -96,9 +96,20 @@ Rejected today, because the engine does not execute them:
 - event definitions outside [`element-matrix.md`](element-matrix.md), including message end events, multiple/parallel-multiple events, and more than one event definition on the same event
 - a start event **inside** an embedded sub-process that carries a trigger (the internal start is a pass-through)
 
-Signal, link, conditional catch/boundary, and sequential multi-instance on service tasks deploy. Lanes, groups, annotations, associations and data objects stay accepted. The matrix index is checked against the parser lists by `element_matrix_matches_parser_support_lists`.
+Signal, link, conditional catch/boundary, and sequential multi-instance on service tasks deploy. Lanes, groups, annotations and associations stay accepted. Data objects stay in the document; executable mappings are a second pass (below). The matrix index is checked against the parser lists by `element_matrix_matches_parser_support_lists`.
 
 Cancel, conditional start, transactions and generic tasks still have their original explanations; the scanner is what reports them together with every other hit. See [element-matrix.md](element-matrix.md).
+
+### ⚠️ Data mappings are a second XML pass
+
+`data::apply` walks the original XML after the definition is built. Serde still ignores unknown data tags, so a model without mappings behaves as before.
+
+- Process `property` and `dataObject` declare names. Only `bpmninja:default` (JSON) writes `variable_defaults`. A declaration alone does not invent a value.
+- Camunda `inputParameter` / `outputParameter` accept a literal string, `${name}` / `#{name}`, or nested `list` / `map`. Interpolation (`hello ${name}`) and `script` are `InvalidDefinition`.
+- `dataInputAssociation` / `dataOutputAssociation` copy one named source to one named target. `assignment` and `transformation` are rejected.
+- `camunda:in` / `camunda:out` are only valid on `callActivity`, with exactly one of `source` or `sourceExpression` plus `target`. `variables`, `local` and `businessKey` are rejected. Either direction makes both transfers explicit.
+- The same constructs on a gateway, event, receive task, or on the process/subprocess container are `InvalidDefinition`. Subprocess data declarations need runtime scopes and are rejected.
+- Inputs run once per activation, before start listeners. Outputs run on success, before end listeners, against one snapshot. Duplicate targets are rejected.
 
 ### ⚠️ Cancel events and transactions are rejected, not ignored
 

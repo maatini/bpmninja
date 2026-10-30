@@ -7,6 +7,17 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- Daten-Mappings (X11): Prozess-Defaults (`bpmninja:default`), Camunda-`inputOutput`
+  (Literal, `${variable}`, Liste, Map) und BPMN-Input-/Output-Assoziationen an
+  User-, Service-, Script- und Send-Tasks sowie Call Activities. `camunda:in` /
+  `camunda:out` ersetzen den vollständigen Variablenaustausch, sobald eine
+  Richtung gesetzt ist. Lokale Inputs bleiben bis zum erfolgreichen Abschluss
+  unsichtbar; fehlende Outputs halten den Task retry-fähig. Ein Fehler beim
+  Betreten der Aktivität beendet die Instanz mit `DATA_MAPPING_ERROR`.
+  Der Modeler bearbeitet Defaults und Mappings im Properties Panel.
+
 ### Geändert
 
 - **Breaking:** Der Deploy lehnt BPMN-Elemente ab, deren Ausführung die Engine nicht

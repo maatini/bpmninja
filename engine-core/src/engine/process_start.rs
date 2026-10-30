@@ -86,6 +86,9 @@ impl WorkflowEngine {
         allow_signal_start: bool,
     ) -> EngineResult<Uuid> {
         let (def, start_id) = self.validate_start_request(definition_key, allow_signal_start)?;
+        let mut initial = def.variable_defaults.clone();
+        initial.extend(variables);
+        variables = initial;
 
         let instance_id = predetermined_id.unwrap_or_else(Uuid::new_v4);
         let business_key = variables
@@ -293,6 +296,26 @@ impl WorkflowEngine {
     ) -> EngineResult<Uuid> {
         let child_id = Uuid::new_v4();
         let called_node = token.current_node.clone();
+        let parent_def_key = self
+            .instances
+            .get(&parent_instance_id)
+            .await
+            .ok_or(EngineError::NoSuchInstance(parent_instance_id))?
+            .read()
+            .await
+            .definition_key;
+        let parent_def = self
+            .definitions
+            .get(&parent_def_key)
+            .ok_or(EngineError::NoSuchDefinition(parent_def_key))?;
+        let child_variables = match parent_def
+            .data_mappings
+            .get(&called_node)
+            .and_then(|mappings| mappings.call_inputs.as_ref())
+        {
+            Some(mappings) => crate::domain::data::evaluate_mappings(mappings, &token.variables)?,
+            None => token.variables.clone(),
+        };
 
         if let Some(inst_arc) = self.instances.get(&parent_instance_id).await {
             let mut parent = inst_arc.write().await;
@@ -314,7 +337,7 @@ impl WorkflowEngine {
         match self
             .start_instance_with_variables_parent_and_id(
                 child_def_key,
-                token.variables.clone(),
+                child_variables,
                 Some(parent_instance_id),
                 Some(child_id),
                 false,
@@ -405,16 +428,30 @@ impl WorkflowEngine {
             ));
 
             let def_key = parent.definition_key;
+            let transferred = {
+                let explicit = self.definitions.get(&def_key).and_then(|def| {
+                    def.data_mappings
+                        .get(&called_node_id)
+                        .and_then(|mappings| mappings.call_outputs.clone())
+                });
+                match explicit {
+                    Some(mappings) if error_code.is_none() => {
+                        crate::domain::data::evaluate_mappings(&mappings, &child_vars)?
+                    }
+                    Some(_) => HashMap::new(),
+                    None => child_vars.clone(),
+                }
+            };
 
             if let Some(active) = parent
                 .active_tokens
                 .iter_mut()
                 .find(|at| at.token.current_node == called_node_id && !at.completed)
             {
-                active.token.variables.extend(child_vars.clone());
+                crate::engine::data_mappings::apply_call_transfer(&mut active.token, &transferred);
                 token_to_resume = Some(active.token.clone());
             } else if let Some(ref mut linear_token) = token_to_resume {
-                linear_token.variables.extend(child_vars.clone());
+                crate::engine::data_mappings::apply_call_transfer(linear_token, &transferred);
             }
 
             (called_node_id, token_to_resume, def_key)
@@ -441,8 +478,12 @@ impl WorkflowEngine {
 
             // End-Scripts der Call-Activity ausführen. Bei Fehler: Eltern-Instanz als
             // fehlerhaft markieren, damit sie nicht in `Running`-Zustand ohne Token
-            // hängen bleibt.
-            if let Err(e) = self
+            // hängen bleibt. Ein fehlgeschlagenes Kind mit Mappings verwirft die
+            // Aktivierung, ohne Erfolgs-Outputs zu schreiben.
+            let mapped = def.data_mappings.contains_key(&called_node_id);
+            if error_code.is_some() && mapped {
+                token.discard_data_scope();
+            } else if let Err(e) = self
                 .run_end_scripts(parent_id, &mut token, &def, &called_node_id)
                 .await
             {

@@ -24,14 +24,17 @@ import { ScriptPropertiesProvider } from './properties/ScriptPropertiesProvider'
 import { TopicPropertiesProvider } from './properties/TopicPropertiesProvider';
 import { AssigneePropertiesProvider } from './properties/AssigneePropertiesProvider';
 import { CalledElementPropertiesProvider } from './properties/CalledElementPropertiesProvider';
+import dataDefaultsModdle from './properties/dataDefaultsModdle.json';
+import { DataMappingsPropertiesProvider } from './properties/DataMappingsPropertiesProvider';
 
 const customProviderModule = {
-  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider'],
+  __init__: ['customPropertiesProvider', 'scriptPropertiesProvider', 'topicPropertiesProvider', 'assigneePropertiesProvider', 'calledElementPropertiesProvider', 'dataMappingsPropertiesProvider'],
   customPropertiesProvider: ['type', CustomPropertiesProvider],
   scriptPropertiesProvider: ['type', ScriptPropertiesProvider],
   topicPropertiesProvider: ['type', TopicPropertiesProvider],
   assigneePropertiesProvider: ['type', AssigneePropertiesProvider],
-  calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider]
+  calledElementPropertiesProvider: ['type', CalledElementPropertiesProvider],
+  dataMappingsPropertiesProvider: ['type', DataMappingsPropertiesProvider]
 };
 
 interface ModelerPageProps {
@@ -92,7 +95,8 @@ export const ModelerPage = memo(function ModelerPage({ onDeploy, onStart, onNewD
           customProviderModule
         ],
         moddleExtensions: {
-          camunda: camundaModdleDescriptor
+          camunda: camundaModdleDescriptor,
+          bpmninja: dataDefaultsModdle
         }
       });
       

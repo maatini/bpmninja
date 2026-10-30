@@ -278,6 +278,11 @@ impl WorkflowEngine {
                     ) {
                         variables_snapshot.insert(element_variable.clone(), value);
                     }
+                    variables_snapshot = crate::engine::data_mappings::apply_inputs(
+                        def_clone,
+                        current_id,
+                        variables_snapshot,
+                    )?;
                     let first = PendingServiceTask {
                         id: Uuid::new_v4(),
                         instance_id,
@@ -335,6 +340,11 @@ impl WorkflowEngine {
                     {
                         variables_snapshot.insert(element_variable.clone(), value);
                     }
+                    variables_snapshot = crate::engine::data_mappings::apply_inputs(
+                        def_clone,
+                        current_id,
+                        variables_snapshot,
+                    )?;
                     tasks.push(PendingServiceTask {
                         id: Uuid::new_v4(),
                         instance_id,

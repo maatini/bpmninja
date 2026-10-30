@@ -84,7 +84,24 @@ impl WorkflowEngine {
                 };
                 let current_gateway_id = token.current_node.clone();
 
-                let action = self.execute_step(instance_id, &mut token).await?;
+                let action = match self.execute_step(instance_id, &mut token).await {
+                    Ok(action) => action,
+                    Err(error) => {
+                        if matches!(error, EngineError::DataMappingError(_))
+                            && let Some(inst_arc) = self.instances.get(&instance_id).await
+                        {
+                            let mut instance = inst_arc.write().await;
+                            instance.state = InstanceState::CompletedWithError {
+                                error_code: "DATA_MAPPING_ERROR".into(),
+                            };
+                            instance.completed_at = Some(chrono::Utc::now());
+                            instance.push_audit_log(error.to_string());
+                        }
+                        self.persist_instance(instance_id).await;
+                        self.emit_event(crate::engine::events::EngineEvent::InstanceChanged);
+                        return Err(error);
+                    }
+                };
 
                 let (event_type, description) = match &action {
                     NextAction::Continue(_) => (
@@ -249,6 +266,8 @@ impl WorkflowEngine {
 
         let def_clone = Arc::clone(&def);
 
+        crate::engine::data_mappings::enter(token, &def_clone, &current_id)?;
+
         let mut start_audits = Vec::new();
         scripting::run_node_scripts(
             &self.script_config,
@@ -265,7 +284,7 @@ impl WorkflowEngine {
             inst.audit_log.append(&mut start_audits);
             // Only sync variables if a script listener potentially modified them
             if def_clone.listeners.contains_key(&current_id) {
-                inst.variables = token.variables.clone();
+                inst.variables = token.process_variables();
             }
         }
 
