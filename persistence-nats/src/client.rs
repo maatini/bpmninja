@@ -20,6 +20,10 @@ const HISTORY_SUBJECTS: &[&str] = &["history.instance.*"];
 
 /// KV-Buckets, die beim Bootstrap vorhanden sein müssen.
 const KV_BUCKETS: &[(&str, &str)] = &[
+    (
+        "definition_collections",
+        "Atomic version-pinned collection deployment commits",
+    ),
     ("tokens", "Token state per process instance (JSON)"),
     ("instances", "ProcessInstance state (JSON)"),
     ("definitions", "ProcessDefinition metadata (JSON)"),

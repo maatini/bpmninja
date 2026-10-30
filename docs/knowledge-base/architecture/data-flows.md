@@ -22,6 +22,8 @@ sequenceDiagram
     Server-->>Client: { definition_key, version }
 ```
 
+`POST /api/deploy/collection` parses every `isExecutable="true"` pool, model-checks each pool in isolation, then calls `deploy_collection`. With persistence, one `definition_collections` KV record is the commit. Routes are installed from that record. `plan_internal_messages` reads them and does not deliver.
+
 ## 2. Instance Execution Flow
 
 ```mermaid

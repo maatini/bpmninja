@@ -11,7 +11,7 @@ Both backends implement `engine_core::port::WorkflowPersistence` — the hexagon
 
 **Owns:**
 1. NATS JetStream connection lifecycle (`NatsPersistence::connect(url, stream_name)`) including a **fail-closed bootstrap** of streams, KV buckets and object stores
-2. 10 KV buckets: `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`
+2. 11 KV buckets: `definition_collections`, `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`
 3. Object Store: `instance_files` for binary file variables
 4. JetStream: `WORKFLOW_EVENTS` consumer for history event streaming
 5. `ENGINE_LOGS` stream for persistent log buffer backup

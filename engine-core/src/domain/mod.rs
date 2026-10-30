@@ -1,3 +1,4 @@
+pub mod collaboration;
 pub mod data;
 pub mod definition;
 pub mod element;
@@ -10,6 +11,9 @@ pub mod multi_instance;
 pub mod timer;
 pub mod token;
 
+pub use collaboration::{
+    Collaboration, DefinitionCollection, MessageEndpoint, MessageFlow, Participant,
+};
 pub use data::{ActivityMappings, DataMapping, DataScope, MappingValue};
 pub use definition::{ProcessDefinition, ProcessDefinitionBuilder};
 pub use element::BpmnElement;

@@ -20,6 +20,15 @@ impl DefinitionRegistry {
         self.inner.insert(key, def);
     }
 
+    /// Veröffentlicht bereits versionierte Definitionen, ohne Schlüssel oder
+    /// Versionen neu zu vergeben.
+    pub fn insert_collection(&self, definitions: Vec<ProcessDefinition>) {
+        for definition in definitions {
+            let key = definition.key;
+            self.insert(key, Arc::new(definition));
+        }
+    }
+
     pub fn get(&self, key: &Uuid) -> Option<Arc<ProcessDefinition>> {
         self.inner
             .get(key)

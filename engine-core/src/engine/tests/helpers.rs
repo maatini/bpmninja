@@ -267,6 +267,15 @@ impl WorkflowPersistence for InstrumentedPersistence {
     async fn delete_definition(&self, key: &str) -> EngineResult<()> {
         self.inner.delete_definition(key).await
     }
+    async fn save_definition_collection(
+        &self,
+        collection: &crate::DefinitionCollection,
+    ) -> EngineResult<()> {
+        self.inner.save_definition_collection(collection).await
+    }
+    async fn list_definition_collections(&self) -> EngineResult<Vec<crate::DefinitionCollection>> {
+        self.inner.list_definition_collections().await
+    }
     async fn save_user_task(&self, task: &PendingUserTask) -> EngineResult<()> {
         self.inner.save_user_task(task).await
     }

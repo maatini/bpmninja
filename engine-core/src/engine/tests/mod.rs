@@ -9,6 +9,7 @@ pub mod inclusive_join;
 pub mod instance_admin;
 pub mod instance_pagination;
 pub mod link_events;
+pub mod message_routing;
 pub mod migration;
 pub mod multi_instance;
 pub mod persist_lock;

@@ -112,6 +112,17 @@ pub trait WorkflowPersistence: Send + Sync {
     /// Delete a process definition.
     async fn delete_definition(&self, key: &str) -> EngineResult<()>;
 
+    /// Schreibt einen Collection-Commit als eine einzige Operation.
+    /// Schlägt sie fehl, darf kein Pool sichtbar werden.
+    async fn save_definition_collection(
+        &self,
+        collection: &crate::DefinitionCollection,
+    ) -> EngineResult<()>;
+
+    /// Lädt alle Collection-Commits. Ein unlesbarer Datensatz ist ein Fehler,
+    /// kein still übersprungener Eintrag.
+    async fn list_definition_collections(&self) -> EngineResult<Vec<crate::DefinitionCollection>>;
+
     /// Persist a pending user task.
     async fn save_user_task(&self, task: &PendingUserTask) -> EngineResult<()>;
     /// Delete a pending user task (e.g. when completed).

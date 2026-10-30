@@ -95,6 +95,52 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /api/deploy/collection:
+    post:
+      tags: [Definitions]
+      summary: Deploy every executable pool in one commit
+      description: |
+        Deploys all top-level processes with `isExecutable="true"`, in document
+        order, as one collection. Each pool is validated and, when `MODEL_CHECK`
+        is `warn` or `enforce`, model-checked in isolation before anything is
+        published. The response includes version-pinned collaboration metadata.
+        Automatic internal message delivery is not enabled. The persisted record
+        must fit the NATS maximum payload (often 1 MiB) even though the HTTP body
+        may be up to 10 MiB. A lost response may already have committed; inspect
+        definitions before retrying. `POST /api/deploy` is unchanged and still
+        deploys one process.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+      responses:
+        '200':
+          description: Collection deployed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionDeployResponse'
+        '400':
+          description: Invalid BPMN, empty collection, or model-check rejection of the whole batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          description: Persistence commit failed, including a payload that exceeds the broker limit. Nothing from the batch is published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/definitions:
     get:
       tags: [Definitions]
@@ -1382,6 +1428,89 @@ components:
           description: Newly created definition version (starts at 1).
         model_check:
           $ref: '#/components/schemas/ModelCheckReport'
+
+    CollectionDeployResponse:
+      type: object
+      required: [collection_id, processes, collaborations]
+      properties:
+        collection_id:
+          type: string
+          format: uuid
+        processes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollectionProcessResult'
+        collaborations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Collaboration'
+
+    CollectionProcessResult:
+      type: object
+      required: [process_id, definition_key, version]
+      properties:
+        process_id:
+          type: string
+        definition_key:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        model_check:
+          $ref: '#/components/schemas/ModelCheckReport'
+
+    Collaboration:
+      type: object
+      required: [id, participants, message_flows]
+      properties:
+        id:
+          type: string
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollaborationParticipant'
+        message_flows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CollaborationMessageFlow'
+
+    CollaborationParticipant:
+      type: object
+      required: [id, process_id, executable]
+      properties:
+        id:
+          type: string
+        process_id:
+          type: string
+          nullable: true
+        executable:
+          type: boolean
+
+    CollaborationMessageFlow:
+      type: object
+      required: [id, message_id, message_name, source, target]
+      properties:
+        id:
+          type: string
+        message_id:
+          type: string
+        message_name:
+          type: string
+        source:
+          $ref: '#/components/schemas/CollaborationEndpoint'
+        target:
+          $ref: '#/components/schemas/CollaborationEndpoint'
+
+    CollaborationEndpoint:
+      type: object
+      required: [participant_id, process_id, element_id]
+      properties:
+        participant_id:
+          type: string
+        process_id:
+          type: string
+        element_id:
+          type: string
 
     ModelCheckError:
       type: object

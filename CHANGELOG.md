@@ -9,6 +9,16 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Collaboration (X12): `parse_bpmn_collaboration` liest Pools, Participants und
+  gerichtete Message-Flows. `POST /api/deploy/collection` deployed alle Prozesse
+  mit `isExecutable="true"` atomar, pinnt die Collaboration an die vergebenen
+  Definition-Versionen und schreibt sie als einen JetStream-KV-Commit
+  (`definition_collections`). `plan_internal_messages` wählt den Empfänger der
+  gepinnten Version (Start, genau ein Catch, oder explizit unavailable). Es gibt
+  keine automatische Zustellung. `POST /api/deploy` bleibt ein Prozess.
+  Ein instanziierender Receive-Task auf Prozessebene ist ein Message-Start.
+  Message-End-Events und Schleifen bleiben abgelehnt.
+
 - Daten-Mappings (X11): Prozess-Defaults (`bpmninja:default`), Camunda-`inputOutput`
   (Literal, `${variable}`, Liste, Map) und BPMN-Input-/Output-Assoziationen an
   User-, Service-, Script- und Send-Tasks sowie Call Activities. `camunda:in` /

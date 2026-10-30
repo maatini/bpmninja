@@ -75,7 +75,7 @@ Camunda/OpenAPI senden Millisekunden. `engine-server` validiert `topics[].lockDu
 
 ### ⚠️ Startup restore prefers Definitions-KV
 
-`StartupCoordinator.restore_definitions` loads `list_definitions()` (parsed JSON) first and deploys without XML reparse. BPMN XML is loaded only into `deployed_xml`. Empty or failed Definitions-KV falls back to XML parse. Persistence `keys()` errors propagate as `PersistenceError`, not as an empty list.
+`StartupCoordinator.restore` loads collection commits before instances and restores their original keys and versions (`restore_definitions`), including gaps mixed with legacy single-process deploys. It does not reparse a collection as the first process. A corrupt or unreadable `definition_collections` record aborts startup. Legacy JSON definitions are inserted with their persisted keys and versions. Empty or failed Definitions-KV still falls back to XML parse. Persistence `keys()` errors propagate as `PersistenceError`, not as an empty list.
 
 ### ⚠️ Deploy XML save failure is HTTP 500
 

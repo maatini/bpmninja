@@ -10,9 +10,11 @@ Stand der BPMN-2.0-Elemente in BPMNinja. Abgeleitet aus `bpmn-parser/src/parser.
 | ❌ | **Beim Deploy abgelehnt** mit `InvalidDefinition`; die Meldung nennt Typ, Id und Zeile |
 | ⚠️ | **Teilweise** — nur in der hier beschriebenen Form |
 
-Geprüft wird nur der deployte Prozess (erster mit `isExecutable="true"`, sonst der erste).
-Elemente anderer Pools bleiben außen vor. Der Deploy meldet **alle** Treffer auf einmal,
-nicht nur den ersten. Es gibt keinen Schalter, der die Prüfung abschaltet.
+Beim Einzel-Deploy wird nur der deployte Prozess geprüft (erster mit `isExecutable="true"`,
+sonst der erste). `parse_bpmn_processes` prüft jeden Pool mit `isExecutable="true"` und
+ignoriert nicht ausführbare Pools. Leere oder doppelte Prozess-IDs lehnen das ganze
+Dokument ab. Der Deploy meldet **alle** Treffer eines Prozesses auf einmal, nicht nur
+den ersten. Es gibt keinen Schalter, der die Prüfung abschaltet.
 
 ## Ereignisse
 
@@ -52,7 +54,7 @@ Prozessebene unbekannten Elements.
 | Service Task | ✅ | External Task; Topic aus `data-topic` / `data-handler` / `camunda:topic` |
 | Script Task | ✅ | Rhai; leeres Script ❌ |
 | Send Task | ✅ | Wirft eine Nachricht und läuft weiter |
-| Receive Task | ✅ | Wie Message-Catch; `instantiate="true"` ❌ |
+| Receive Task | ✅ | Wie Message-Catch. `instantiate="true"` auf Prozessebene ist ein Message-Start (Collaboration-Ziel). Im Sub-Prozess und mit eingehendem Sequenzfluss ❌ |
 | Manual Task | ✅ | Wie User Task |
 | Business Rule Task | ✅ / ❌ | Mit Topic → External Task; ohne Topic ❌ (kein DMN) |
 | Task (abstrakt) | ❌ | Konkreten Task-Typ verwenden |
@@ -81,7 +83,7 @@ Prozessebene unbekannten Elements.
 | Element | Status | Anmerkung |
 |---|---|---|
 | Sequence Flow | ✅ | Bedingte und Default-Flows |
-| Message Flow | 🟡 | Zwischen Pools; nur ein Prozess wird deployed |
+| Message Flow | ⚠️ | Gerichtete interne Route zwischen ausführbaren Pools derselben Collaboration. `plan_internal_messages` pinnt Quell- und Zielversion; es wird nichts automatisch zugestellt. Participant-Ebene, verschachtelte Scopes und Schleifen ❌ |
 | Association | 🟡 | Compensation-Associations werden noch nicht ausgewertet |
 | Data Association (Input / Output) | ⚠️ | An User, Service, Script, Send Task und Call Activity ausgeführt (`sourceRef`/`targetRef` oder Camunda `inputOutput`). Transformation, Skript, Interpolation und Collection werden abgelehnt |
 
@@ -89,7 +91,7 @@ Prozessebene unbekannten Elements.
 
 | Element | Status | Anmerkung |
 |---|---|---|
-| Pool (Participant) | 🟡 | Ein ausführbarer Prozess pro Deployment |
+| Pool (Participant) | ⚠️ | `POST /api/deploy` bleibt ein Prozess. `POST /api/deploy/collection` deployed alle Pools mit `isExecutable="true"` atomar. Black-Box-Pools bleiben Metadaten |
 | Lane / Lane Set | 🟡 | |
 | Group | 🟡 | |
 | Text Annotation | 🟡 | |
@@ -113,7 +115,7 @@ eingetragen, aus der Ablehnung genommen und hier nachgezogen.
 
 ```support-index
 unsupported-elements: adHocSubProcess standardLoopCharacteristics task transaction
-rejected-attributes: eventBasedGateway@eventGatewayType=Parallel eventBasedGateway@instantiate receiveTask@instantiate subProcess@triggeredByEvent
+rejected-attributes: eventBasedGateway@eventGatewayType=Parallel eventBasedGateway@instantiate subProcess@triggeredByEvent
 rejected-events: boundaryEvent/cancelEventDefinition endEvent/cancelEventDefinition startEvent/conditionalEventDefinition
 boundaryEvent: compensateEventDefinition conditionalEventDefinition errorEventDefinition escalationEventDefinition messageEventDefinition signalEventDefinition timerEventDefinition
 endEvent: compensateEventDefinition errorEventDefinition escalationEventDefinition signalEventDefinition terminateEventDefinition

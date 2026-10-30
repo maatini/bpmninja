@@ -33,6 +33,8 @@
 | `WorkflowEngine::new()` | `Self` | Creates empty engine with script config from env |
 | `.with_persistence(p)` | `Self` | Attaches persistence + starts retry worker |
 | `.deploy_definition(def)` | `(Uuid, i32)` | Register a `ProcessDefinition` → versioning |
+| `.deploy_collection(processes, xml, collaborations)` | `EngineResult<DefinitionCollection>` | Atomarer Commit aller ausführbaren Pools, eine Versionsvergabe unter `deployment_lock` |
+| `.plan_internal_messages(source, element, business_key, variables)` | `EngineResult<Vec<InternalMessagePlan>>` | Versionsgepinntes Routing ohne Zustellung |
 | `.start_instance(key, vars, biz_key, parent)` | `ProcessInstance` | Create and run a new instance |
 | `.start_instance_latest(bpmn_id, vars, biz_key)` | `ProcessInstance` | Start latest version by BPMN process ID |
 | `.start_timer_instance(key, vars, biz_key)` | `ProcessInstance` | Start a timer-triggered instance |

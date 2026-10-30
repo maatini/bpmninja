@@ -56,6 +56,17 @@ impl WorkflowPersistence for FailSaveXmlPersistence {
     async fn delete_definition(&self, _: &str) -> EngineResult<()> {
         Ok(())
     }
+    async fn save_definition_collection(
+        &self,
+        _: &engine_core::DefinitionCollection,
+    ) -> EngineResult<()> {
+        Ok(())
+    }
+    async fn list_definition_collections(
+        &self,
+    ) -> EngineResult<Vec<engine_core::DefinitionCollection>> {
+        Ok(vec![])
+    }
     async fn save_user_task(&self, _: &PendingUserTask) -> EngineResult<()> {
         Ok(())
     }

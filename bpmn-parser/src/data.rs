@@ -7,19 +7,19 @@ use quick_xml::events::Event;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default, Debug)]
-struct Node {
-    name: String,
+pub(crate) struct Node {
+    pub(crate) name: String,
     attrs: HashMap<String, String>,
     text: String,
-    children: Vec<Node>,
+    pub(crate) children: Vec<Node>,
 }
 
 impl Node {
-    fn attr(&self, name: &str) -> Option<&str> {
+    pub(crate) fn attr(&self, name: &str) -> Option<&str> {
         self.attrs.get(name).map(String::as_str)
     }
 
-    fn children<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Node> + 'a {
+    pub(crate) fn children<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Node> + 'a {
         self.children.iter().filter(move |node| node.name == name)
     }
 
@@ -67,7 +67,7 @@ fn push_text(stack: &mut [Node], text: &str) -> EngineResult<()> {
     Ok(())
 }
 
-fn tree(xml: &str) -> EngineResult<Node> {
+pub(crate) fn tree(xml: &str) -> EngineResult<Node> {
     let mut reader = quick_xml::Reader::from_str(xml);
     reader.config_mut().expand_empty_elements = true;
     let mut stack = vec![Node::default()];

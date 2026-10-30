@@ -2839,18 +2839,53 @@ fn reject_transaction_names_id() {
 }
 
 #[test]
-fn reject_instantiating_receive_task() {
-    assert_rejected(
-        r#"<receiveTask id="recv" instantiate="true" messageRef="msg" />"#,
-        &["instantiating receiveTask", "'recv'"],
+fn instantiating_receive_task_is_a_message_start() {
+    for flag in ["true", "1"] {
+        let xml = format!(
+            r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                <message id="msg" name="Order" />
+                <process id="p" isExecutable="true">
+                  <receiveTask id="recv" instantiate="{flag}" messageRef="msg" />
+                  <endEvent id="e" />
+                  <sequenceFlow id="f" sourceRef="recv" targetRef="e" />
+                </process>
+              </definitions>"#
+        );
+        let def = parse_bpmn_xml(&xml).unwrap_or_else(|err| panic!("{flag}: {err}"));
+        assert!(
+            matches!(
+                def.nodes.get("recv"),
+                Some(BpmnElement::MessageStartEvent { message_name }) if message_name == "Order"
+            ),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn reject_instantiating_receive_with_incoming_flow() {
+    let xml = r#"<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+        <message id="msg" name="Order" />
+        <process id="p" isExecutable="true">
+          <startEvent id="s" />
+          <receiveTask id="recv" instantiate="true" messageRef="msg" />
+          <endEvent id="e" />
+          <sequenceFlow id="f1" sourceRef="s" targetRef="recv" />
+          <sequenceFlow id="f2" sourceRef="recv" targetRef="e" />
+        </process>
+      </definitions>"#;
+    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    assert!(
+        err.contains("incoming sequence flows") && err.contains("recv"),
+        "{err}"
     );
 }
 
 #[test]
-fn reject_instantiating_receive_task_numeric_flag() {
+fn reject_instantiating_receive_inside_subprocess() {
     assert_rejected(
-        r#"<receiveTask id="recv" instantiate="1" messageRef="msg" />"#,
-        &["instantiating receiveTask", "'recv'"],
+        r#"<subProcess id="sp"><receiveTask id="recv" instantiate="true" messageRef="msg" /></subProcess>"#,
+        &["instantiating receiveTask", "'recv'", "sub-process"],
     );
 }
 
@@ -3120,7 +3155,6 @@ fn unsupported_elements_are_all_reported() {
         "standardLoopCharacteristics 'ut'",
         "transaction 'tx1'",
         "messageEventDefinition on endEvent 'msgEnd'",
-        "instantiating receiveTask 'recv'",
     ] {
         assert!(err.contains(needle), "missing {needle} in {err}");
     }

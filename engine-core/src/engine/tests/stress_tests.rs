@@ -620,6 +620,17 @@ async fn persistence_error_counter_increments() {
         async fn list_definitions(&self) -> EngineResult<Vec<crate::domain::ProcessDefinition>> {
             Ok(vec![])
         }
+        async fn save_definition_collection(
+            &self,
+            _: &crate::DefinitionCollection,
+        ) -> EngineResult<()> {
+            Ok(())
+        }
+        async fn list_definition_collections(
+            &self,
+        ) -> EngineResult<Vec<crate::DefinitionCollection>> {
+            Ok(vec![])
+        }
         async fn delete_definition(&self, _: &str) -> EngineResult<()> {
             Ok(())
         }
