@@ -37,12 +37,14 @@ pub(crate) mod registry;
 pub(crate) mod retry_queue;
 mod service_task;
 mod signal_processor;
+mod task_handler;
 mod timer_index;
 mod timer_processor;
 mod topic_index;
 mod user_task;
 
 pub use events::EngineEvent;
+pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
 pub struct WorkflowEngine {
@@ -52,6 +54,15 @@ pub struct WorkflowEngine {
     pub(crate) pending_service_tasks: Arc<DashMap<Uuid, PendingServiceTask>>,
     /// Secondary index topic → task IDs. SSOT remains `pending_service_tasks`.
     pub(crate) service_task_topic_index: topic_index::TopicIndex,
+    /// In-process handlers per topic. A registered topic is not fetched by external workers.
+    pub(crate) task_handlers: Arc<DashMap<String, Arc<dyn TaskHandler>>>,
+    /// Service tasks whose handler invocation is still running.
+    pub(crate) in_process_inflight: Arc<dashmap::DashSet<Uuid>>,
+    /// Wakes the in-process dispatcher when a service task may be fetchable.
+    pub(crate) service_task_notify: tokio::sync::Notify,
+    /// `true` asks the in-process dispatcher to stop fetching and drain.
+    pub(crate) task_handler_shutdown: tokio::sync::watch::Sender<bool>,
+    pub(crate) task_handler_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     pub(crate) pending_timers: Arc<DashMap<Uuid, PendingTimer>>,
     /// Secondary due-time index. SSOT remains `pending_timers`.
     pub(crate) timer_due_index: timer_index::TimerDueIndex,
@@ -88,6 +99,7 @@ impl WorkflowEngine {
         );
 
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
+        let (task_handler_shutdown, _) = tokio::sync::watch::channel(false);
 
         Self {
             definitions: registry::DefinitionRegistry::new(),
@@ -95,6 +107,11 @@ impl WorkflowEngine {
             pending_user_tasks: Arc::new(DashMap::new()),
             pending_service_tasks: Arc::new(DashMap::new()),
             service_task_topic_index: DashMap::new(),
+            task_handlers: Arc::new(DashMap::new()),
+            in_process_inflight: Arc::new(dashmap::DashSet::new()),
+            service_task_notify: tokio::sync::Notify::new(),
+            task_handler_shutdown,
+            task_handler_handle: tokio::sync::Mutex::new(None),
             pending_timers: Arc::new(DashMap::new()),
             timer_due_index: timer_index::TimerDueIndex::new(),
             pending_message_catches: Arc::new(DashMap::new()),
@@ -154,9 +171,14 @@ impl WorkflowEngine {
     }
 
     /// Shuts down the engine gracefully.
-    /// This signals the background persistence retry worker to drain the jobs
-    /// still queued in the bounded channel and exit, and waits for it to finish.
+    ///
+    /// Stops the in-process task-handler dispatcher first and waits for handler
+    /// invocations that already started. Then signals the background persistence
+    /// retry worker to drain the jobs still queued in the bounded channel and
+    /// waits for it to finish.
     pub async fn shutdown(&self) {
+        self.shutdown_task_handler_dispatcher().await;
+
         if let Some(tx) = &self.retry_tx {
             // Async send waits for capacity so Shutdown is not lost when the
             // bounded queue is still draining residual jobs.

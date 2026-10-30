@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
 use serde_json::Value;
@@ -22,6 +23,31 @@ const MIN_LOCK_SECONDS: i64 = 1;
 const MAX_LOCK_SECONDS: i64 = 3_600;
 /// Duration used when a requested topic carries no explicit duration.
 const FALLBACK_LOCK_SECONDS: i64 = 30;
+/// Upper bound for a service-task retry delay. Larger values are capped.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Who is allowed to lock a topic in this fetch.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ServiceTaskFetchAudience {
+    /// External worker. Topics with an in-process handler are skipped.
+    ExternalWorker,
+    /// In-process dispatcher. Only topics with a registered handler are locked.
+    InProcessDispatcher,
+}
+
+/// `lock_expiration` for a retry delay. `None` means the task is fetchable immediately.
+///
+/// The delay reuses the existing lock-expiration field with `worker_id == None`,
+/// which `fetch_and_lock` already treats as "not yet available".
+fn retry_lock_expiration(retry_after: Duration) -> Option<chrono::DateTime<Utc>> {
+    if retry_after.is_zero() {
+        return None;
+    }
+    let capped = retry_after.min(MAX_RETRY_AFTER);
+    let millis = i64::try_from(capped.as_millis()).ok()?;
+    let delta = TimeDelta::try_milliseconds(millis)?;
+    Utc::now().checked_add_signed(delta)
+}
 
 /// Converts a requested lock duration (seconds) into a safe `TimeDelta`.
 ///
@@ -77,15 +103,57 @@ impl WorkflowEngine {
     ///
     /// Topics not present in the slice are ignored; duplicate names keep the
     /// last duration. Durations are clamped to 1..=3600 s.
+    ///
+    /// Topics with a registered in-process handler are reserved for the
+    /// dispatcher and are not locked here, including when `worker_id` is
+    /// [`IN_PROCESS_WORKER_ID`](super::IN_PROCESS_WORKER_ID).
     pub async fn fetch_and_lock_service_tasks_with_durations(
         &self,
         worker_id: &str,
         max_tasks: usize,
         topics: &[(String, i64)],
     ) -> Vec<PendingServiceTask> {
+        self.fetch_and_lock_inner(
+            worker_id,
+            max_tasks,
+            topics,
+            ServiceTaskFetchAudience::ExternalWorker,
+        )
+        .await
+    }
+
+    pub(crate) async fn fetch_and_lock_in_process(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[String],
+        lock_duration: i64,
+    ) -> Vec<PendingServiceTask> {
+        let topics: Vec<(String, i64)> = topics
+            .iter()
+            .map(|topic| (topic.clone(), lock_duration))
+            .collect();
+        self.fetch_and_lock_inner(
+            worker_id,
+            max_tasks,
+            &topics,
+            ServiceTaskFetchAudience::InProcessDispatcher,
+        )
+        .await
+    }
+
+    async fn fetch_and_lock_inner(
+        &self,
+        worker_id: &str,
+        max_tasks: usize,
+        topics: &[(String, i64)],
+        audience: ServiceTaskFetchAudience,
+    ) -> Vec<PendingServiceTask> {
         let now = Utc::now();
         let mut result = Vec::new();
         let mut to_persist = Vec::new();
+        let handlers = Arc::clone(&self.task_handlers);
+        let inflight = Arc::clone(&self.in_process_inflight);
 
         let durations: HashMap<&str, i64> = topics
             .iter()
@@ -110,13 +178,30 @@ impl WorkflowEngine {
                 continue;
             }
 
-            // Skip tasks that are already locked and not expired
+            // A running in-process invocation keeps the task even after its lock
+            // duration elapses, so the dispatcher cannot execute it twice.
+            if inflight.contains(&task_id) {
+                continue;
+            }
+
+            let reserved = handlers.contains_key(task.topic.as_str());
+            let claimable = match audience {
+                ServiceTaskFetchAudience::ExternalWorker => !reserved,
+                ServiceTaskFetchAudience::InProcessDispatcher => reserved,
+            };
+            if !claimable {
+                continue;
+            }
+
+            // A future expiration hides the task. That is either an active worker
+            // lock or a retry delay stored without a worker id.
             if let Some(expiration) = task.lock_expiration {
                 if expiration > now {
                     continue;
                 }
-                // Lock expired — release it
-                tracing::info!("Service task {}: lock expired, releasing", task.id);
+                if task.worker_id.is_some() {
+                    tracing::info!("Service task {}: lock expired, releasing", task.id);
+                }
             }
 
             let lock = lock_time_delta(
@@ -542,6 +627,7 @@ impl WorkflowEngine {
     /// Reports a failure for an service task.
     ///
     /// Decrements retries. When retries reach 0, the task becomes an incident.
+    /// The task is unlocked and can be fetched again immediately.
     pub async fn fail_service_task(
         &self,
         task_id: Uuid,
@@ -550,59 +636,91 @@ impl WorkflowEngine {
         error_message: Option<String>,
         error_details: Option<String>,
     ) -> EngineResult<()> {
-        let instance_id = {
+        self.fail_service_task_with_retry_timeout(
+            task_id,
+            worker_id,
+            retries,
+            error_message,
+            error_details,
+            Duration::ZERO,
+        )
+        .await
+    }
+
+    /// Like [`Self::fail_service_task`], but hides the task from fetch until
+    /// `retry_after` has elapsed when retries remain.
+    ///
+    /// The deadline is stored in `lock_expiration` without a worker id. A zero
+    /// delay matches [`Self::fail_service_task`]. Values above 24h are capped.
+    /// An incident (`retries <= 0`) is never left locked.
+    pub async fn fail_service_task_with_retry_timeout(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        retries: Option<i32>,
+        error_message: Option<String>,
+        error_details: Option<String>,
+        retry_after: Duration,
+    ) -> EngineResult<()> {
+        let (instance_id, node_id, new_retries, error_message, error_details) = {
             let mut task = self
                 .pending_service_tasks
                 .get_mut(&task_id)
                 .ok_or(EngineError::ServiceTaskNotFound(task_id))?;
 
-            // Verify lock ownership
             verify_lock_ownership(task_id, &task.worker_id, worker_id)?;
 
-            // Update retries
             let new_retries = retries.unwrap_or(task.retries - 1);
             task.retries = new_retries;
             task.error_message = error_message.clone();
             task.error_details = error_details.clone();
-
-            // Release the lock so it can be retried (or becomes incident)
             task.worker_id = None;
-            task.lock_expiration = None;
-
-            let instance_id = task.instance_id;
-            let node_id = task.node_id.clone();
-
-            if new_retries <= 0 {
-                metrics::counter!("bpmn_errors_total", "type" => "incident").increment(1);
-                // Incident: log and record on the instance
-                if let Some(inst_arc) = self.instances.get(&instance_id).await {
-                    let mut inst = inst_arc.write().await;
-                    let msg = error_message
-                        .clone()
-                        .unwrap_or_else(|| "Unknown error".into());
-                    inst.push_audit_log(format!(
-                        "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
-                        node_id, msg
-                    ));
-                    inst.push_or_touch_incident(
-                        IncidentKind::ServiceTask,
-                        Some(node_id.clone()),
-                        Some(task_id),
-                        msg,
-                        error_details.clone(),
-                    );
-                    metrics::counter!("bpmn_incidents_total", "kind" => "service_task")
-                        .increment(1);
-                }
-                tracing::warn!("Service task {task_id}: incident created (retries exhausted)");
+            task.lock_expiration = if new_retries <= 0 {
+                None
             } else {
-                tracing::info!(
-                    "Service task {task_id}: failed, {} retries remaining",
-                    new_retries
-                );
-            }
-            instance_id
+                retry_lock_expiration(retry_after)
+            };
+
+            (
+                task.instance_id,
+                task.node_id.clone(),
+                new_retries,
+                error_message,
+                error_details,
+            )
         };
+
+        if new_retries > 0 {
+            self.notify_service_tasks_available();
+        }
+
+        if new_retries <= 0 {
+            metrics::counter!("bpmn_errors_total", "type" => "incident").increment(1);
+            if let Some(inst_arc) = self.instances.get(&instance_id).await {
+                let mut inst = inst_arc.write().await;
+                let msg = error_message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".into());
+                inst.push_audit_log(format!(
+                    "🚨 INCIDENT: Service task '{}' failed with 0 retries — {}",
+                    node_id, msg
+                ));
+                inst.push_or_touch_incident(
+                    IncidentKind::ServiceTask,
+                    Some(node_id.clone()),
+                    Some(task_id),
+                    msg,
+                    error_details.clone(),
+                );
+                metrics::counter!("bpmn_incidents_total", "kind" => "service_task").increment(1);
+            }
+            tracing::warn!("Service task {task_id}: incident created (retries exhausted)");
+        } else {
+            tracing::info!(
+                "Service task {task_id}: failed, {} retries remaining",
+                new_retries
+            );
+        }
 
         self.record_history_event(
             instance_id,
@@ -677,6 +795,7 @@ impl WorkflowEngine {
 
         self.persist_service_task(task_id).await;
         self.persist_instance(instance_id).await;
+        self.notify_service_tasks_available();
 
         Ok(())
     }
@@ -845,6 +964,22 @@ impl WorkflowEngine {
         worker_id: &str,
         error_code: &str,
     ) -> EngineResult<()> {
+        self.handle_bpmn_error_with_variables(task_id, worker_id, error_code, HashMap::new(), None)
+            .await
+    }
+
+    /// Like [`Self::handle_bpmn_error`], merging `variables` into the token first.
+    ///
+    /// `error_message` is written to the audit log and, when no boundary catches
+    /// the error, stored as the incident details.
+    pub async fn handle_bpmn_error_with_variables(
+        &self,
+        task_id: Uuid,
+        worker_id: &str,
+        error_code: &str,
+        variables: HashMap<String, Value>,
+        error_message: Option<String>,
+    ) -> EngineResult<()> {
         // Atomically verify lock ownership and remove to prevent TOCTOU
         let task = self.remove_pending_service_task_if(&task_id, |_, t| {
             t.worker_id.as_deref() == Some(worker_id)
@@ -866,6 +1001,23 @@ impl WorkflowEngine {
             }
         };
         let instance_id = task.instance_id;
+
+        if (!variables.is_empty() || error_message.is_some())
+            && let Some(inst_arc) = self.instances.get(&instance_id).await
+        {
+            let mut inst = inst_arc.write().await;
+            if let Some(message) = &error_message {
+                inst.push_audit_log(format!("BPMN error detail: {message}"));
+            }
+            if let Some(token) = inst.tokens.get_mut(&task.token_id) {
+                for (key, value) in &variables {
+                    token.variables.insert(key.clone(), value.clone());
+                }
+            }
+            for (key, value) in &variables {
+                inst.variables.insert(key.clone(), value.clone());
+            }
+        }
 
         let def_key = {
             let inst_arc = self
@@ -961,6 +1113,9 @@ impl WorkflowEngine {
         incident.worker_id = None;
         incident.lock_expiration = None;
         incident.error_message = Some(format!("Unhandled BPMN error '{error_code}'"));
+        if let Some(message) = &error_message {
+            incident.error_details = Some(message.clone());
+        }
 
         if let Some(inst_arc) = self.instances.get(&instance_id).await {
             let mut inst = inst_arc.write().await;
@@ -973,7 +1128,7 @@ impl WorkflowEngine {
                 Some(incident.node_id.clone()),
                 Some(task_id),
                 format!("Unhandled BPMN error '{error_code}'"),
-                None,
+                error_message.clone(),
             );
             metrics::counter!("bpmn_incidents_total", "kind" => "service_task").increment(1);
         }

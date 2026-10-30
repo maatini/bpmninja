@@ -9,6 +9,9 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | Type | Location | Purpose |
 |------|----------|---------|
 | `WorkflowEngine` | `engine/mod.rs` | Central engine — all operations |
+| `TaskHandler` | `engine/task_handler.rs` | Async handler for one in-process service-task topic |
+| `TaskOutcome` | `engine/task_handler.rs` | `Complete` / `Failure` / `BpmnError` returned by a handler |
+| `IN_PROCESS_WORKER_ID` | `engine/task_handler.rs` | Reserved worker id `bpmninja-in-process` |
 | `ProcessDefinition` | `domain/definition.rs` | Immutable BPMN definition with nodes, edges, listeners |
 | `ProcessDefinitionBuilder` | `domain/definition.rs` | Builder pattern for constructing definitions (used in tests) |
 | `BpmnElement` | `domain/element.rs` | Enum: 37 BPMN element variants (inkl. Signal- und Conditional-Events, LinkThrowEvent) |
@@ -176,6 +179,37 @@ pub struct Incident {
 | Metrik | `bpmn_incidents_total{kind="service_task" / "timer" / "persistence" / "bpmn_error"}` |
 
 Quellen: Service-Task mit `retries <= 0` bzw. unbehandeltem `bpmnError`; fehlschlagende Timer-Auswertung (dedupliziert trotz 2-s-Retry); Persistenz-Job nach 50 Retries (Instanz-Zuordnung über `SaveInstance`, `AppendHistoryEntry` bzw. Pending-Maps); ungefangener `ErrorEndEvent` am Prozessscope sowie unbehandelter Child-Error einer Call Activity.
+
+### In-Process Service-Task-Handler
+
+Ein `TaskHandler` führt Service-Tasks eines Topics im Engine-Prozess aus. Das Topic gehört danach exklusiv dem Dispatcher: `fetch_and_lock` gibt es nicht an externe Worker zurück, auch nicht unter der Worker-ID `bpmninja-in-process`. Topics ohne Handler bleiben über die External-Task-API erreichbar. Gesperrt wird mit derselben Fetch-and-Lock-Semantik (Lock, Retry, Incident, BPMN-Error), dadurch läuft ein Task nicht doppelt.
+
+`TaskOutcome::Failure` mit `retries: None` zählt den Zähler herunter, `Some(0)` öffnet einen Incident. `retry_after` schreibt die Wartezeit in `lock_expiration` ohne Worker-ID; bis dahin ist der Task nicht holbar. Eine Panik im Handler wird als Failure gemeldet und stoppt die Engine nicht. `WorkflowEngine::shutdown` beendet den Dispatcher, wartet laufende Handler ab (`TASK_HANDLER_SHUTDOWN_DRAIN_MS`, Standard 30s) und drainiert danach die Persistenz-Retry-Queue.
+
+```rust
+use std::sync::Arc;
+use engine_core::{PendingServiceTask, TaskHandler, TaskOutcome, WorkflowEngine};
+
+struct Double;
+
+#[async_trait::async_trait]
+impl TaskHandler for Double {
+    async fn handle(&self, task: &PendingServiceTask) -> TaskOutcome {
+        let input = task
+            .variables_snapshot
+            .get("input")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
+        TaskOutcome::complete([("result".to_string(), serde_json::json!(input * 2))])
+    }
+}
+
+let engine = Arc::new(WorkflowEngine::new());
+engine.register_task_handler("calc", Arc::new(Double));
+engine.spawn_task_handler_dispatcher().await;
+```
+
+CPU-lastige Arbeit gehört in `tokio::task::spawn_blocking`. Der Handler schließt denselben Task nicht selbst ab, sondern liefert ein `TaskOutcome`.
 
 ### Retry queue (internal)
 
