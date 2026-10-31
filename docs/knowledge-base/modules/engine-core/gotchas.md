@@ -157,6 +157,10 @@ Live listing sorts by `started_at` desc, then instance id. `GET /api/instances` 
 
 Migration changes the `definition_key` and optionally remaps node IDs. The `node_mapping: HashMap<String, String>` provides old→new node translations. If a node ID exists in the old definition but is missing in the new one (and no mapping exists), migration fails with `EngineError::OrphanedToken`.
 
+### ⚠️ Collaboration routes do not deliver messages
+
+`deploy_collection` publishes every executable pool under one `deployment_lock` and installs version-pinned routes. `plan_internal_messages` only observes: a message start, exactly one matching catch (definition key, element, business key), or an explicit unavailable receiver. It does not start instances, claim catches, or broadcast by message name. Hold the deployment lock only around version allocation and the plan; do not call `deploy_definition` or `delete_definition` while already holding it (the mutex is not re-entrant).
+
 ### ⚠️ Backward-compatible re-exports
 
 `engine-core/src/lib.rs` has legacy re-exports:

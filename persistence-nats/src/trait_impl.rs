@@ -110,7 +110,104 @@ impl WorkflowPersistence for NatsPersistence {
         self.list_kv_entries("definitions", "definition").await
     }
 
+    async fn save_definition_collection(
+        &self,
+        collection: &engine_core::DefinitionCollection,
+    ) -> EngineResult<()> {
+        let store = self.kv("definition_collections").await?;
+        let data = serde_json::to_vec(collection)
+            .map_err(|err| EngineError::PersistenceError(err.to_string()))?;
+        // Eine KV-Nachricht ist die Commit-Grenze. Ein zu großer Batch schlägt
+        // fehl, bevor ein Pool sichtbar wird (Broker-Payload-Limit).
+        store
+            .create(collection.id.to_string(), data.into())
+            .await
+            .map_err(|err| {
+                EngineError::PersistenceError(format!("Collection commit failed: {err}"))
+            })?;
+        Ok(())
+    }
+
+    async fn list_definition_collections(
+        &self,
+    ) -> EngineResult<Vec<engine_core::DefinitionCollection>> {
+        let store = self.kv("definition_collections").await?;
+        let mut keys = store.keys().await.map_err(|err| {
+            EngineError::PersistenceError(format!(
+                "Failed to list definition collection keys: {err}"
+            ))
+        })?;
+        let mut entries = Vec::new();
+        while let Some(key_result) = keys.next().await {
+            let key = key_result.map_err(|err| {
+                EngineError::PersistenceError(format!(
+                    "Failed to stream definition collection key: {err}"
+                ))
+            })?;
+            let Some(bytes) = store.get(&key).await.map_err(|err| {
+                EngineError::PersistenceError(format!(
+                    "Failed to read definition collection '{key}': {err}"
+                ))
+            })?
+            else {
+                continue;
+            };
+            let collection = serde_json::from_slice(&bytes).map_err(|err| {
+                EngineError::PersistenceError(format!(
+                    "Corrupt definition collection '{key}': {err}"
+                ))
+            })?;
+            entries.push(collection);
+        }
+        Ok(entries)
+    }
+
     async fn delete_definition(&self, key: &str) -> EngineResult<()> {
+        let collections = self.kv("definition_collections").await?;
+        for collection in self.list_definition_collections().await? {
+            if collection
+                .definitions
+                .iter()
+                .any(|definition| definition.key.to_string() == key)
+            {
+                let id = uuid::Uuid::parse_str(key)
+                    .map_err(|err| EngineError::PersistenceError(err.to_string()))?;
+                loop {
+                    let entry = collections
+                        .entry(collection.id.to_string())
+                        .await
+                        .map_err(|err| EngineError::PersistenceError(err.to_string()))?
+                        .ok_or_else(|| {
+                            EngineError::PersistenceError("Missing collection commit".into())
+                        })?;
+                    let mut current: engine_core::DefinitionCollection =
+                        serde_json::from_slice(&entry.value)
+                            .map_err(|err| EngineError::PersistenceError(err.to_string()))?;
+                    if current.deleted.contains(&id) {
+                        return Ok(());
+                    }
+                    current.deleted.push(id);
+                    let data = serde_json::to_vec(&current)
+                        .map_err(|err| EngineError::PersistenceError(err.to_string()))?;
+                    match collections
+                        .update(collection.id.to_string(), data.into(), entry.revision)
+                        .await
+                    {
+                        Ok(_) => return Ok(()),
+                        Err(err)
+                            if err.kind()
+                                == async_nats::jetstream::kv::UpdateErrorKind::WrongLastRevision =>
+                        {
+                            continue;
+                        }
+                        Err(err) => {
+                            return Err(EngineError::PersistenceError(err.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
         let store = self.kv("definitions").await?;
 
         store.delete(key).await.map_err(|e| {
@@ -376,6 +473,15 @@ impl WorkflowPersistence for NatsPersistence {
     }
 
     async fn load_bpmn_xml(&self, definition_id: &str) -> EngineResult<String> {
+        for collection in self.list_definition_collections().await? {
+            if collection.definitions.iter().any(|definition| {
+                definition.key.to_string() == definition_id
+                    && !collection.deleted.contains(&definition.key)
+            }) {
+                return Ok(collection.xml);
+            }
+        }
+
         use tokio::io::AsyncReadExt;
 
         let store = self.object_store("bpmn_xml").await?;
@@ -434,6 +540,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "pending_signal_catches",
             "pending_conditional_catches",
+            "definition_collections",
         ];
         for name in &kv_bucket_names {
             match self.kv(name).await {
@@ -634,6 +741,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "pending_signal_catches",
             "pending_conditional_catches",
+            "definition_collections",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {
@@ -773,6 +881,7 @@ impl WorkflowPersistence for NatsPersistence {
             "messages",
             "pending_signal_catches",
             "pending_conditional_catches",
+            "definition_collections",
         ];
 
         if kv_bucket_names.contains(&bucket_name) {

@@ -8,6 +8,15 @@
 /// Handles all 29 BpmnElement variants, sub-process flattening,
 /// ISO 8601 timer parsing, and Camunda extension elements.
 pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition>
+
+/// All explicitly executable top-level processes, in document order.
+/// Non-executable pools are not semantically validated. Empty or duplicate
+/// process IDs reject the document. `parse_bpmn_xml` is unchanged.
+pub fn parse_bpmn_processes(xml: &str) -> EngineResult<Vec<ProcessDefinition>>
+
+/// Executable processes plus validated participants and directed message flows.
+/// Does not deploy and does not deliver messages.
+pub fn parse_bpmn_collaboration(xml: &str) -> EngineResult<CollaborationDocument>
 ```
 
 ## Input/Output

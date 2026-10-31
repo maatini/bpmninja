@@ -589,7 +589,6 @@ pub(crate) const REJECTED_EVENT_DEFINITIONS: &[(&str, &str)] = &[
 pub(crate) const REJECTED_ATTRIBUTES: &[&str] = &[
     "eventBasedGateway@eventGatewayType=Parallel",
     "eventBasedGateway@instantiate",
-    "receiveTask@instantiate",
     "subProcess@triggeredByEvent",
 ];
 
@@ -797,11 +796,6 @@ fn matched_rejected_attribute(name: &str, element: &BytesStart<'_>) -> Option<&'
     {
         return Some("subProcess@triggeredByEvent");
     }
-    if name == "receiveTask"
-        && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
-    {
-        return Some("receiveTask@instantiate");
-    }
     if name == "eventBasedGateway"
         && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
     {
@@ -823,6 +817,16 @@ fn collect_for_element(
     stack: &mut [XmlFrame],
 ) -> Vec<String> {
     let id = nearest_id(xml_attr(element, "id"), stack);
+    // Ein instanziierender Receive-Task ist auf Prozessebene der Message-Start.
+    // Im Sub-Prozess fehlt der Start-Vertrag, deshalb bleibt er abgelehnt.
+    if name == "receiveTask"
+        && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
+        && stack.iter().any(|frame| frame.name == "subProcess")
+    {
+        return vec![format!(
+            "instantiating receiveTask '{id}' inside a sub-process is not supported (line {line})"
+        )];
+    }
     if let Some(code) = matched_rejected_attribute(name, element)
         && REJECTED_ATTRIBUTES.contains(&code)
     {
@@ -900,14 +904,7 @@ fn on_xml_end(scan: &mut XmlScan, name: &str) {
     }
 }
 
-/// Lehnt im deployten Prozess alle Elemente ab, deren Ausführungssemantik fehlt.
-///
-/// Der Scan läuft vor `serde`, damit unbekannte Tags nicht erst als generischer
-/// Parsefehler oder — schlimmer — gar nicht auffallen. Es werden alle Treffer
-/// gemeldet, nicht nur der erste. Dieselbe Prozessauswahl wie danach im
-/// Deserializer: erster `isExecutable="true"`, sonst der erste Prozess.
-/// Visuelle und Datenelemente bleiben erlaubt.
-fn reject_unsupported_elements(xml: &str) -> EngineResult<()> {
+fn scan_xml(xml: &str) -> EngineResult<XmlScan> {
     let mut reader = Reader::from_str(xml);
     let mut scan = XmlScan {
         stack: Vec::new(),
@@ -931,20 +928,50 @@ fn reject_unsupported_elements(xml: &str) -> EngineResult<()> {
             _ => {}
         }
     }
+    Ok(scan)
+}
 
-    let Some(selected) = select_process_index(&scan.processes) else {
-        return Ok(());
-    };
-    let found = &scan.violations[selected];
+fn reject_indexed(scan: &XmlScan, index: usize) -> EngineResult<()> {
+    let found = scan.violations.get(index).ok_or_else(|| {
+        EngineError::InvalidDefinition(format!("process index {index} is outside the document"))
+    })?;
     if found.is_empty() {
         Ok(())
     } else {
         Err(EngineError::InvalidDefinition(format!(
             "Unsupported BPMN element(s) in process '{}': {}",
-            scan.processes[selected].0,
+            scan.processes[index].0,
             found.join("; ")
         )))
     }
+}
+
+fn validate_process_ids(processes: &[(String, bool)]) -> EngineResult<()> {
+    let mut seen = HashSet::new();
+    for (id, _) in processes {
+        let trimmed = id.trim();
+        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "empty or duplicate process ID '{id}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Lehnt im deployten Prozess alle Elemente ab, deren Ausführungssemantik fehlt.
+///
+/// Der Scan läuft vor `serde`, damit unbekannte Tags nicht erst als generischer
+/// Parsefehler oder — schlimmer — gar nicht auffallen. Es werden alle Treffer
+/// gemeldet, nicht nur der erste. Dieselbe Prozessauswahl wie danach im
+/// Deserializer: erster `isExecutable="true"`, sonst der erste Prozess.
+/// Visuelle und Datenelemente bleiben erlaubt.
+fn reject_unsupported_elements(xml: &str) -> EngineResult<()> {
+    let scan = scan_xml(xml)?;
+    let Some(selected) = select_process_index(&scan.processes) else {
+        return Ok(());
+    };
+    reject_indexed(&scan, selected)
 }
 
 fn gateway_is_instantiating_or_parallel(gw: &crate::models::BpmnGateway) -> bool {
@@ -957,33 +984,83 @@ fn gateway_is_instantiating_or_parallel(gw: &crate::models::BpmnGateway) -> bool
 
 /// Parses a subset of BPMN 2.0 XML and builds a `ProcessDefinition`.
 ///
-/// Note: Since `quick-xml` expects exact structure, the parsed XML must match
-/// the structs above (elements rather than attributes where specified, etc.).
+/// Wählt den ersten Prozess mit `isExecutable="true"`, sonst den ersten Prozess.
+/// Fehlende oder falsche Ausführungsflags optieren nicht in den Collection-Deploy.
 pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
     // Sammelablehnung vor serde, damit ununterstützte Tags nicht still fallen.
     reject_unsupported_elements(xml)?;
+    let mut defs = read_definitions(xml)?;
+    let index = defs
+        .processes
+        .iter()
+        .position(|process| process.is_executable == Some(true))
+        .unwrap_or(0);
+    compile_process(xml, &mut defs, index)
+}
 
-    let mut defs: BpmnDefinitions = from_str(xml).map_err(|e| {
+/// Alle explizit ausführbaren Top-Level-Prozesse in Dokumentreihenfolge.
+///
+/// Nicht ausführbare Pools werden nicht semantisch geprüft. Leere oder doppelte
+/// Prozess-IDs lehnen das gesamte Dokument ab, auch wenn ein Pool nicht
+/// ausführbar ist. Ein Fehler in einem späteren ausführbaren Pool verwirft
+/// die ganze Sammlung, bevor irgendetwas deployed wird.
+pub fn parse_bpmn_processes(xml: &str) -> EngineResult<Vec<ProcessDefinition>> {
+    let scan = scan_xml(xml)?;
+    validate_process_ids(&scan.processes)?;
+    let executable: Vec<usize> = scan
+        .processes
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, executable))| *executable)
+        .map(|(index, _)| index)
+        .collect();
+    if executable.is_empty() {
+        return Err(EngineError::InvalidDefinition(
+            "No executable process in BPMN XML".into(),
+        ));
+    }
+    for index in &executable {
+        reject_indexed(&scan, *index)?;
+    }
+    let mut defs = read_definitions(xml)?;
+    if defs.processes.len() != scan.processes.len() {
+        return Err(EngineError::InvalidDefinition(
+            "BPMN process list could not be aligned".into(),
+        ));
+    }
+    let mut produced = vec![None; executable.len()];
+    let mut ranked: Vec<(usize, usize)> = executable.iter().copied().enumerate().collect();
+    ranked.sort_by_key(|left| std::cmp::Reverse(left.1));
+    for (ordinal, index) in ranked {
+        produced[ordinal] = Some(compile_process(xml, &mut defs, index)?);
+    }
+    Ok(produced
+        .into_iter()
+        .map(|process| process.expect("every selected executable process was compiled above"))
+        .collect())
+}
+
+fn read_definitions(xml: &str) -> EngineResult<BpmnDefinitions> {
+    let defs: BpmnDefinitions = from_str(xml).map_err(|e| {
         EngineError::InvalidDefinition(format!(
             "BPMN XML parsing failed (hint: ensure the XML contains a valid <process> element and supported entities): {}",
             e
         ))
     })?;
-
     if defs.processes.is_empty() {
         return Err(EngineError::InvalidDefinition(
             "No <process> element found in BPMN XML".to_string(),
         ));
     }
+    Ok(defs)
+}
 
-    // Find the executable process, or fallback to the first one available
-    let executable_idx = defs
-        .processes
-        .iter()
-        .position(|p| p.is_executable == Some(true))
-        .unwrap_or(0);
-    let process = defs.processes.remove(executable_idx);
-
+fn compile_process(
+    xml: &str,
+    defs: &mut BpmnDefinitions,
+    index: usize,
+) -> EngineResult<ProcessDefinition> {
+    let process = defs.processes.remove(index);
     let process_id = process.id.clone();
 
     if let Some(tx) = &process.transaction {
@@ -1179,14 +1256,10 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 
-    // 5c. receiveTask waits for a message (same runtime as MessageCatchEvent)
+    // 5c. receiveTask waits for a message (same runtime as MessageCatchEvent).
+    // `instantiate="true"` ist der Message-Start des Prozesses.
     for task in process.receive_tasks {
         let node_id = task.id.clone();
-        if task.instantiate.as_deref().is_some_and(flag_is_true) {
-            return Err(EngineError::InvalidDefinition(
-                instantiating_receive_violation(&node_id, None),
-            ));
-        }
         reject_multi_instance(task.multi_instance, &node_id, "receiveTask")?;
         let msg_ref = task.message_ref.clone().or_else(|| {
             task.message_event_definition
@@ -1199,7 +1272,23 @@ pub fn parse_bpmn_xml(xml: &str) -> EngineResult<ProcessDefinition> {
                 node_id
             )));
         };
-        builder = builder.node(task.id, BpmnElement::MessageCatchEvent { message_name });
+        let instantiating = task.instantiate.as_deref().is_some_and(flag_is_true);
+        if instantiating
+            && process
+                .sequence_flows
+                .iter()
+                .any(|flow| flow.target_ref == node_id)
+        {
+            return Err(EngineError::InvalidDefinition(format!(
+                "instantiating receiveTask '{node_id}' must not have incoming sequence flows"
+            )));
+        }
+        let element = if instantiating {
+            BpmnElement::MessageStartEvent { message_name }
+        } else {
+            BpmnElement::MessageCatchEvent { message_name }
+        };
+        builder = builder.node(task.id, element);
         builder = add_listeners(builder, &node_id, task.extension_elements);
     }
 

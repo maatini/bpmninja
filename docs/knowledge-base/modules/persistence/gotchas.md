@@ -86,7 +86,7 @@ exists.
 
 ### ⚠️ KV bucket names cannot change after creation
 
-NATS KV bucket names are hardcoded in `client.rs`/`trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`.
+NATS KV bucket names are hardcoded in `client.rs`/`trait_impl.rs`. Changing a bucket name requires deleting the old bucket and its data. The current buckets: `definition_collections`, `definitions`, `instances`, `tokens`, `user_tasks`, `service_tasks`, `timers`, `messages`, `pending_signal_catches`, `pending_conditional_catches`, `history_instances`. `definition_collections` is the atomic commit of a multi-pool deploy: one JSON record holds definitions, original XML and collaboration metadata. A corrupt record aborts startup. Deleting a member tombstones it inside the record.
 
 ### ⚠️ Token keys include instance ID for scoping
 

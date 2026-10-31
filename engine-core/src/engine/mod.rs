@@ -32,6 +32,7 @@ mod incidents;
 mod instance_ops;
 pub(crate) mod instance_store;
 mod message_processor;
+mod message_routing;
 mod persistence_ops;
 mod process_start;
 pub(crate) mod registry;
@@ -47,6 +48,7 @@ mod topic_index;
 mod user_task;
 
 pub use events::EngineEvent;
+pub use message_routing::{InternalMessagePlan, PlannedMessageReceiver, ReceiverUnavailable};
 pub use task_handler::{IN_PROCESS_WORKER_ID, TaskHandler, TaskOutcome};
 
 /// The central workflow engine managing definitions, instances, and handlers.
@@ -93,6 +95,12 @@ pub struct WorkflowEngine {
     pub(crate) script_config: crate::scripting::ScriptConfig,
     /// Broadcast channel — feuert bei jeder relevanten Zustandsänderung.
     pub(crate) event_tx: tokio::sync::broadcast::Sender<EngineEvent>,
+    /// Serialisiert Versionsvergabe von Einzel- und Collection-Deploy.
+    pub(crate) deployment_lock: tokio::sync::Mutex<()>,
+    /// Ausgehende interne Message-Flows, gruppiert nach Quell-Definition.
+    pub(crate) internal_routes: std::sync::RwLock<
+        std::collections::HashMap<Uuid, Vec<message_routing::PinnedMessageRoute>>,
+    >,
 }
 
 impl WorkflowEngine {
@@ -135,6 +143,8 @@ impl WorkflowEngine {
             persist_locks: persistence_ops::PersistLocks::new(),
             script_config,
             event_tx,
+            deployment_lock: tokio::sync::Mutex::new(()),
+            internal_routes: std::sync::RwLock::new(std::collections::HashMap::new()),
         }
     }
 

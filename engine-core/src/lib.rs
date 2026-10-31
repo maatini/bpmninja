@@ -11,7 +11,8 @@ pub use condition::{evaluate_condition, validate_condition};
 
 pub use domain::*;
 pub use engine::{
-    IN_PROCESS_WORKER_ID, MAX_SERVICE_TASK_LONG_POLL, TaskHandler, TaskOutcome, WorkflowEngine,
+    IN_PROCESS_WORKER_ID, InternalMessagePlan, MAX_SERVICE_TASK_LONG_POLL, PlannedMessageReceiver,
+    ReceiverUnavailable, TaskHandler, TaskOutcome, WorkflowEngine,
 };
 pub use history::{HistoryDiff, HistoryEntry, HistoryEventType, VariableDiff};
 pub use port::*;

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use engine_core::EngineResult;
 use engine_core::ProcessDefinition;
 use engine_core::WorkflowEngine;
 use engine_core::WorkflowPersistence;
@@ -30,8 +31,20 @@ impl StartupCoordinator {
         &self,
         engine: &mut WorkflowEngine,
         deployed_xml: &mut HashMap<String, String>,
-    ) -> RestoreStats {
-        let definitions = self.restore_definitions(engine, deployed_xml).await;
+    ) -> EngineResult<RestoreStats> {
+        // Ein korrupter Collection-Datensatz bricht den Start ab. Ein Fallback
+        // auf den ersten Prozess würde den Batch unvollständig wiederherstellen.
+        let collections = self.persistence.list_definition_collections().await?;
+        let mut definitions = self.restore_definitions(engine, deployed_xml).await;
+        for collection in collections {
+            engine.restore_definition_collection(&collection)?;
+            for definition in &collection.definitions {
+                if !collection.deleted.contains(&definition.key) {
+                    deployed_xml.insert(definition.key.to_string(), collection.xml.clone());
+                    definitions += 1;
+                }
+            }
+        }
         let instances = self.restore_instances(engine).await;
         let user_tasks = self.restore_user_tasks(engine).await;
         let service_tasks = self.restore_service_tasks(engine).await;
@@ -40,7 +53,7 @@ impl StartupCoordinator {
         let signal_catches = self.restore_signal_catches(engine).await;
         let conditional_catches = self.restore_conditional_catches(engine).await;
 
-        RestoreStats {
+        Ok(RestoreStats {
             definitions,
             instances,
             user_tasks,
@@ -49,7 +62,7 @@ impl StartupCoordinator {
             message_catches,
             signal_catches,
             conditional_catches,
-        }
+        })
     }
 
     async fn restore_definitions(
@@ -88,7 +101,8 @@ impl StartupCoordinator {
         let mut count = 0;
         for def in defs {
             let xml_key = def.key.to_string();
-            let (key, _) = engine.deploy_definition(def).await;
+            let key = def.key;
+            engine.restore_definitions(vec![def]);
             match self.persistence.load_bpmn_xml(&xml_key).await {
                 Ok(xml) => {
                     deployed_xml.insert(key.to_string(), xml);
@@ -400,7 +414,8 @@ mod tests {
         let mut deployed_xml = HashMap::new();
         let stats = StartupCoordinator::new(persistence)
             .restore(&mut engine, &mut deployed_xml)
-            .await;
+            .await
+            .expect("restore");
 
         assert_eq!(stats.definitions, 1);
         assert_eq!(stats.instances, 1);
@@ -438,7 +453,8 @@ mod tests {
         let mut deployed_xml = HashMap::new();
         let stats = StartupCoordinator::new(persistence)
             .restore(&mut engine, &mut deployed_xml)
-            .await;
+            .await
+            .expect("restore");
 
         assert_eq!(stats.definitions, 1);
         assert_eq!(engine.get_stats().await.definitions_count, 1);
@@ -460,7 +476,8 @@ mod tests {
         let mut deployed_xml = HashMap::new();
         let stats = StartupCoordinator::new(persistence)
             .restore(&mut engine, &mut deployed_xml)
-            .await;
+            .await
+            .expect("restore");
 
         assert_eq!(stats.definitions, 1);
         assert!(engine.get_definition(&definition_key).await.is_some());

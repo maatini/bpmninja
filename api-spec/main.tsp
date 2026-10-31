@@ -85,6 +85,46 @@ model DeployResponse {
   model_check?: ModelCheckReport;
 }
 
+model CollectionProcessResult {
+  process_id: string;
+  definition_key: string;
+  version: int32;
+  model_check?: ModelCheckReport;
+}
+
+model CollaborationEndpoint {
+  participant_id: string;
+  process_id: string;
+  element_id: string;
+}
+
+model CollaborationParticipant {
+  id: string;
+  process_id: string | null;
+  executable: boolean;
+}
+
+model CollaborationMessageFlow {
+  id: string;
+  message_id: string;
+  message_name: string;
+  source: CollaborationEndpoint;
+  target: CollaborationEndpoint;
+}
+
+model Collaboration {
+  id: string;
+  participants: CollaborationParticipant[];
+  message_flows: CollaborationMessageFlow[];
+}
+
+@doc("Atomic deploy of every explicitly executable pool. Collaborations are stored and version-pinned. Automatic internal message delivery is not enabled. The persisted record must fit the NATS maximum payload. A lost response may already have committed.")
+model CollectionDeployResponse {
+  collection_id: string;
+  processes: CollectionProcessResult[];
+  collaborations: Collaboration[];
+}
+
 model StartRequest {
   definition_key: string;
   business_key?: string;
@@ -430,6 +470,10 @@ namespace Api {
   @post @route("/deploy")
   @doc("Deploy BPMN XML. model_check is set when MODEL_CHECK is warn or enforce. enforce returns ModelCheckRejected for a confirmed violation or when the model-check feature was not compiled.")
   op deploy(@body request: DeployRequest): DeployResponse | AppError | ModelCheckRejected;
+
+  @post @route("/deploy/collection")
+  @doc("Deploy all explicitly executable top-level processes atomically. Validates every pool and model-checks each one before publishing. Persists version-pinned collaboration metadata. Automatic internal message delivery is not enabled. enforce rejects the whole batch, including when the model-check feature was not compiled.")
+  op deployCollection(@body request: DeployRequest): CollectionDeployResponse | AppError;
 
   @post @route("/start")
   op start(@body request: StartRequest): StartResponse | AppError;

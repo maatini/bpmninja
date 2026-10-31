@@ -233,6 +233,7 @@ pub fn build_app_with_config(
 
     let mut router = Router::new()
         .route("/api/deploy", post(deploy::deploy_definition))
+        .route("/api/deploy/collection", post(deploy::deploy_collection))
         .route("/api/start", post(instances::start_instance))
         .route("/api/start/latest", post(instances::start_instance_latest))
         .route("/api/start/timer", post(instances::start_timer_instance))

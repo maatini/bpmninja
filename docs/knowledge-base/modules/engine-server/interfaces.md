@@ -54,7 +54,7 @@ See groups below. Key groups:
 
 | Group | Count | Key Endpoints |
 |-------|-------|---------------|
-| Definitions | 5 | `POST /api/deploy`, `GET /api/definitions`, `GET /api/definitions/:id/xml`, `DELETE /api/definitions/:id`, `DELETE /api/definitions/bpmn/:bpmn_id` |
+| Definitions | 6 | `POST /api/deploy`, `POST /api/deploy/collection`, `GET /api/definitions`, `GET /api/definitions/:id/xml`, `DELETE /api/definitions/:id`, `DELETE /api/definitions/bpmn/:bpmn_id` |
 | Instances | 13 | `POST /api/start`, `POST /api/start/latest`, `POST /api/start/timer`, `GET/DELETE /api/instances...`, `variables`, `suspend`, `resume`, `move-token`, `migrate`, `incidents`, `incidents/:incident_id/resolve` |
 | User Tasks | 2 | `GET /api/tasks`, `POST /api/complete/:id` |
 | Service Tasks | 8 | `GET /api/service-tasks`, `fetchAndLock`, `complete`, `failure`, `bpmnError`, `extendLock`, `retry`, `resolve` |
@@ -191,7 +191,7 @@ Fehlversuche (fehlender/falscher Key → 401, Worker auf Admin-Route → 403) we
 pub struct StartupCoordinator { ... }
 impl StartupCoordinator {
     pub fn new(nats: Arc<NatsPersistence>) -> Self
-    pub async fn restore(&self, engine: &mut WorkflowEngine, deployed_xml: &mut HashMap<String, String>) -> RestoreStats
+    pub async fn restore(&self, engine: &mut WorkflowEngine, deployed_xml: &mut HashMap<String, String>) -> EngineResult<RestoreStats>
 }
 pub struct RestoreStats { definitions, instances, user_tasks, service_tasks, timers, message_catches: usize }
 ```

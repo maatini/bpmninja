@@ -130,6 +130,16 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Install isolated JetStream test server
+        run: |
+          cid=$(docker ps -qf ancestor=nats:alpine | head -n 1)
+          test -n "$cid"
+          bin=$(docker exec "$cid" sh -c 'command -v nats-server')
+          test -n "$bin"
+          docker cp "$cid:$bin" "$RUNNER_TEMP/nats-server"
+          chmod +x "$RUNNER_TEMP/nats-server"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
       - name: Run tests
         run: cargo nextest run --workspace
 
@@ -182,6 +192,16 @@ jobs:
           done
           echo "NATS failed to become ready"
           exit 1
+
+      - name: Install isolated JetStream test server
+        run: |
+          cid=$(docker ps -qf ancestor=nats:alpine | head -n 1)
+          test -n "$cid"
+          bin=$(docker exec "$cid" sh -c 'command -v nats-server')
+          test -n "$bin"
+          docker cp "$cid:$bin" "$RUNNER_TEMP/nats-server"
+          chmod +x "$RUNNER_TEMP/nats-server"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Measure coverage
         run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info --fail-under-lines 75

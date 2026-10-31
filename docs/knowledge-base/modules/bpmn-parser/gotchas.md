@@ -86,7 +86,7 @@ The runtime broadcast is process-local. `POST /api/signal` wakes every matching 
 
 ### ⚠️ Unsupported elements fail the deploy, they are not dropped
 
-`reject_unsupported_elements` walks the deployed process (first `isExecutable="true"`, otherwise the first process) **before** serde mapping and returns every hit in one `InvalidDefinition`. Each hit names the element type, its id (or the nearest ancestor id) and the source line. There is no escape hatch.
+`reject_unsupported_elements` walks the deployed process (first `isExecutable="true"`, otherwise the first process) **before** serde mapping and returns every hit in one `InvalidDefinition`. `parse_bpmn_processes` repeats that scan for every explicitly executable pool and ignores non-executable pools. Each hit names the element type, its id (or the nearest ancestor id) and the source line. There is no escape hatch.
 
 Rejected today, because the engine does not execute them:
 
