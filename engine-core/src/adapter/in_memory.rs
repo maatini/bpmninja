@@ -626,6 +626,9 @@ mod tests {
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
             started_at: None,
             completed_at: None,
         };

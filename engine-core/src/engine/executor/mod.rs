@@ -160,6 +160,10 @@ impl WorkflowEngine {
                         crate::history::HistoryEventType::TokenForked,
                         "Escalation handler spawned (non-interrupting)".to_string(),
                     ),
+                    NextAction::InterruptScope(_) => (
+                        crate::history::HistoryEventType::TokenForked,
+                        "Interrupting event subprocess replaced the scope".to_string(),
+                    ),
                     NextAction::Terminate => (
                         crate::history::HistoryEventType::BranchCompleted,
                         "Process terminated".to_string(),

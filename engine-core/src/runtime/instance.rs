@@ -39,6 +39,8 @@ pub enum NextAction {
     EscalationEnd { escalation_code: String },
     /// Spawns extra tokens (e.g. non-interrupting escalation handler) while the main token continues.
     SpawnAndContinue { main: Token, spawned: Vec<Token> },
+    /// Ein unterbrechender Event-Subprozess ersetzt alle noch laufenden Tokens des Scopes.
+    InterruptScope(Token),
     /// Terminate End Event: kill all active tokens and complete the instance immediately.
     Terminate,
     /// The engine must pause — a call activity (sub-process) is pending.
@@ -200,6 +202,17 @@ pub struct ProcessInstance {
     /// Offene und aufgelöste Incidents dieser Instanz (begrenzt).
     #[serde(default)]
     pub incidents: Vec<Incident>,
+    /// Aktive Event-Subprozess-Subscriptionen dieses Scopes.
+    #[serde(default)]
+    pub event_subscriptions: Vec<crate::domain::EventSubscription>,
+    /// Token-Id → Event-Subprozess, der den Token gestartet hat.
+    #[serde(default)]
+    pub event_handler_tokens: HashMap<Uuid, String>,
+    /// Der Prozess nutzt Event-Subprozesse. Bleibt gesetzt, auch wenn ein
+    /// Abbruch die Subscriptions schon geleert hat, damit ein Neustart
+    /// verwaiste Waits entfernen kann.
+    #[serde(default)]
+    pub event_scope: bool,
 }
 
 impl ProcessInstance {
@@ -339,6 +352,9 @@ mod tests {
             started_at: None,
             completed_at: None,
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
         }
     }
 

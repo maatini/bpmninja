@@ -1238,6 +1238,38 @@ impl WorkflowEngine {
             return Ok(());
         }
 
+        let (exclude, variables_for_handler) = {
+            let Some(inst_arc) = self.instances.get(&instance_id).await else {
+                return Err(EngineError::NoSuchInstance(instance_id));
+            };
+            let inst = inst_arc.read().await;
+            let exclude = inst.event_handler_tokens.get(&task.token_id).cloned();
+            if let Some(token) = inst.tokens.get(&task.token_id) {
+                (exclude, token.process_variables())
+            } else {
+                (exclude, inst.variables.clone())
+            }
+        };
+        if let Some(activation) = self
+            .try_activate_event_code(
+                instance_id,
+                error_code,
+                false,
+                &variables_for_handler,
+                exclude.as_deref(),
+            )
+            .await?
+        {
+            let token = match activation {
+                crate::engine::event_subprocess::ScopeActivation::Interrupting(token)
+                | crate::engine::event_subprocess::ScopeActivation::Parallel(token) => token,
+            };
+            self.remove_persisted_service_task(task_id).await;
+            self.persist_instance(instance_id).await;
+            self.run_instance_batch(instance_id, token).await?;
+            return Ok(());
+        }
+
         // Unhandled BPMN error: re-insert as incident so the token is not a zombie.
         let mut incident = task;
         incident.retries = 0;

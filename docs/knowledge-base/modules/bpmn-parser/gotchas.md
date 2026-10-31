@@ -69,7 +69,7 @@ Nested sub-processes each get their own map, so equal link names in sibling scop
 `<signal id="…" name="…"/>` is read from `<definitions>` into a lookup `signalRef → name`. Start, end, intermediate catch/throw and boundary events carry `<signalEventDefinition signalRef="…"/>`:
 
 - A missing or unknown `signalRef` fails deployment with `InvalidDefinition`. There is no generic fallback name.
-- Signal events inside embedded sub-processes are flattened like messages. Signal start events on an embedded sub-process remain unsupported (event sub-processes are outside this scope).
+- Signal events inside embedded sub-processes are flattened like messages. Signal start events on an embedded sub-process remain unsupported. A signal start is valid on a process-level event sub-process.
 - Signal end events inside a flattened sub-process become `SubProcessEndEvent` and do **not** broadcast.
 - Event-based gateways accept `SignalCatchEvent` as a target; conditional catches are rejected there.
 
@@ -91,7 +91,7 @@ The runtime broadcast is process-local. `POST /api/signal` wakes every matching 
 Rejected today, because the engine does not execute them:
 
 - `transaction`, `adHocSubProcess`, `standardLoopCharacteristics`, generic `task`
-- event sub-processes (`subProcess triggeredByEvent="true"`)
+- event sub-processes nested inside another sub-process, conditional/compensation starts, non-interrupting error starts, and sequence flows on the event sub-process container
 - `receiveTask` / `eventBasedGateway` with `instantiate="true"` (also `1`), and `eventGatewayType="Parallel"`
 - event definitions outside [`element-matrix.md`](element-matrix.md), including message end events, multiple/parallel-multiple events, and more than one event definition on the same event
 - a start event **inside** an embedded sub-process that carries a trigger (the internal start is a pass-through)

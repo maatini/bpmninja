@@ -9,6 +9,13 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Event-Subprozesse (`subProcess triggeredByEvent="true"`) direkt im Prozess.
+  Message-, Timer-, Signal-, Error- (nur unterbrechend) und Escalation-Starts.
+  Der Scope abonniert beim Instanzstart und räumt Subscriptions beim Verlassen auf.
+  Unterbrechende Starts brechen die Scope-Tokens ab, nicht unterbrechende laufen
+  parallel. Verschachtelte Event-Subprozesse, Conditional-Starts und Sequenzflüsse
+  am Container bleiben abgelehnt. Subscriptions überstehen einen NATS-Neustart.
+
 - Collaboration (X12): `parse_bpmn_collaboration` liest Pools, Participants und
   gerichtete Message-Flows. `POST /api/deploy/collection` deployed alle Prozesse
   mit `isExecutable="true"` atomar, pinnt die Collaboration an die vergebenen
@@ -34,7 +41,7 @@ die Versionierung [Semantic Versioning](https://semver.org/lang/de/).
   kennt, statt sie still zu verwerfen oder auf ein schwächeres Element abzubilden.
   `InvalidDefinition` nennt Typ, Id und Zeile **aller** Treffer im deployten Prozess.
   Neu abgelehnt werden unter anderem `adHocSubProcess`, `standardLoopCharacteristics`,
-  Event-Subprozesse (`triggeredByEvent`), instanziierende Receive-Tasks, instanziierende
+  instanziierende Receive-Tasks, instanziierende
   oder parallele Event-Based-Gateways, Message-End-Events, mehrere Event-Definitionen
   am selben Ereignis und Trigger an Start-Events eingebetteter Sub-Prozesse.
   Signal-, Link- und Conditional-Events (Catch/Boundary) sowie sequentielles

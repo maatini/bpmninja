@@ -24,6 +24,7 @@ pub(crate) mod boundary;
 mod conditional_events;
 pub(crate) mod data_mappings;
 mod definition_ops;
+pub(crate) mod event_subprocess;
 pub(crate) mod events;
 pub(crate) mod executor;
 pub(crate) mod gateway;

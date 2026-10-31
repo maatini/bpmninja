@@ -234,6 +234,7 @@ impl WorkflowEngine {
                 }
 
                 if self.all_tokens_completed(instance_id).await? {
+                    self.close_event_scope(instance_id).await;
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
                         inst.state = InstanceState::Completed;
@@ -256,12 +257,25 @@ impl WorkflowEngine {
             NextAction::ErrorEnd { error_code } => {
                 self.complete_branch_token(instance_id, token_id).await?;
 
+                let (exclude, variables) = self.token_event_context(instance_id, token_id).await;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
                     inst.tokens.remove(&token_id);
                 }
 
-                if self.all_tokens_completed(instance_id).await? {
+                if let Some(activation) = self
+                    .try_activate_event_code(
+                        instance_id,
+                        &error_code,
+                        false,
+                        &variables,
+                        exclude.as_deref(),
+                    )
+                    .await?
+                {
+                    queue_scope_activation(queue, activation);
+                    self.persist_instance(instance_id).await;
+                } else if self.all_tokens_completed(instance_id).await? {
                     // Schreiblock in eigenem Block — muss vor record_history_event freigegeben sein
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
@@ -294,18 +308,32 @@ impl WorkflowEngine {
                         None,
                     )
                     .await;
+                    self.close_event_scope(instance_id).await;
                 }
                 self.persist_instance(instance_id).await;
             }
             NextAction::EscalationEnd { escalation_code } => {
                 self.complete_branch_token(instance_id, token_id).await?;
 
+                let (exclude, variables) = self.token_event_context(instance_id, token_id).await;
                 if let Some(inst_arc) = self.instances.get(&instance_id).await {
                     let mut inst = inst_arc.write().await;
                     inst.tokens.remove(&token_id);
                 }
 
-                if self.all_tokens_completed(instance_id).await? {
+                if let Some(activation) = self
+                    .try_activate_event_code(
+                        instance_id,
+                        &escalation_code,
+                        true,
+                        &variables,
+                        exclude.as_deref(),
+                    )
+                    .await?
+                {
+                    queue_scope_activation(queue, activation);
+                    self.persist_instance(instance_id).await;
+                } else if self.all_tokens_completed(instance_id).await? {
                     // Schreiblock in eigenem Block — muss vor record_history_event freigegeben sein
                     if let Some(inst_arc) = self.instances.get(&instance_id).await {
                         let mut inst = inst_arc.write().await;
@@ -324,6 +352,7 @@ impl WorkflowEngine {
                         None,
                     )
                     .await;
+                    self.close_event_scope(instance_id).await;
                 }
                 self.persist_instance(instance_id).await;
             }
@@ -333,7 +362,12 @@ impl WorkflowEngine {
                     queue.push_back(extra_token);
                 }
             }
+            NextAction::InterruptScope(token) => {
+                queue.clear();
+                queue.push_back(token);
+            }
             NextAction::Terminate => {
+                self.close_event_scope(instance_id).await;
                 self.pending_user_tasks
                     .retain(|_, t| t.instance_id != instance_id);
                 self.clear_pending_service_tasks_for_instance(instance_id);
@@ -459,5 +493,40 @@ impl WorkflowEngine {
             matches!(def.get_node(node_id), Some(BpmnElement::InclusiveGateway))
                 && def.is_split_gateway(node_id),
         )
+    }
+
+    async fn token_event_context(
+        &self,
+        instance_id: Uuid,
+        token_id: Uuid,
+    ) -> (
+        Option<String>,
+        std::collections::HashMap<String, serde_json::Value>,
+    ) {
+        let Some(instance) = self.instances.get(&instance_id).await else {
+            return (None, std::collections::HashMap::new());
+        };
+        let instance = instance.read().await;
+        let exclude = instance.event_handler_tokens.get(&token_id).cloned();
+        if let Some(token) = instance.tokens.get(&token_id) {
+            (exclude, token.process_variables())
+        } else {
+            (exclude, instance.variables.clone())
+        }
+    }
+}
+
+fn queue_scope_activation(
+    queue: &mut VecDeque<Token>,
+    activation: crate::engine::event_subprocess::ScopeActivation,
+) {
+    match activation {
+        crate::engine::event_subprocess::ScopeActivation::Interrupting(token) => {
+            queue.clear();
+            queue.push_back(token);
+        }
+        crate::engine::event_subprocess::ScopeActivation::Parallel(token) => {
+            queue.push_back(token);
+        }
     }
 }

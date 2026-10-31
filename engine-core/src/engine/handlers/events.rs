@@ -463,6 +463,43 @@ impl WorkflowEngine {
                     spawned: vec![handler_token],
                 })
             }
+        } else if let Some(activation) = self
+            .try_activate_event_code(
+                instance_id,
+                escalation_code,
+                true,
+                &token.process_variables(),
+                self.event_handler_for_token(instance_id, token.id)
+                    .await
+                    .as_deref(),
+            )
+            .await?
+        {
+            match activation {
+                crate::engine::event_subprocess::ScopeActivation::Interrupting(handler) => {
+                    Ok(NextAction::InterruptScope(handler))
+                }
+                crate::engine::event_subprocess::ScopeActivation::Parallel(handler) => {
+                    let next = resolve_next_target(def_clone, current_id, &token.variables)?;
+                    token.current_node = next.clone();
+                    {
+                        let inst_arc = self
+                            .instances
+                            .get(&instance_id)
+                            .await
+                            .ok_or(EngineError::NoSuchInstance(instance_id))?;
+                        let mut inst = inst_arc.write().await;
+                        inst.current_node = next;
+                        inst.push_audit_log(format!(
+                            "⚡ Escalation '{escalation_code}' caught by non-interrupting event subprocess"
+                        ));
+                    }
+                    Ok(NextAction::SpawnAndContinue {
+                        main: token.clone(),
+                        spawned: vec![handler],
+                    })
+                }
+            }
         } else {
             // No handler found — escalation is ignored (non-fatal), token continues
             let next = resolve_next_target(def_clone, current_id, &token.variables)?;

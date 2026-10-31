@@ -165,6 +165,7 @@ impl WorkflowEngine {
             }
         }
 
+        self.open_event_scope(instance_id).await?;
         Box::pin(self.run_instance_batch(instance_id, token)).await?;
         self.persist_instance(instance_id).await;
 
@@ -230,6 +231,9 @@ impl WorkflowEngine {
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }
@@ -513,6 +517,28 @@ impl WorkflowEngine {
                     crate::engine::executor::find_boundary_error_event(&def, &called_node_id, code)
                 {
                     target_boundary = Some(boundary_id);
+                } else if let Some(activation) = self
+                    .try_activate_event_code(
+                        parent_id,
+                        code,
+                        false,
+                        &token.process_variables(),
+                        self.event_handler_for_token(parent_id, token.id)
+                            .await
+                            .as_deref(),
+                    )
+                    .await?
+                {
+                    let handler = match activation {
+                        crate::engine::event_subprocess::ScopeActivation::Interrupting(handler)
+                        | crate::engine::event_subprocess::ScopeActivation::Parallel(handler) => {
+                            handler
+                        }
+                    };
+                    drop(token);
+                    self.persist_instance(parent_id).await;
+                    Box::pin(self.run_instance_batch(parent_id, handler)).await?;
+                    return Ok(());
                 } else {
                     handle_as_incident = true;
                 }
@@ -631,6 +657,9 @@ impl WorkflowEngine {
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -655,6 +684,7 @@ impl WorkflowEngine {
 
         let token = Token::new(&start_id);
 
+        self.open_event_scope(instance_id).await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 
@@ -810,6 +840,9 @@ impl WorkflowEngine {
             compensation_log: Vec::new(),
             outstanding_calls: HashMap::new(),
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         };
@@ -829,6 +862,7 @@ impl WorkflowEngine {
         .await;
 
         let token = Token::new(start_id);
+        self.open_event_scope(instance_id).await?;
         self.run_instance_batch(instance_id, token).await?;
         self.persist_instance(instance_id).await;
 
