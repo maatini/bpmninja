@@ -23,7 +23,9 @@ Stable module aliases (not deprecated): `engine_core::model` → `domain`, `engi
 | `TimerDefinition` | `domain/timer.rs` | ISO 8601 timer: Duration, AbsoluteDate, CronCycle, RepeatingInterval |
 | `ExecutionListener` | `domain/listener.rs` | Script attached to a node (start/end event) |
 | `ListenerEvent` | `domain/listener.rs` | Enum: Start, End |
-| `ScopeEventListener` | `domain/listener.rs` | Timer/Message/Error event sub-process listener |
+| `ScopeEventListener` | `domain/listener.rs` | Legacy scope listener; new models use `EventSubProcess` |
+| `EventSubProcess` | `domain/event_subprocess.rs` | Process-level event subprocess: trigger, start node, interrupting flag |
+| `EventSubscription` | `domain/event_subprocess.rs` | Persisted subscription restored after restart |
 | `MultiInstanceDef` | `domain/multi_instance.rs` | Multi-instance configuration |
 | `FileReference` | `domain/file_ref.rs` | File variable metadata (object_key, filename, mime_type, size) |
 | `Incident` | `domain/incident.rs` | Incident an einer Instanz: kind, node_id, task_id, message, details, occurrences, resolved_at/by |

@@ -52,6 +52,7 @@ impl StartupCoordinator {
         let message_catches = self.restore_message_catches(engine).await;
         let signal_catches = self.restore_signal_catches(engine).await;
         let conditional_catches = self.restore_conditional_catches(engine).await;
+        engine.reconcile_event_subprocesses().await?;
 
         Ok(RestoreStats {
             definitions,
@@ -323,6 +324,9 @@ mod tests {
             compensation_log: vec![],
             outstanding_calls: HashMap::new(),
             incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
             started_at: Some(chrono::Utc::now()),
             completed_at: None,
         }

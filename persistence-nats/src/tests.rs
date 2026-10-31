@@ -131,6 +131,94 @@ async fn x11_mapped_external_task_survives_nats_reconnect() {
     fresh.delete_definition(&key.to_string()).await.unwrap();
 }
 
+#[tokio::test]
+async fn event_subprocess_message_survives_nats_restart() {
+    use engine_core::domain::{
+        BpmnElement, EventSubProcess, EventSubProcessTrigger, ProcessDefinitionBuilder,
+    };
+    use engine_core::{InstanceState, WorkflowEngine};
+    use std::collections::HashMap;
+
+    let Some(persistence) = setup_nats_test().await else {
+        return;
+    };
+    let engine = WorkflowEngine::new().with_persistence(persistence.clone());
+    let mut def = ProcessDefinitionBuilder::new("event_restart")
+        .node("start", BpmnElement::StartEvent)
+        .node("main", BpmnElement::UserTask("main".into()))
+        .node("end", BpmnElement::EndEvent)
+        .flow("start", "main")
+        .flow("main", "end")
+        .build()
+        .unwrap();
+    let body = ProcessDefinitionBuilder::new("handler")
+        .node("hs", BpmnElement::StartEvent)
+        .node("work", BpmnElement::UserTask("handler".into()))
+        .node("he", BpmnElement::EndEvent)
+        .flow("hs", "work")
+        .flow("work", "he")
+        .build()
+        .unwrap();
+    let node_ids: Vec<String> = body.nodes.keys().cloned().collect();
+    def.nodes.extend(body.nodes);
+    for (source, targets) in body.flows {
+        def.flows.entry(source).or_default().extend(targets);
+    }
+    def.event_subprocesses.push(EventSubProcess {
+        id: "handler".into(),
+        start_node: "hs".into(),
+        node_ids,
+        trigger: EventSubProcessTrigger::Message("alert".into()),
+        is_interrupting: true,
+    });
+    let (key, _) = engine.deploy_definition(def).await;
+    let id = engine.start_instance(key).await.unwrap();
+    for catch in persistence.list_message_catches().await.unwrap() {
+        if catch.instance_id == id {
+            persistence.delete_message_catch(catch.id).await.unwrap();
+        }
+    }
+    drop(engine);
+
+    let restored = WorkflowEngine::new().with_persistence(persistence.clone());
+    restored.restore_definitions(
+        persistence
+            .list_definitions()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|definition| definition.key == key)
+            .collect(),
+    );
+    for instance in persistence.list_instances().await.unwrap() {
+        if instance.id == id {
+            restored.restore_instance(instance).await;
+        }
+    }
+    restored.reconcile_event_subprocesses().await.unwrap();
+    restored
+        .correlate_message("alert".into(), None, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.get_pending_user_tasks()[0].node_id,
+        "work",
+        "restarted subscription must activate the handler"
+    );
+    assert!(
+        !matches!(
+            restored.get_instance_details(id).await.unwrap().state,
+            InstanceState::Completed | InstanceState::CompletedWithError { .. }
+        ),
+        "handler must keep the instance active"
+    );
+    persistence.delete_instance(&id.to_string()).await.unwrap();
+    persistence
+        .delete_definition(&key.to_string())
+        .await
+        .unwrap();
+}
+
 pub async fn setup_nats_test() -> Option<Arc<NatsPersistence>> {
     connect_nats(&format!("TEST_STREAM_{}", Uuid::new_v4())).await
 }
@@ -285,6 +373,9 @@ async fn test_definition_instance_restore_roundtrip() {
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: Some(chrono::Utc::now()),
         completed_at: None,
     };
@@ -668,6 +759,9 @@ async fn test_completed_instance_archive_and_query() {
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: Some(completed_at - chrono::Duration::seconds(5)),
         completed_at: Some(completed_at),
     };
@@ -915,6 +1009,9 @@ async fn test_handles_are_cached_and_still_write() {
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: Some(chrono::Utc::now()),
         completed_at: None,
     };

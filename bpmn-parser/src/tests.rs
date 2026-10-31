@@ -639,7 +639,7 @@ fn parse_event_based_gateway() {
 }
 
 #[test]
-fn reject_event_subprocess() {
+fn parse_error_event_subprocess() {
     let xml = r#"
         <definitions id="def1" xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
             <error id="err1" errorCode="VALIDATION_FAILED" />
@@ -651,21 +651,131 @@ fn reject_event_subprocess() {
                     <startEvent id="sub_s1">
                         <errorEventDefinition errorRef="err1" />
                     </startEvent>
+                    <userTask id="handler" />
                     <endEvent id="sub_e1" />
-                    <sequenceFlow id="sub_f1" sourceRef="sub_s1" targetRef="sub_e1" />
+                    <sequenceFlow id="sub_f1" sourceRef="sub_s1" targetRef="handler" />
+                    <sequenceFlow id="sub_f2" sourceRef="handler" targetRef="sub_e1" />
                 </subProcess>
             </process>
         </definitions>
     "#;
 
-    let err = parse_bpmn_xml(xml).unwrap_err().to_string();
+    let def = parse_bpmn_xml(xml).expect("interrupting error event sub-process");
+    assert!(def.nodes.contains_key("s1"));
+    assert!(!def.nodes.contains_key("sub1"));
+    let handler = def
+        .event_subprocesses
+        .iter()
+        .find(|handler| handler.id == "sub1")
+        .expect("handler metadata");
+    assert!(handler.is_interrupting);
+    assert_eq!(handler.start_node, "sub_s1");
+    assert!(matches!(
+        &handler.trigger,
+        engine_core::EventSubProcessTrigger::Error(Some(code)) if code == "VALIDATION_FAILED"
+    ));
+    assert!(matches!(
+        def.nodes.get("sub_s1"),
+        Some(BpmnElement::StartEvent)
+    ));
+    assert_eq!(def.start_event().map(|(id, _)| id), Some("s1"));
+}
+
+#[test]
+fn reject_unsupported_event_subprocess_variants() {
+    let nested = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="s1" />
+                <subProcess id="outer">
+                    <startEvent id="os" />
+                    <endEvent id="oe" />
+                    <sequenceFlow id="of" sourceRef="os" targetRef="oe" />
+                    <subProcess id="inner" triggeredByEvent="true">
+                        <startEvent id="is"><messageEventDefinition messageRef="m" /></startEvent>
+                        <endEvent id="ie" />
+                        <sequenceFlow id="if" sourceRef="is" targetRef="ie" />
+                    </subProcess>
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="outer" />
+                <sequenceFlow id="f2" sourceRef="outer" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(nested).unwrap_err().to_string();
     assert!(
-        err.contains("event sub-process 'sub1'") && err.contains("triggeredByEvent"),
-        "event sub-process must be rejected: {err}"
+        err.contains("event sub-process 'inner'") && err.contains("subProcess 'outer'"),
+        "nested event sub-process must be rejected: {err}"
     );
+
+    let conditional = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <process id="proc1">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+                <subProcess id="sub1" triggeredByEvent="true">
+                    <startEvent id="hs">
+                        <conditionalEventDefinition><conditionExpression>approved</conditionExpression></conditionalEventDefinition>
+                    </startEvent>
+                    <endEvent id="he" />
+                    <sequenceFlow id="hf" sourceRef="hs" targetRef="he" />
+                </subProcess>
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(conditional).unwrap_err().to_string();
     assert!(
-        err.contains("errorEventDefinition on startEvent 'sub_s1'"),
-        "error start inside the event sub-process is also unsupported: {err}"
+        err.contains("conditional start"),
+        "conditional event-subprocess start must be rejected: {err}"
+    );
+
+    let non_interrupting_error = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <error id="err1" errorCode="FAIL" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+                <subProcess id="sub1" triggeredByEvent="true">
+                    <startEvent id="hs" isInterrupting="false">
+                        <errorEventDefinition errorRef="err1" />
+                    </startEvent>
+                    <endEvent id="he" />
+                    <sequenceFlow id="hf" sourceRef="hs" targetRef="he" />
+                </subProcess>
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(non_interrupting_error)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("must be interrupting"),
+        "non-interrupting error start must be rejected: {err}"
+    );
+
+    let connected = r#"
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+            <message id="Message_alert" name="alert" />
+            <process id="proc1">
+                <startEvent id="s1" />
+                <subProcess id="sub1" triggeredByEvent="true">
+                    <startEvent id="hs"><messageEventDefinition messageRef="Message_alert" /></startEvent>
+                    <endEvent id="he" />
+                    <sequenceFlow id="hf" sourceRef="hs" targetRef="he" />
+                </subProcess>
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="sub1" />
+                <sequenceFlow id="f2" sourceRef="sub1" targetRef="e1" />
+            </process>
+        </definitions>
+    "#;
+    let err = parse_bpmn_xml(connected).unwrap_err().to_string();
+    assert!(
+        err.contains("cannot have incoming or outgoing sequence flows"),
+        "connected event sub-process must be rejected: {err}"
     );
 }
 

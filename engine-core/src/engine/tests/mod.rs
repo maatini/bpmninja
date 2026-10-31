@@ -3,6 +3,7 @@ pub mod call_activity_parallel;
 pub mod call_errors;
 pub mod conditional_events;
 pub mod data_mappings;
+pub mod event_subprocess;
 pub mod gateways;
 pub mod helpers;
 pub mod inclusive_join;

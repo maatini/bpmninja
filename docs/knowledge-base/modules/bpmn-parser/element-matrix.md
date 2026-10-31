@@ -60,7 +60,7 @@ Prozessebene unbekannten Elements.
 | Task (abstrakt) | ❌ | Konkreten Task-Typ verwenden |
 | Call Activity | ✅ | Ohne Mapping alle Variablen in beide Richtungen. Mit `camunda:in`/`camunda:out` nur die genannten Ziele; eine Richtung macht beide Seiten explizit. Error-Boundaries |
 | Embedded Sub-Process | ✅ | Beim Parsen geflacht (ADR-003). Boundary-Events am Sub-Prozess sind nicht spezifikationsgenau |
-| Event-Sub-Process | ❌ | `triggeredByEvent="true"` wird nicht ausgelöst |
+| Event-Sub-Process | ⚠️ | Nur direkt im Prozess. Start: Message, Timer, Signal, Error (nur unterbrechend), Escalation. Unterbrechend bricht den Prozess-Scope ab, nicht unterbrechend läuft parallel. Subscriptions enden mit dem Scope. Conditional-Start, verschachtelte Event-Subprozesse und Sequenzflüsse am Container bleiben ❌ |
 | Transaction | ❌ | |
 | Ad-hoc Sub-Process | ❌ | |
 | Loop (`standardLoopCharacteristics`) | ❌ | |
@@ -115,7 +115,7 @@ eingetragen, aus der Ablehnung genommen und hier nachgezogen.
 
 ```support-index
 unsupported-elements: adHocSubProcess standardLoopCharacteristics task transaction
-rejected-attributes: eventBasedGateway@eventGatewayType=Parallel eventBasedGateway@instantiate subProcess@triggeredByEvent
+rejected-attributes: eventBasedGateway@eventGatewayType=Parallel eventBasedGateway@instantiate
 rejected-events: boundaryEvent/cancelEventDefinition endEvent/cancelEventDefinition startEvent/conditionalEventDefinition
 boundaryEvent: compensateEventDefinition conditionalEventDefinition errorEventDefinition escalationEventDefinition messageEventDefinition signalEventDefinition timerEventDefinition
 endEvent: compensateEventDefinition errorEventDefinition escalationEventDefinition signalEventDefinition terminateEventDefinition

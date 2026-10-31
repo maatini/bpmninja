@@ -44,6 +44,31 @@ impl WorkflowEngine {
             self.clear_wait_states_for_token(catch.instance_id, &catch.token_id)
                 .await;
 
+            if self
+                .is_event_subscription(catch.instance_id, catch.id)
+                .await
+            {
+                let instance_id = catch.instance_id;
+                let activation = self
+                    .activate_event_subscription(
+                        instance_id,
+                        super::event_subprocess::EventConsumption::Message(catch),
+                        &variables,
+                    )
+                    .await?;
+                if !self.pending_message_catches.contains_key(&catch_id) {
+                    self.remove_persisted_message_catch(catch_id).await;
+                }
+                if let Some(activation) = activation {
+                    let token = match activation {
+                        super::event_subprocess::ScopeActivation::Interrupting(token)
+                        | super::event_subprocess::ScopeActivation::Parallel(token) => token,
+                    };
+                    self.run_instance_batch(instance_id, token).await?;
+                }
+                continue;
+            }
+
             if catch.token_id.is_nil() {
                 // This is a Scope Event Listener (Event Sub-Process) trigger
                 let child_bpmn_id = catch.node_id.clone();

@@ -52,8 +52,13 @@ impl WorkflowEngine {
             match self.process_expired_timer(&timer).await {
                 Ok(()) => {
                     metrics::counter!("bpmn_timer_fired_total").increment(1);
-                    // Persisted removal happens only after successful processing.
-                    self.remove_persisted_timer(tid).await;
+                    // Ein erneut eingetragener Timer (nicht unterbrechender Zyklus)
+                    // behält seine Id. Alle anderen sind verbraucht.
+                    if self.pending_timers.contains_key(&tid) {
+                        self.persist_timer(tid).await;
+                    } else {
+                        self.remove_persisted_timer(tid).await;
+                    }
                 }
                 Err(e) => {
                     self.timer_processing_errors
@@ -99,6 +104,28 @@ impl WorkflowEngine {
         // Event-Based Gateway support: If this timer triggered, clear any sibling wait states
         self.clear_wait_states_for_token(timer.instance_id, &timer.token_id)
             .await;
+
+        if self
+            .is_event_subscription(timer.instance_id, timer.id)
+            .await
+        {
+            let instance_id = timer.instance_id;
+            let activation = self
+                .activate_event_subscription(
+                    instance_id,
+                    super::event_subprocess::EventConsumption::Timer(timer.clone()),
+                    &std::collections::HashMap::new(),
+                )
+                .await?;
+            if let Some(activation) = activation {
+                let token = match activation {
+                    super::event_subprocess::ScopeActivation::Interrupting(token)
+                    | super::event_subprocess::ScopeActivation::Parallel(token) => token,
+                };
+                self.run_instance_batch(instance_id, token).await?;
+            }
+            return Ok(());
+        }
 
         let old_state = if let Some(lk) = self.instances.get(&timer.instance_id).await {
             Some(lk.read().await.clone())

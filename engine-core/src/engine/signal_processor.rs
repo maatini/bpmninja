@@ -47,6 +47,32 @@ impl WorkflowEngine {
             let Some((_, catch)) = self.pending_signal_catches.remove(&catch.id) else {
                 continue;
             };
+            if self
+                .is_event_subscription(catch.instance_id, catch.id)
+                .await
+            {
+                let instance_id = catch.instance_id;
+                let catch_id = catch.id;
+                let activation = self
+                    .activate_event_subscription(
+                        instance_id,
+                        super::event_subprocess::EventConsumption::Signal(catch),
+                        variables,
+                    )
+                    .await?;
+                if !self.pending_signal_catches.contains_key(&catch_id) {
+                    self.remove_persisted_signal_catch(catch_id).await;
+                }
+                if let Some(activation) = activation {
+                    let token = match activation {
+                        super::event_subprocess::ScopeActivation::Interrupting(token)
+                        | super::event_subprocess::ScopeActivation::Parallel(token) => token,
+                    };
+                    Box::pin(self.run_instance_batch(instance_id, token)).await?;
+                }
+                affected.push(instance_id);
+                continue;
+            }
             self.resume_signal_catch(&catch, signal_name, variables)
                 .await?;
             affected.push(catch.instance_id);

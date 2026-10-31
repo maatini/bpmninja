@@ -236,6 +236,9 @@ pub(crate) struct BpmnProcess {
 pub(crate) struct BpmnStartEvent {
     #[serde(rename = "@id")]
     pub id: String,
+    /// Fehlt der Wert, ist der Start unterbrechend (BPMN-Default).
+    #[serde(rename = "@isInterrupting", default)]
+    pub is_interrupting: Option<bool>,
     #[serde(rename = "extensionElements")]
     pub extension_elements: Option<BpmnExtensionElements>,
     #[serde(rename = "timerEventDefinition")]
@@ -246,6 +249,10 @@ pub(crate) struct BpmnStartEvent {
     pub signal_event_definition: Option<BpmnSignalEventDefinition>,
     #[serde(rename = "conditionalEventDefinition")]
     pub conditional_event_definition: Option<BpmnConditionalEventDefinition>,
+    #[serde(rename = "errorEventDefinition")]
+    pub error_event_definition: Option<BpmnErrorEventDefinition>,
+    #[serde(rename = "escalationEventDefinition")]
+    pub escalation_event_definition: Option<BpmnEscalationEventDefinition>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -207,6 +207,9 @@ fuzz_target!(|data: &[u8]| {
         compensation_log: vec![],
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+            event_subscriptions: Vec::new(),
+            event_handler_tokens: HashMap::new(),
+            event_scope: false,
         started_at: None,
         completed_at: None,
     };

@@ -1,6 +1,7 @@
 use crate::condition::validate_condition;
 use crate::domain::{
-    BpmnElement, ExecutionListener, ListenerEvent, ScopeEventListener, SequenceFlow,
+    BpmnElement, EventSubProcess, ExecutionListener, ListenerEvent, ScopeEventListener,
+    SequenceFlow,
 };
 use crate::domain::{EngineError, EngineResult};
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,9 @@ pub struct ProcessDefinition {
     pub listeners: HashMap<String, Vec<ExecutionListener>>,
     #[serde(default)]
     pub event_listeners: Vec<ScopeEventListener>,
+    /// Event-Subprozesse dieses Prozesses. Ihre Knoten liegen in `nodes`.
+    #[serde(default)]
+    pub event_subprocesses: Vec<EventSubProcess>,
     #[serde(default)]
     pub sub_processes: Vec<ProcessDefinition>,
     /// Deklarierte Daten, ohne dadurch einen Wert zu erfinden.
@@ -212,6 +216,7 @@ impl ProcessDefinition {
             flows,
             listeners,
             event_listeners,
+            event_subprocesses: Vec::new(),
             sub_processes,
             data_variables: Vec::new(),
             variable_defaults: HashMap::new(),
@@ -219,9 +224,12 @@ impl ProcessDefinition {
         })
     }
 
-    /// Returns the (id, element) of the start event.
+    /// Start des Prozesses. Starts von Event-Subprozessen zählen nicht.
     pub fn start_event(&self) -> Option<(&str, &BpmnElement)> {
         self.nodes.iter().find_map(|(id, e)| {
+            if self.event_subprocess_node(id) {
+                return None;
+            }
             if matches!(
                 e,
                 BpmnElement::StartEvent
@@ -234,6 +242,19 @@ impl ProcessDefinition {
                 None
             }
         })
+    }
+
+    /// Knoten, die nur über einen Event-Subprozess erreicht werden.
+    pub fn event_subprocess_node(&self, id: &str) -> bool {
+        self.event_subprocesses
+            .iter()
+            .any(|handler| handler.node_ids.iter().any(|node| node == id))
+    }
+
+    pub fn event_subprocess_by_id(&self, id: &str) -> Option<&EventSubProcess> {
+        self.event_subprocesses
+            .iter()
+            .find(|handler| handler.id == id)
     }
 
     /// Returns the element at the given node ID.

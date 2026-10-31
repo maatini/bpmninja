@@ -103,6 +103,9 @@ async fn restore_instance_loads_from_persistence() {
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: None,
         completed_at: None,
     };
@@ -1034,6 +1037,9 @@ async fn test_instance_store_is_empty_and_clear() {
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: None,
         completed_at: None,
     };
@@ -1213,6 +1219,9 @@ async fn test_restore_instance_makes_it_accessible() {
         compensation_log: Vec::new(),
         outstanding_calls: HashMap::new(),
         incidents: Vec::new(),
+        event_subscriptions: Vec::new(),
+        event_handler_tokens: HashMap::new(),
+        event_scope: false,
         started_at: None,
         completed_at: None,
     };

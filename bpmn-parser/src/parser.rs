@@ -6,7 +6,10 @@ use quick_xml::de::from_str;
 use quick_xml::events::{BytesStart, Event};
 
 use engine_core::error::{EngineError, EngineResult};
-use engine_core::model::{BpmnElement, ListenerEvent, ProcessDefinition, ProcessDefinitionBuilder};
+use engine_core::model::{
+    BpmnElement, EventSubProcess, EventSubProcessTrigger, ListenerEvent, ProcessDefinition,
+    ProcessDefinitionBuilder,
+};
 use engine_core::validate_condition;
 
 use crate::models::{BpmnDefinitions, BpmnExtensionElements};
@@ -589,7 +592,6 @@ pub(crate) const REJECTED_EVENT_DEFINITIONS: &[(&str, &str)] = &[
 pub(crate) const REJECTED_ATTRIBUTES: &[&str] = &[
     "eventBasedGateway@eventGatewayType=Parallel",
     "eventBasedGateway@instantiate",
-    "subProcess@triggeredByEvent",
 ];
 
 struct XmlFrame {
@@ -690,12 +692,12 @@ fn generic_task_violation(id: &str, line: Option<usize>) -> String {
     }
 }
 
-fn event_subprocess_violation(id: &str, line: Option<usize>) -> String {
+fn nested_event_subprocess_violation(id: &str, line: Option<usize>) -> String {
     match line {
         Some(line) => {
-            format!("event sub-process '{id}' is not supported (triggeredByEvent, line {line})")
+            format!("event sub-process '{id}' inside a sub-process is not supported (line {line})")
         }
-        None => format!("event sub-process '{id}' is not supported (triggeredByEvent)"),
+        None => format!("event sub-process '{id}' inside a sub-process is not supported"),
     }
 }
 
@@ -775,6 +777,19 @@ fn classify_event_definition(name: &str, line: usize, stack: &mut [XmlFrame]) ->
         };
         return vec![cancel_violation(label, &event_id, Some(line))];
     }
+    if kind == "startEvent"
+        && stack.iter().any(|frame| frame.triggered_by_event)
+        && matches!(
+            name,
+            "messageEventDefinition"
+                | "timerEventDefinition"
+                | "signalEventDefinition"
+                | "errorEventDefinition"
+                | "escalationEventDefinition"
+        )
+    {
+        return Vec::new();
+    }
     if supported_definitions(&kind).contains(&name) {
         if kind == "startEvent"
             && let Some(sub_process) = plain_subprocess_id(stack)
@@ -791,11 +806,6 @@ fn classify_event_definition(name: &str, line: usize, stack: &mut [XmlFrame]) ->
 }
 
 fn matched_rejected_attribute(name: &str, element: &BytesStart<'_>) -> Option<&'static str> {
-    if name == "subProcess"
-        && xml_attr(element, "triggeredByEvent").is_some_and(|value| flag_is_true(&value))
-    {
-        return Some("subProcess@triggeredByEvent");
-    }
     if name == "eventBasedGateway"
         && xml_attr(element, "instantiate").is_some_and(|value| flag_is_true(&value))
     {
@@ -817,6 +827,20 @@ fn collect_for_element(
     stack: &mut [XmlFrame],
 ) -> Vec<String> {
     let id = nearest_id(xml_attr(element, "id"), stack);
+    if name == "subProcess"
+        && xml_attr(element, "triggeredByEvent").is_some_and(|value| flag_is_true(&value))
+        && stack.iter().any(|frame| frame.name == "subProcess")
+    {
+        let parent = stack
+            .iter()
+            .rev()
+            .find(|frame| frame.name == "subProcess")
+            .and_then(|frame| frame.id.clone())
+            .unwrap_or_else(|| "?".to_string());
+        return vec![format!(
+            "event sub-process '{id}' inside subProcess '{parent}' is not supported (line {line})"
+        )];
+    }
     // Ein instanziierender Receive-Task ist auf Prozessebene der Message-Start.
     // Im Sub-Prozess fehlt der Start-Vertrag, deshalb bleibt er abgelehnt.
     if name == "receiveTask"
@@ -831,7 +855,6 @@ fn collect_for_element(
         && REJECTED_ATTRIBUTES.contains(&code)
     {
         return vec![match code {
-            "subProcess@triggeredByEvent" => event_subprocess_violation(&id, Some(line)),
             "receiveTask@instantiate" => instantiating_receive_violation(&id, Some(line)),
             _ => instantiating_gateway_violation(&id, Some(line)),
         }];
@@ -1612,6 +1635,21 @@ fn compile_process(
         builder = add_listeners(builder, &node_id, None);
     }
 
+    for sp in &process.sub_processes {
+        if sp.triggered_by_event == Some(true) {
+            let connected = process
+                .sequence_flows
+                .iter()
+                .any(|flow| flow.source_ref == sp.id || flow.target_ref == sp.id);
+            if connected {
+                return Err(EngineError::InvalidDefinition(format!(
+                    "event sub-process '{}' cannot have incoming or outgoing sequence flows",
+                    sp.id
+                )));
+            }
+        }
+    }
+
     // 10. Process Sequence Flows
     for flow in process.sequence_flows {
         if link_scope.catch_ids.contains(&flow.source_ref) {
@@ -1625,20 +1663,34 @@ fn compile_process(
         }
     }
 
-    // 11. Flatten nested sub-processes (embedded scopes)
+    // 11. Flatten nested sub-processes. Event-Subprozesse bleiben eigene Handler.
+    let mut event_handlers = Vec::new();
     for sp in process.sub_processes {
-        builder = flatten_subprocess(
-            sp,
-            &process_id,
-            builder,
-            &message_lookup,
-            &signal_lookup,
-            &error_lookup,
-            &escalation_lookup,
-        )?;
+        if sp.triggered_by_event == Some(true) {
+            event_handlers.push(compile_event_subprocess(
+                sp,
+                &message_lookup,
+                &signal_lookup,
+                &error_lookup,
+                &escalation_lookup,
+            )?);
+        } else {
+            builder = flatten_subprocess(
+                sp,
+                builder,
+                false,
+                &message_lookup,
+                &signal_lookup,
+                &error_lookup,
+                &escalation_lookup,
+            )?;
+        }
     }
 
     let mut definition = builder.build()?;
+    for (handler, body) in event_handlers {
+        attach_event_subprocess(&mut definition, handler, body)?;
+    }
     crate::data::apply(xml, &mut definition)?;
     Ok(definition)
 }
@@ -1660,11 +1712,49 @@ fn resolve_sub_process_default(
         .transpose()
 }
 
+fn event_handler_end(
+    end: &crate::models::BpmnEndEvent,
+    signal_lookup: &HashMap<String, String>,
+    error_lookup: &HashMap<String, String>,
+    escalation_lookup: &HashMap<String, String>,
+) -> EngineResult<BpmnElement> {
+    if end.terminate_event_definition.is_some() {
+        return Ok(BpmnElement::TerminateEndEvent);
+    }
+    if let Some(err) = &end.error_event_definition {
+        let error_code = err
+            .error_ref
+            .as_ref()
+            .and_then(|ref_id| error_lookup.get(ref_id).cloned())
+            .unwrap_or_else(|| "generic_error".into());
+        return Ok(BpmnElement::ErrorEndEvent { error_code });
+    }
+    if let Some(esc) = &end.escalation_event_definition {
+        let escalation_code = esc
+            .escalation_ref
+            .as_ref()
+            .and_then(|ref_id| escalation_lookup.get(ref_id).cloned())
+            .unwrap_or_else(|| "generic_escalation".into());
+        return Ok(BpmnElement::EscalationEndEvent { escalation_code });
+    }
+    if let Some(comp) = &end.compensate_event_definition {
+        return Ok(BpmnElement::CompensationEndEvent {
+            activity_ref: comp.activity_ref.clone(),
+        });
+    }
+    if let Some(sig) = &end.signal_event_definition {
+        let signal_name =
+            resolve_signal_ref(sig.signal_ref.clone(), signal_lookup, "endEvent", &end.id)?;
+        return Ok(BpmnElement::SignalEndEvent { signal_name });
+    }
+    Ok(BpmnElement::EndEvent)
+}
+
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_subprocess(
     sp: crate::models::BpmnSubProcess,
-    _parent_id: &str,
     mut builder: ProcessDefinitionBuilder,
+    as_event_handler: bool,
     message_lookup: &HashMap<String, String>,
     signal_lookup: &HashMap<String, String>,
     error_lookup: &HashMap<String, String>,
@@ -1672,11 +1762,10 @@ fn flatten_subprocess(
 ) -> EngineResult<ProcessDefinitionBuilder> {
     let sub_process_id = sp.id.clone();
 
-    if sp.triggered_by_event == Some(true) {
-        return Err(EngineError::InvalidDefinition(event_subprocess_violation(
-            &sub_process_id,
-            None,
-        )));
+    if sp.triggered_by_event == Some(true) && !as_event_handler {
+        return Err(EngineError::InvalidDefinition(
+            nested_event_subprocess_violation(&sub_process_id, None),
+        ));
     }
 
     if let Some(tx) = &sp.transaction {
@@ -1726,15 +1815,24 @@ fn flatten_subprocess(
             )));
         }
         1 => (start_targets.remove(0), false),
+        _ if as_event_handler => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "event sub-process start '{start_event_id}' must have exactly one outgoing sequence flow"
+            )));
+        }
         _ => (start_event_id.clone(), true),
     };
 
-    builder = builder.node(
-        sub_process_id.clone(),
-        BpmnElement::EmbeddedSubProcess { start_node_id },
-    );
-    if start_forks {
-        builder = builder.node(start_event_id.clone(), BpmnElement::ParallelGateway);
+    if as_event_handler {
+        builder = builder.node(start_event_id.clone(), BpmnElement::StartEvent);
+    } else {
+        builder = builder.node(
+            sub_process_id.clone(),
+            BpmnElement::EmbeddedSubProcess { start_node_id },
+        );
+        if start_forks {
+            builder = builder.node(start_event_id.clone(), BpmnElement::ParallelGateway);
+        }
     }
 
     for end in sp.end_events {
@@ -1747,12 +1845,20 @@ fn flatten_subprocess(
                 None,
             )));
         }
-        builder = builder.node(
-            end.id,
-            BpmnElement::SubProcessEndEvent {
-                sub_process_id: sub_process_id.clone(),
-            },
-        );
+        if as_event_handler {
+            let end_id = end.id.clone();
+            builder = builder.node(
+                end_id,
+                event_handler_end(&end, signal_lookup, error_lookup, escalation_lookup)?,
+            );
+        } else {
+            builder = builder.node(
+                end.id,
+                BpmnElement::SubProcessEndEvent {
+                    sub_process_id: sub_process_id.clone(),
+                },
+            );
+        }
     }
 
     for task in sp.service_tasks {
@@ -2104,7 +2210,7 @@ fn flatten_subprocess(
     }
 
     for flow in sp.sequence_flows {
-        if flow.source_ref == start_event_id && !start_forks {
+        if flow.source_ref == start_event_id && !start_forks && !as_event_handler {
             // Flows out of the internal start event define the sub-process entry point only.
             continue;
         }
@@ -2126,8 +2232,8 @@ fn flatten_subprocess(
     for nested_sp in sp.sub_processes {
         builder = flatten_subprocess(
             nested_sp,
-            &sub_process_id,
             builder,
+            false,
             message_lookup,
             signal_lookup,
             error_lookup,
@@ -2136,4 +2242,237 @@ fn flatten_subprocess(
     }
 
     Ok(builder)
+}
+
+fn compile_event_subprocess(
+    sp: crate::models::BpmnSubProcess,
+    message_lookup: &HashMap<String, String>,
+    signal_lookup: &HashMap<String, String>,
+    error_lookup: &HashMap<String, String>,
+    escalation_lookup: &HashMap<String, String>,
+) -> EngineResult<(EventSubProcess, ProcessDefinition)> {
+    let id = sp.id.clone();
+    if sp
+        .extension_elements
+        .as_ref()
+        .is_some_and(|extension| !extension.execution_listeners.is_empty())
+    {
+        return Err(EngineError::InvalidDefinition(format!(
+            "execution listeners on event sub-process '{id}' are not supported; attach them to activities inside the handler"
+        )));
+    }
+    if let Some(nested) = sp
+        .sub_processes
+        .iter()
+        .find(|nested| nested.triggered_by_event == Some(true))
+    {
+        return Err(EngineError::InvalidDefinition(format!(
+            "event sub-process '{}' inside subProcess '{id}' is not supported",
+            nested.id
+        )));
+    }
+    let start = match sp.start_events.as_slice() {
+        [start] => start,
+        _ => {
+            return Err(EngineError::InvalidDefinition(format!(
+                "event sub-process '{id}' requires exactly one start event"
+            )));
+        }
+    };
+    let is_interrupting = start.is_interrupting.unwrap_or(true);
+    let trigger = event_subprocess_trigger(
+        &id,
+        start,
+        message_lookup,
+        signal_lookup,
+        error_lookup,
+        escalation_lookup,
+    )?;
+    if matches!(trigger, EventSubProcessTrigger::Error(_)) && !is_interrupting {
+        return Err(EngineError::InvalidDefinition(format!(
+            "error start of event sub-process '{id}' must be interrupting"
+        )));
+    }
+    let start_node = start.id.clone();
+    let outgoing = sp
+        .sequence_flows
+        .iter()
+        .filter(|flow| flow.source_ref == start_node)
+        .count();
+    if outgoing != 1 {
+        return Err(EngineError::InvalidDefinition(format!(
+            "event sub-process start '{start_node}' must have exactly one outgoing sequence flow"
+        )));
+    }
+
+    let mut builder = ProcessDefinitionBuilder::new(id.clone());
+    builder = flatten_subprocess(
+        sp,
+        builder,
+        true,
+        message_lookup,
+        signal_lookup,
+        error_lookup,
+        escalation_lookup,
+    )?;
+    let body = builder.build()?;
+    let mut node_ids: Vec<String> = body.nodes.keys().cloned().collect();
+    node_ids.sort();
+    Ok((
+        EventSubProcess {
+            id,
+            start_node,
+            node_ids,
+            trigger,
+            is_interrupting,
+        },
+        body,
+    ))
+}
+
+fn event_subprocess_trigger(
+    subprocess_id: &str,
+    start: &crate::models::BpmnStartEvent,
+    message_lookup: &HashMap<String, String>,
+    signal_lookup: &HashMap<String, String>,
+    error_lookup: &HashMap<String, String>,
+    escalation_lookup: &HashMap<String, String>,
+) -> EngineResult<EventSubProcessTrigger> {
+    if start.conditional_event_definition.is_some() {
+        return Err(EngineError::InvalidDefinition(conditional_start_violation(
+            &start.id,
+            Some(subprocess_id),
+            None,
+        )));
+    }
+    let mut triggers = Vec::new();
+    if let Some(timer) = &start.timer_event_definition {
+        triggers.push(EventSubProcessTrigger::Timer(parse_timer_definition(
+            &start.id, timer,
+        )?));
+    }
+    if let Some(message) = &start.message_event_definition {
+        let Some(message_name) = resolve_message_ref(message.message_ref.clone(), message_lookup)
+        else {
+            return Err(EngineError::InvalidDefinition(format!(
+                "message start of event sub-process '{subprocess_id}' requires messageRef"
+            )));
+        };
+        triggers.push(EventSubProcessTrigger::Message(message_name));
+    }
+    if let Some(signal) = &start.signal_event_definition {
+        let signal_name = resolve_signal_ref(
+            signal.signal_ref.clone(),
+            signal_lookup,
+            "startEvent",
+            &start.id,
+        )?;
+        triggers.push(EventSubProcessTrigger::Signal(signal_name));
+    }
+    if let Some(error) = &start.error_event_definition {
+        triggers.push(EventSubProcessTrigger::Error(referenced_code(
+            error.error_ref.clone(),
+            error_lookup,
+            "error",
+            &start.id,
+        )?));
+    }
+    if let Some(escalation) = &start.escalation_event_definition {
+        triggers.push(EventSubProcessTrigger::Escalation(referenced_code(
+            escalation.escalation_ref.clone(),
+            escalation_lookup,
+            "escalation",
+            &start.id,
+        )?));
+    }
+    match triggers.as_slice() {
+        [trigger] => Ok(trigger.clone()),
+        [] => Err(EngineError::InvalidDefinition(format!(
+            "event sub-process '{subprocess_id}' start '{}' requires exactly one event definition",
+            start.id
+        ))),
+        _ => Err(EngineError::InvalidDefinition(format!(
+            "event sub-process '{subprocess_id}' start '{}' requires exactly one event definition",
+            start.id
+        ))),
+    }
+}
+
+fn referenced_code(
+    reference: Option<String>,
+    lookup: &HashMap<String, String>,
+    kind: &str,
+    start_id: &str,
+) -> EngineResult<Option<String>> {
+    let Some(reference) = nonempty_attr(reference) else {
+        return Ok(None);
+    };
+    lookup.get(&reference).cloned().map(Some).ok_or_else(|| {
+        EngineError::InvalidDefinition(format!(
+            "event sub-process start '{start_id}' references unknown {kind} '{reference}'"
+        ))
+    })
+}
+
+fn trigger_identity(trigger: &EventSubProcessTrigger) -> Option<String> {
+    match trigger {
+        EventSubProcessTrigger::Timer(_) => None,
+        EventSubProcessTrigger::Message(name) => Some(format!("message:{name}")),
+        EventSubProcessTrigger::Signal(name) => Some(format!("signal:{name}")),
+        EventSubProcessTrigger::Error(code) => {
+            Some(format!("error:{}", code.as_deref().unwrap_or("*")))
+        }
+        EventSubProcessTrigger::Escalation(code) => {
+            Some(format!("escalation:{}", code.as_deref().unwrap_or("*")))
+        }
+    }
+}
+
+fn attach_event_subprocess(
+    definition: &mut ProcessDefinition,
+    handler: EventSubProcess,
+    body: ProcessDefinition,
+) -> EngineResult<()> {
+    if let Some(identity) = trigger_identity(&handler.trigger)
+        && definition
+            .event_subprocesses
+            .iter()
+            .any(|other| trigger_identity(&other.trigger).as_deref() == Some(identity.as_str()))
+    {
+        return Err(EngineError::InvalidDefinition(format!(
+            "event sub-process '{}' duplicates trigger '{identity}'",
+            handler.id
+        )));
+    }
+    if definition
+        .event_subprocesses
+        .iter()
+        .any(|other| other.id == handler.id)
+    {
+        return Err(EngineError::InvalidDefinition(format!(
+            "duplicate event sub-process id '{}'",
+            handler.id
+        )));
+    }
+    for id in body.nodes.keys() {
+        if definition.nodes.contains_key(id) {
+            return Err(EngineError::InvalidDefinition(format!(
+                "event sub-process '{}' reuses node id '{id}'",
+                handler.id
+            )));
+        }
+    }
+    definition.nodes.extend(body.nodes);
+    for (source, targets) in body.flows {
+        definition.flows.entry(source).or_default().extend(targets);
+    }
+    for (node_id, listeners) in body.listeners {
+        definition
+            .listeners
+            .entry(node_id)
+            .or_default()
+            .extend(listeners);
+    }
+    definition.event_subprocesses.push(handler);
+    Ok(())
 }
