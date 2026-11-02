@@ -42,8 +42,9 @@ bpmninja is a BPMN 2.0 engine with the following core features:
 - **NATS JetStream persistence** — KV stores for instances, object store for files, event streaming for history
 - **Fault-tolerant retry queue** — two-stage retry (inline + **bounded** background worker) for NATS outages; drops + metrics when the queue is full
 - **Fail-closed durability** — `REQUIRE_NATS` defaults to true (also docker-compose) and refuses silent in-memory fallback; `/api/ready` mirrors persistence health
+- **Optional deploy-time model checking** — Cargo feature `model-check` (off by default) runs [rust_bpmn_analyzer](https://github.com/timKraeuter/rust_bpmn_analyzer) (MIT, pinned git revision) for deadlocks, livelocks, unsafe parallelism and dead activities. Runtime `MODEL_CHECK` defaults to `off`; `warn` returns findings with the deploy, `enforce` rejects confirmed violations. See [Environment variables](docs/env.md#engine-server)
 - **Upload limits** — multipart instance files capped via `MAX_UPLOAD_BYTES` (default 5 MiB → HTTP 413)
-- **Automatic timer scheduler** — background task processes expired timers (configurable via `TIMER_INTERVAL_MS`)
+- **Automatic timer scheduler** — background task sleeps until the next timer is due (`TIMER_INTERVAL_MS` is the maximum idle wait)
 - **Camunda-compatible service tasks** — fetch-and-lock pattern with long polling
 - **Rhai script engine** — sandboxed execution listeners (ops / memory budget / timeout)
 - **Call Activities** — call another deployed process definition (`calledElement`); variables are propagated in both directions; BPMN error boundaries supported
@@ -158,7 +159,7 @@ For full local verification, run the root checks plus module-specific checks fro
 |---------|-------------|
 | **Conditional Flows** | Edges with conditions (`amount > 100`, `status == 'approved'`, `${amount > 100 && approved}`). Supports `&&`/`and`, `\|\|`/`or`, `!`/`not`, `==`, `!=`, `>`, `<`, `>=`, `<=`, arithmetic `+ - * / %`, parentheses, numbers, single- and double-quoted strings with escapes, `true`/`false`/`null`, and dotted/array paths (`order.amount`, `items[0].id`). |
 | **Execution Listeners** | Start/end scripts on nodes (Rhai). Can read and mutate variables. |
-| **Scope Event Listeners** | Timer/message/error event sub-processes at scope level (interrupting/non-interrupting). |
+| **Event Sub-Processes** | `subProcess triggeredByEvent="true"` directly under a process. Message, timer, signal, error (interrupting only) and escalation starts. The scope subscribes when the instance starts and drops subscriptions when it leaves. Interrupting starts cancel the scope; non-interrupting starts run in parallel. |
 | **File Variables** | Upload/download of files as process variables via NATS Object Store. |
 | **Message Correlation** | Matching via `messageName` + optional `businessKey`. |
 | **Signal Correlation** | Broadcast via `POST /api/signal`; wakes every waiting `SignalCatchEvent` and starts instances with a `SignalStartEvent`. Broadcast is process-local (single engine node). |
@@ -174,22 +175,22 @@ For full local verification, run the root checks plus module-specific checks fro
 
 For performance and architectural reasons (keep it simple), bpmninja deviates from the strict BPMN 2.0 standard in a few points:
 
-- **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API.
+- **Service Tasks (External Task Pattern):** Instead of synchronously executing code inside the engine, `Service Tasks` pause execution. They place the task asynchronously into a fetch-and-lock queue (similar to Camunda), from where external workers fetch tasks (`topic`-based) and report completion via the API. A topic can instead be claimed by an in-process `TaskHandler` registered on `WorkflowEngine`; that topic is then hidden from external workers and executed by the engine's dispatcher with the same lock, retry and BPMN-error semantics.
 - **Embedded Sub-Processes (Flattening):** Embedded sub-processes are resolved directly at parse time and inlined deep into the main graph (**flattening**). At runtime there are no complex nested instance structures, only direct node sequences. Returns from the sub-process are handled via simulated `SubProcessEndEvent`s in the same variable scope.
 - **Script Tasks:** Script evaluation is not done via JavaScript or Groovy, but natively in Rust via the **Rhai engine**.
 - **Multi-Instance (Service Tasks only):** Parallel and sequential `multiInstanceLoopCharacteristics` are supported on `serviceTask` via `collection` + `elementVariable` or `loopCardinality`. In both modes `loopCounter` starts at 1 and the instance advances once after all items complete. Parallel MI creates all pending tasks up front; sequential MI (`isSequential="true"`) keeps exactly one task open and creates the next one after each completion, preserving collection order and the `elementVariable` value per iteration. Multi-instance on any other task type is rejected at deploy time with `InvalidDefinition`.
 - **Inclusive Gateway join:** Split follows BPMN OR (every outgoing flow whose condition is true). Join waits for taken paths: `expected_count` is the matching split's taken branch count (via `find_downstream_join`). Unstructured joins without a matching split fall back to AND-style `incoming_flow_count`.
 - **Camunda assignee/topic attributes:** User tasks read `data-assignee` first, then `camunda:assignee` (quick-xml strips the prefix to `@assignee`; fallback `"unassigned"`). Service tasks read `data-topic`, then `data-handler`, then `camunda:topic` (`@topic`), then the node id.
-- **Task type mapping:** `receiveTask`, `manualTask`, `businessRuleTask`, and generic `task` are parsed as `ServiceTask` (topic = `name` or node id). An empty `scriptTask` body becomes a `ServiceTask`. An intermediate catch event without timer or message becomes a `ServiceTask` with topic `event_passthrough`. There is no DMN engine for business-rule tasks.
+- **Task type mapping:** `receiveTask` with a `messageRef` becomes a message catch (`instantiate="true"` is rejected). `manualTask` becomes a user task. `businessRuleTask` with a topic becomes an external service task; without a topic it is rejected (no DMN). A generic `task` is rejected — convert it to a concrete type. An empty `scriptTask` is rejected. An intermediate catch without a supported trigger is rejected.
 - **One process per file:** Only the first `<process isExecutable="true">` is deployed; if none is marked executable, the first `<process>` is used. Further processes in the same file are ignored.
 
 ### Currently Unsupported BPMN Elements
 
-The engine focuses on a practical and performant core feature set. The following BPMN elements are currently **not** supported and will either cause parser errors on deployment or be silently ignored:
+The engine focuses on a practical and performant core feature set. Elements with execution semantics the engine does not implement are **rejected at deploy** with `InvalidDefinition`. The error names every offending element (type, id, source line), not only the first. Visual and data elements are still accepted. The full matrix is [`docs/knowledge-base/modules/bpmn-parser/element-matrix.md`](docs/knowledge-base/modules/bpmn-parser/element-matrix.md).
 
-- **Event scope:** Signal events are supported for start, intermediate catch/throw, end and boundary (interrupting/non-interrupting); the broadcast is process-local, so multiple engine nodes do not fan out. Conditional events are supported for intermediate catch and boundary only. A **conditional start event** is rejected at deploy time with `InvalidDefinition` because the engine has no global variable scope to trigger it. An event-based gateway cannot target a conditional catch. Link events are supported: a link throw jumps to the target of its link catch within the same scope; cross-scope links are rejected.
-- **Cancel events & transactions:** `cancelEventDefinition` on end and boundary events is recognised but rejected at deploy time with `InvalidDefinition` — cancel events require a BPMN transaction, and transaction sub-processes are not supported. A `<transaction>` element is rejected with the same reasoning.
-- **Extended sub-processes:** `Ad-Hoc Sub-Process`. (`Transaction Sub-Process` is rejected explicitly; see cancel events above.)
+- **Event scope:** Signal events are supported for start, intermediate catch/throw, end and boundary (interrupting/non-interrupting); the broadcast is process-local, so multiple engine nodes do not fan out. Conditional events are supported for intermediate catch and boundary only. A **conditional start event** is rejected at deploy time with `InvalidDefinition` because the engine has no global variable scope to trigger it. An event-based gateway cannot target a conditional catch. Link events are supported: a link throw jumps to the target of its link catch within the same scope; cross-scope links are rejected. Message end events, multiple event definitions on one event, and multiple/parallel-multiple events are rejected.
+- **Cancel events & transactions:** `cancelEventDefinition` is rejected at deploy time with `InvalidDefinition` — cancel events require a BPMN transaction, and transaction sub-processes are not supported. A `<transaction>` element is rejected with the same reasoning.
+- **Extended sub-processes:** `adHocSubProcess` and `standardLoopCharacteristics` are rejected. An event sub-process is supported only as a direct child of the process (message, timer, signal, interrupting error, escalation). Nested event sub-processes, conditional starts and sequence flows on the container are rejected. An instantiating receive task and an instantiating or parallel event-based gateway are rejected. A trigger on the start event of an embedded sub-process is rejected, because that start is a pass-through.
 - **Data Objects / Data Stores:** Visual data objects and associations (`Data Input/Output Association`) are ignored. Data exchange is done exclusively via the JSON variable state (`HashMap<String, serde_json::Value>`).
 
 ---
@@ -297,8 +298,18 @@ The server runs at `http://localhost:8081`.
 | `BIND_ADDR` | `0.0.0.0` | Listen address (alias `BIND_ADDRESS`) |
 | `PORT` | `8081` | HTTP server port |
 | `RUST_LOG` | `info` | Log level filter (e.g. `debug`, `warn`, `engine_server=trace`) |
+| `MODEL_CHECK` | `off` | Deploy-time check: `off`, `warn` (findings in the response and the log), `enforce` (reject confirmed violations). Requires `--features model-check` |
+| `MODEL_CHECK_TIMEOUT_MS` | `2000` | How long a deploy waits for that check |
 
-Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbox, NATS-Retention, Client-Variablen): **[docs/env.md](docs/env.md)**.
+Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbox, NATS-Retention, Model-Checking, Client-Variablen): **[docs/env.md](docs/env.md)**.
+
+Model checking is not in the default binary or the published image. Build it explicitly:
+
+```bash
+cargo run -p engine-server --features model-check
+```
+
+`warn` still deploys when the analyzer finds a problem, times out, or panics; the response field `model_check` explains which. `enforce` returns HTTP 400 with `error` and `model_check` for a confirmed violation. A timeout, a panic, or a second deploy while one analysis is running does not fail the deploy in either mode (the single in-flight analysis runs on a blocking thread and is capped by `MODEL_CHECK_TIMEOUT_MS`). Setting `enforce` on a binary built without the feature rejects every deploy, so the switch cannot fail open.
 
 
 ---
@@ -311,7 +322,7 @@ Vollständige Liste (Auth, Upload-/XML-Limits, Logging, Retry-Queue, Rhai-Sandbo
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB) |
+| `POST` | `/api/deploy` | Deploy a BPMN definition (max 10 MB). With `MODEL_CHECK=warn` or `enforce` the response includes `model_check` |
 | `GET` | `/api/definitions` | List all definitions |
 | `GET` | `/api/definitions/:id/xml` | Retrieve the BPMN XML of a definition |
 | `DELETE` | `/api/definitions/:id` | Delete a definition (`?cascade=true` to also delete instances) |
@@ -591,7 +602,7 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 > Snapshot from 2026-10-24. The authoritative source is CI (`.github/workflows/ci.yml` + `.github/workflows/fuzzing.yml`).
 
 <!-- QUALITY_METRICS:START -->
-- Letztes Update (UTC): `2026-10-26T09:41:46.234457+00:00`
+- Letztes Update (UTC): `2026-11-02T11:59:17.246331+00:00`
 - Mutation Score: **68.9%** (caught: 406, missed: 182, timeout: 1)
 - Fuzzing: **0/9 targets** (failed)
 <!-- QUALITY_METRICS:END -->
@@ -604,12 +615,12 @@ The compose file includes a **cobra-nats** service (`natsio/nats-box`) which pro
 | **bpmn-parser** | 91 | — | 91 |
 | **persistence-nats** | 20 | — | 20 |
 | **persistence-memory** | 2 | — | 2 |
-| **engine-server** | 40 | 97 | 137 |
+| **engine-server** | 50 | 100 | 150 |
 | **desktop-tauri** | — | 52 | 52 |
 | **bpmn-ninja-external-task-client** | 85 | — | 85 |
-| **Total** | **557** | **154** | **711** |
+| **Total** | **567** | **157** | **724** |
 
-> Authoritative (2026-10-24): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases.
+> Authoritative (2026-10-29 for engine-server test counts; 2026-10-24 for the other packages and for coverage below): `cargo test --workspace -- --list` (Rust, devbox toolchain 1.99.0), `node ./node_modules/@playwright/test/cli.js test --list` (desktop-tauri), `node ./node_modules/vitest/vitest.mjs list` (external task client). Counts are listed test cases. The three `e2e_model_check` cases and the ten `model_check` unit tests are the default feature set; `--features model-check` adds the analyzer cases.
 
 ### Line Coverage
 
@@ -680,7 +691,7 @@ Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
 | Call Activity | 1 | `calledElement` attribute parsing and mapping to `CallActivity` element |
 | Namespace handling | 1 | Camunda namespace prefixes on execution listeners (`camunda:executionListener`) |
 
-### engine-server E2E Tests (97 tests, 19 files)
+### engine-server E2E Tests (100 tests, 20 files)
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -695,6 +706,7 @@ Overall: **82.2 %** regions, **75.9 %** functions, **81.8 %** lines.
 | `e2e_instances_page.rs` | 2 | `X-Total-Count` header, full-array response without query parameters |
 | `e2e_lifecycle.rs` | 6 | Delete instance, delete definition (409 without cascade), unknown instances, process timers, correlate messages |
 | `e2e_migration.rs` | 5 | Instance migration (same node ids, node mapping, unknown target, orphaned token → 422) |
+| `e2e_model_check.rs` | 3 | `MODEL_CHECK=off` omits the report; without feature `model-check`, warn still deploys (`unavailable`) and enforce returns 400. Feature build: sound model, deadlock finding, structured rejection |
 | `e2e_monitoring.rs` | 7 | Health, ready (dev / REQUIRE_NATS), info, credential redaction, monitoring stats |
 | `e2e_signals.rs` | 3 | Signal broadcast to waiters, signal start, `GET /api/signals` |
 | `e2e_service_tasks.rs` | 13 | List, FetchAndLock (limits and lock-duration validation), ExtendLock, Complete, failure/retries, BPMN error, conflicts, incidents |
@@ -730,8 +742,8 @@ The unit tests use `vi.useFakeTimers()` and `vi.stubGlobal('fetch', …)` — no
 | bpmn-parser | 4 | ~2,500 |
 | persistence-nats | 5 | 1,282 |
 | persistence-memory | 2 | ~450 |
-| engine-server (lib) | 18 | ~2,400 |
-| engine-server (E2E tests) | 19 | ~4,600 |
+| engine-server (lib) | 19 | ~2,400 |
+| engine-server (E2E tests) | 20 | ~4,600 |
 | desktop-tauri (TypeScript + CSS) | ~55 | ~7,800 |
 | desktop-tauri (Rust backend) | 11 | ~900 |
 | external-task-client (lib) | 11 | 1,997 |
@@ -787,6 +799,7 @@ Sanitizers (AddressSanitizer) are enabled by default and will cause a structured
 | Token move (modify process instance) | ✅ Implemented |
 | Multi-node cluster (NATS-based token locking) | 🔲 Planned |
 | OIDC/OAuth2 middleware | 🔲 Planned |
+| Optional deploy-time model checking (`model-check`, `MODEL_CHECK`) | ✅ Implemented |
 
 ---
 
