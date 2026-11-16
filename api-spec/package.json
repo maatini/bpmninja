@@ -9,7 +9,7 @@
     "check": "tsp compile main.tsp && git diff --exit-code tsp-output"
   },
   "dependencies": {
-    "@typespec/compiler": "1.17.0",
+    "@typespec/compiler": "1.18.0",
     "@typespec/http": "1.17.0",
     "@typespec/rest": "0.87.0",
     "@typespec/openapi3": "1.17.0",
