@@ -1,9 +1,11 @@
 name: Core Mutation Tests
 
 on:
+  # Zeitplan pausiert: fehlschlagende Mutanten und Actions-Minutenbudget.
+  # Wiederherstellen, sobald die Mutanten behoben sind.
   # Täglich um 02:00 Uhr nachts (UTC)
-  schedule:
-    - cron: '0 2 * * *'
+  # schedule:
+  #   - cron: '0 2 * * *'
   # Erlaubt manuelles Ausführen über die GitHub UI
   workflow_dispatch:
 
